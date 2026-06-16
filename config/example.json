@@ -1,0 +1,22 @@
+{
+  "http": {
+    "host": "0.0.0.0",
+    "port": 8790
+  },
+  "ensemble": {
+    "id": "berklee-b51",
+    "voices": [
+      "player-1",
+      "player-2",
+      "player-3",
+      "player-4",
+      "player-5",
+      "player-6"
+    ]
+  },
+  "rnbo": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 9000
+  }
+}

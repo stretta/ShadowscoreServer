@@ -1,0 +1,44 @@
+{
+  "http": {
+    "host": "0.0.0.0",
+    "port": 8790
+  },
+  "ensemble": {
+    "id": "berklee-b51",
+    "voices": [
+      "player-1",
+      "player-2",
+      "player-3",
+      "player-4",
+      "player-5",
+      "player-6"
+    ]
+  },
+  "persistence": {
+    "enabled": true,
+    "path": "data/score.json",
+    "backupPath": "data/score.previous.json",
+    "debounceMs": 150
+  },
+  "rnbo": {
+    "enabled": true,
+    "host": "192.168.68.96",
+    "port": 1234,
+    "address": "/rnbo/inst/4/messages/in/shadowscore",
+    "stagesPerBeat": 16,
+    "transactionStart": 1000,
+    "sendDelayMs": 5,
+    "targets": [
+      {
+        "voiceId": "player-1",
+        "clientId": 5505,
+        "address": "/rnbo/inst/5/messages/in/shadowscore"
+      },
+      {
+        "voiceId": "player-2",
+        "clientId": 4404,
+        "address": "/rnbo/inst/4/messages/in/shadowscore"
+      }
+    ]
+  }
+}

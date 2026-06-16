@@ -44,32 +44,40 @@ export function createRnboOscAdapter(config) {
 }
 
 export async function sendScoreTransaction(socket, config, score, transactionId) {
-  const compiled = compileScoreTransaction(score, config, transactionId);
-  for (const message of compiled.messages) {
-    await sendOscMessage(socket, config, message.values);
-    if (config.rnbo.sendDelayMs > 0) {
-      await delay(config.rnbo.sendDelayMs);
+  const targets = rnboTargets(config);
+  const compiledTargets = [];
+
+  for (const target of targets) {
+    const compiled = compileScoreTransaction(score, config, transactionId, target);
+    for (const message of compiled.messages) {
+      await sendOscMessage(socket, config, target, message.values);
+      if (config.rnbo.sendDelayMs > 0) {
+        await delay(config.rnbo.sendDelayMs);
+      }
+    }
+    compiledTargets.push({ target, compiled });
+    if (config.rnbo.log !== false) {
+      console.log(
+        `[rnbo] sent score v${score.version} txn=${transactionId} voice=${target.voiceId ?? "*"} notes=${compiled.noteCount} -> ${target.host}:${target.port}${target.address}`
+      );
     }
   }
-  if (config.rnbo.log !== false) {
-    console.log(
-      `[rnbo] sent score v${score.version} txn=${transactionId} notes=${compiled.noteCount} -> ${config.rnbo.host}:${config.rnbo.port}${config.rnbo.address}`
-    );
-  }
-  return compiled;
+
+  return compiledTargets.length === 1 ? compiledTargets[0].compiled : { targets: compiledTargets };
 }
 
-export function compileScoreTransaction(score, config, transactionId) {
+export function compileScoreTransaction(score, config, transactionId, target = rnboTargets(config)[0]) {
   const stagesPerBeat = clampInt(config.rnbo.stagesPerBeat, 1, 960);
-  const notes = flattenScoreNotes(score);
+  const notes = flattenScoreNotes(score, target.voiceId);
   const selectionStart = readNumber(score.context.clip?.time_selection_start, 0);
   const selectionEnd = inferSelectionEnd(score, notes, selectionStart);
   const patternLength = clampInt((selectionEnd - selectionStart) * stagesPerBeat, 1, 2147483647);
+  const prefix = target.clientId === undefined ? [] : [clampInt(target.clientId, 0, 2147483647)];
 
   const messages = [
     {
       label: "BEGIN_REPLACE",
-      values: [OPCODES.BEGIN_REPLACE, transactionId, 1, notes.length, patternLength, stagesPerBeat, 0]
+      values: [...prefix, OPCODES.BEGIN_REPLACE, transactionId, 1, notes.length, patternLength, stagesPerBeat, 0]
     }
   ];
 
@@ -77,6 +85,7 @@ export function compileScoreTransaction(score, config, transactionId) {
     messages.push({
       label: `NOTE_${index}`,
       values: [
+        ...prefix,
         OPCODES.NOTE,
         transactionId,
         index,
@@ -95,7 +104,7 @@ export function compileScoreTransaction(score, config, transactionId) {
 
   messages.push({
     label: "COMMIT",
-    values: [OPCODES.COMMIT, transactionId, notes.length, 0]
+    values: [...prefix, OPCODES.COMMIT, transactionId, notes.length, 0]
   });
 
   return {
@@ -106,8 +115,9 @@ export function compileScoreTransaction(score, config, transactionId) {
   };
 }
 
-function flattenScoreNotes(score) {
+function flattenScoreNotes(score, voiceFilter) {
   return Object.entries(score.voices)
+    .filter(([voiceId]) => voiceFilter === undefined || voiceId === voiceFilter)
     .flatMap(([voiceId, voice]) =>
       voice.notes.map((note, voiceIndex) => ({
         ...note,
@@ -130,10 +140,10 @@ function inferSelectionEnd(score, notes, selectionStart) {
   return lastNoteEnd;
 }
 
-async function sendOscMessage(socket, config, values) {
-  const packet = encodeOscMessage(config.rnbo.address, values);
+async function sendOscMessage(socket, config, target, values) {
+  const packet = encodeOscMessage(target.address, values);
   await new Promise((resolve, reject) => {
-    socket.send(packet, config.rnbo.port, config.rnbo.host, (error) => {
+    socket.send(packet, target.port, target.host, (error) => {
       if (error) {
         reject(error);
       } else {
@@ -141,6 +151,26 @@ async function sendOscMessage(socket, config, values) {
       }
     });
   });
+}
+
+function rnboTargets(config) {
+  if (Array.isArray(config.rnbo.targets) && config.rnbo.targets.length > 0) {
+    return config.rnbo.targets.map((target) => ({
+      host: target.host ?? config.rnbo.host,
+      port: target.port ?? config.rnbo.port,
+      address: target.address ?? config.rnbo.address,
+      voiceId: target.voiceId,
+      clientId: target.clientId
+    }));
+  }
+  return [
+    {
+      host: config.rnbo.host,
+      port: config.rnbo.port,
+      address: config.rnbo.address,
+      clientId: config.rnbo.clientId
+    }
+  ];
 }
 
 function readNumber(value, fallback) {

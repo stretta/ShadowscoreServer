@@ -8,7 +8,7 @@ export function createInitialScore(config) {
       version: 0,
       notes: []
     };
-    assignments[voiceId] = createEmptyAssignment();
+    assignments[voiceId] = createEmptyAssignment(config.ensemble.assignmentDefaults?.[voiceId]);
   }
 
   return {
@@ -23,6 +23,7 @@ export function createInitialScore(config) {
 export function createScoreStore(initialScore) {
   const events = new EventEmitter();
   let score = structuredClone(initialScore);
+  const assignmentDefaults = structuredClone(initialScore.assignments ?? {});
 
   return {
     events,
@@ -57,7 +58,7 @@ export function createScoreStore(initialScore) {
     clearVoiceAssignment(voiceId, options = {}) {
       assertKnownVoice(score, voiceId);
       assertExpectedScoreVersion(score, options.expectedVersion);
-      const assignment = createEmptyAssignment();
+      const assignment = createEmptyAssignment(assignmentDefaults[voiceId]);
       score = {
         ...score,
         version: score.version + 1,
@@ -93,7 +94,7 @@ export function createScoreStore(initialScore) {
         throw new Error("reset must include at least one of context, voices, or assignments");
       }
       const voices = options.voices ? resetVoices(score.voices) : score.voices;
-      const assignments = options.assignments ? resetAssignments(score.voices) : ensureAssignments(score);
+      const assignments = options.assignments ? resetAssignments(score.voices, assignmentDefaults) : ensureAssignments(score, assignmentDefaults);
       score = {
         ...score,
         version: score.version + 1,
@@ -145,26 +146,26 @@ function normalizeAssignment(assignmentDocument) {
   };
 }
 
-function createEmptyAssignment() {
+function createEmptyAssignment(defaults = {}) {
   return {
-    assignee: "",
-    deviceId: "",
-    clientId: null,
-    label: "",
-    color: "",
-    locked: false
+    assignee: stringField(defaults.assignee),
+    deviceId: stringField(defaults.deviceId),
+    clientId: nullableStringField(defaults.clientId),
+    label: stringField(defaults.label),
+    color: stringField(defaults.color),
+    locked: Boolean(defaults.locked)
   };
 }
 
-function ensureAssignments(score) {
+function ensureAssignments(score, defaults = {}) {
   return {
-    ...resetAssignments(score.voices),
+    ...resetAssignments(score.voices, defaults),
     ...(score.assignments ?? {})
   };
 }
 
-function resetAssignments(voices) {
-  return Object.fromEntries(Object.keys(voices).map((voiceId) => [voiceId, createEmptyAssignment()]));
+function resetAssignments(voices, defaults = {}) {
+  return Object.fromEntries(Object.keys(voices).map((voiceId) => [voiceId, createEmptyAssignment(defaults[voiceId])]));
 }
 
 function resetVoices(voices) {

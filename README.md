@@ -24,6 +24,8 @@ The default HTTP server listens on `0.0.0.0:8790`.
 ```sh
 curl http://127.0.0.1:8790/healthz
 curl http://127.0.0.1:8790/score
+curl http://127.0.0.1:8790/session
+open http://127.0.0.1:8790/
 open http://127.0.0.1:8790/admin
 ```
 
@@ -32,6 +34,18 @@ Use a config file to override defaults:
 ```sh
 npm start -- --config config/example.json
 ```
+
+For the first Shadowbox local-host prototype, use:
+
+```sh
+npm start -- --config config/shadowbox.local.json
+```
+
+The root route serves static app assets from `public/matrix-edit` by default.
+The bundled page is a lightweight Phase 1 browser prototype that loads `/score`,
+subscribes to `/events`, renders all voice layers, and writes the selected voice
+through `POST /voices/:voiceId/notes`. A production Matrix Edit build can replace
+the contents of that folder without changing server routes.
 
 By default, score state persists to `data/score.json` and the previous snapshot
 is kept at `data/score.previous.json`.
@@ -44,6 +58,7 @@ configured RNBO inport address.
 
 - `GET /healthz`: service status.
 - `GET /score`: current ensemble score snapshot.
+- `GET /session`: host/session metadata, app URLs, voices, assignments, and local RNBO target config.
 - `GET /assignments`: current voice assignment map.
 - `POST /context`: replace or merge shared ShadowScore context.
 - `POST /voices/:voiceId/assignment`: assign a voice to a player, device, or client.

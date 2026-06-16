@@ -6,8 +6,8 @@
   },
   "server": {
     "role": "host",
-    "advertisedName": "shadowscore-server",
-    "hostIdentity": "shadowscore-server"
+    "advertisedName": "shadowbox-host",
+    "hostIdentity": "shadowbox-host"
   },
   "static": {
     "enabled": true,
@@ -40,7 +40,7 @@
     "debounceMs": 150
   },
   "rnbo": {
-    "enabled": false,
+    "enabled": true,
     "host": "127.0.0.1",
     "port": 9000,
     "address": "/rnbo/inst/2/messages/in/shadowscore",

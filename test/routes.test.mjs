@@ -45,6 +45,43 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /Shadowscore Lab Admin/);
 });
 
+test("session route exposes host metadata and voice assignments", async () => {
+  const context = createRouteContext();
+  const session = await requestJson(context, "GET", "/session");
+
+  assert.equal(session.ensembleId, "berklee-b51");
+  assert.equal(session.server.role, "host");
+  assert.equal(session.endpoints.collab, "ws://127.0.0.1/collab");
+  assert.equal(session.voices.length, 6);
+  assert.equal(session.voices[0].assignment.label, "Player 1");
+  assert.deepEqual(session.hardwareUnits, []);
+});
+
+test("root route serves static app html", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /ShadowScore Matrix Edit/);
+});
+
+test("voice note route rejects stale expected voice versions", async () => {
+  const context = createRouteContext();
+
+  await requestJson(context, "POST", "/voices/player-1/notes", {
+    expectedVoiceVersion: 0,
+    notes: [{ pitch: 60 }]
+  });
+  const response = await request(context, "POST", "/voices/player-1/notes", {
+    expectedVoiceVersion: 0,
+    notes: [{ pitch: 61 }]
+  });
+
+  assert.equal(response.status, 400);
+  assert.match(response.body, /stale voice 'player-1' version 0; current version is 1/);
+});
+
 function createRouteContext() {
   return {
     store: createScoreStore(createInitialScore(defaultConfig)),

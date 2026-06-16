@@ -1,4 +1,6 @@
 import { adminPage } from "./admin-page.mjs";
+import { serveStaticAsset } from "./static-files.mjs";
+import { createSessionSnapshot } from "../session.mjs";
 
 export async function routeRequest(request, response, store, config) {
   setCors(response);
@@ -27,6 +29,11 @@ export async function routeRequest(request, response, store, config) {
 
   if (request.method === "GET" && url.pathname === "/score") {
     writeJson(response, 200, store.getScore());
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/session") {
+    writeJson(response, 200, createSessionSnapshot(store.getScore(), config, request));
     return;
   }
 
@@ -90,10 +97,17 @@ export async function routeRequest(request, response, store, config) {
     try {
       const voiceId = decodeURIComponent(voiceMatch[1]);
       const body = await readJson(request);
-      writeJson(response, 200, store.replaceVoiceNotes(voiceId, body));
+      writeJson(response, 200, store.replaceVoiceNotes(voiceId, body, {
+        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion"),
+        expectedVoiceVersion: optionalInteger(body.expectedVoiceVersion, "expectedVoiceVersion")
+      }));
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
+    return;
+  }
+
+  if (request.method === "GET" && await serveStaticAsset(url, response, config)) {
     return;
   }
 
@@ -151,4 +165,15 @@ function setCors(response) {
 
 function messageForError(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function optionalInteger(value, field) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const number = Number(value);
+  if (!Number.isInteger(number)) {
+    throw new Error(`${field} must be an integer`);
+  }
+  return number;
 }

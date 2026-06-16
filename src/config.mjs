@@ -1,13 +1,33 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 
 export const defaultConfig = Object.freeze({
   http: {
     host: "0.0.0.0",
-    port: 8790
+    port: 8790,
+    publicUrl: ""
+  },
+  server: {
+    role: "host",
+    advertisedName: os.hostname(),
+    hostIdentity: os.hostname()
+  },
+  static: {
+    enabled: true,
+    root: "public/matrix-edit",
+    index: "index.html"
   },
   ensemble: {
     id: "berklee-b51",
-    voices: ["player-1", "player-2", "player-3", "player-4", "player-5", "player-6"]
+    voices: ["player-1", "player-2", "player-3", "player-4", "player-5", "player-6"],
+    assignmentDefaults: {
+      "player-1": { label: "Player 1", color: "#d1453b" },
+      "player-2": { label: "Player 2", color: "#256f86" },
+      "player-3": { label: "Player 3", color: "#2f855a" },
+      "player-4": { label: "Player 4", color: "#8a5a16" },
+      "player-5": { label: "Player 5", color: "#6f42c1" },
+      "player-6": { label: "Player 6", color: "#c04778" }
+    }
   },
   persistence: {
     enabled: true,

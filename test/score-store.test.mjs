@@ -8,6 +8,8 @@ test("initial score creates configured voices", () => {
   assert.equal(score.ensembleId, "berklee-b51");
   assert.deepEqual(Object.keys(score.voices), defaultConfig.ensemble.voices);
   assert.deepEqual(Object.keys(score.assignments), defaultConfig.ensemble.voices);
+  assert.equal(score.assignments["player-1"].label, "Player 1");
+  assert.equal(score.assignments["player-1"].color, "#d1453b");
 });
 
 test("context updates merge into shared score context", () => {
@@ -91,8 +93,8 @@ test("voice assignments can be replaced and cleared", () => {
     assignee: "",
     deviceId: "",
     clientId: null,
-    label: "",
-    color: "",
+    label: "Player 1",
+    color: "#d1453b",
     locked: false
   });
 });
@@ -109,6 +111,7 @@ test("admin reset can clear notes and assignments without changing context", () 
   assert.deepEqual(reset.voices["player-1"].notes, []);
   assert.equal(reset.voices["player-1"].version, 2);
   assert.equal(reset.assignments["player-1"].assignee, "");
+  assert.equal(reset.assignments["player-1"].label, "Player 1");
 });
 
 test("unknown voices are rejected", () => {

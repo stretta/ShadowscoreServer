@@ -1,6 +1,7 @@
-export function createSessionSnapshot(score, config, request) {
+export function createSessionSnapshot(score, config, request, runtime = {}) {
   const baseUrl = publicBaseUrl(config, request);
   const assignments = score.assignments ?? {};
+  const targets = runtime.rnboTargets ?? config.rnbo?.targets ?? [];
 
   return {
     ensembleId: score.ensembleId,
@@ -30,7 +31,11 @@ export function createSessionSnapshot(score, config, request) {
       host: config.rnbo?.host ?? "",
       port: config.rnbo?.port ?? null,
       address: config.rnbo?.address ?? "",
-      targets: config.rnbo?.targets ?? []
+      oscQuery: {
+        enabled: Boolean(config.rnbo?.oscQuery?.enabled),
+        url: config.rnbo?.oscQuery?.url ?? ""
+      },
+      targets
     }
   };
 }
@@ -58,6 +63,10 @@ function emptyAssignment() {
     assignee: "",
     deviceId: "",
     clientId: null,
+    rnboTargetId: "",
+    rnboHost: "",
+    rnboPort: null,
+    rnboAddress: "",
     label: "",
     color: "",
     locked: false

@@ -140,6 +140,10 @@ function normalizeAssignment(assignmentDocument) {
     assignee: stringField(assignmentDocument.assignee ?? assignmentDocument.playerName),
     deviceId: stringField(assignmentDocument.deviceId),
     clientId: nullableStringField(assignmentDocument.clientId),
+    rnboTargetId: stringField(assignmentDocument.rnboTargetId),
+    rnboHost: stringField(assignmentDocument.rnboHost),
+    rnboPort: nullableNumberField(assignmentDocument.rnboPort),
+    rnboAddress: stringField(assignmentDocument.rnboAddress),
     label: stringField(assignmentDocument.label),
     color: stringField(assignmentDocument.color),
     locked: Boolean(assignmentDocument.locked)
@@ -151,6 +155,10 @@ function createEmptyAssignment(defaults = {}) {
     assignee: stringField(defaults.assignee),
     deviceId: stringField(defaults.deviceId),
     clientId: nullableStringField(defaults.clientId),
+    rnboTargetId: stringField(defaults.rnboTargetId),
+    rnboHost: stringField(defaults.rnboHost),
+    rnboPort: nullableNumberField(defaults.rnboPort),
+    rnboAddress: stringField(defaults.rnboAddress),
     label: stringField(defaults.label),
     color: stringField(defaults.color),
     locked: Boolean(defaults.locked)
@@ -219,6 +227,17 @@ function stringField(value) {
 function nullableStringField(value) {
   const stringValue = stringField(value);
   return stringValue ? stringValue : null;
+}
+
+function nullableNumberField(value) {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    throw new Error("numeric assignment field must be a finite number");
+  }
+  return number;
 }
 
 function emitChange(events, type, score, detail, options = {}) {

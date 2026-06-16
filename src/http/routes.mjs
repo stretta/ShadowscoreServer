@@ -1,5 +1,6 @@
 import { adminPage } from "./admin-page.mjs";
 import { serveStaticAsset } from "./static-files.mjs";
+import { configuredRnboTargets, discoverRnboTargets } from "../adapters/rnbo-oscquery.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 
 export async function routeRequest(request, response, store, config) {
@@ -33,7 +34,13 @@ export async function routeRequest(request, response, store, config) {
   }
 
   if (request.method === "GET" && url.pathname === "/session") {
-    writeJson(response, 200, createSessionSnapshot(store.getScore(), config, request));
+    const rnboTargets = await readRnboTargets(config);
+    writeJson(response, 200, createSessionSnapshot(store.getScore(), config, request, { rnboTargets }));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/rnbo/targets") {
+    writeJson(response, 200, { targets: await readRnboTargets(config) });
     return;
   }
 
@@ -161,6 +168,11 @@ function setCors(response) {
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");
   response.setHeader("Access-Control-Allow-Methods", "DELETE,GET,POST,OPTIONS");
   response.setHeader("Access-Control-Allow-Origin", "*");
+}
+
+async function readRnboTargets(config) {
+  const discovered = await discoverRnboTargets(config);
+  return discovered.length > 0 ? discovered : configuredRnboTargets(config);
 }
 
 function messageForError(error) {

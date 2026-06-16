@@ -106,6 +106,43 @@ test("sends one transaction per configured RNBO target", async () => {
   assert.equal(packets.length, 6);
 });
 
+test("sends score updates to assignment-bound RNBO targets", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      stagesPerBeat: 16,
+      sendDelayMs: 0,
+      log: false
+    }
+  });
+  const score = createScore();
+  score.assignments = {
+    "player-1": {
+      rnboTargetId: "rnbo-inst-2:shadowscore",
+      rnboHost: "192.168.68.96",
+      rnboPort: 1234,
+      rnboAddress: "/rnbo/inst/2/messages/in/shadowscore",
+      clientId: "2202"
+    }
+  };
+  const packets = [];
+  const socket = {
+    send(packet, port, host, callback) {
+      packets.push({ packet, port, host });
+      callback();
+    }
+  };
+
+  const result = await sendScoreTransaction(socket, config, score, 700);
+
+  assert.equal(result.noteCount, 1);
+  assert.equal(packets.length, 3);
+  assert.equal(packets[0].host, "192.168.68.96");
+  assert.equal(packets[0].port, 1234);
+  assert.deepEqual(result.messages[0].values, [2202, 1, 700, 1, 1, 32, 16, 0]);
+});
+
 test("RNBO adapter ignores assignment-only score events", () => {
   assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.replaced", detail: {} }), false);
   assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.cleared", detail: {} }), false);

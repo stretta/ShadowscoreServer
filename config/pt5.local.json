@@ -25,6 +25,12 @@
     "host": "192.168.68.96",
     "port": 1234,
     "address": "/rnbo/inst/4/messages/in/shadowscore",
+    "oscQuery": {
+      "enabled": true,
+      "url": "http://192.168.68.96:5678/",
+      "timeoutMs": 1000,
+      "addressPattern": "shadowscore"
+    },
     "stagesPerBeat": 16,
     "transactionStart": 1000,
     "sendDelayMs": 5,

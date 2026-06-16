@@ -27,6 +27,23 @@ export function adminPage() {
     main { margin: 0 auto; max-width: 1120px; padding: 24px clamp(16px, 4vw, 40px) 40px; }
     .status { color: #c8d1da; font-size: 14px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+    .targets {
+      background: #fff;
+      border: 1px solid #d5d8dc;
+      margin-bottom: 18px;
+      padding: 14px;
+    }
+    .targets h2 { font-size: 16px; margin: 0 0 10px; }
+    .target-list { display: grid; gap: 8px; }
+    .target {
+      align-items: center;
+      border: 1px solid #e1e4e8;
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      padding: 9px;
+    }
+    .target code { color: #38414a; font-size: 12px; }
     button {
       align-items: center;
       background: #ffffff;
@@ -67,6 +84,14 @@ export function adminPage() {
     input[type="checkbox"] { min-height: 18px; width: 18px; }
     .voice { font-weight: 700; white-space: nowrap; }
     .actions { display: flex; gap: 8px; }
+    select {
+      border: 1px solid #bac2ca;
+      border-radius: 4px;
+      font: inherit;
+      min-height: 36px;
+      padding: 7px 8px;
+      width: 100%;
+    }
     @media (max-width: 760px) {
       header { align-items: flex-start; flex-direction: column; }
       table, thead, tbody, th, td, tr { display: block; }
@@ -89,10 +114,15 @@ export function adminPage() {
       <button class="danger" id="clear-notes" type="button">Clear all notes</button>
       <button class="danger" id="clear-assignments" type="button">Clear assignments</button>
     </div>
+    <section class="targets">
+      <h2>Discovered RNBO targets</h2>
+      <div class="target-list" id="targets"></div>
+    </section>
     <table>
       <thead>
         <tr>
           <th>Voice</th>
+          <th>RNBO Target</th>
           <th>Assignee</th>
           <th>Device</th>
           <th>Client</th>
@@ -108,13 +138,15 @@ export function adminPage() {
   <script>
     const statusEl = document.querySelector("#status");
     const voicesEl = document.querySelector("#voices");
+    const targetsEl = document.querySelector("#targets");
     const inputs = new Map();
+    let discoveredTargets = [];
 
-    document.querySelector("#refresh").addEventListener("click", loadScore);
+    document.querySelector("#refresh").addEventListener("click", loadSession);
     document.querySelector("#clear-notes").addEventListener("click", () => resetScore({ voices: true }, "Clear all notes?"));
     document.querySelector("#clear-assignments").addEventListener("click", () => resetScore({ assignments: true }, "Clear all voice assignments?"));
 
-    loadScore();
+    loadSession();
     const events = new EventSource("/events");
     events.addEventListener("snapshot", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.assignment.replaced", (event) => render(JSON.parse(event.data).score));
@@ -122,9 +154,13 @@ export function adminPage() {
     events.addEventListener("admin.reset", (event) => render(JSON.parse(event.data).score));
     events.onerror = () => setStatus("Event stream reconnecting...");
 
-    async function loadScore() {
-      const response = await fetch("/score");
-      render(await response.json());
+    async function loadSession() {
+      const response = await fetch("/session");
+      const session = await response.json();
+      discoveredTargets = session.rnbo?.targets ?? [];
+      renderTargets(discoveredTargets);
+      const scoreResponse = await fetch("/score");
+      render(await scoreResponse.json());
     }
 
     function render(score) {
@@ -135,6 +171,7 @@ export function adminPage() {
         const row = document.createElement("tr");
         row.dataset.voice = voiceId;
         row.append(cell("Voice", voiceId, "voice"));
+        row.append(targetCell("RNBO Target", voiceId, assignment));
         row.append(inputCell("Assignee", voiceId, "assignee", assignment.assignee ?? ""));
         row.append(inputCell("Device", voiceId, "deviceId", assignment.deviceId ?? ""));
         row.append(inputCell("Client", voiceId, "clientId", assignment.clientId ?? ""));
@@ -145,6 +182,27 @@ export function adminPage() {
         voicesEl.append(row);
       }
       setStatus(score.ensembleId + " · score v" + score.version);
+    }
+
+    function renderTargets(targets) {
+      targetsEl.textContent = "";
+      if (targets.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "target";
+        empty.textContent = "No ShadowScoreClient RNBO targets discovered.";
+        targetsEl.append(empty);
+        return;
+      }
+      for (const target of targets) {
+        const row = document.createElement("div");
+        row.className = "target";
+        const label = document.createElement("div");
+        label.textContent = target.name ?? target.id ?? target.address;
+        const code = document.createElement("code");
+        code.textContent = target.host + ":" + target.port + target.address;
+        row.append(label, code);
+        targetsEl.append(row);
+      }
     }
 
     function cell(label, text, className) {
@@ -165,6 +223,25 @@ export function adminPage() {
       const td = document.createElement("td");
       td.dataset.label = label;
       td.append(input);
+      return td;
+    }
+
+    function targetCell(label, voiceId, assignment) {
+      const select = document.createElement("select");
+      select.dataset.voice = voiceId;
+      select.dataset.field = "rnboTargetId";
+      const current = assignment.rnboTargetId ?? "";
+      select.append(new Option("Unassigned", ""));
+      for (const target of discoveredTargets) {
+        const option = new Option(target.name + " · " + target.address, target.id);
+        option.dataset.target = JSON.stringify(target);
+        select.append(option);
+      }
+      select.value = current;
+      rememberInput(voiceId, "rnboTargetId", select);
+      const td = document.createElement("td");
+      td.dataset.label = label;
+      td.append(select);
       return td;
     }
 
@@ -215,6 +292,7 @@ export function adminPage() {
     async function saveAssignment(voiceId) {
       const fields = inputs.get(voiceId);
       const body = {
+        ...targetFields(fields.rnboTargetId),
         assignee: fields.assignee.value,
         deviceId: fields.deviceId.value,
         clientId: fields.clientId.value,
@@ -228,6 +306,25 @@ export function adminPage() {
         body: JSON.stringify(body)
       });
       render(await response.json());
+    }
+
+    function targetFields(select) {
+      if (!select?.value) {
+        return {
+          rnboTargetId: "",
+          rnboHost: "",
+          rnboPort: null,
+          rnboAddress: ""
+        };
+      }
+      const option = select.selectedOptions[0];
+      const target = JSON.parse(option.dataset.target);
+      return {
+        rnboTargetId: target.id,
+        rnboHost: target.host,
+        rnboPort: target.port,
+        rnboAddress: target.address
+      };
     }
 
     async function clearAssignment(voiceId) {

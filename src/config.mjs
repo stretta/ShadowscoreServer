@@ -40,6 +40,12 @@ export const defaultConfig = Object.freeze({
     host: "127.0.0.1",
     port: 9000,
     address: "/rnbo/inst/2/messages/in/shadowscore",
+    oscQuery: {
+      enabled: false,
+      url: "http://127.0.0.1:5678/",
+      timeoutMs: 1000,
+      addressPattern: "shadowscore"
+    },
     stagesPerBeat: 16,
     transactionStart: 1000,
     sendDelayMs: 5

@@ -47,7 +47,7 @@ export function createRnboOscAdapter(config) {
 }
 
 export async function sendScoreTransaction(socket, config, score, transactionId) {
-  const targets = rnboTargets(config);
+  const targets = rnboTargets(config, score);
   const compiledTargets = [];
 
   for (const target of targets) {
@@ -77,7 +77,7 @@ export function shouldSendScoreTransaction(event) {
   );
 }
 
-export function compileScoreTransaction(score, config, transactionId, target = rnboTargets(config)[0]) {
+export function compileScoreTransaction(score, config, transactionId, target = rnboTargets(config, score)[0]) {
   const stagesPerBeat = clampInt(config.rnbo.stagesPerBeat, 1, 960);
   const notes = flattenScoreNotes(score, target.voiceId);
   const selectionStart = readNumber(score.context.clip?.time_selection_start, 0);
@@ -164,7 +164,11 @@ async function sendOscMessage(socket, config, target, values) {
   });
 }
 
-function rnboTargets(config) {
+function rnboTargets(config, score) {
+  const assignedTargets = assignmentRnboTargets(config, score);
+  if (assignedTargets.length > 0) {
+    return assignedTargets;
+  }
   if (Array.isArray(config.rnbo.targets) && config.rnbo.targets.length > 0) {
     return config.rnbo.targets.map((target) => ({
       host: target.host ?? config.rnbo.host,
@@ -182,6 +186,22 @@ function rnboTargets(config) {
       clientId: config.rnbo.clientId
     }
   ];
+}
+
+function assignmentRnboTargets(config, score) {
+  if (!score?.assignments) {
+    return [];
+  }
+  return Object.entries(score.assignments)
+    .filter(([, assignment]) => assignment?.rnboAddress)
+    .map(([voiceId, assignment]) => ({
+      host: assignment.rnboHost || config.rnbo.host,
+      port: assignment.rnboPort ?? config.rnbo.port,
+      address: assignment.rnboAddress,
+      voiceId,
+      clientId: assignment.clientId ?? undefined,
+      id: assignment.rnboTargetId || undefined
+    }));
 }
 
 function readNumber(value, fallback) {

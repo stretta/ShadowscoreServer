@@ -122,14 +122,14 @@ Exit criteria:
 Goal: the session host can derive RNBO target information from RNBOOSCQuery.
 
 - Implement a local RNBOOSCQuery inspection helper.
-- Identify ShadowScore-capable RNBO instances by message path, metadata, or explicit config.
+- Identify ShadowScoreClient RNBO instances by message path, metadata, or explicit config.
 - Register discovered targets into ShadowscoreServer's session model.
 - Display discovered targets in `/admin`.
 - Allow an assignment to bind a voice to one RNBO target.
 
 Exit criteria:
 
-- A hardware unit reports at least one RNBO target such as `Source / shadowscore`.
+- A hardware unit reports at least one RNBO target such as `ShadowScoreClient / shadowscore`.
 - The admin page can bind `player-1` to that target.
 - A committed score update sends to the bound RNBO message path.
 - Stale or missing RNBOOSCQuery data does not crash ShadowscoreServer.
@@ -244,3 +244,12 @@ Phase 1 server-side status:
 - `public/matrix-edit/index.html` is a lightweight local browser prototype. It can be replaced by a full Matrix Edit static build while preserving the same server route.
 
 This proves the browser and score-authority shape before adding peer registration and multi-unit RNBO routing.
+
+Phase 2 server-side status:
+
+- RNBOOSCQuery discovery is implemented for local ShadowScoreClient message targets under paths such as `/rnbo/inst/2/messages/in/shadowscore`.
+- `GET /session` and `GET /rnbo/targets` expose discovered targets, falling back to configured RNBO targets when discovery is disabled or empty.
+- `/admin` displays discovered targets and can bind a voice assignment to a target.
+- Voice assignments now persist RNBO target metadata: target id, host, port, and message address.
+- RNBO sends prefer assignment-bound targets, so a committed voice update can route to the bound RNBO message path.
+- Missing or stale RNBOOSCQuery data returns an empty discovery result and does not crash the server.

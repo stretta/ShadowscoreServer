@@ -137,7 +137,7 @@ export function assertScoreShape(score) {
     if (!isPlainObject(assignment)) {
       throw new Error(`assignment ${voiceId} must be an object`);
     }
-    for (const field of ["assignee", "deviceId", "label", "color"]) {
+    for (const field of ["assignee", "deviceId", "rnboTargetId", "rnboHost", "rnboAddress", "label", "color"]) {
       if (assignment[field] !== undefined && typeof assignment[field] !== "string") {
         throw new Error(`assignment ${voiceId}.${field} must be a string`);
       }
@@ -149,6 +149,13 @@ export function assertScoreShape(score) {
       typeof assignment.clientId !== "number"
     ) {
       throw new Error(`assignment ${voiceId}.clientId must be a string, number, or null`);
+    }
+    if (
+      assignment.rnboPort !== undefined &&
+      assignment.rnboPort !== null &&
+      typeof assignment.rnboPort !== "number"
+    ) {
+      throw new Error(`assignment ${voiceId}.rnboPort must be a number or null`);
     }
     if (assignment.locked !== undefined && typeof assignment.locked !== "boolean") {
       throw new Error(`assignment ${voiceId}.locked must be boolean`);

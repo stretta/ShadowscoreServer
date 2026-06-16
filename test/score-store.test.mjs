@@ -76,6 +76,10 @@ test("voice assignments can be replaced and cleared", () => {
     assignee: "Ari",
     deviceId: "shadowbox-05",
     clientId: 5505,
+    rnboTargetId: "rnbo-inst-5:shadowscore",
+    rnboHost: "192.168.68.96",
+    rnboPort: "1234",
+    rnboAddress: "/rnbo/inst/5/messages/in/shadowscore",
     label: "left table",
     color: "#256f86",
     locked: true
@@ -85,6 +89,10 @@ test("voice assignments can be replaced and cleared", () => {
   assert.equal(assigned.assignments["player-1"].assignee, "Ari");
   assert.equal(assigned.assignments["player-1"].deviceId, "shadowbox-05");
   assert.equal(assigned.assignments["player-1"].clientId, "5505");
+  assert.equal(assigned.assignments["player-1"].rnboTargetId, "rnbo-inst-5:shadowscore");
+  assert.equal(assigned.assignments["player-1"].rnboHost, "192.168.68.96");
+  assert.equal(assigned.assignments["player-1"].rnboPort, 1234);
+  assert.equal(assigned.assignments["player-1"].rnboAddress, "/rnbo/inst/5/messages/in/shadowscore");
   assert.equal(assigned.assignments["player-1"].locked, true);
 
   const cleared = store.clearVoiceAssignment("player-1");
@@ -93,6 +101,10 @@ test("voice assignments can be replaced and cleared", () => {
     assignee: "",
     deviceId: "",
     clientId: null,
+    rnboTargetId: "",
+    rnboHost: "",
+    rnboPort: null,
+    rnboAddress: "",
     label: "Player 1",
     color: "#d1453b",
     locked: false

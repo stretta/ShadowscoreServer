@@ -102,12 +102,15 @@ log "Installing npm package metadata"
 npm install --omit=dev
 
 if [[ "$ROLE" == "host" ]]; then
-  CONFIG_PATH="config/shadowbox.hardware-host.json"
+  CONFIG_TEMPLATE_PATH="config/shadowbox.hardware-host.json"
+  CONFIG_PATH="config/shadowscore.host.local.json"
 else
-  CONFIG_PATH="config/shadowbox.hardware-peer.json"
+  CONFIG_TEMPLATE_PATH="config/shadowbox.hardware-peer.json"
+  CONFIG_PATH="config/shadowscore.peer.local.json"
 fi
 
 log "Writing $ROLE config to $CONFIG_PATH"
+cp "$CONFIG_TEMPLATE_PATH" "$CONFIG_PATH"
 SHADOWSCORE_ROLE_VALUE="$ROLE" \
 SHADOWSCORE_PUBLIC_URL_VALUE="$PUBLIC_URL" \
 SHADOWSCORE_SESSION_HOST_URL_VALUE="$SESSION_HOST_URL" \
@@ -138,12 +141,18 @@ NODE
 
 if [[ "$ROLE" == "host" ]]; then
   SERVICE_NAME="shadowscore-server.service"
+  SERVICE_CONFIG_DEFAULT="/home/pi/ShadowscoreServer/config/shadowbox.hardware-host.json"
 else
   SERVICE_NAME="shadowscore-registration-agent.service"
+  SERVICE_CONFIG_DEFAULT="/home/pi/ShadowscoreServer/config/shadowbox.hardware-peer.json"
 fi
 
 log "Installing systemd service $SERVICE_NAME"
-$SUDO cp "deploy/systemd/$SERVICE_NAME" "/etc/systemd/system/$SERVICE_NAME"
+SERVICE_CONFIG_PATH="$INSTALL_DIR/$CONFIG_PATH"
+tmp_service="$(mktemp)"
+sed "s#$SERVICE_CONFIG_DEFAULT#$SERVICE_CONFIG_PATH#g" "deploy/systemd/$SERVICE_NAME" > "$tmp_service"
+$SUDO cp "$tmp_service" "/etc/systemd/system/$SERVICE_NAME"
+rm -f "$tmp_service"
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now "$SERVICE_NAME"
 $SUDO systemctl restart "$SERVICE_NAME"

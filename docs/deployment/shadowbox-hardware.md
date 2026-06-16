@@ -28,7 +28,7 @@ curl -L https://raw.githubusercontent.com/stretta/ShadowscoreServer/main/deploy/
 bash /tmp/install-shadowscore.sh --role peer --host-identity pt6 --advertised-name pt6 --session-host-url http://pt5.local:8790
 ```
 
-The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages, clones or updates the repo, writes the role-specific config, installs the matching systemd unit, starts the service, and runs the hardware smoke test.
+The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages, clones or updates the repo, writes the role-specific generated config, installs the matching systemd unit, starts the service, and runs the hardware smoke test.
 
 Manual install remains available:
 

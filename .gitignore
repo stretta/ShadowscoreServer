@@ -5,3 +5,4 @@ coverage/
 dist/
 data/*.json
 !data/.gitkeep
+config/*.local.json

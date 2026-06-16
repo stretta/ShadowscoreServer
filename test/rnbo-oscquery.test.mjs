@@ -31,6 +31,28 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
   });
 });
 
+test("ignores nested ShadowScore metadata message paths", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      oscQuery: {
+        enabled: true
+      }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.messages.CONTENTS.in.CONTENTS.shadowscore.CONTENTS = {
+    meta: {
+      FULL_PATH: "/rnbo/inst/2/messages/in/shadowscore/meta",
+      TYPE: "m"
+    }
+  };
+
+  const targets = extractRnboTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].address, "/rnbo/inst/2/messages/in/shadowscore");
+});
+
 test("RNBOOSCQuery discovery returns an empty target list on fetch failure", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

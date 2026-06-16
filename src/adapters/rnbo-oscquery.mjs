@@ -90,7 +90,7 @@ function walkOscQueryTree(node, path, visit) {
 
 function isShadowScoreMessagePath(path, node, addressPattern) {
   const normalized = normalizeAddress(path).toLowerCase();
-  if (!normalized.includes(addressPattern)) {
+  if (!normalized.endsWith(`/${addressPattern}`)) {
     return false;
   }
   if (normalized.includes("/messages/in/")) {

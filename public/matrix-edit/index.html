@@ -1,531 +1,92 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ShadowScore Matrix Edit</title>
-  <style>
-    :root {
-      color-scheme: light;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f4f5f2;
-      color: #202428;
-    }
-    * { box-sizing: border-box; }
-    body { margin: 0; }
-    header {
-      align-items: center;
-      background: #20272f;
-      color: white;
-      display: flex;
-      gap: 16px;
-      justify-content: space-between;
-      padding: 14px clamp(16px, 4vw, 36px);
-    }
-    h1 {
-      font-size: 20px;
-      letter-spacing: 0;
-      line-height: 1.2;
-      margin: 0;
-    }
-    main {
-      display: grid;
-      gap: 18px;
-      grid-template-columns: minmax(240px, 310px) 1fr;
-      margin: 0 auto;
-      max-width: 1220px;
-      padding: 20px clamp(16px, 4vw, 36px) 36px;
-    }
-    button, textarea { font: inherit; }
-    button {
-      align-items: center;
-      background: #fff;
-      border: 1px solid #b7bfc7;
-      border-radius: 6px;
-      cursor: pointer;
-      display: inline-flex;
-      font-weight: 700;
-      justify-content: center;
-      min-height: 38px;
-      padding: 8px 12px;
-    }
-    button:disabled {
-      cursor: not-allowed;
-      opacity: 0.55;
-    }
-    button.primary {
-      background: #256f86;
-      border-color: #256f86;
-      color: #fff;
-    }
-    .status {
-      color: #d8e0e7;
-      font-size: 14px;
-      text-align: right;
-    }
-    .status.bad { color: #ffd2c9; }
-    .status.warn { color: #ffe4a6; }
-    .panel {
-      background: #fff;
-      border: 1px solid #d4d8dc;
-      border-radius: 8px;
-      min-width: 0;
-      padding: 14px;
-    }
-    .voice-list {
-      display: flex;
-      flex-direction: column;
-      gap: 8px;
-    }
-    .voice {
-      align-items: center;
-      border: 1px solid #cbd2d8;
-      border-radius: 6px;
-      cursor: pointer;
-      display: grid;
-      gap: 8px;
-      grid-template-columns: 18px 16px 1fr auto;
-      min-height: 48px;
-      padding: 8px;
-    }
-    .voice:has(input:checked) {
-      border-color: #20272f;
-      box-shadow: inset 3px 0 0 var(--voice-color, #256f86);
-    }
-    .voice input { margin: 0; }
-    .swatch {
-      border: 1px solid rgba(0, 0, 0, 0.18);
-      border-radius: 50%;
-      height: 16px;
-      width: 16px;
-    }
-    .voice-text {
-      min-width: 0;
-    }
-    .voice-name {
-      font-weight: 760;
-      overflow-wrap: anywhere;
-    }
-    .voice-meta, .muted {
-      color: #66717a;
-      font-size: 13px;
-    }
-    .presence-dot {
-      background: #d9dee2;
-      border-radius: 999px;
-      height: 10px;
-      width: 10px;
-    }
-    .presence-dot.active { background: #2f855a; }
-    .grid-shell {
-      display: grid;
-      gap: 10px;
-    }
-    .grid {
-      background:
-        linear-gradient(#e2e7ea 1px, transparent 1px),
-        linear-gradient(90deg, #e2e7ea 1px, transparent 1px);
-      background-size: 40px 26px;
-      border: 1px solid #c7d0d7;
-      height: min(48vw, 370px);
-      min-height: 280px;
-      overflow: hidden;
-      position: relative;
-    }
-    .note {
-      border: 1px solid rgba(0, 0, 0, 0.28);
-      border-radius: 4px;
-      min-height: 14px;
-      position: absolute;
-    }
-    .note.editable { opacity: 0.95; }
-    .note.reference { opacity: 0.24; }
-    .editor {
-      display: grid;
-      gap: 10px;
-      grid-template-rows: auto 1fr auto;
-      margin-top: 12px;
-    }
-    textarea {
-      border: 1px solid #bac2ca;
-      border-radius: 6px;
-      min-height: 220px;
-      padding: 10px;
-      resize: vertical;
-      width: 100%;
-    }
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      justify-content: flex-end;
-    }
-    .message {
-      border-left: 3px solid #9aa4ad;
-      color: #46515a;
-      font-size: 14px;
-      min-height: 22px;
-      padding: 2px 0 2px 8px;
-    }
-    .message.bad { border-color: #c43b32; color: #8c241d; }
-    .message.warn { border-color: #b17418; color: #7b4a08; }
-    @media (max-width: 780px) {
-      header { align-items: flex-start; flex-direction: column; }
-      .status { text-align: left; }
-      main { grid-template-columns: 1fr; }
-      .grid { height: 320px; }
-    }
-  </style>
-</head>
-<body>
-  <header>
-    <h1>ShadowScore Matrix Edit</h1>
-    <div class="status warn" id="status">Connecting...</div>
-  </header>
-  <main>
-    <section class="panel">
-      <div class="voice-list" id="voices" role="radiogroup" aria-label="Editable voice"></div>
-    </section>
-    <section class="panel">
-      <div class="grid-shell">
-        <div class="grid" id="grid" aria-label="Ensemble note grid"></div>
-        <div class="message" id="message"></div>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ShadowScore Matrix Edit</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
+    <script type="module" crossorigin src="/app/assets/index-BR02-WG7.js"></script>
+    <link rel="stylesheet" crossorigin href="/app/assets/index-BCwxodsr.css">
+  </head>
+  <body>
+    <main>
+      <div class="toolbar">
+        <select id="mode" aria-label="Editor mode">
+          <option value="shadowscore" selected>ShadowScore Server</option>
+          <option value="rnbo">RNBO Packed Notes</option>
+        </select>
+        <input id="server" value="http://127.0.0.1:8790" aria-label="ShadowScore server" />
+        <input id="voice" value="player-1" aria-label="ShadowScore voice" />
+        <input id="assignee" value="" aria-label="ShadowScore assignee" placeholder="Assignee" />
+        <input id="device-id" value="" aria-label="ShadowScore device" placeholder="Device" />
+        <input id="client-id" value="" aria-label="ShadowScore client" placeholder="Client" />
+        <input id="assignment-label" value="" aria-label="ShadowScore assignment label" placeholder="Label" />
+        <input id="assignment-color" value="" aria-label="ShadowScore assignment color" placeholder="Color" />
+        <label class="check-label">
+          <input id="assignment-locked" type="checkbox" />
+          Locked
+        </label>
+        <button id="assign" type="button">Assign</button>
+        <input id="target" value="http://192.168.68.96:5678" aria-label="RNBO target" />
+        <input id="bridge" value="http://127.0.0.1:8790" aria-label="RNBO OSC bridge" />
+        <button id="refresh" type="button">Refresh</button>
+        <button id="sync" type="button">Sync</button>
       </div>
-      <div class="editor">
-        <div>
-          <strong id="selected-label">No voice selected</strong>
-          <div class="muted" id="selected-meta"></div>
-        </div>
-        <textarea id="notes" spellcheck="false" aria-label="Selected voice notes JSON"></textarea>
-        <div class="toolbar">
-          <button id="reload" type="button">Reload</button>
-          <button class="primary" id="save" type="button" disabled>Save selected voice</button>
-        </div>
+      <div class="toolbar compact">
+        <label>
+          Root
+          <select id="scale-root"></select>
+        </label>
+        <label>
+          Scale
+          <select id="scale"></select>
+        </label>
+        <label>
+          Low Note
+          <span class="stepper">
+            <input id="root-pitch" type="number" min="0" max="127" value="48" />
+            <span class="stepper-buttons">
+              <button type="button" class="stepper-button" data-step-target="root-pitch" data-step-amount="1" aria-label="Increase low note">+</button>
+              <button type="button" class="stepper-button" data-step-target="root-pitch" data-step-amount="-1" aria-label="Decrease low note">-</button>
+            </span>
+          </span>
+        </label>
+        <label>
+          Rows
+          <span class="stepper">
+            <input id="pitch-rows" type="number" min="8" max="64" value="24" />
+            <span class="stepper-buttons">
+              <button type="button" class="stepper-button" data-step-target="pitch-rows" data-step-amount="1" aria-label="Increase rows">+</button>
+              <button type="button" class="stepper-button" data-step-target="pitch-rows" data-step-amount="-1" aria-label="Decrease rows">-</button>
+            </span>
+          </span>
+        </label>
+        <label>
+          Duration
+          <span class="stepper">
+            <input id="duration" type="number" min="1" max="255" value="4" />
+            <span class="stepper-buttons">
+              <button type="button" class="stepper-button" data-step-target="duration" data-step-amount="1" aria-label="Increase duration">+</button>
+              <button type="button" class="stepper-button" data-step-target="duration" data-step-amount="-1" aria-label="Decrease duration">-</button>
+            </span>
+          </span>
+        </label>
+        <label>
+          Velocity
+          <span class="stepper">
+            <input id="velocity" type="number" min="1" max="127" value="100" />
+            <span class="stepper-buttons">
+              <button type="button" class="stepper-button" data-step-target="velocity" data-step-amount="1" aria-label="Increase velocity">+</button>
+              <button type="button" class="stepper-button" data-step-target="velocity" data-step-amount="-1" aria-label="Decrease velocity">-</button>
+            </span>
+          </span>
+        </label>
+        <button id="clear" type="button">Clear</button>
       </div>
-    </section>
-  </main>
-  <script>
-    const clientId = getClientId();
-    const statusEl = document.querySelector("#status");
-    const messageEl = document.querySelector("#message");
-    const voicesEl = document.querySelector("#voices");
-    const gridEl = document.querySelector("#grid");
-    const notesEl = document.querySelector("#notes");
-    const selectedLabelEl = document.querySelector("#selected-label");
-    const selectedMetaEl = document.querySelector("#selected-meta");
-    const saveButton = document.querySelector("#save");
-    let session;
-    let score;
-    let socket;
-    let selectedVoiceId;
-    let pendingSaveId;
-    let presenceClients = [];
-
-    document.querySelector("#reload").addEventListener("click", reload);
-    saveButton.addEventListener("click", saveSelectedVoice);
-
-    boot();
-
-    async function boot() {
-      try {
-        setStatus("Connecting...", "warn");
-        const response = await fetch("/session");
-        if (!response.ok) {
-          throw new Error("Session endpoint returned " + response.status);
-        }
-        session = await response.json();
-        await loadScore();
-        connectCollab();
-      } catch (error) {
-        setDisconnected("Server unavailable: " + error.message);
-      }
-    }
-
-    async function reload() {
-      try {
-        await loadScore({ keepEditor: true });
-        say("Reloaded from server.");
-      } catch (error) {
-        setDisconnected("Reload failed: " + error.message);
-      }
-    }
-
-    async function loadScore(options = {}) {
-      const response = await fetch("/score");
-      if (!response.ok) {
-        throw new Error("Score endpoint returned " + response.status);
-      }
-      applyScore(await response.json(), options);
-    }
-
-    function connectCollab() {
-      const url = new URL(session.endpoints?.collab || "/collab", window.location.href);
-      url.searchParams.set("clientId", clientId);
-      socket = new WebSocket(url);
-      socket.addEventListener("open", () => {
-        setStatus("Connected to " + serverName(), "");
-        sendPresence();
-      });
-      socket.addEventListener("message", (event) => handleCollabMessage(JSON.parse(event.data)));
-      socket.addEventListener("close", () => {
-        socket = undefined;
-        setDisconnected("Disconnected. Edits are paused until the server returns.");
-      });
-      socket.addEventListener("error", () => {
-        setStatus("Connection error", "bad");
-      });
-    }
-
-    function handleCollabMessage(message) {
-      switch (message.type) {
-        case "welcome":
-          setStatus("Connected to " + serverName(), "");
-          break;
-        case "snapshot":
-          applyScore(message.score, { keepEditor: true });
-          break;
-        case "score.changed":
-          applyScore(message.event.score, {
-            keepEditor: message.event.sourceClientId !== clientId
-          });
-          break;
-        case "presence.list":
-        case "presence.updated":
-        case "presence.left":
-          presenceClients = message.clients ?? [];
-          renderVoices();
-          break;
-        case "ack":
-          if (!pendingSaveId || message.requestId !== pendingSaveId) {
-            return;
-          }
-          pendingSaveId = undefined;
-          applyScore(message.score, { keepEditor: false });
-          say("Saved " + labelFor(selectedVoiceId) + ".");
-          break;
-        case "error":
-          if (!pendingSaveId || message.requestId === pendingSaveId) {
-            pendingSaveId = undefined;
-            say(message.error || "Save failed", message.error?.includes("stale") ? "warn" : "bad");
-          }
-          break;
-      }
-    }
-
-    function applyScore(nextScore, options = {}) {
-      const previousSelection = selectedVoiceId;
-      score = nextScore;
-      const voiceIds = orderedVoiceIds();
-      selectedVoiceId = voiceIds.includes(selectedVoiceId) ? selectedVoiceId : voiceIds[0];
-      renderVoices();
-      renderGrid();
-      if (selectedVoiceId && (!options.keepEditor || previousSelection !== selectedVoiceId)) {
-        notesEl.value = JSON.stringify(score.voices[selectedVoiceId].notes, null, 2);
-      }
-      updateEditorState();
-      setStatus("Connected to " + serverName() + " · score v" + score.version, "");
-    }
-
-    function renderVoices() {
-      voicesEl.textContent = "";
-      if (!score) {
-        return;
-      }
-      for (const voiceId of orderedVoiceIds()) {
-        const assignment = assignmentFor(voiceId);
-        const label = document.createElement("label");
-        label.className = "voice";
-        label.style.setProperty("--voice-color", colorFor(voiceId));
-        const radio = document.createElement("input");
-        radio.type = "radio";
-        radio.name = "voice";
-        radio.checked = voiceId === selectedVoiceId;
-        radio.setAttribute("role", "radio");
-        radio.addEventListener("change", () => selectVoice(voiceId));
-        const swatch = document.createElement("span");
-        swatch.className = "swatch";
-        swatch.style.background = colorFor(voiceId);
-        const text = document.createElement("span");
-        text.className = "voice-text";
-        const name = document.createElement("div");
-        name.className = "voice-name";
-        name.textContent = assignment.label || voiceId;
-        const meta = document.createElement("div");
-        meta.className = "voice-meta";
-        meta.textContent = voiceMeta(voiceId, assignment);
-        text.append(name, meta);
-        const presence = document.createElement("span");
-        presence.className = "presence-dot" + (isVoiceActiveElsewhere(voiceId) ? " active" : "");
-        presence.title = presenceLabel(voiceId);
-        label.append(radio, swatch, text, presence);
-        voicesEl.append(label);
-      }
-      if (selectedVoiceId) {
-        selectedLabelEl.textContent = labelFor(selectedVoiceId);
-        selectedMetaEl.textContent = selectedVoiceId + " · voice v" + score.voices[selectedVoiceId].version;
-      }
-    }
-
-    function renderGrid() {
-      gridEl.textContent = "";
-      if (!score) {
-        return;
-      }
-      for (const voiceId of orderedVoiceIds()) {
-        const voice = score.voices[voiceId];
-        for (const note of voice.notes ?? []) {
-          gridEl.append(noteElement(voiceId, note));
-        }
-      }
-    }
-
-    function noteElement(voiceId, note) {
-      const el = document.createElement("div");
-      const start = finite(note.start_time ?? note.start ?? note.tick, 0);
-      const duration = Math.max(0.25, finite(note.duration, 1));
-      const pitch = finite(note.pitch ?? note.midi, 60);
-      el.className = "note " + (voiceId === selectedVoiceId ? "editable" : "reference");
-      el.style.background = colorFor(voiceId);
-      el.style.left = Math.max(0, start * 40) + "px";
-      el.style.width = Math.max(18, duration * 40) + "px";
-      el.style.top = Math.max(0, Math.min(348, (84 - pitch) * 6)) + "px";
-      el.title = labelFor(voiceId);
-      return el;
-    }
-
-    function selectVoice(voiceId) {
-      selectedVoiceId = voiceId;
-      notesEl.value = JSON.stringify(score.voices[selectedVoiceId].notes, null, 2);
-      renderVoices();
-      renderGrid();
-      updateEditorState();
-      sendPresence();
-    }
-
-    function saveSelectedVoice() {
-      if (!score || !selectedVoiceId || !socket || socket.readyState !== WebSocket.OPEN) {
-        say("Disconnected. Reconnect before saving.", "bad");
-        return;
-      }
-      let notes;
-      try {
-        notes = JSON.parse(notesEl.value);
-      } catch (error) {
-        say("Invalid JSON: " + error.message, "bad");
-        return;
-      }
-      pendingSaveId = "save-" + Date.now();
-      socket.send(JSON.stringify({
-        type: "voice.notes.replace",
-        requestId: pendingSaveId,
-        voiceId: selectedVoiceId,
-        notes,
-        expectedVoiceVersion: score.voices[selectedVoiceId].version
-      }));
-      say("Saving " + labelFor(selectedVoiceId) + "...");
-    }
-
-    function sendPresence() {
-      if (!socket || socket.readyState !== WebSocket.OPEN || !selectedVoiceId) {
-        return;
-      }
-      socket.send(JSON.stringify({
-        type: "presence.update",
-        presence: {
-          voiceId: selectedVoiceId,
-          assignee: labelFor(selectedVoiceId),
-          deviceId: navigator.userAgent,
-          editing: true
-        }
-      }));
-    }
-
-    function updateEditorState() {
-      const connected = Boolean(socket && socket.readyState === WebSocket.OPEN);
-      const hasVoice = Boolean(score && selectedVoiceId);
-      saveButton.disabled = !connected || !hasVoice;
-      notesEl.disabled = !hasVoice;
-    }
-
-    function setDisconnected(message) {
-      setStatus(message, "bad");
-      say(message, "bad");
-      updateEditorState();
-    }
-
-    function setStatus(message, tone) {
-      statusEl.textContent = message;
-      statusEl.className = "status" + (tone ? " " + tone : "");
-      updateEditorState();
-    }
-
-    function say(message, tone) {
-      messageEl.textContent = message || "";
-      messageEl.className = "message" + (tone ? " " + tone : "");
-    }
-
-    function orderedVoiceIds() {
-      const fromSession = (session?.voices ?? []).map((voice) => voice.id).filter((voiceId) => score?.voices?.[voiceId]);
-      return fromSession.length ? fromSession : Object.keys(score?.voices ?? {});
-    }
-
-    function assignmentFor(voiceId) {
-      return score?.assignments?.[voiceId] ?? session?.assignments?.[voiceId] ?? session?.voices?.find((voice) => voice.id === voiceId)?.assignment ?? {};
-    }
-
-    function colorFor(voiceId) {
-      return assignmentFor(voiceId).color || "#7b858e";
-    }
-
-    function labelFor(voiceId) {
-      return assignmentFor(voiceId).label || voiceId || "";
-    }
-
-    function voiceMeta(voiceId, assignment) {
-      const active = activeEditors(voiceId);
-      if (active.length) {
-        return active.join(", ");
-      }
-      if (assignment.rnboTargetId) {
-        return assignment.rnboTargetId;
-      }
-      return "voice v" + score.voices[voiceId].version;
-    }
-
-    function activeEditors(voiceId) {
-      return presenceClients
-        .filter((client) => client.clientId !== clientId && client.voiceId === voiceId && client.editing)
-        .map((client) => client.assignee || "Active editor");
-    }
-
-    function isVoiceActiveElsewhere(voiceId) {
-      return activeEditors(voiceId).length > 0;
-    }
-
-    function presenceLabel(voiceId) {
-      const active = activeEditors(voiceId);
-      return active.length ? "Being edited by " + active.join(", ") : "No other editor";
-    }
-
-    function serverName() {
-      return session?.server?.advertisedName || session?.ensembleId || "server";
-    }
-
-    function finite(value, fallback) {
-      const number = Number(value);
-      return Number.isFinite(number) ? number : fallback;
-    }
-
-    function getClientId() {
-      const key = "shadowscore.matrixEdit.clientId";
-      const existing = localStorage.getItem(key);
-      if (existing) {
-        return existing;
-      }
-      const next = crypto.randomUUID ? crypto.randomUUID() : "client-" + Date.now();
-      localStorage.setItem(key, next);
-      return next;
-    }
-  </script>
-</body>
+      <canvas id="matrix" aria-label="RNBO matrix parameter"></canvas>
+      <p id="status"></p>
+    </main>
+  </body>
 </html>

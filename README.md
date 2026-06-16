@@ -34,6 +34,10 @@ npm start -- --config config/example.json
 By default, score state persists to `data/score.json` and the previous snapshot
 is kept at `data/score.previous.json`.
 
+RNBO output is disabled by default. When enabled, committed score changes are
+compiled into the numeric ShadowScore OSC transaction stream and sent to the
+configured RNBO inport address.
+
 ## API Draft
 
 - `GET /healthz`: service status.

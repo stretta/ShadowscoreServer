@@ -68,6 +68,6 @@ The Matrix Edit file `apps/rnbo-matrix-editor/bridge/rnbo-osc-bridge.mjs` is a u
 1. Repository scaffold with documented data model, config, health check, score snapshot, context updates, voice note updates, and event streaming. Done.
 2. Matrix Edit client wiring against the new HTTP/SSE API. Done in `/Users/mdavidson/Documents/matrixedit/apps/rnbo-matrix-editor`: the client now defaults to ShadowScore Server mode, loads `/score`, subscribes to `/events`, edits a selected voice, and syncs to `/voices/:voiceId/notes`.
 3. Persistence for last-known score state on Shadowbox hardware. Done: the server loads a saved score on boot, reconciles it with configured voices, writes atomic JSON snapshots, and keeps a previous-snapshot backup.
-4. RNBO/OSC adapter that transmits committed score updates to the running patch.
+4. RNBO/OSC adapter that transmits committed score updates to the running patch. Done: committed score changes are flattened across voices, compiled to v1 ShadowScore numeric transaction messages, and sent over UDP OSC to the configured RNBO inport.
 5. Voice assignment and simple lab admin controls.
 6. Optional WebSocket/collaboration layer if multiple clients must edit the same voice concurrently.

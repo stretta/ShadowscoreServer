@@ -38,6 +38,7 @@ function shutdown() {
   server.close(async () => {
     try {
       await persistence.close();
+      rnbo.close();
       process.exit(0);
     } catch (error) {
       console.error(`[persistence] shutdown flush failed: ${error.message}`);

@@ -23,6 +23,10 @@
   "rnbo": {
     "enabled": false,
     "host": "127.0.0.1",
-    "port": 9000
+    "port": 9000,
+    "address": "/rnbo/inst/2/messages/in/shadowscore",
+    "stagesPerBeat": 16,
+    "transactionStart": 1000,
+    "sendDelayMs": 5
   }
 }

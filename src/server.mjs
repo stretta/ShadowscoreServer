@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import http from "node:http";
 import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
+import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
 import { routeRequest } from "./http/routes.mjs";
 import { createScorePersistence, loadPersistedScore } from "./state/persistence.mjs";
@@ -19,9 +20,11 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ ok: false, error: error.message }));
   });
 });
+const collaboration = attachWebSocketCollaboration(server, store, config);
 
 server.listen(config.http.port, config.http.host, () => {
   console.log(`[http] ShadowscoreServer listening on http://${config.http.host}:${config.http.port}`);
+  console.log("[collab] websocket endpoint available at /collab");
   console.log(`[score] ensemble=${config.ensemble.id} voices=${config.ensemble.voices.join(",")}`);
   if (config.rnbo.enabled) {
     console.log(`[rnbo] adapter enabled for ${config.rnbo.host}:${config.rnbo.port}`);
@@ -38,6 +41,7 @@ function shutdown() {
   server.close(async () => {
     try {
       await persistence.close();
+      collaboration.close();
       rnbo.close();
       process.exit(0);
     } catch (error) {

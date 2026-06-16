@@ -63,6 +63,7 @@ Draft endpoints:
 - `POST /admin/reset`
 - `GET /admin`
 - `GET /events`
+- `GET /collab` WebSocket upgrade for realtime collaboration commands.
 
 ## Port Policy
 
@@ -85,4 +86,4 @@ The Matrix Edit file `apps/rnbo-matrix-editor/bridge/rnbo-osc-bridge.mjs` is a u
 3. Persistence for last-known score state on Shadowbox hardware. Done: the server loads a saved score on boot, reconciles it with configured voices, writes atomic JSON snapshots, and keeps a previous-snapshot backup.
 4. RNBO/OSC adapter that transmits committed score updates to the running patch. Done: committed score changes are flattened across voices, compiled to v1 ShadowScore numeric transaction messages, and sent over UDP OSC to the configured RNBO inport.
 5. Voice assignment and simple lab admin controls. Done: the score now carries per-voice assignment metadata, exposes assignment/update/clear/reset endpoints, persists assignment state, streams assignment events, and serves a dependency-free `/admin` lab page for voice assignment and basic resets.
-6. Optional WebSocket/collaboration layer if multiple clients must edit the same voice concurrently.
+6. Optional WebSocket/collaboration layer if multiple clients must edit the same voice concurrently. Done: `/collab` accepts dependency-free WebSocket clients, sends welcome/snapshot/presence messages, mirrors score updates as JSON broadcasts, accepts context/voice/assignment/reset commands, and supports optional expected-version guards for stale same-voice edit detection.

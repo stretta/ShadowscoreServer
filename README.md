@@ -52,6 +52,27 @@ configured RNBO inport address.
 - `POST /admin/reset`: clear selected score sections with a JSON body containing `context`, `voices`, and/or `assignments` booleans.
 - `GET /admin`: simple lab admin page for voice assignments and basic resets.
 - `GET /events`: server-sent event stream of score changes.
+- `GET /collab`: WebSocket collaboration endpoint for realtime JSON commands.
+
+## WebSocket Collaboration
+
+Connect WebSocket clients to `/collab`. The server sends a `welcome`, `snapshot`,
+and `presence.list` message on connect. Score mutations are broadcast as
+`score.changed` messages with the same event shape used by `/events`.
+
+Client command messages are JSON objects:
+
+- `get.score`: request a fresh `snapshot`.
+- `presence.update`: broadcast editing presence with `voiceId`, `name` or `assignee`, `deviceId`, and `editing`.
+- `context.update`: update shared context with `context`, optional `replace`, and optional `expectedVersion`.
+- `voice.notes.replace`: replace one voice with `voiceId`, `notes` or `document`, and optional `expectedVoiceVersion`.
+- `voice.assignment.replace`: replace assignment metadata with `voiceId` and `assignment`.
+- `voice.assignment.clear`: clear one assignment with `voiceId`.
+- `admin.reset`: clear selected sections with `context`, `voices`, and/or `assignments`.
+
+Successful write commands receive an `ack` with the updated score. Stale guarded
+writes receive an `error`, so two clients editing the same voice can avoid
+silently overwriting one another.
 
 ## Development
 

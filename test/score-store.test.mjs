@@ -48,6 +48,26 @@ test("voice notes can be replaced from a ShadowScore notes document", () => {
   assert.equal(score.voices["player-1"].notes[0].pitch, 60);
 });
 
+test("voice notes can reject stale collaboration writes", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceVoiceNotes("player-1", [{ pitch: 60 }], { expectedVoiceVersion: 0 });
+
+  assert.throws(
+    () => store.replaceVoiceNotes("player-1", [{ pitch: 61 }], { expectedVoiceVersion: 0 }),
+    /stale voice 'player-1' version 0; current version is 1/
+  );
+});
+
+test("score mutations can reject stale score versions", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.updateContext({ seed: 1 }, { expectedVersion: 0 });
+
+  assert.throws(
+    () => store.updateContext({ seed: 2 }, { expectedVersion: 0 }),
+    /stale score version 0; current version is 1/
+  );
+});
+
 test("voice assignments can be replaced and cleared", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   const assigned = store.replaceVoiceAssignment("player-1", {

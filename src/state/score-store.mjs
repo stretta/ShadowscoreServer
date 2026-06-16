@@ -30,16 +30,18 @@ export function createScoreStore(initialScore) {
       return structuredClone(score);
     },
     updateContext(nextContext, options = {}) {
+      assertExpectedScoreVersion(score, options.expectedVersion);
       score = {
         ...score,
         version: score.version + 1,
         context: options.replace ? structuredClone(nextContext) : deepMerge(score.context, nextContext)
       };
-      emitChange(events, "context.updated", score, { context: score.context });
+      emitChange(events, "context.updated", score, { context: score.context }, options);
       return structuredClone(score);
     },
-    replaceVoiceAssignment(voiceId, assignmentDocument) {
+    replaceVoiceAssignment(voiceId, assignmentDocument, options = {}) {
       assertKnownVoice(score, voiceId);
+      assertExpectedScoreVersion(score, options.expectedVersion);
       const assignment = normalizeAssignment(assignmentDocument);
       score = {
         ...score,
@@ -49,11 +51,12 @@ export function createScoreStore(initialScore) {
           [voiceId]: assignment
         }
       };
-      emitChange(events, "voice.assignment.replaced", score, { voiceId, assignment });
+      emitChange(events, "voice.assignment.replaced", score, { voiceId, assignment }, options);
       return structuredClone(score);
     },
-    clearVoiceAssignment(voiceId) {
+    clearVoiceAssignment(voiceId, options = {}) {
       assertKnownVoice(score, voiceId);
+      assertExpectedScoreVersion(score, options.expectedVersion);
       const assignment = createEmptyAssignment();
       score = {
         ...score,
@@ -63,11 +66,13 @@ export function createScoreStore(initialScore) {
           [voiceId]: assignment
         }
       };
-      emitChange(events, "voice.assignment.cleared", score, { voiceId, assignment });
+      emitChange(events, "voice.assignment.cleared", score, { voiceId, assignment }, options);
       return structuredClone(score);
     },
-    replaceVoiceNotes(voiceId, notesDocument) {
+    replaceVoiceNotes(voiceId, notesDocument, options = {}) {
       assertKnownVoice(score, voiceId);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedVoiceVersion(score, voiceId, options.expectedVoiceVersion);
       const notes = normalizeNotesDocument(notesDocument);
       score = {
         ...score,
@@ -80,7 +85,7 @@ export function createScoreStore(initialScore) {
           }
         }
       };
-      emitChange(events, "voice.notes.replaced", score, { voiceId, notes });
+      emitChange(events, "voice.notes.replaced", score, { voiceId, notes }, options);
       return structuredClone(score);
     },
     reset(options = {}) {
@@ -100,7 +105,7 @@ export function createScoreStore(initialScore) {
         context: Boolean(options.context),
         voices: Boolean(options.voices),
         assignments: Boolean(options.assignments)
-      });
+      }, options);
       return structuredClone(score);
     }
   };
@@ -181,6 +186,31 @@ function assertKnownVoice(score, voiceId) {
   }
 }
 
+function assertExpectedScoreVersion(score, expectedVersion) {
+  if (expectedVersion === undefined || expectedVersion === null) {
+    return;
+  }
+  if (!Number.isInteger(expectedVersion)) {
+    throw new Error("expectedVersion must be an integer");
+  }
+  if (score.version !== expectedVersion) {
+    throw new Error(`stale score version ${expectedVersion}; current version is ${score.version}`);
+  }
+}
+
+function assertExpectedVoiceVersion(score, voiceId, expectedVoiceVersion) {
+  if (expectedVoiceVersion === undefined || expectedVoiceVersion === null) {
+    return;
+  }
+  if (!Number.isInteger(expectedVoiceVersion)) {
+    throw new Error("expectedVoiceVersion must be an integer");
+  }
+  const currentVersion = score.voices[voiceId].version;
+  if (currentVersion !== expectedVoiceVersion) {
+    throw new Error(`stale voice '${voiceId}' version ${expectedVoiceVersion}; current version is ${currentVersion}`);
+  }
+}
+
 function stringField(value) {
   return value === undefined || value === null ? "" : String(value).trim();
 }
@@ -190,10 +220,11 @@ function nullableStringField(value) {
   return stringValue ? stringValue : null;
 }
 
-function emitChange(events, type, score, detail) {
+function emitChange(events, type, score, detail, options = {}) {
   events.emit("change", {
     type,
     version: score.version,
+    sourceClientId: options.sourceClientId,
     detail,
     score: structuredClone(score)
   });

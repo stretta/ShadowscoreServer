@@ -1,0 +1,44 @@
+{
+  "http": {
+    "host": "0.0.0.0",
+    "port": 8790,
+    "publicUrl": "http://shadowbox-host.local:8790"
+  },
+  "server": {
+    "role": "host",
+    "advertisedName": "Shadowbox Host",
+    "hostIdentity": "shadowbox-host"
+  },
+  "registration": {
+    "enabled": true,
+    "sessionHostUrl": "",
+    "heartbeatIntervalMs": 10000,
+    "heartbeatTtlMs": 30000
+  },
+  "static": {
+    "enabled": true,
+    "root": "public/matrix-edit",
+    "index": "index.html"
+  },
+  "persistence": {
+    "enabled": true,
+    "path": "data/score.json",
+    "backupPath": "data/score.previous.json",
+    "debounceMs": 150
+  },
+  "rnbo": {
+    "enabled": true,
+    "host": "127.0.0.1",
+    "port": 9000,
+    "address": "/rnbo/inst/2/messages/in/shadowscore",
+    "oscQuery": {
+      "enabled": true,
+      "url": "http://127.0.0.1:5678/",
+      "timeoutMs": 1000,
+      "addressPattern": "shadowscore"
+    },
+    "stagesPerBeat": 16,
+    "transactionStart": 1000,
+    "sendDelayMs": 5
+  }
+}

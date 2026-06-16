@@ -1,0 +1,16 @@
+[Unit]
+Description=ShadowscoreServer ensemble host
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=pi
+WorkingDirectory=/home/pi/ShadowscoreServer
+ExecStart=/usr/bin/npm start -- --config /home/pi/ShadowscoreServer/config/shadowbox.hardware-host.json
+Restart=on-failure
+RestartSec=5
+Environment=NODE_ENV=production
+
+[Install]
+WantedBy=multi-user.target

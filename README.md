@@ -41,6 +41,13 @@ For the first Shadowbox local-host prototype, use:
 npm start -- --config config/shadowbox.local.json
 ```
 
+For the hardware deployment path, start from:
+
+```sh
+npm start -- --config config/shadowbox.hardware-host.json
+npm run smoke:hardware -- --config config/shadowbox.hardware-host.json
+```
+
 For a peer Shadowbox hardware unit that should register with the selected host,
 set `registration.sessionHostUrl` in its config and run:
 
@@ -113,3 +120,10 @@ npm test
 ```
 
 No runtime dependencies are required for the initial scaffold.
+
+## Hardware Deployment
+
+Phase 5 hardware deployment material lives in
+[`docs/deployment/shadowbox-hardware.md`](docs/deployment/shadowbox-hardware.md).
+It includes Pi install/update commands, systemd service templates, smoke-test
+commands, and the pre-session hardware checklist.

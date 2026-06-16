@@ -174,10 +174,10 @@ Exit criteria:
 Goal: the system can be installed and updated repeatedly on actual Shadowbox hardware units.
 
 - Publish ShadowscoreServer to GitHub.
-- Add Pi install/update commands.
-- Add systemd unit templates and config examples.
-- Add a smoke-test command for the hardware unit.
-- Add a deployment checklist that verifies ports, services, browser access, RNBOOSCQuery, registration, persistence, and RNBO output.
+- Add Pi install/update commands. Done: `docs/deployment/shadowbox-hardware.md` documents fresh install and update commands for `/home/pi/ShadowscoreServer`.
+- Add systemd unit templates and config examples. Done: `deploy/systemd/shadowscore-server.service`, `deploy/systemd/shadowscore-registration-agent.service`, `config/shadowbox.hardware-host.json`, and `config/shadowbox.hardware-peer.json`.
+- Add a smoke-test command for the hardware unit. Done: `npm run smoke:hardware -- --config <config>` checks the server, RNBO targets, HTTP port, RNBOOSCQuery when enabled, and peer host visibility when applicable.
+- Add a deployment checklist that verifies ports, services, browser access, RNBOOSCQuery, registration, persistence, and RNBO output. Done: see the checklist in `docs/deployment/shadowbox-hardware.md`.
 
 Exit criteria:
 
@@ -185,6 +185,13 @@ Exit criteria:
 - Updating from GitHub does not disturb existing Shadowbox software state.
 - Services restart cleanly after reboot.
 - The checklist catches missing network, port, RNBOOSCQuery, and registration problems.
+
+Phase 5 server-side status:
+
+- Hardware host and peer config examples are present under `config/`.
+- Systemd templates are present under `deploy/systemd/`.
+- The hardware deployment guide covers fresh install, update, service install, log inspection, smoke testing, and pre-session validation.
+- The hardware smoke command is test-covered and available through `npm run smoke:hardware`.
 
 ### Phase 6: Session UX Polish
 

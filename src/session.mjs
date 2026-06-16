@@ -26,6 +26,10 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       assignment: assignments[voiceId] ?? emptyAssignment()
     })),
     assignments,
+    assignmentPresets: Object.entries(config.ensemble?.assignmentPresets ?? {}).map(([id, preset]) => ({
+      id,
+      label: preset.label ?? id
+    })),
     hardwareUnits,
     rnbo: {
       enabled: Boolean(config.rnbo?.enabled),

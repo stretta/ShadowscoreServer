@@ -70,6 +70,27 @@ export function createScoreStore(initialScore) {
       emitChange(events, "voice.assignment.cleared", score, { voiceId, assignment }, options);
       return structuredClone(score);
     },
+    applyAssignmentPreset(assignmentsDocument, options = {}) {
+      if (!assignmentsDocument || typeof assignmentsDocument !== "object" || Array.isArray(assignmentsDocument)) {
+        throw new Error("assignment preset must be an object");
+      }
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      const nextAssignments = { ...ensureAssignments(score, assignmentDefaults) };
+      for (const [voiceId, assignmentDocument] of Object.entries(assignmentsDocument)) {
+        assertKnownVoice(score, voiceId);
+        nextAssignments[voiceId] = normalizeAssignment({
+          ...nextAssignments[voiceId],
+          ...assignmentDocument
+        });
+      }
+      score = {
+        ...score,
+        version: score.version + 1,
+        assignments: nextAssignments
+      };
+      emitChange(events, "voice.assignment.preset.applied", score, { presetId: options.presetId ?? "" }, options);
+      return structuredClone(score);
+    },
     replaceVoiceNotes(voiceId, notesDocument, options = {}) {
       assertKnownVoice(score, voiceId);
       assertExpectedScoreVersion(score, options.expectedVersion);
@@ -107,6 +128,17 @@ export function createScoreStore(initialScore) {
         voices: Boolean(options.voices),
         assignments: Boolean(options.assignments)
       }, options);
+      return structuredClone(score);
+    },
+    restore(nextScore, options = {}) {
+      const restored = normalizeScoreDocument(nextScore, assignmentDefaults, score);
+      const previousVersion = score.version;
+      score = {
+        ...restored,
+        ensembleId: score.ensembleId,
+        version: Math.max(previousVersion + 1, restored.version + 1)
+      };
+      emitChange(events, "admin.restore", score, { previousVersion }, options);
       return structuredClone(score);
     }
   };
@@ -147,6 +179,51 @@ function normalizeAssignment(assignmentDocument) {
     label: stringField(assignmentDocument.label),
     color: stringField(assignmentDocument.color),
     locked: Boolean(assignmentDocument.locked)
+  };
+}
+
+function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallbackScore) {
+  if (!scoreDocument || typeof scoreDocument !== "object" || Array.isArray(scoreDocument)) {
+    throw new Error("score snapshot must be an object");
+  }
+  if (!isPlainObject(scoreDocument.context)) {
+    throw new Error("score snapshot context must be an object");
+  }
+  if (!isPlainObject(scoreDocument.voices)) {
+    throw new Error("score snapshot voices must be an object");
+  }
+  const restoredVoices = {};
+  for (const [voiceId, voice] of Object.entries(scoreDocument.voices)) {
+    if (!isPlainObject(voice)) {
+      throw new Error(`voice ${voiceId} must be an object`);
+    }
+    if (!Array.isArray(voice.notes)) {
+      throw new Error(`voice ${voiceId}.notes must be an array`);
+    }
+    restoredVoices[voiceId] = {
+      version: Number.isFinite(voice.version) ? voice.version : 0,
+      notes: structuredClone(voice.notes)
+    };
+  }
+  const voiceIds = Object.keys(fallbackScore?.voices ?? restoredVoices);
+  const voices = Object.fromEntries(
+    voiceIds.map((voiceId) => [
+      voiceId,
+      structuredClone(restoredVoices[voiceId] ?? fallbackScore.voices[voiceId])
+    ])
+  );
+  const assignments = resetAssignments(voices, assignmentDefaults);
+  for (const [voiceId, assignment] of Object.entries(scoreDocument.assignments ?? {})) {
+    if (voices[voiceId]) {
+      assignments[voiceId] = normalizeAssignment(assignment);
+    }
+  }
+  return {
+    ensembleId: stringField(scoreDocument.ensembleId),
+    version: Number.isFinite(scoreDocument.version) ? scoreDocument.version : 0,
+    context: structuredClone(scoreDocument.context),
+    assignments,
+    voices
   };
 }
 

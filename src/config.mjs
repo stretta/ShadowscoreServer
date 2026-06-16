@@ -33,6 +33,19 @@ export const defaultConfig = Object.freeze({
       "player-4": { label: "Player 4", color: "#8a5a16" },
       "player-5": { label: "Player 5", color: "#6f42c1" },
       "player-6": { label: "Player 6", color: "#c04778" }
+    },
+    assignmentPresets: {
+      "six-player-shadowbox": {
+        label: "Six Shadowboxes",
+        assignments: {
+          "player-1": { label: "Shadowbox A / Source", assignee: "Player 1", deviceId: "shadowbox-a", color: "#d1453b" },
+          "player-2": { label: "Shadowbox B / Source", assignee: "Player 2", deviceId: "shadowbox-b", color: "#256f86" },
+          "player-3": { label: "Shadowbox C / Source", assignee: "Player 3", deviceId: "shadowbox-c", color: "#2f855a" },
+          "player-4": { label: "Shadowbox D / Source", assignee: "Player 4", deviceId: "shadowbox-d", color: "#8a5a16" },
+          "player-5": { label: "Shadowbox E / Source", assignee: "Player 5", deviceId: "shadowbox-e", color: "#6f42c1" },
+          "player-6": { label: "Shadowbox F / Source", assignee: "Player 6", deviceId: "shadowbox-f", color: "#c04778" }
+        }
+      }
     }
   },
   persistence: {

@@ -44,6 +44,8 @@ test("admin page is served as html", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /Shadowscore Lab Admin/);
+  assert.match(response.body, /Session link/);
+  assert.match(response.body, /Download backup/);
 });
 
 test("session route exposes host metadata and voice assignments", async () => {
@@ -55,8 +57,36 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.endpoints.collab, "ws://127.0.0.1/collab");
   assert.equal(session.voices.length, 6);
   assert.equal(session.voices[0].assignment.label, "Player 1");
+  assert.equal(session.assignmentPresets[0].id, "six-player-shadowbox");
   assert.equal(session.hardwareUnits.length, 1);
   assert.equal(session.hardwareUnits[0].local, true);
+});
+
+test("admin assignment preset applies friendly six-player labels", async () => {
+  const context = createRouteContext();
+
+  const score = await requestJson(context, "POST", "/admin/assignment-preset", {
+    presetId: "six-player-shadowbox"
+  });
+
+  assert.equal(score.assignments["player-1"].label, "Shadowbox A / Source");
+  assert.equal(score.assignments["player-6"].deviceId, "shadowbox-f");
+});
+
+test("admin backup downloads and restore replaces score snapshot", async () => {
+  const context = createRouteContext();
+  await requestJson(context, "POST", "/voices/player-1/notes", [{ pitch: 60 }]);
+  const backup = await request(context, "GET", "/admin/backup");
+
+  assert.equal(backup.status, 200);
+  assert.match(backup.headers["Content-Disposition"], /shadowscore-berklee-b51/);
+  const snapshot = JSON.parse(backup.body);
+  snapshot.voices["player-1"].notes = [{ pitch: 72 }];
+
+  const restored = await requestJson(context, "POST", "/admin/restore", snapshot);
+  assert.deepEqual(restored.voices["player-1"].notes, [{ pitch: 72 }]);
+  assert.equal(restored.ensembleId, "berklee-b51");
+  assert.equal(restored.version > snapshot.version, true);
 });
 
 test("hardware registration appears in session and RNBO targets", async () => {

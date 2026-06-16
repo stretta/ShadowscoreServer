@@ -210,6 +210,14 @@ Exit criteria:
 - Students can connect with a URL or QR code.
 - The ensemble can recover from a browser refresh or one hardware unit reboot.
 
+Phase 6 server-side status:
+
+- `/admin` now shows the Matrix Edit session URL, a copy button, and a QR image for student connection.
+- Matrix Edit reports a clear unavailable state when it is opened against a non-host server or unreachable session endpoints.
+- RNBO target displays use friendly labels such as `Shadowbox A / Source` when ShadowScoreClient targets are discovered.
+- `ensemble.assignmentPresets` supports a default six-Shadowbox layout with `Shadowbox A / Source` through `Shadowbox F / Source`.
+- `/admin/backup`, `/admin/restore`, and admin page controls support downloading and restoring ensemble score snapshots.
+
 ## Coexistence Requirements
 
 - ShadowscoreServer must not bind ports already used by Shadowbox software, RNBO Runner, or RNBOOSCQuery.

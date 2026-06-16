@@ -113,6 +113,40 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/admin/backup") {
+    const now = new Date().toISOString().replace(/[:.]/g, "-");
+    response.writeHead(200, {
+      "Content-Disposition": `attachment; filename="shadowscore-${store.getScore().ensembleId}-${now}.json"`,
+      "Content-Type": "application/json"
+    });
+    response.end(`${JSON.stringify(store.getScore(), null, 2)}\n`);
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/restore") {
+    try {
+      writeJson(response, 200, store.restore(await readJson(request)));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/assignment-preset") {
+    try {
+      const body = await readJson(request);
+      const presetId = String(body.presetId ?? "");
+      const preset = config.ensemble?.assignmentPresets?.[presetId];
+      if (!preset) {
+        throw new Error(`unknown assignment preset '${presetId}'`);
+      }
+      writeJson(response, 200, store.applyAssignmentPreset(preset.assignments ?? {}, { presetId }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   const assignmentMatch = url.pathname.match(/^\/voices\/([^/]+)\/assignment$/);
   if ((request.method === "POST" || request.method === "DELETE") && assignmentMatch) {
     try {

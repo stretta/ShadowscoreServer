@@ -27,13 +27,42 @@ export function adminPage() {
     main { margin: 0 auto; max-width: 1120px; padding: 24px clamp(16px, 4vw, 40px) 40px; }
     .status { color: #c8d1da; font-size: 14px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
-    .targets, .hardware {
+    .session-tools, .targets, .hardware {
       background: #fff;
       border: 1px solid #d5d8dc;
       margin-bottom: 18px;
       padding: 14px;
     }
-    .targets h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
+    .session-tools h2, .targets h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
+    .session-grid {
+      align-items: start;
+      display: grid;
+      gap: 14px;
+      grid-template-columns: minmax(220px, 1fr) auto;
+    }
+    .share-url {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 1fr auto;
+      margin-bottom: 12px;
+    }
+    .preset-row, .backup-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .qr {
+      border: 1px solid #d5d8dc;
+      display: block;
+      height: 180px;
+      width: 180px;
+    }
+    .hint {
+      color: #66717d;
+      font-size: 13px;
+      margin-top: 6px;
+    }
     .target-list, .unit-list { display: grid; gap: 8px; }
     .target, .unit {
       align-items: center;
@@ -125,6 +154,28 @@ export function adminPage() {
       <button class="danger" id="clear-notes" type="button">Clear all notes</button>
       <button class="danger" id="clear-assignments" type="button">Clear assignments</button>
     </div>
+    <section class="session-tools">
+      <h2>Session link</h2>
+      <div class="session-grid">
+        <div>
+          <div class="share-url">
+            <input id="share-url" readonly aria-label="Matrix Edit URL">
+            <button id="copy-url" type="button">Copy</button>
+          </div>
+          <div class="preset-row">
+            <select id="assignment-preset" aria-label="Assignment preset"></select>
+            <button id="apply-preset" type="button">Apply preset</button>
+          </div>
+          <div class="backup-row">
+            <button id="download-backup" type="button">Download backup</button>
+            <button id="restore-backup" type="button">Restore backup</button>
+            <input id="restore-file" type="file" accept="application/json,.json" hidden>
+          </div>
+          <div class="hint" id="session-hint"></div>
+        </div>
+        <img class="qr" id="qr-code" alt="Matrix Edit QR code">
+      </div>
+    </section>
     <section class="targets">
       <h2>Discovered RNBO targets</h2>
       <div class="target-list" id="targets"></div>
@@ -155,6 +206,11 @@ export function adminPage() {
     const voicesEl = document.querySelector("#voices");
     const targetsEl = document.querySelector("#targets");
     const hardwareUnitsEl = document.querySelector("#hardware-units");
+    const shareUrlEl = document.querySelector("#share-url");
+    const qrCodeEl = document.querySelector("#qr-code");
+    const sessionHintEl = document.querySelector("#session-hint");
+    const assignmentPresetEl = document.querySelector("#assignment-preset");
+    const restoreFileEl = document.querySelector("#restore-file");
     const inputs = new Map();
     let discoveredTargets = [];
     let hardwareUnits = [];
@@ -162,13 +218,20 @@ export function adminPage() {
     document.querySelector("#refresh").addEventListener("click", loadSession);
     document.querySelector("#clear-notes").addEventListener("click", () => resetScore({ voices: true }, "Clear all notes?"));
     document.querySelector("#clear-assignments").addEventListener("click", () => resetScore({ assignments: true }, "Clear all voice assignments?"));
+    document.querySelector("#copy-url").addEventListener("click", copyShareUrl);
+    document.querySelector("#apply-preset").addEventListener("click", applyAssignmentPreset);
+    document.querySelector("#download-backup").addEventListener("click", () => { window.location.href = "/admin/backup"; });
+    document.querySelector("#restore-backup").addEventListener("click", () => restoreFileEl.click());
+    restoreFileEl.addEventListener("change", restoreBackup);
 
     loadSession();
     const events = new EventSource("/events");
     events.addEventListener("snapshot", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.assignment.replaced", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.assignment.cleared", (event) => render(JSON.parse(event.data).score));
+    events.addEventListener("voice.assignment.preset.applied", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.reset", (event) => render(JSON.parse(event.data).score));
+    events.addEventListener("admin.restore", (event) => render(JSON.parse(event.data).score));
     events.onerror = () => setStatus("Event stream reconnecting...");
 
     async function loadSession() {
@@ -176,6 +239,7 @@ export function adminPage() {
       const session = await response.json();
       discoveredTargets = session.rnbo?.targets ?? [];
       hardwareUnits = session.hardwareUnits ?? [];
+      renderSessionTools(session);
       renderTargets(discoveredTargets);
       renderHardwareUnits(hardwareUnits);
       const scoreResponse = await fetch("/score");
@@ -216,7 +280,7 @@ export function adminPage() {
         const row = document.createElement("div");
         row.className = "target";
         const label = document.createElement("div");
-        label.textContent = (target.hardwareUnitName ? target.hardwareUnitName + " · " : "") + (target.name ?? target.id ?? target.address);
+        label.textContent = displayTargetLabel(target);
         const code = document.createElement("code");
         code.textContent = target.host + ":" + target.port + target.address;
         row.append(label, code, statusBadge(target.available === false ? "offline" : "online"));
@@ -280,9 +344,9 @@ export function adminPage() {
       const current = assignment.rnboTargetId ?? "";
       select.append(new Option("Unassigned", ""));
       for (const target of discoveredTargets) {
-        const prefix = target.hardwareUnitName ? target.hardwareUnitName + " · " : "";
+        const prefix = target.hardwareUnitName ? target.hardwareUnitName + " / " : "";
         const suffix = target.available === false ? " · offline" : "";
-        const option = new Option(prefix + target.name + " · " + target.address + suffix, target.id);
+        const option = new Option(prefix + friendlyTargetName(target) + suffix, target.id);
         option.disabled = target.available === false;
         option.dataset.target = JSON.stringify(target);
         select.append(option);
@@ -375,6 +439,74 @@ export function adminPage() {
         rnboPort: target.port,
         rnboAddress: target.address
       };
+    }
+
+    function renderSessionTools(session) {
+      const appUrl = session.endpoints?.app ?? window.location.origin + "/";
+      shareUrlEl.value = appUrl;
+      qrCodeEl.src = "https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=" + encodeURIComponent(appUrl);
+      sessionHintEl.textContent = session.server?.role === "host"
+        ? "Students can open this URL on the classroom network."
+        : "This device is not configured as the session host.";
+      assignmentPresetEl.textContent = "";
+      const presets = session.assignmentPresets ?? [];
+      if (presets.length === 0) {
+        assignmentPresetEl.append(new Option("No presets configured", ""));
+        assignmentPresetEl.disabled = true;
+      } else {
+        assignmentPresetEl.disabled = false;
+        for (const preset of presets) {
+          assignmentPresetEl.append(new Option(preset.label, preset.id));
+        }
+      }
+    }
+
+    async function copyShareUrl() {
+      shareUrlEl.select();
+      try {
+        await navigator.clipboard.writeText(shareUrlEl.value);
+      } catch {
+        document.execCommand("copy");
+      }
+      setStatus("Copied Matrix Edit URL.");
+    }
+
+    async function applyAssignmentPreset() {
+      if (!assignmentPresetEl.value) return;
+      if (!confirm("Apply this assignment preset?")) return;
+      const response = await fetch("/admin/assignment-preset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ presetId: assignmentPresetEl.value })
+      });
+      render(await response.json());
+    }
+
+    async function restoreBackup() {
+      const file = restoreFileEl.files?.[0];
+      restoreFileEl.value = "";
+      if (!file) return;
+      if (!confirm("Restore this score backup? Current score state will be replaced.")) return;
+      const response = await fetch("/admin/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: await file.text()
+      });
+      render(await response.json());
+    }
+
+    function displayTargetLabel(target) {
+      const unit = target.hardwareUnitName || target.hardwareUnitId || "";
+      const name = friendlyTargetName(target);
+      return unit ? unit + " / " + name : name;
+    }
+
+    function friendlyTargetName(target) {
+      const name = target.name ?? target.id ?? target.address ?? "RNBO target";
+      if (/ShadowScoreClient/i.test(name) && /shadowscore/i.test(target.address ?? name)) {
+        return "Source";
+      }
+      return name;
     }
 
     async function clearAssignment(voiceId) {

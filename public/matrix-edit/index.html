@@ -8,8 +8,8 @@
     :root {
       color-scheme: light;
       font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f7f7f4;
-      color: #1f2428;
+      background: #f4f5f2;
+      color: #202428;
     }
     * { box-sizing: border-box; }
     body { margin: 0; }
@@ -20,24 +20,27 @@
       display: flex;
       gap: 16px;
       justify-content: space-between;
-      padding: 16px clamp(16px, 4vw, 40px);
+      padding: 14px clamp(16px, 4vw, 36px);
     }
-    h1 { font-size: 20px; letter-spacing: 0; margin: 0; }
+    h1 {
+      font-size: 20px;
+      letter-spacing: 0;
+      line-height: 1.2;
+      margin: 0;
+    }
     main {
       display: grid;
       gap: 18px;
-      grid-template-columns: minmax(220px, 280px) 1fr;
+      grid-template-columns: minmax(240px, 310px) 1fr;
       margin: 0 auto;
-      max-width: 1180px;
-      padding: 22px clamp(16px, 4vw, 40px) 38px;
+      max-width: 1220px;
+      padding: 20px clamp(16px, 4vw, 36px) 36px;
     }
-    button, textarea {
-      font: inherit;
-    }
+    button, textarea { font: inherit; }
     button {
       align-items: center;
       background: #fff;
-      border: 1px solid #b8c0c7;
+      border: 1px solid #b7bfc7;
       border-radius: 6px;
       cursor: pointer;
       display: inline-flex;
@@ -46,60 +49,97 @@
       min-height: 38px;
       padding: 8px 12px;
     }
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
     button.primary {
       background: #256f86;
       border-color: #256f86;
       color: #fff;
     }
-    .status { color: #d2dae2; font-size: 14px; }
+    .status {
+      color: #d8e0e7;
+      font-size: 14px;
+      text-align: right;
+    }
+    .status.bad { color: #ffd2c9; }
+    .status.warn { color: #ffe4a6; }
     .panel {
       background: #fff;
-      border: 1px solid #d6d9dd;
+      border: 1px solid #d4d8dc;
       border-radius: 8px;
       min-width: 0;
       padding: 14px;
     }
-    .voices {
+    .voice-list {
       display: flex;
       flex-direction: column;
       gap: 8px;
     }
     .voice {
       align-items: center;
-      border: 1px solid #cdd3d8;
+      border: 1px solid #cbd2d8;
       border-radius: 6px;
       cursor: pointer;
       display: grid;
       gap: 8px;
-      grid-template-columns: 18px 14px 1fr;
-      min-height: 42px;
+      grid-template-columns: 18px 16px 1fr auto;
+      min-height: 48px;
       padding: 8px;
+    }
+    .voice:has(input:checked) {
+      border-color: #20272f;
+      box-shadow: inset 3px 0 0 var(--voice-color, #256f86);
     }
     .voice input { margin: 0; }
     .swatch {
       border: 1px solid rgba(0, 0, 0, 0.18);
       border-radius: 50%;
-      height: 14px;
-      width: 14px;
+      height: 16px;
+      width: 16px;
     }
-    .voice-name { font-weight: 750; min-width: 0; overflow-wrap: anywhere; }
-    .muted { color: #67727d; font-size: 13px; }
+    .voice-text {
+      min-width: 0;
+    }
+    .voice-name {
+      font-weight: 760;
+      overflow-wrap: anywhere;
+    }
+    .voice-meta, .muted {
+      color: #66717a;
+      font-size: 13px;
+    }
+    .presence-dot {
+      background: #d9dee2;
+      border-radius: 999px;
+      height: 10px;
+      width: 10px;
+    }
+    .presence-dot.active { background: #2f855a; }
+    .grid-shell {
+      display: grid;
+      gap: 10px;
+    }
     .grid {
       background:
-        linear-gradient(#e4e8eb 1px, transparent 1px),
-        linear-gradient(90deg, #e4e8eb 1px, transparent 1px);
+        linear-gradient(#e2e7ea 1px, transparent 1px),
+        linear-gradient(90deg, #e2e7ea 1px, transparent 1px);
       background-size: 40px 26px;
-      border: 1px solid #cbd2d8;
-      height: min(48vw, 360px);
-      min-height: 260px;
+      border: 1px solid #c7d0d7;
+      height: min(48vw, 370px);
+      min-height: 280px;
+      overflow: hidden;
       position: relative;
     }
     .note {
-      border: 1px solid rgba(0, 0, 0, 0.25);
+      border: 1px solid rgba(0, 0, 0, 0.28);
       border-radius: 4px;
       min-height: 14px;
       position: absolute;
     }
+    .note.editable { opacity: 0.95; }
+    .note.reference { opacity: 0.24; }
     .editor {
       display: grid;
       gap: 10px;
@@ -114,9 +154,24 @@
       resize: vertical;
       width: 100%;
     }
-    .toolbar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
-    @media (max-width: 760px) {
+    .toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+    .message {
+      border-left: 3px solid #9aa4ad;
+      color: #46515a;
+      font-size: 14px;
+      min-height: 22px;
+      padding: 2px 0 2px 8px;
+    }
+    .message.bad { border-color: #c43b32; color: #8c241d; }
+    .message.warn { border-color: #b17418; color: #7b4a08; }
+    @media (max-width: 780px) {
       header { align-items: flex-start; flex-direction: column; }
+      .status { text-align: left; }
       main { grid-template-columns: 1fr; }
       .grid { height: 320px; }
     }
@@ -125,89 +180,217 @@
 <body>
   <header>
     <h1>ShadowScore Matrix Edit</h1>
-    <div class="status" id="status">Connecting...</div>
+    <div class="status warn" id="status">Connecting...</div>
   </header>
   <main>
     <section class="panel">
-      <div class="voices" id="voices"></div>
+      <div class="voice-list" id="voices" role="radiogroup" aria-label="Editable voice"></div>
     </section>
     <section class="panel">
-      <div class="grid" id="grid"></div>
+      <div class="grid-shell">
+        <div class="grid" id="grid" aria-label="Ensemble note grid"></div>
+        <div class="message" id="message"></div>
+      </div>
       <div class="editor">
         <div>
           <strong id="selected-label">No voice selected</strong>
           <div class="muted" id="selected-meta"></div>
         </div>
-        <textarea id="notes" spellcheck="false"></textarea>
+        <textarea id="notes" spellcheck="false" aria-label="Selected voice notes JSON"></textarea>
         <div class="toolbar">
           <button id="reload" type="button">Reload</button>
-          <button class="primary" id="save" type="button">Save selected voice</button>
+          <button class="primary" id="save" type="button" disabled>Save selected voice</button>
         </div>
       </div>
     </section>
   </main>
   <script>
+    const clientId = getClientId();
     const statusEl = document.querySelector("#status");
+    const messageEl = document.querySelector("#message");
     const voicesEl = document.querySelector("#voices");
     const gridEl = document.querySelector("#grid");
     const notesEl = document.querySelector("#notes");
     const selectedLabelEl = document.querySelector("#selected-label");
     const selectedMetaEl = document.querySelector("#selected-meta");
+    const saveButton = document.querySelector("#save");
+    let session;
     let score;
+    let socket;
     let selectedVoiceId;
+    let pendingSaveId;
+    let presenceClients = [];
 
-    document.querySelector("#reload").addEventListener("click", loadScore);
-    document.querySelector("#save").addEventListener("click", saveSelectedVoice);
+    document.querySelector("#reload").addEventListener("click", reload);
+    saveButton.addEventListener("click", saveSelectedVoice);
 
-    loadScore();
-    const events = new EventSource("/events");
-    events.addEventListener("snapshot", (event) => setScore(JSON.parse(event.data).score, { keepEditor: false }));
-    events.addEventListener("voice.notes.replaced", (event) => setScore(JSON.parse(event.data).score, { keepEditor: true }));
-    events.addEventListener("voice.assignment.replaced", (event) => setScore(JSON.parse(event.data).score, { keepEditor: true }));
-    events.addEventListener("voice.assignment.cleared", (event) => setScore(JSON.parse(event.data).score, { keepEditor: true }));
-    events.addEventListener("admin.reset", (event) => setScore(JSON.parse(event.data).score, { keepEditor: false }));
-    events.onerror = () => setStatus("Reconnecting...");
+    boot();
 
-    async function loadScore() {
-      const response = await fetch("/score");
-      setScore(await response.json(), { keepEditor: false });
+    async function boot() {
+      try {
+        setStatus("Connecting...", "warn");
+        const response = await fetch("/session");
+        if (!response.ok) {
+          throw new Error("Session endpoint returned " + response.status);
+        }
+        session = await response.json();
+        await loadScore();
+        connectCollab();
+      } catch (error) {
+        setDisconnected("Server unavailable: " + error.message);
+      }
     }
 
-    function setScore(nextScore, options) {
+    async function reload() {
+      try {
+        await loadScore({ keepEditor: true });
+        say("Reloaded from server.");
+      } catch (error) {
+        setDisconnected("Reload failed: " + error.message);
+      }
+    }
+
+    async function loadScore(options = {}) {
+      const response = await fetch("/score");
+      if (!response.ok) {
+        throw new Error("Score endpoint returned " + response.status);
+      }
+      applyScore(await response.json(), options);
+    }
+
+    function connectCollab() {
+      const url = new URL(session.endpoints?.collab || "/collab", window.location.href);
+      url.searchParams.set("clientId", clientId);
+      socket = new WebSocket(url);
+      socket.addEventListener("open", () => {
+        setStatus("Connected to " + serverName(), "");
+        sendPresence();
+      });
+      socket.addEventListener("message", (event) => handleCollabMessage(JSON.parse(event.data)));
+      socket.addEventListener("close", () => {
+        socket = undefined;
+        setDisconnected("Disconnected. Edits are paused until the server returns.");
+      });
+      socket.addEventListener("error", () => {
+        setStatus("Connection error", "bad");
+      });
+    }
+
+    function handleCollabMessage(message) {
+      switch (message.type) {
+        case "welcome":
+          setStatus("Connected to " + serverName(), "");
+          break;
+        case "snapshot":
+          applyScore(message.score, { keepEditor: true });
+          break;
+        case "score.changed":
+          applyScore(message.event.score, {
+            keepEditor: message.event.sourceClientId !== clientId
+          });
+          break;
+        case "presence.list":
+        case "presence.updated":
+        case "presence.left":
+          presenceClients = message.clients ?? [];
+          renderVoices();
+          break;
+        case "ack":
+          if (!pendingSaveId || message.requestId !== pendingSaveId) {
+            return;
+          }
+          pendingSaveId = undefined;
+          applyScore(message.score, { keepEditor: false });
+          say("Saved " + labelFor(selectedVoiceId) + ".");
+          break;
+        case "error":
+          if (!pendingSaveId || message.requestId === pendingSaveId) {
+            pendingSaveId = undefined;
+            say(message.error || "Save failed", message.error?.includes("stale") ? "warn" : "bad");
+          }
+          break;
+      }
+    }
+
+    function applyScore(nextScore, options = {}) {
       const previousSelection = selectedVoiceId;
       score = nextScore;
-      selectedVoiceId = score.voices[selectedVoiceId] ? selectedVoiceId : Object.keys(score.voices)[0];
+      const voiceIds = orderedVoiceIds();
+      selectedVoiceId = voiceIds.includes(selectedVoiceId) ? selectedVoiceId : voiceIds[0];
       renderVoices();
       renderGrid();
-      if (!options.keepEditor || previousSelection !== selectedVoiceId) {
+      if (selectedVoiceId && (!options.keepEditor || previousSelection !== selectedVoiceId)) {
         notesEl.value = JSON.stringify(score.voices[selectedVoiceId].notes, null, 2);
       }
-      setStatus(score.ensembleId + " · score v" + score.version);
+      updateEditorState();
+      setStatus("Connected to " + serverName() + " · score v" + score.version, "");
     }
 
     function renderVoices() {
       voicesEl.textContent = "";
-      for (const voiceId of Object.keys(score.voices)) {
-        const assignment = score.assignments?.[voiceId] ?? {};
+      if (!score) {
+        return;
+      }
+      for (const voiceId of orderedVoiceIds()) {
+        const assignment = assignmentFor(voiceId);
         const label = document.createElement("label");
         label.className = "voice";
+        label.style.setProperty("--voice-color", colorFor(voiceId));
         const radio = document.createElement("input");
         radio.type = "radio";
         radio.name = "voice";
         radio.checked = voiceId === selectedVoiceId;
+        radio.setAttribute("role", "radio");
         radio.addEventListener("change", () => selectVoice(voiceId));
         const swatch = document.createElement("span");
         swatch.className = "swatch";
-        swatch.style.background = assignment.color || "#8f979f";
+        swatch.style.background = colorFor(voiceId);
         const text = document.createElement("span");
-        text.className = "voice-name";
-        text.textContent = assignment.label || voiceId;
-        label.append(radio, swatch, text);
+        text.className = "voice-text";
+        const name = document.createElement("div");
+        name.className = "voice-name";
+        name.textContent = assignment.label || voiceId;
+        const meta = document.createElement("div");
+        meta.className = "voice-meta";
+        meta.textContent = voiceMeta(voiceId, assignment);
+        text.append(name, meta);
+        const presence = document.createElement("span");
+        presence.className = "presence-dot" + (isVoiceActiveElsewhere(voiceId) ? " active" : "");
+        presence.title = presenceLabel(voiceId);
+        label.append(radio, swatch, text, presence);
         voicesEl.append(label);
       }
-      const assignment = score.assignments?.[selectedVoiceId] ?? {};
-      selectedLabelEl.textContent = assignment.label || selectedVoiceId;
-      selectedMetaEl.textContent = selectedVoiceId + " · voice v" + score.voices[selectedVoiceId].version;
+      if (selectedVoiceId) {
+        selectedLabelEl.textContent = labelFor(selectedVoiceId);
+        selectedMetaEl.textContent = selectedVoiceId + " · voice v" + score.voices[selectedVoiceId].version;
+      }
+    }
+
+    function renderGrid() {
+      gridEl.textContent = "";
+      if (!score) {
+        return;
+      }
+      for (const voiceId of orderedVoiceIds()) {
+        const voice = score.voices[voiceId];
+        for (const note of voice.notes ?? []) {
+          gridEl.append(noteElement(voiceId, note));
+        }
+      }
+    }
+
+    function noteElement(voiceId, note) {
+      const el = document.createElement("div");
+      const start = finite(note.start_time ?? note.start ?? note.tick, 0);
+      const duration = Math.max(0.25, finite(note.duration, 1));
+      const pitch = finite(note.pitch ?? note.midi, 60);
+      el.className = "note " + (voiceId === selectedVoiceId ? "editable" : "reference");
+      el.style.background = colorFor(voiceId);
+      el.style.left = Math.max(0, start * 40) + "px";
+      el.style.width = Math.max(18, duration * 40) + "px";
+      el.style.top = Math.max(0, Math.min(348, (84 - pitch) * 6)) + "px";
+      el.title = labelFor(voiceId);
+      return el;
     }
 
     function selectVoice(voiceId) {
@@ -215,54 +398,117 @@
       notesEl.value = JSON.stringify(score.voices[selectedVoiceId].notes, null, 2);
       renderVoices();
       renderGrid();
+      updateEditorState();
+      sendPresence();
     }
 
-    function renderGrid() {
-      gridEl.textContent = "";
-      for (const [voiceId, voice] of Object.entries(score.voices)) {
-        const assignment = score.assignments?.[voiceId] ?? {};
-        for (const note of voice.notes) {
-          gridEl.append(noteElement(voiceId, note, assignment));
-        }
+    function saveSelectedVoice() {
+      if (!score || !selectedVoiceId || !socket || socket.readyState !== WebSocket.OPEN) {
+        say("Disconnected. Reconnect before saving.", "bad");
+        return;
       }
-    }
-
-    function noteElement(voiceId, note, assignment) {
-      const el = document.createElement("div");
-      const start = finite(note.start_time ?? note.start ?? note.tick, 0);
-      const duration = Math.max(0.25, finite(note.duration, 1));
-      const pitch = finite(note.pitch ?? note.midi, 60);
-      el.className = "note";
-      el.style.background = assignment.color || "#256f86";
-      el.style.opacity = voiceId === selectedVoiceId ? "0.95" : "0.28";
-      el.style.left = Math.max(0, start * 40) + "px";
-      el.style.width = Math.max(18, duration * 40) + "px";
-      el.style.top = Math.max(0, Math.min(330, (84 - pitch) * 6)) + "px";
-      return el;
-    }
-
-    async function saveSelectedVoice() {
       let notes;
       try {
         notes = JSON.parse(notesEl.value);
       } catch (error) {
-        setStatus("Invalid JSON: " + error.message);
+        say("Invalid JSON: " + error.message, "bad");
         return;
       }
-      const response = await fetch("/voices/" + encodeURIComponent(selectedVoiceId) + "/notes", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          notes,
-          expectedVoiceVersion: score.voices[selectedVoiceId].version
-        })
-      });
-      const body = await response.json();
-      if (!response.ok || body.ok === false) {
-        setStatus(body.error || "Save failed");
+      pendingSaveId = "save-" + Date.now();
+      socket.send(JSON.stringify({
+        type: "voice.notes.replace",
+        requestId: pendingSaveId,
+        voiceId: selectedVoiceId,
+        notes,
+        expectedVoiceVersion: score.voices[selectedVoiceId].version
+      }));
+      say("Saving " + labelFor(selectedVoiceId) + "...");
+    }
+
+    function sendPresence() {
+      if (!socket || socket.readyState !== WebSocket.OPEN || !selectedVoiceId) {
         return;
       }
-      setScore(body, { keepEditor: false });
+      socket.send(JSON.stringify({
+        type: "presence.update",
+        presence: {
+          voiceId: selectedVoiceId,
+          assignee: labelFor(selectedVoiceId),
+          deviceId: navigator.userAgent,
+          editing: true
+        }
+      }));
+    }
+
+    function updateEditorState() {
+      const connected = Boolean(socket && socket.readyState === WebSocket.OPEN);
+      const hasVoice = Boolean(score && selectedVoiceId);
+      saveButton.disabled = !connected || !hasVoice;
+      notesEl.disabled = !hasVoice;
+    }
+
+    function setDisconnected(message) {
+      setStatus(message, "bad");
+      say(message, "bad");
+      updateEditorState();
+    }
+
+    function setStatus(message, tone) {
+      statusEl.textContent = message;
+      statusEl.className = "status" + (tone ? " " + tone : "");
+      updateEditorState();
+    }
+
+    function say(message, tone) {
+      messageEl.textContent = message || "";
+      messageEl.className = "message" + (tone ? " " + tone : "");
+    }
+
+    function orderedVoiceIds() {
+      const fromSession = (session?.voices ?? []).map((voice) => voice.id).filter((voiceId) => score?.voices?.[voiceId]);
+      return fromSession.length ? fromSession : Object.keys(score?.voices ?? {});
+    }
+
+    function assignmentFor(voiceId) {
+      return score?.assignments?.[voiceId] ?? session?.assignments?.[voiceId] ?? session?.voices?.find((voice) => voice.id === voiceId)?.assignment ?? {};
+    }
+
+    function colorFor(voiceId) {
+      return assignmentFor(voiceId).color || "#7b858e";
+    }
+
+    function labelFor(voiceId) {
+      return assignmentFor(voiceId).label || voiceId || "";
+    }
+
+    function voiceMeta(voiceId, assignment) {
+      const active = activeEditors(voiceId);
+      if (active.length) {
+        return active.join(", ");
+      }
+      if (assignment.rnboTargetId) {
+        return assignment.rnboTargetId;
+      }
+      return "voice v" + score.voices[voiceId].version;
+    }
+
+    function activeEditors(voiceId) {
+      return presenceClients
+        .filter((client) => client.clientId !== clientId && client.voiceId === voiceId && client.editing)
+        .map((client) => client.assignee || "Active editor");
+    }
+
+    function isVoiceActiveElsewhere(voiceId) {
+      return activeEditors(voiceId).length > 0;
+    }
+
+    function presenceLabel(voiceId) {
+      const active = activeEditors(voiceId);
+      return active.length ? "Being edited by " + active.join(", ") : "No other editor";
+    }
+
+    function serverName() {
+      return session?.server?.advertisedName || session?.ensembleId || "server";
     }
 
     function finite(value, fallback) {
@@ -270,8 +516,15 @@
       return Number.isFinite(number) ? number : fallback;
     }
 
-    function setStatus(message) {
-      statusEl.textContent = message;
+    function getClientId() {
+      const key = "shadowscore.matrixEdit.clientId";
+      const existing = localStorage.getItem(key);
+      if (existing) {
+        return existing;
+      }
+      const next = crypto.randomUUID ? crypto.randomUUID() : "client-" + Date.now();
+      localStorage.setItem(key, next);
+      return next;
     }
   </script>
 </body>

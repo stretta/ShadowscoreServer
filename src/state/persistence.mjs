@@ -91,9 +91,17 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
   assertScoreShape(persistedScore);
 
   const voices = structuredClone(persistedScore.voices);
+  const assignments = {
+    ...structuredClone(fallbackScore.assignments ?? {}),
+    ...structuredClone(persistedScore.assignments ?? {})
+  };
+
   for (const voiceId of config.ensemble.voices) {
     if (!voices[voiceId]) {
       voices[voiceId] = structuredClone(fallbackScore.voices[voiceId] ?? { version: 0, notes: [] });
+    }
+    if (!assignments[voiceId]) {
+      assignments[voiceId] = structuredClone(fallbackScore.assignments?.[voiceId] ?? createEmptyAssignment());
     }
   }
 
@@ -101,6 +109,7 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
     ensembleId: config.ensemble.id,
     version: persistedScore.version,
     context: structuredClone(persistedScore.context),
+    assignments,
     voices
   };
 }
@@ -120,6 +129,30 @@ export function assertScoreShape(score) {
   }
   if (!isPlainObject(score.voices)) {
     throw new Error("score.voices must be an object");
+  }
+  if (score.assignments !== undefined && !isPlainObject(score.assignments)) {
+    throw new Error("score.assignments must be an object");
+  }
+  for (const [voiceId, assignment] of Object.entries(score.assignments ?? {})) {
+    if (!isPlainObject(assignment)) {
+      throw new Error(`assignment ${voiceId} must be an object`);
+    }
+    for (const field of ["assignee", "deviceId", "label", "color"]) {
+      if (assignment[field] !== undefined && typeof assignment[field] !== "string") {
+        throw new Error(`assignment ${voiceId}.${field} must be a string`);
+      }
+    }
+    if (
+      assignment.clientId !== undefined &&
+      assignment.clientId !== null &&
+      typeof assignment.clientId !== "string" &&
+      typeof assignment.clientId !== "number"
+    ) {
+      throw new Error(`assignment ${voiceId}.clientId must be a string, number, or null`);
+    }
+    if (assignment.locked !== undefined && typeof assignment.locked !== "boolean") {
+      throw new Error(`assignment ${voiceId}.locked must be boolean`);
+    }
   }
   for (const [voiceId, voice] of Object.entries(score.voices)) {
     if (!isPlainObject(voice)) {
@@ -147,6 +180,17 @@ async function backupExistingSnapshot(scorePath, backupPath) {
 
 function resolvePath(filePath) {
   return path.resolve(filePath);
+}
+
+function createEmptyAssignment() {
+  return {
+    assignee: "",
+    deviceId: "",
+    clientId: null,
+    label: "",
+    color: "",
+    locked: false
+  };
 }
 
 function isPlainObject(value) {

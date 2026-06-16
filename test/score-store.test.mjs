@@ -7,6 +7,7 @@ test("initial score creates configured voices", () => {
   const score = createInitialScore(defaultConfig);
   assert.equal(score.ensembleId, "berklee-b51");
   assert.deepEqual(Object.keys(score.voices), defaultConfig.ensemble.voices);
+  assert.deepEqual(Object.keys(score.assignments), defaultConfig.ensemble.voices);
 });
 
 test("context updates merge into shared score context", () => {
@@ -47,7 +48,51 @@ test("voice notes can be replaced from a ShadowScore notes document", () => {
   assert.equal(score.voices["player-1"].notes[0].pitch, 60);
 });
 
+test("voice assignments can be replaced and cleared", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const assigned = store.replaceVoiceAssignment("player-1", {
+    assignee: "Ari",
+    deviceId: "shadowbox-05",
+    clientId: 5505,
+    label: "left table",
+    color: "#256f86",
+    locked: true
+  });
+
+  assert.equal(assigned.version, 1);
+  assert.equal(assigned.assignments["player-1"].assignee, "Ari");
+  assert.equal(assigned.assignments["player-1"].deviceId, "shadowbox-05");
+  assert.equal(assigned.assignments["player-1"].clientId, "5505");
+  assert.equal(assigned.assignments["player-1"].locked, true);
+
+  const cleared = store.clearVoiceAssignment("player-1");
+  assert.equal(cleared.version, 2);
+  assert.deepEqual(cleared.assignments["player-1"], {
+    assignee: "",
+    deviceId: "",
+    clientId: null,
+    label: "",
+    color: "",
+    locked: false
+  });
+});
+
+test("admin reset can clear notes and assignments without changing context", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.updateContext({ scale: { scale_name: "Aeolian" } });
+  store.replaceVoiceAssignment("player-1", { assignee: "Ari" });
+  store.replaceVoiceNotes("player-1", [{ pitch: 60 }]);
+
+  const reset = store.reset({ voices: true, assignments: true });
+
+  assert.equal(reset.context.scale.scale_name, "Aeolian");
+  assert.deepEqual(reset.voices["player-1"].notes, []);
+  assert.equal(reset.voices["player-1"].version, 2);
+  assert.equal(reset.assignments["player-1"].assignee, "");
+});
+
 test("unknown voices are rejected", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   assert.throws(() => store.replaceVoiceNotes("player-99", []), /unknown voice/);
+  assert.throws(() => store.replaceVoiceAssignment("player-99", {}), /unknown voice/);
 });

@@ -34,6 +34,9 @@ test("reconciles persisted voices with configured voices", () => {
     ensembleId: "old-room",
     version: 5,
     context: { clip: {}, scale: { scale_name: "Aeolian" }, grid: {}, seed: 0 },
+    assignments: {
+      "player-1": { assignee: "Ari", deviceId: "shadowbox-05", clientId: "5505", label: "", color: "", locked: true }
+    },
     voices: {
       "player-1": { version: 2, notes: [{ pitch: 60 }] },
       guest: { version: 1, notes: [] }
@@ -47,6 +50,8 @@ test("reconciles persisted voices with configured voices", () => {
   assert.equal(reconciled.voices["player-1"].notes[0].pitch, 60);
   assert.deepEqual(reconciled.voices["player-7"], { version: 0, notes: [] });
   assert.deepEqual(reconciled.voices.guest, { version: 1, notes: [] });
+  assert.equal(reconciled.assignments["player-1"].assignee, "Ari");
+  assert.equal(reconciled.assignments["player-7"].assignee, "");
 });
 
 test("writes score snapshots and keeps previous backup", async () => {
@@ -92,6 +97,16 @@ function scoreWithVersion(version) {
     ensembleId: "berklee-b51",
     version,
     context: { clip: {}, scale: {}, grid: {}, seed: 0 },
+    assignments: {
+      "player-1": {
+        assignee: "",
+        deviceId: "",
+        clientId: null,
+        label: "",
+        color: "",
+        locked: false
+      }
+    },
     voices: {
       "player-1": {
         version,

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { compileScoreTransaction, sendScoreTransaction } from "../src/adapters/rnbo-osc.mjs";
+import { compileScoreTransaction, sendScoreTransaction, shouldSendScoreTransaction } from "../src/adapters/rnbo-osc.mjs";
 
 test("compiles ensemble score into RNBO ShadowScore transaction messages", () => {
   const config = mergeConfig(defaultConfig, {
@@ -104,6 +104,14 @@ test("sends one transaction per configured RNBO target", async () => {
 
   assert.equal(result.targets.length, 2);
   assert.equal(packets.length, 6);
+});
+
+test("RNBO adapter ignores assignment-only score events", () => {
+  assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.replaced", detail: {} }), false);
+  assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.cleared", detail: {} }), false);
+  assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { assignments: true } }), false);
+  assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { voices: true } }), true);
+  assert.equal(shouldSendScoreTransaction({ type: "voice.notes.replaced", detail: {} }), true);
 });
 
 function createScore() {

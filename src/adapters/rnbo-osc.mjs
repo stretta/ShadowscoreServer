@@ -23,6 +23,9 @@ export function createRnboOscAdapter(config) {
     enabled: true,
     attach(store) {
       store.events.on("change", (event) => {
+        if (!shouldSendScoreTransaction(event)) {
+          return;
+        }
         void sendScoreTransaction(socket, config, event.score, nextTransactionId()).catch((error) => {
           console.error(`[rnbo] send failed: ${messageForError(error)}`);
         });
@@ -64,6 +67,14 @@ export async function sendScoreTransaction(socket, config, score, transactionId)
   }
 
   return compiledTargets.length === 1 ? compiledTargets[0].compiled : { targets: compiledTargets };
+}
+
+export function shouldSendScoreTransaction(event) {
+  return Boolean(
+    event.type === "context.updated" ||
+    event.type === "voice.notes.replaced" ||
+    (event.type === "admin.reset" && (event.detail?.context || event.detail?.voices))
+  );
 }
 
 export function compileScoreTransaction(score, config, transactionId, target = rnboTargets(config)[0]) {

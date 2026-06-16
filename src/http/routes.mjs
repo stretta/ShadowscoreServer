@@ -1,3 +1,5 @@
+import { adminPage } from "./admin-page.mjs";
+
 export async function routeRequest(request, response, store, config) {
   setCors(response);
 
@@ -28,6 +30,16 @@ export async function routeRequest(request, response, store, config) {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/assignments") {
+    writeJson(response, 200, store.getScore().assignments ?? {});
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/admin") {
+    writeHtml(response, 200, adminPage());
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/events") {
     openEventStream(request, response, store);
     return;
@@ -38,6 +50,35 @@ export async function routeRequest(request, response, store, config) {
       const body = await readJson(request);
       const replace = url.searchParams.get("replace") === "1";
       writeJson(response, 200, store.updateContext(body.context ?? body, { replace }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/reset") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.reset({
+        context: Boolean(body.context),
+        voices: Boolean(body.voices),
+        assignments: Boolean(body.assignments)
+      }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const assignmentMatch = url.pathname.match(/^\/voices\/([^/]+)\/assignment$/);
+  if ((request.method === "POST" || request.method === "DELETE") && assignmentMatch) {
+    try {
+      const voiceId = decodeURIComponent(assignmentMatch[1]);
+      const score =
+        request.method === "DELETE"
+          ? store.clearVoiceAssignment(voiceId)
+          : store.replaceVoiceAssignment(voiceId, await readJson(request));
+      writeJson(response, 200, score);
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -62,6 +103,11 @@ export async function routeRequest(request, response, store, config) {
 export function writeJson(response, status, payload) {
   response.writeHead(status, { "Content-Type": "application/json" });
   response.end(JSON.stringify(payload));
+}
+
+export function writeHtml(response, status, html) {
+  response.writeHead(status, { "Content-Type": "text/html; charset=utf-8" });
+  response.end(html);
 }
 
 export async function readJson(request) {
@@ -99,7 +145,7 @@ function writeEvent(response, eventName, payload) {
 
 function setCors(response) {
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "DELETE,GET,POST,OPTIONS");
   response.setHeader("Access-Control-Allow-Origin", "*");
 }
 

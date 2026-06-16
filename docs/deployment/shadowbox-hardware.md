@@ -14,9 +14,27 @@ Adjust the config files if a unit uses different hostnames, ports, or RNBO messa
 
 ## Fresh Install
 
+The preferred install path is the idempotent installer:
+
+```sh
+curl -L https://raw.githubusercontent.com/stretta/ShadowscoreServer/main/deploy/install-shadowscore.sh -o /tmp/install-shadowscore.sh
+bash /tmp/install-shadowscore.sh --role host --host-identity pt5 --advertised-name pt5 --public-url http://pt5.local:8790
+```
+
+For a peer unit:
+
+```sh
+curl -L https://raw.githubusercontent.com/stretta/ShadowscoreServer/main/deploy/install-shadowscore.sh -o /tmp/install-shadowscore.sh
+bash /tmp/install-shadowscore.sh --role peer --host-identity pt6 --advertised-name pt6 --session-host-url http://pt5.local:8790
+```
+
+The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages, clones or updates the repo, writes the role-specific config, installs the matching systemd unit, starts the service, and runs the hardware smoke test.
+
+Manual install remains available:
+
 ```sh
 cd /home/pi
-git clone https://github.com/YOUR_ORG/ShadowscoreServer.git
+git clone https://github.com/stretta/ShadowscoreServer.git
 cd /home/pi/ShadowscoreServer
 npm install
 cp config/shadowbox.hardware-host.json config/shadowbox.local.json

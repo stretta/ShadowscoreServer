@@ -1,9 +1,10 @@
 import { adminPage } from "./admin-page.mjs";
 import { serveStaticAsset } from "./static-files.mjs";
 import { configuredRnboTargets, discoverRnboTargets } from "../adapters/rnbo-oscquery.mjs";
+import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 
-export async function routeRequest(request, response, store, config) {
+export async function routeRequest(request, response, store, config, runtime = {}) {
   setCors(response);
 
   if (request.method === "OPTIONS") {
@@ -34,13 +35,41 @@ export async function routeRequest(request, response, store, config) {
   }
 
   if (request.method === "GET" && url.pathname === "/session") {
-    const rnboTargets = await readRnboTargets(config);
-    writeJson(response, 200, createSessionSnapshot(store.getScore(), config, request, { rnboTargets }));
+    const sessionRuntime = await readSessionRuntime(config, runtime);
+    writeJson(response, 200, createSessionSnapshot(store.getScore(), config, request, sessionRuntime));
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/rnbo/targets") {
-    writeJson(response, 200, { targets: await readRnboTargets(config) });
+    writeJson(response, 200, { targets: await readAllRnboTargets(config, runtime) });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/hardware/units") {
+    writeJson(response, 200, { hardwareUnits: await readHardwareUnits(config, runtime) });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/hardware/register") {
+    try {
+      const registry = requirePeerRegistry(runtime);
+      const unit = registry.register(await readJson(request), { remoteAddress: request.socket?.remoteAddress ?? "" });
+      writeJson(response, 200, { ok: true, unit, heartbeatTtlMs: registry.heartbeatTtlMs });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const heartbeatMatch = url.pathname.match(/^\/hardware\/units\/([^/]+)\/heartbeat$/);
+  if (request.method === "POST" && heartbeatMatch) {
+    try {
+      const registry = requirePeerRegistry(runtime);
+      const unit = registry.heartbeat(decodeURIComponent(heartbeatMatch[1]), { remoteAddress: request.socket?.remoteAddress ?? "" });
+      writeJson(response, 200, { ok: true, unit });
+    } catch (error) {
+      writeJson(response, 404, { ok: false, error: messageForError(error) });
+    }
     return;
   }
 
@@ -173,6 +202,34 @@ function setCors(response) {
 async function readRnboTargets(config) {
   const discovered = await discoverRnboTargets(config);
   return discovered.length > 0 ? discovered : configuredRnboTargets(config);
+}
+
+async function readSessionRuntime(config, runtime) {
+  const localTargets = await readRnboTargets(config);
+  const localUnit = createLocalHardwareUnit(config, localTargets);
+  const peerUnits = runtime.peerRegistry?.snapshot?.() ?? [];
+  const peerTargets = runtime.peerRegistry?.targets?.() ?? [];
+  return {
+    rnboTargets: [...localUnit.targets, ...peerTargets],
+    hardwareUnits: [localUnit, ...peerUnits]
+  };
+}
+
+async function readAllRnboTargets(config, runtime) {
+  const sessionRuntime = await readSessionRuntime(config, runtime);
+  return sessionRuntime.rnboTargets;
+}
+
+async function readHardwareUnits(config, runtime) {
+  const sessionRuntime = await readSessionRuntime(config, runtime);
+  return sessionRuntime.hardwareUnits;
+}
+
+function requirePeerRegistry(runtime) {
+  if (!runtime.peerRegistry) {
+    throw new Error("peer registration registry is not available");
+  }
+  return runtime.peerRegistry;
 }
 
 function messageForError(error) {

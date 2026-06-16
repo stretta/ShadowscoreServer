@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import test from "node:test";
-import { defaultConfig } from "../src/config.mjs";
+import { defaultConfig, mergeConfig } from "../src/config.mjs";
 import { routeRequest } from "../src/http/routes.mjs";
+import { createPeerRegistry } from "../src/registration/peer-registry.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
 
 test("assignment routes expose, replace, and clear voice assignments", async () => {
@@ -54,7 +55,93 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.endpoints.collab, "ws://127.0.0.1/collab");
   assert.equal(session.voices.length, 6);
   assert.equal(session.voices[0].assignment.label, "Player 1");
-  assert.deepEqual(session.hardwareUnits, []);
+  assert.equal(session.hardwareUnits.length, 1);
+  assert.equal(session.hardwareUnits[0].local, true);
+});
+
+test("hardware registration appears in session and RNBO targets", async () => {
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig)
+    }
+  });
+
+  const registered = await requestJson(context, "POST", "/hardware/register", {
+    id: "shadowbox-b",
+    advertisedName: "Shadowbox B",
+    targets: [
+      {
+        id: "b-source",
+        name: "ShadowScoreClient / shadowscore",
+        host: "192.168.68.71",
+        port: 9000,
+        address: "/rnbo/inst/2/messages/in/shadowscore"
+      }
+    ]
+  });
+  assert.equal(registered.unit.status, "online");
+
+  const session = await requestJson(context, "GET", "/session");
+  const peer = session.hardwareUnits.find((unit) => unit.id === "shadowbox-b");
+  assert.equal(peer.advertisedName, "Shadowbox B");
+  assert.equal(peer.status, "online");
+  assert.equal(session.rnbo.targets.some((target) => target.hardwareUnitId === "shadowbox-b"), true);
+
+  const targets = await requestJson(context, "GET", "/rnbo/targets");
+  assert.equal(targets.targets.some((target) => target.id === "shadowbox-b:b-source"), true);
+});
+
+test("hardware units expire offline without removing voice assignments", async () => {
+  let currentTime = 1000;
+  const config = mergeConfig(defaultConfig, {
+    registration: {
+      heartbeatTtlMs: 5000
+    }
+  });
+  const context = createRouteContext({
+    config,
+    runtime: {
+      peerRegistry: createPeerRegistry(config, { now: () => currentTime })
+    }
+  });
+
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    assignee: "Ari",
+    rnboTargetId: "shadowbox-b:b-source",
+    rnboHost: "192.168.68.71",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/hardware/register", {
+    id: "shadowbox-b",
+    targets: [{ id: "b-source", host: "192.168.68.71", port: 9000, address: "/rnbo/inst/2/messages/in/shadowscore" }]
+  });
+
+  currentTime = 7000;
+  const session = await requestJson(context, "GET", "/session");
+  const peer = session.hardwareUnits.find((unit) => unit.id === "shadowbox-b");
+  const target = session.rnbo.targets.find((entry) => entry.id === "shadowbox-b:b-source");
+
+  assert.equal(peer.status, "offline");
+  assert.equal(peer.available, false);
+  assert.equal(target.available, false);
+  assert.equal(session.assignments["player-1"].rnboTargetId, "shadowbox-b:b-source");
+});
+
+test("hardware heartbeat refreshes a registered unit", async () => {
+  let currentTime = 1000;
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig, { now: () => currentTime })
+    }
+  });
+
+  await requestJson(context, "POST", "/hardware/register", { id: "shadowbox-b" });
+  currentTime = 2000;
+  const heartbeat = await requestJson(context, "POST", "/hardware/units/shadowbox-b/heartbeat", {});
+
+  assert.equal(heartbeat.unit.status, "online");
+  assert.match(heartbeat.unit.lastSeenAt, /1970-01-01T00:00:02.000Z/);
 });
 
 test("root route serves static app html", async () => {
@@ -82,10 +169,12 @@ test("voice note route rejects stale expected voice versions", async () => {
   assert.match(response.body, /stale voice 'player-1' version 0; current version is 1/);
 });
 
-function createRouteContext() {
+function createRouteContext(options = {}) {
+  const config = options.config ?? defaultConfig;
   return {
-    store: createScoreStore(createInitialScore(defaultConfig)),
-    config: defaultConfig
+    store: createScoreStore(createInitialScore(config)),
+    config,
+    runtime: options.runtime ?? {}
   };
 }
 
@@ -99,7 +188,7 @@ async function requestJson(context, method, url, body) {
 async function request(context, method, url, body) {
   const request = createRequest(method, url, body);
   const response = createResponse();
-  await routeRequest(request, response, context.store, context.config);
+  await routeRequest(request, response, context.store, context.config, context.runtime);
   return response.snapshot();
 }
 

@@ -6,6 +6,7 @@
   "description": "Shared ensemble score server for ShadowScore clients on Shadowbox hardware.",
   "scripts": {
     "start": "node src/server.mjs",
+    "agent": "node src/registration-agent.mjs",
     "test": "node --test"
   },
   "engines": {

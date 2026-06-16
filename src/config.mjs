@@ -12,6 +12,12 @@ export const defaultConfig = Object.freeze({
     advertisedName: os.hostname(),
     hostIdentity: os.hostname()
   },
+  registration: {
+    enabled: true,
+    sessionHostUrl: "",
+    heartbeatIntervalMs: 10000,
+    heartbeatTtlMs: 30000
+  },
   static: {
     enabled: true,
     root: "public/matrix-edit",

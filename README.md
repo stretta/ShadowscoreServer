@@ -41,6 +41,19 @@ For the first Shadowbox local-host prototype, use:
 npm start -- --config config/shadowbox.local.json
 ```
 
+For a peer Shadowbox hardware unit that should register with the selected host,
+set `registration.sessionHostUrl` in its config and run:
+
+```sh
+npm run agent -- --config config/shadowbox.peer.json
+```
+
+Use `--once` for a single registration without the heartbeat loop:
+
+```sh
+npm run agent -- --config config/shadowbox.peer.json --once
+```
+
 The root route serves static app assets from `public/matrix-edit` by default.
 The bundled page is a lightweight Phase 1 browser prototype that loads `/score`,
 subscribes to `/events`, renders all voice layers, and writes the selected voice
@@ -59,6 +72,10 @@ configured RNBO inport address.
 - `GET /healthz`: service status.
 - `GET /score`: current ensemble score snapshot.
 - `GET /session`: host/session metadata, app URLs, voices, assignments, and local RNBO target config.
+- `GET /hardware/units`: local and registered hardware units with online/offline state.
+- `POST /hardware/register`: register a peer hardware unit and its RNBO targets.
+- `POST /hardware/units/:unitId/heartbeat`: refresh a registered peer heartbeat.
+- `GET /rnbo/targets`: local and registered RNBO targets with availability state.
 - `GET /assignments`: current voice assignment map.
 - `POST /context`: replace or merge shared ShadowScore context.
 - `POST /voices/:voiceId/assignment`: assign a voice to a player, device, or client.

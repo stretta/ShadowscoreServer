@@ -2,6 +2,7 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
   const baseUrl = publicBaseUrl(config, request);
   const assignments = score.assignments ?? {};
   const targets = runtime.rnboTargets ?? config.rnbo?.targets ?? [];
+  const hardwareUnits = runtime.hardwareUnits ?? [];
 
   return {
     ensembleId: score.ensembleId,
@@ -25,7 +26,7 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       assignment: assignments[voiceId] ?? emptyAssignment()
     })),
     assignments,
-    hardwareUnits: [],
+    hardwareUnits,
     rnbo: {
       enabled: Boolean(config.rnbo?.enabled),
       host: config.rnbo?.host ?? "",

@@ -138,11 +138,11 @@ Exit criteria:
 
 Goal: peer Shadowbox hardware units register with the selected session host.
 
-- Add peer registration and heartbeat endpoints.
-- Add registration-agent config for `sessionHostUrl`.
-- Query each peer's local RNBOOSCQuery and register targets with the host.
-- Expire missing peers cleanly after missed heartbeats.
-- Surface online/offline state in `/session` and `/admin`.
+- Add peer registration and heartbeat endpoints. Done: `/hardware/register` accepts a unit document and `/hardware/units/:unitId/heartbeat` refreshes liveness.
+- Add registration-agent config for `sessionHostUrl`. Done: `registration.sessionHostUrl`, heartbeat interval, and TTL are part of config.
+- Query each peer's local RNBOOSCQuery and register targets with the host. Done: `npm run agent` discovers local RNBOOSCQuery targets and posts them to the host.
+- Expire missing peers cleanly after missed heartbeats. Done: stale peers remain visible as offline and their targets become unavailable without deleting saved assignments.
+- Surface online/offline state in `/session` and `/admin`. Done: `/session`, `/hardware/units`, `/rnbo/targets`, and `/admin` expose registered unit status.
 
 Exit criteria:
 

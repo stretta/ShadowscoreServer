@@ -27,15 +27,15 @@ export function adminPage() {
     main { margin: 0 auto; max-width: 1120px; padding: 24px clamp(16px, 4vw, 40px) 40px; }
     .status { color: #c8d1da; font-size: 14px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
-    .targets {
+    .targets, .hardware {
       background: #fff;
       border: 1px solid #d5d8dc;
       margin-bottom: 18px;
       padding: 14px;
     }
-    .targets h2 { font-size: 16px; margin: 0 0 10px; }
-    .target-list { display: grid; gap: 8px; }
-    .target {
+    .targets h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
+    .target-list, .unit-list { display: grid; gap: 8px; }
+    .target, .unit {
       align-items: center;
       border: 1px solid #e1e4e8;
       display: flex;
@@ -44,6 +44,17 @@ export function adminPage() {
       padding: 9px;
     }
     .target code { color: #38414a; font-size: 12px; }
+    .badge {
+      border: 1px solid #bac2ca;
+      border-radius: 999px;
+      color: #38414a;
+      font-size: 12px;
+      font-weight: 700;
+      padding: 3px 8px;
+      text-transform: uppercase;
+    }
+    .badge.online { background: #e4f4ea; border-color: #9ad2ad; color: #22653b; }
+    .badge.offline { background: #f7e6e4; border-color: #d9a29a; color: #96382e; }
     button {
       align-items: center;
       background: #ffffff;
@@ -118,6 +129,10 @@ export function adminPage() {
       <h2>Discovered RNBO targets</h2>
       <div class="target-list" id="targets"></div>
     </section>
+    <section class="hardware">
+      <h2>Hardware units</h2>
+      <div class="unit-list" id="hardware-units"></div>
+    </section>
     <table>
       <thead>
         <tr>
@@ -139,8 +154,10 @@ export function adminPage() {
     const statusEl = document.querySelector("#status");
     const voicesEl = document.querySelector("#voices");
     const targetsEl = document.querySelector("#targets");
+    const hardwareUnitsEl = document.querySelector("#hardware-units");
     const inputs = new Map();
     let discoveredTargets = [];
+    let hardwareUnits = [];
 
     document.querySelector("#refresh").addEventListener("click", loadSession);
     document.querySelector("#clear-notes").addEventListener("click", () => resetScore({ voices: true }, "Clear all notes?"));
@@ -158,7 +175,9 @@ export function adminPage() {
       const response = await fetch("/session");
       const session = await response.json();
       discoveredTargets = session.rnbo?.targets ?? [];
+      hardwareUnits = session.hardwareUnits ?? [];
       renderTargets(discoveredTargets);
+      renderHardwareUnits(hardwareUnits);
       const scoreResponse = await fetch("/score");
       render(await scoreResponse.json());
     }
@@ -197,12 +216,40 @@ export function adminPage() {
         const row = document.createElement("div");
         row.className = "target";
         const label = document.createElement("div");
-        label.textContent = target.name ?? target.id ?? target.address;
+        label.textContent = (target.hardwareUnitName ? target.hardwareUnitName + " · " : "") + (target.name ?? target.id ?? target.address);
         const code = document.createElement("code");
         code.textContent = target.host + ":" + target.port + target.address;
-        row.append(label, code);
+        row.append(label, code, statusBadge(target.available === false ? "offline" : "online"));
         targetsEl.append(row);
       }
+    }
+
+    function renderHardwareUnits(units) {
+      hardwareUnitsEl.textContent = "";
+      if (units.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "unit";
+        empty.textContent = "No hardware units registered.";
+        hardwareUnitsEl.append(empty);
+        return;
+      }
+      for (const unit of units) {
+        const row = document.createElement("div");
+        row.className = "unit";
+        const label = document.createElement("div");
+        label.textContent = (unit.advertisedName ?? unit.id) + (unit.local ? " · local host" : "");
+        const detail = document.createElement("code");
+        detail.textContent = unit.id + " · targets " + (unit.targets?.length ?? 0);
+        row.append(label, detail, statusBadge(unit.status ?? "offline"));
+        hardwareUnitsEl.append(row);
+      }
+    }
+
+    function statusBadge(status) {
+      const badge = document.createElement("span");
+      badge.className = "badge " + status;
+      badge.textContent = status;
+      return badge;
     }
 
     function cell(label, text, className) {
@@ -233,7 +280,10 @@ export function adminPage() {
       const current = assignment.rnboTargetId ?? "";
       select.append(new Option("Unassigned", ""));
       for (const target of discoveredTargets) {
-        const option = new Option(target.name + " · " + target.address, target.id);
+        const prefix = target.hardwareUnitName ? target.hardwareUnitName + " · " : "";
+        const suffix = target.available === false ? " · offline" : "";
+        const option = new Option(prefix + target.name + " · " + target.address + suffix, target.id);
+        option.disabled = target.available === false;
         option.dataset.target = JSON.stringify(target);
         select.append(option);
       }

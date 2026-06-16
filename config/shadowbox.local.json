@@ -9,6 +9,12 @@
     "advertisedName": "shadowbox-host",
     "hostIdentity": "shadowbox-host"
   },
+  "registration": {
+    "enabled": true,
+    "sessionHostUrl": "",
+    "heartbeatIntervalMs": 10000,
+    "heartbeatTtlMs": 30000
+  },
   "static": {
     "enabled": true,
     "root": "public/matrix-edit",

@@ -14,6 +14,12 @@
       "player-6"
     ]
   },
+  "persistence": {
+    "enabled": true,
+    "path": "data/score.json",
+    "backupPath": "data/score.previous.json",
+    "debounceMs": 150
+  },
   "rnbo": {
     "enabled": false,
     "host": "127.0.0.1",

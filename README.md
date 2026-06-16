@@ -31,6 +31,9 @@ Use a config file to override defaults:
 npm start -- --config config/example.json
 ```
 
+By default, score state persists to `data/score.json` and the previous snapshot
+is kept at `data/score.previous.json`.
+
 ## API Draft
 
 - `GET /healthz`: service status.

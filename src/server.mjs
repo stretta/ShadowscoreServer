@@ -3,10 +3,13 @@ import http from "node:http";
 import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { loadConfig } from "./config.mjs";
 import { routeRequest } from "./http/routes.mjs";
+import { createScorePersistence, loadPersistedScore } from "./state/persistence.mjs";
 import { createInitialScore, createScoreStore } from "./state/score-store.mjs";
 
 const config = await loadConfig();
-const store = createScoreStore(createInitialScore(config));
+const initialScore = await loadPersistedScore(config, createInitialScore(config));
+const store = createScoreStore(initialScore);
+const persistence = createScorePersistence(store, config);
 const rnbo = createRnboOscAdapter(config);
 rnbo.attach(store);
 
@@ -23,13 +26,22 @@ server.listen(config.http.port, config.http.host, () => {
   if (config.rnbo.enabled) {
     console.log(`[rnbo] adapter enabled for ${config.rnbo.host}:${config.rnbo.port}`);
   }
+  if (persistence.enabled) {
+    console.log(`[persistence] writing snapshots to ${config.persistence.path}`);
+  }
 });
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
 function shutdown() {
-  server.close(() => {
-    process.exit(0);
+  server.close(async () => {
+    try {
+      await persistence.close();
+      process.exit(0);
+    } catch (error) {
+      console.error(`[persistence] shutdown flush failed: ${error.message}`);
+      process.exit(1);
+    }
   });
 }

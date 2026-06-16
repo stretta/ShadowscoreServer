@@ -9,6 +9,12 @@ export const defaultConfig = Object.freeze({
     id: "berklee-b51",
     voices: ["player-1", "player-2", "player-3", "player-4", "player-5", "player-6"]
   },
+  persistence: {
+    enabled: true,
+    path: "data/score.json",
+    backupPath: "data/score.previous.json",
+    debounceMs: 150
+  },
   rnbo: {
     enabled: false,
     host: "127.0.0.1",

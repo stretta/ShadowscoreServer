@@ -16,10 +16,10 @@ test("Matrix Edit static app is an exported Vite app with /app assets", async ()
 test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   const { js } = await readBuiltApp();
 
+  assert.match(js, /\/session/);
   assert.match(js, /\/score/);
   assert.match(js, /\/collab/);
   assert.match(js, /\/events/);
-  assert.match(js, /\/assignments/);
   assert.match(js, /\/voices\/\$\{encodeURIComponent\([^}]+\)\}\/notes/);
   assert.match(js, /\/voices\/\$\{encodeURIComponent\([^}]+\)\}\/assignment/);
   assert.match(js, /new WebSocket/);

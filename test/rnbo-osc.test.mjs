@@ -6,7 +6,8 @@ import { compileScoreTransaction, sendScoreTransaction, shouldSendScoreTransacti
 test("compiles ensemble score into RNBO ShadowScore transaction messages", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
-      stagesPerBeat: 16
+      stagesPerBeat: 16,
+      clearRowCount: 0
     }
   });
   const score = createScore();
@@ -25,6 +26,7 @@ test("compiles client-prefixed transactions for a specific voice target", () => 
   const config = mergeConfig(defaultConfig, {
     rnbo: {
       stagesPerBeat: 16,
+      clearRowCount: 0,
       targets: [
         {
           voiceId: "player-2",
@@ -43,6 +45,29 @@ test("compiles client-prefixed transactions for a specific voice target", () => 
   assert.deepEqual(compiled.messages[2].values, [4404, 90, 321, 1, 0]);
 });
 
+
+test("pads clear rows so RNBO playback lookup overwrites stale note rows", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 64
+    }
+  });
+  const score = createScore();
+  score.voices["player-1"].notes = [];
+  score.voices["player-2"].notes = [];
+
+  const compiled = compileScoreTransaction(score, config, 901);
+
+  assert.equal(compiled.noteCount, 0);
+  assert.equal(compiled.transmittedRowCount, 64);
+  assert.equal(compiled.messages.length, 66);
+  assert.deepEqual(compiled.messages[0].values, [1, 901, 1, 64, 32, 16, 0]);
+  assert.deepEqual(compiled.messages[1].values, [20, 901, 0, 0, 0, 0, 1, 0, 1, 0, 0, 64]);
+  assert.deepEqual(compiled.messages[64].values, [20, 901, 63, 0, 0, 0, 1, 0, 1, 0, 0, 64]);
+  assert.deepEqual(compiled.messages[65].values, [90, 901, 64, 0]);
+});
+
 test("sends one OSC packet per compiled transaction message", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
@@ -50,6 +75,7 @@ test("sends one OSC packet per compiled transaction message", async () => {
       port: 9000,
       address: "/rnbo/inst/2/messages/in/shadowscore",
       stagesPerBeat: 16,
+      clearRowCount: 0,
       sendDelayMs: 0,
       log: false
     }
@@ -76,6 +102,7 @@ test("sends one transaction per configured RNBO target", async () => {
       host: "127.0.0.1",
       port: 9000,
       stagesPerBeat: 16,
+      clearRowCount: 0,
       sendDelayMs: 0,
       log: false,
       targets: [
@@ -112,6 +139,7 @@ test("sends score updates to assignment-bound RNBO targets", async () => {
       host: "127.0.0.1",
       port: 9000,
       stagesPerBeat: 16,
+      clearRowCount: 0,
       sendDelayMs: 0,
       log: false
     }

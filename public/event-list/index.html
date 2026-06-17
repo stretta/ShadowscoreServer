@@ -1,0 +1,913 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShadowScore Event List</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f5ef;
+      --panel: #ffffff;
+      --ink: #191b1f;
+      --muted: #646b75;
+      --line: #d7d4ca;
+      --accent: #0f766e;
+      --accent-ink: #ffffff;
+      --danger: #b42318;
+      --field: #fbfaf6;
+      --focus: #d99f24;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    header {
+      align-items: center;
+      background: #20232a;
+      color: white;
+      display: flex;
+      gap: 18px;
+      min-height: 56px;
+      padding: 10px 18px;
+    }
+
+    h1 {
+      font-size: 18px;
+      font-weight: 700;
+      line-height: 1.1;
+      margin: 0;
+      white-space: nowrap;
+    }
+
+    main {
+      display: grid;
+      gap: 14px;
+      padding: 14px;
+    }
+
+    .toolbar {
+      align-items: end;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(160px, 220px) repeat(4, minmax(110px, 1fr)) auto auto;
+    }
+
+    .server-toolbar {
+      grid-template-columns: minmax(180px, 260px) auto minmax(220px, 1fr);
+    }
+
+    label {
+      color: var(--muted);
+      display: grid;
+      font-size: 12px;
+      font-weight: 650;
+      gap: 4px;
+      letter-spacing: 0;
+    }
+
+    select,
+    input,
+    button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font: inherit;
+      min-height: 34px;
+    }
+
+    select,
+    input {
+      background: var(--field);
+      color: var(--ink);
+      padding: 6px 8px;
+      width: 100%;
+    }
+
+    input[type="checkbox"] {
+      min-height: 0;
+      width: auto;
+    }
+
+    textarea {
+      background: var(--field);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--ink);
+      font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      min-height: 108px;
+      padding: 8px;
+      resize: vertical;
+      width: 100%;
+    }
+
+    select:focus,
+    input:focus,
+    textarea:focus,
+    button:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 1px;
+    }
+
+    button {
+      background: var(--panel);
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 700;
+      padding: 6px 10px;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    button.danger {
+      border-color: #e6b3ad;
+      color: var(--danger);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    .status {
+      color: #d8dde7;
+      flex: 1;
+      font-size: 13px;
+      overflow: hidden;
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .summary {
+      align-items: center;
+      color: var(--muted);
+      display: flex;
+      gap: 12px;
+      min-height: 28px;
+    }
+
+    .summary strong {
+      color: var(--ink);
+    }
+
+    .paste-panel {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(0, 1fr) auto auto;
+    }
+
+    .paste-panel label {
+      min-width: 0;
+    }
+
+    .table-wrap {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-height: 260px;
+      overflow: auto;
+    }
+
+    table {
+      border-collapse: collapse;
+      min-width: 980px;
+      width: 100%;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 6px;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    th {
+      background: #e9e6dc;
+      color: #3e454f;
+      font-size: 12px;
+      font-weight: 750;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    td.index {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+      width: 48px;
+    }
+
+    td.actions {
+      width: 58px;
+    }
+
+    td.boolean {
+      text-align: center;
+      width: 64px;
+    }
+
+    tbody tr[data-muted="true"] {
+      background: #faf2f0;
+      color: #6d747d;
+    }
+
+    tbody tr:hover {
+      background: #f2f7f5;
+    }
+
+    td input {
+      font-variant-numeric: tabular-nums;
+      min-width: 80px;
+    }
+
+    td input[name="note_id"] {
+      min-width: 96px;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 24px;
+      text-align: center;
+    }
+
+    @media (max-width: 980px) {
+      header {
+        align-items: flex-start;
+        display: grid;
+      }
+
+      .status {
+        text-align: left;
+        white-space: normal;
+      }
+
+      .toolbar {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .paste-panel {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 620px) {
+      main {
+        padding: 10px;
+      }
+
+      .toolbar {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ShadowScore Event List</h1>
+    <div class="status" id="status">Loading session...</div>
+  </header>
+  <main>
+    <section class="toolbar server-toolbar" aria-label="Event list controls">
+      <label>Server
+        <select id="server-select"></select>
+      </label>
+      <button id="discover" type="button">Scan</button>
+      <label>Custom server
+        <input id="server" value="" placeholder="http://pt5.local:8790">
+      </label>
+    </section>
+    <section class="toolbar" aria-label="Voice note controls">
+      <label>Voice
+        <select id="voice"></select>
+      </label>
+      <label>Start
+        <input id="new-start" type="number" min="0" step="0.001" value="0">
+      </label>
+      <label>Duration
+        <input id="new-duration" type="number" min="0.001" step="0.001" value="0.25">
+      </label>
+      <label>Pitch
+        <input id="new-pitch" type="number" min="0" max="127" step="1" value="60">
+      </label>
+      <label>Velocity
+        <input id="new-velocity" type="number" min="0" max="127" step="1" value="96">
+      </label>
+      <button id="add" type="button">Add</button>
+      <button class="primary" id="save" type="button">Save</button>
+    </section>
+    <section class="summary" aria-live="polite">
+      <span><strong id="note-count">0</strong> notes</span>
+      <span id="version"></span>
+      <span id="assignment"></span>
+    </section>
+    <section class="paste-panel" aria-label="Ableton note array import">
+      <label>Ableton note array
+        <textarea id="ableton-notes" spellcheck="false" placeholder='[{"pitch":60,"start_time":0,"duration":0.25,"velocity":100}]'></textarea>
+      </label>
+      <button id="replace-array" type="button">Replace</button>
+      <button id="add-array" type="button">Add</button>
+    </section>
+    <section class="table-wrap" aria-label="Voice note events">
+      <table>
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>note_id</th>
+            <th>start_time</th>
+            <th>duration</th>
+            <th>pitch</th>
+            <th>velocity</th>
+            <th>probability</th>
+            <th>mute</th>
+            <th>velocity_deviation</th>
+            <th>release_velocity</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="notes"></tbody>
+      </table>
+      <div class="empty" id="empty">No notes for this voice.</div>
+    </section>
+  </main>
+  <script type="module">
+    const fields = ["note_id", "start_time", "duration", "pitch", "velocity", "probability", "velocity_deviation", "release_velocity"];
+    const state = {
+      score: undefined,
+      session: undefined,
+      serverUrl: "",
+      servers: [],
+      eventSource: undefined,
+      voiceId: "",
+      notes: [],
+      dirty: false,
+      saving: false
+    };
+
+    const els = {
+      status: document.querySelector("#status"),
+      serverSelect: document.querySelector("#server-select"),
+      discover: document.querySelector("#discover"),
+      server: document.querySelector("#server"),
+      voice: document.querySelector("#voice"),
+      notes: document.querySelector("#notes"),
+      empty: document.querySelector("#empty"),
+      count: document.querySelector("#note-count"),
+      version: document.querySelector("#version"),
+      assignment: document.querySelector("#assignment"),
+      add: document.querySelector("#add"),
+      save: document.querySelector("#save"),
+      abletonNotes: document.querySelector("#ableton-notes"),
+      replaceArray: document.querySelector("#replace-array"),
+      addArray: document.querySelector("#add-array"),
+      newStart: document.querySelector("#new-start"),
+      newDuration: document.querySelector("#new-duration"),
+      newPitch: document.querySelector("#new-pitch"),
+      newVelocity: document.querySelector("#new-velocity")
+    };
+
+    els.discover.addEventListener("click", discoverServers);
+    els.serverSelect.addEventListener("change", () => {
+      els.server.value = els.serverSelect.value;
+      void loadServer(els.serverSelect.value);
+    });
+    els.server.addEventListener("change", () => {
+      void loadServer(els.server.value);
+    });
+    els.voice.addEventListener("change", () => {
+      if (state.dirty && !window.confirm("Discard unsaved edits for this voice?")) {
+        els.voice.value = state.voiceId;
+        return;
+      }
+      state.voiceId = els.voice.value;
+      loadVoice();
+    });
+    els.add.addEventListener("click", addNote);
+    els.save.addEventListener("click", saveNotes);
+    els.replaceArray.addEventListener("click", () => importAbletonNotes("replace"));
+    els.addArray.addEventListener("click", () => importAbletonNotes("add"));
+
+    await boot();
+
+    async function boot() {
+      renderServerOptions([]);
+      await discoverServers();
+    }
+
+    async function discoverServers() {
+      setStatus("Scanning for local ShadowScore servers...");
+      els.discover.disabled = true;
+      try {
+        const servers = (await Promise.all(serverCandidates().map(async (url) => {
+          try {
+            return { url, session: await fetchJson(`${url}/session`, 1200) };
+          } catch {
+            return undefined;
+          }
+        }))).filter(Boolean);
+        state.servers = servers;
+        renderServerOptions();
+        if (!servers.length) {
+          setStatus("No local ShadowScore servers found.");
+          return;
+        }
+        const preferred = servers.find((server) => server.url === currentServerUrl()) ?? servers[0];
+        els.serverSelect.value = preferred.url;
+        els.server.value = preferred.url;
+        await loadServer(preferred.url, preferred.session);
+      } catch (error) {
+        setStatus(`Scan failed: ${error.message}`);
+      } finally {
+        els.discover.disabled = false;
+      }
+    }
+
+    async function loadServer(url, session) {
+      const serverUrl = normalizeServerUrl(url);
+      if (!serverUrl) {
+        setStatus("Enter a ShadowScore server URL.");
+        return;
+      }
+      if (state.dirty && !window.confirm("Discard unsaved edits and switch servers?")) {
+        els.server.value = state.serverUrl;
+        els.serverSelect.value = state.serverUrl;
+        return;
+      }
+      closeEvents();
+      state.serverUrl = serverUrl;
+      els.server.value = serverUrl;
+      setStatus(`Loading ${serverUrl}...`);
+      try {
+        state.session = session ?? await fetchJson(`${serverUrl}/session`);
+        state.score = await fetchJson(endpointUrl("score", "/score"));
+        state.voiceId = state.session.voices?.[0]?.id ?? Object.keys(state.score.voices ?? {})[0] ?? "";
+        if (!state.servers.some((server) => server.url === serverUrl)) {
+          state.servers = [{ url: serverUrl, session: state.session }, ...state.servers];
+        }
+        renderServerOptions();
+        els.serverSelect.value = serverUrl;
+        renderVoicePicker();
+        loadVoice();
+        connectEvents(endpointUrl("events", "/events"));
+        setStatus(`Connected to ${serverLabel(serverUrl, state.session)}.`);
+      } catch (error) {
+        setStatus(`Load failed: ${error.message}`);
+      }
+    }
+
+    function connectEvents(url) {
+      const events = new EventSource(url);
+      const refresh = (event) => {
+        const payload = JSON.parse(event.data);
+        if (!payload.score) {
+          return;
+        }
+        state.score = payload.score;
+        renderVoicePicker();
+        if (!state.dirty && !state.saving) {
+          loadVoice();
+        } else {
+          renderSummary();
+        }
+      };
+      events.addEventListener("snapshot", refresh);
+      events.addEventListener("context.updated", refresh);
+      events.addEventListener("voice.notes.replaced", refresh);
+      events.addEventListener("voice.assignment.replaced", refresh);
+      events.addEventListener("voice.assignment.cleared", refresh);
+      events.addEventListener("voice.assignment.preset.applied", refresh);
+      events.addEventListener("admin.reset", refresh);
+      events.addEventListener("admin.restore", refresh);
+      events.onerror = () => setStatus("Event stream reconnecting...");
+      state.eventSource = events;
+    }
+
+    function closeEvents() {
+      state.eventSource?.close();
+      state.eventSource = undefined;
+    }
+
+    function renderVoicePicker() {
+      const voices = state.session?.voices?.length
+        ? state.session.voices.map((voice) => voice.id)
+        : Object.keys(state.score?.voices ?? {});
+      els.voice.replaceChildren(...voices.map((voiceId) => {
+        const option = document.createElement("option");
+        option.value = voiceId;
+        option.textContent = labelForVoice(voiceId);
+        return option;
+      }));
+      if (!voices.includes(state.voiceId)) {
+        state.voiceId = voices[0] ?? "";
+      }
+      els.voice.value = state.voiceId;
+    }
+
+    function loadVoice() {
+      const voice = state.score?.voices?.[state.voiceId];
+      state.notes = normalizeNotes(voice?.notes ?? []);
+      state.dirty = false;
+      render();
+    }
+
+    function render() {
+      els.notes.replaceChildren(...state.notes.map((note, index) => noteRow(note, index)));
+      els.empty.hidden = state.notes.length > 0;
+      renderSummary();
+      updateButtons();
+    }
+
+    function renderSummary() {
+      const voice = state.score?.voices?.[state.voiceId];
+      const assignment = state.score?.assignments?.[state.voiceId];
+      els.count.textContent = String(state.notes.length);
+      els.version.textContent = voice ? `voice v${voice.version}, score v${state.score.version}` : "";
+      els.assignment.textContent = assignmentSummary(assignment);
+    }
+
+    function updateButtons() {
+      const locked = Boolean(state.score?.assignments?.[state.voiceId]?.locked);
+      els.add.disabled = locked || state.saving || !state.voiceId;
+      els.save.disabled = locked || state.saving || !state.voiceId || !state.dirty;
+      els.replaceArray.disabled = locked || state.saving || !state.voiceId;
+      els.addArray.disabled = locked || state.saving || !state.voiceId;
+    }
+
+    function noteRow(note, index) {
+      const row = document.createElement("tr");
+      row.dataset.muted = String(Boolean(Number(note.mute)));
+      row.append(cell(String(index + 1), "index"));
+      for (const field of fields) {
+        const input = document.createElement("input");
+        input.name = field;
+        input.type = "number";
+        input.step = stepForField(field);
+        input.value = note[field] ?? defaultForField(field, index);
+        input.addEventListener("input", () => {
+          note[field] = readNumber(input.value, defaultForField(field, index));
+          markDirty();
+        });
+        row.append(inputCell(input));
+      }
+
+      const mute = document.createElement("input");
+      mute.name = "mute";
+      mute.type = "checkbox";
+      mute.checked = Boolean(Number(note.mute));
+      mute.addEventListener("change", () => {
+        note.mute = mute.checked ? 1 : 0;
+        row.dataset.muted = String(mute.checked);
+        markDirty();
+      });
+      row.insertBefore(inputCell(mute, "boolean"), row.children[7]);
+
+      const remove = document.createElement("button");
+      remove.className = "danger";
+      remove.type = "button";
+      remove.textContent = "Del";
+      remove.addEventListener("click", () => {
+        state.notes.splice(index, 1);
+        markDirty();
+        render();
+      });
+      row.append(inputCell(remove, "actions"));
+      return row;
+    }
+
+    function addNote() {
+      const nextId = Math.max(0, ...state.notes.map((note) => readNumber(note.note_id, 0))) + 1;
+      state.notes.push({
+        note_id: nextId,
+        start_time: readNumber(els.newStart.value, 0),
+        duration: Math.max(0.001, readNumber(els.newDuration.value, 0.25)),
+        pitch: clampInt(readNumber(els.newPitch.value, 60), 0, 127),
+        velocity: clampInt(readNumber(els.newVelocity.value, 96), 0, 127),
+        mute: 0,
+        probability: 1,
+        velocity_deviation: 0,
+        release_velocity: 64
+      });
+      state.notes.sort((a, b) => readNumber(a.start_time, 0) - readNumber(b.start_time, 0));
+      markDirty();
+      render();
+    }
+
+    function importAbletonNotes(mode) {
+      try {
+        const imported = parseAbletonNotes(els.abletonNotes.value);
+        if (!imported.length) {
+          setStatus("No notes found in pasted Ableton array.");
+          return;
+        }
+        const next = mode === "replace" ? imported : [...state.notes, ...renumberImportedNotes(imported)];
+        state.notes = normalizeNotes(next).map((note, index) => ({
+          ...note,
+          note_id: note.note_id || index + 1
+        }));
+        markDirty();
+        render();
+        setStatus(`${mode === "replace" ? "Replaced with" : "Added"} ${imported.length} pasted notes. Save to commit.`);
+      } catch (error) {
+        setStatus(`Import failed: ${error.message}`);
+      }
+    }
+
+    async function saveNotes() {
+      state.saving = true;
+      updateButtons();
+      try {
+        const voice = state.score?.voices?.[state.voiceId];
+        const score = await postJson(apiUrl(`/voices/${encodeURIComponent(state.voiceId)}/notes`), {
+          notes: state.notes.map(cleanNote),
+          expectedVersion: state.score?.version,
+          expectedVoiceVersion: voice?.version
+        });
+        state.score = score;
+        state.dirty = false;
+        loadVoice();
+        setStatus(`Saved ${state.notes.length} notes for ${labelForVoice(state.voiceId)}.`);
+      } catch (error) {
+        setStatus(`Save failed: ${error.message}`);
+      } finally {
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
+    function markDirty() {
+      state.dirty = true;
+      setStatus("Unsaved edits.");
+      updateButtons();
+    }
+
+    function normalizeNotes(notes) {
+      return notes.map((note, index) => ({
+        note_id: note.note_id ?? index + 1,
+        start_time: note.start_time ?? note.startTime ?? note.time ?? note.start ?? 0,
+        duration: note.duration ?? note.length ?? 0,
+        pitch: note.pitch ?? 60,
+        velocity: note.velocity ?? 96,
+        mute: note.mute ?? 0,
+        probability: note.probability ?? 1,
+        velocity_deviation: note.velocity_deviation ?? note.velocityDeviation ?? 0,
+        release_velocity: note.release_velocity ?? note.releaseVelocity ?? 64
+      })).sort((a, b) => readNumber(a.start_time, 0) - readNumber(b.start_time, 0));
+    }
+
+    function parseAbletonNotes(text) {
+      const trimmed = text.trim();
+      if (!trimmed) {
+        return [];
+      }
+      const parsed = parseJsonish(trimmed);
+      const notes = Array.isArray(parsed)
+        ? parsed
+        : Array.isArray(parsed?.notes)
+          ? parsed.notes
+          : Array.isArray(parsed?.contents?.notes)
+            ? parsed.contents.notes
+            : undefined;
+      if (!Array.isArray(notes)) {
+        throw new Error("expected an array or an object with a notes array");
+      }
+      return notes.map(abletonNoteToShadowScore).filter(Boolean);
+    }
+
+    function parseJsonish(text) {
+      try {
+        return JSON.parse(text);
+      } catch {
+        const start = text.indexOf("[");
+        const end = text.lastIndexOf("]");
+        if (start !== -1 && end > start) {
+          return JSON.parse(text.slice(start, end + 1));
+        }
+        throw new Error("paste must contain a JSON note array");
+      }
+    }
+
+    function abletonNoteToShadowScore(note, index) {
+      if (Array.isArray(note)) {
+        return {
+          note_id: index + 1,
+          pitch: note[0],
+          start_time: note[1],
+          duration: note[2],
+          velocity: note[3] ?? 96,
+          mute: note[4] ?? 0,
+          probability: note[5] ?? 1,
+          velocity_deviation: note[6] ?? 0,
+          release_velocity: note[7] ?? 64
+        };
+      }
+      if (!note || typeof note !== "object") {
+        return undefined;
+      }
+      return {
+        note_id: note.note_id ?? note.id ?? index + 1,
+        pitch: note.pitch ?? note.midi_note,
+        start_time: note.start_time ?? note.startTime ?? note.time ?? note.start,
+        duration: note.duration ?? note.length,
+        velocity: note.velocity,
+        mute: note.mute,
+        probability: note.probability,
+        velocity_deviation: note.velocity_deviation ?? note.velocityDeviation,
+        release_velocity: note.release_velocity ?? note.releaseVelocity
+      };
+    }
+
+    function renumberImportedNotes(notes) {
+      const nextId = Math.max(0, ...state.notes.map((note) => readNumber(note.note_id, 0)));
+      return notes.map((note, index) => ({
+        ...note,
+        note_id: nextId + index + 1
+      }));
+    }
+
+    function cleanNote(note) {
+      return {
+        note_id: clampInt(readNumber(note.note_id, 0), 0, 2147483647),
+        pitch: clampInt(readNumber(note.pitch, 60), 0, 127),
+        start_time: Math.max(0, readNumber(note.start_time, 0)),
+        duration: Math.max(0.001, readNumber(note.duration, 0.001)),
+        velocity: clampInt(readNumber(note.velocity, 96), 0, 127),
+        mute: Boolean(Number(note.mute)) ? 1 : 0,
+        probability: clamp(readNumber(note.probability, 1), 0, 1),
+        velocity_deviation: clampInt(readNumber(note.velocity_deviation, 0), 0, 127),
+        release_velocity: clampInt(readNumber(note.release_velocity, 64), 0, 127)
+      };
+    }
+
+    function cell(text, className) {
+      const td = document.createElement("td");
+      td.className = className;
+      td.textContent = text;
+      return td;
+    }
+
+    function inputCell(child, className = "") {
+      const td = document.createElement("td");
+      td.className = className;
+      td.append(child);
+      return td;
+    }
+
+    function labelForVoice(voiceId) {
+      const assignment = state.score?.assignments?.[voiceId];
+      return assignment?.label || assignment?.assignee || voiceId;
+    }
+
+    function assignmentSummary(assignment) {
+      if (!assignment) {
+        return "";
+      }
+      const bits = [assignment.assignee, assignment.deviceId].filter(Boolean);
+      if (assignment.locked) {
+        bits.push("locked");
+      }
+      return bits.length ? bits.join(" / ") : "";
+    }
+
+    function stepForField(field) {
+      return field === "start_time" || field === "duration" || field === "probability" ? "0.001" : "1";
+    }
+
+    function defaultForField(field, index) {
+      return {
+        note_id: index + 1,
+        start_time: 0,
+        duration: 0.25,
+        pitch: 60,
+        velocity: 96,
+        probability: 1,
+        velocity_deviation: 0,
+        release_velocity: 64
+      }[field] ?? 0;
+    }
+
+    async function fetchJson(url, timeoutMs) {
+      const controller = timeoutMs ? new AbortController() : undefined;
+      const timeout = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : undefined;
+      try {
+        const response = await fetch(url, controller ? { signal: controller.signal } : {});
+        if (!response.ok) {
+          throw new Error(await response.text());
+        }
+        return response.json();
+      } finally {
+        if (timeout !== undefined) {
+          window.clearTimeout(timeout);
+        }
+      }
+    }
+
+    async function postJson(url, body) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      return response.json();
+    }
+
+    function renderServerOptions(servers = state.servers) {
+      const current = currentServerUrl();
+      const unique = new Map(servers.map((server) => [server.url, server]));
+      els.serverSelect.replaceChildren();
+      if (!unique.size) {
+        const option = document.createElement("option");
+        option.value = current;
+        option.textContent = current ? "Custom server" : "No servers found";
+        els.serverSelect.append(option);
+        els.serverSelect.value = current;
+        return;
+      }
+      for (const server of unique.values()) {
+        const option = document.createElement("option");
+        option.value = server.url;
+        option.textContent = serverLabel(server.url, server.session);
+        els.serverSelect.append(option);
+      }
+      if (unique.has(current)) {
+        els.serverSelect.value = current;
+      }
+    }
+
+    function serverCandidates() {
+      return [
+        els.server.value,
+        els.serverSelect.value,
+        window.location.origin,
+        "http://pt5.local:8790",
+        "http://pt4.local:8790",
+        "http://shadowbox.local:8790",
+        "http://127.0.0.1:8790"
+      ].map(normalizeServerUrl).filter(Boolean).filter((url, index, urls) => urls.indexOf(url) === index);
+    }
+
+    function serverLabel(url, session) {
+      const name = session?.server?.advertisedName || session?.server?.hostIdentity || session?.ensembleId || "ShadowScore";
+      const role = session?.server?.role ? ` ${session.server.role}` : "";
+      return `${name}${role} (${url})`;
+    }
+
+    function currentServerUrl() {
+      return normalizeServerUrl(els.server.value) || normalizeServerUrl(els.serverSelect.value) || normalizeServerUrl(state.serverUrl);
+    }
+
+    function normalizeServerUrl(value) {
+      const trimmed = String(value ?? "").trim().replace(/\/+$/, "");
+      if (!trimmed) {
+        return "";
+      }
+      if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
+        return `http://${trimmed}`;
+      }
+      return trimmed;
+    }
+
+    function endpointUrl(name, fallbackPath) {
+      const endpoint = state.session?.endpoints?.[name];
+      return endpoint || apiUrl(fallbackPath);
+    }
+
+    function apiUrl(path) {
+      return `${state.serverUrl}${path}`;
+    }
+
+    function readNumber(value, fallback) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : fallback;
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function clampInt(value, min, max) {
+      return Math.round(clamp(value, min, max));
+    }
+
+    function setStatus(message) {
+      els.status.textContent = message;
+    }
+  </script>
+</body>
+</html>

@@ -21,7 +21,19 @@ export const defaultConfig = Object.freeze({
   static: {
     enabled: true,
     root: "public/matrix-edit",
-    index: "index.html"
+    index: "index.html",
+    apps: {
+      matrixEdit: {
+        root: "public/matrix-edit",
+        index: "index.html",
+        routes: ["/", "/app"]
+      },
+      eventList: {
+        root: "public/event-list",
+        index: "index.html",
+        routes: ["/event-list"]
+      }
+    }
   },
   ensemble: {
     id: "berklee-b51",
@@ -66,6 +78,7 @@ export const defaultConfig = Object.freeze({
       addressPattern: "shadowscore"
     },
     stagesPerBeat: 16,
+    clearRowCount: 64,
     transactionStart: 1000,
     sendDelayMs: 5
   }

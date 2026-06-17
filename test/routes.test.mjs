@@ -55,6 +55,7 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.ensembleId, "berklee-b51");
   assert.equal(session.server.role, "host");
   assert.equal(session.endpoints.collab, "ws://127.0.0.1/collab");
+  assert.equal(session.endpoints.eventList, "http://127.0.0.1/event-list");
   assert.equal(session.voices.length, 6);
   assert.equal(session.voices[0].assignment.label, "Player 1");
   assert.equal(session.assignmentPresets[0].id, "six-player-shadowbox");
@@ -181,6 +182,24 @@ test("root route serves static app html", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore Matrix Edit/);
+});
+
+test("event list route serves server-bundled editor html", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/event-list");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /ShadowScore Event List/);
+  assert.match(response.body, /id="server-select"/);
+  assert.match(response.body, /id="discover"/);
+  assert.match(response.body, /pt5\.local:8790/);
+  assert.match(response.body, /\/session/);
+  assert.match(response.body, /id="ableton-notes"/);
+  assert.match(response.body, /id="replace-array"/);
+  assert.match(response.body, /id="add-array"/);
+  assert.match(response.body, /POST/);
+  assert.match(response.body, /\/voices\/\$\{encodeURIComponent\(state\.voiceId\)\}\/notes/);
 });
 
 test("voice note route rejects stale expected voice versions", async () => {

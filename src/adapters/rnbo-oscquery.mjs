@@ -51,6 +51,8 @@ export function extractRnboTargets(tree, config) {
     }
     const address = normalizeAddress(path);
     const instanceId = readInstanceId(address);
+    const instanceNode = findInstanceNode(tree, instanceId);
+    const outports = readMessageOutports(instanceNode);
     entries.push({
       id: instanceId ? `rnbo-inst-${instanceId}:shadowscore` : address,
       name: instanceId ? `ShadowScoreClient / shadowscore` : address,
@@ -59,6 +61,9 @@ export function extractRnboTargets(tree, config) {
       address,
       instanceId,
       messagePath: address,
+      ackPath: outports.shadowscore_ack,
+      currentStagePath: outports.current_stage,
+      clientId: readClientId(node, instanceNode),
       source: "rnbooscquery",
       available: true
     });
@@ -86,6 +91,37 @@ function walkOscQueryTree(node, path, visit) {
     const childPath = child?.FULL_PATH ?? joinAddress(nodePath, name);
     walkOscQueryTree(child, childPath, visit);
   }
+}
+
+function findInstanceNode(tree, instanceId) {
+  if (!instanceId) {
+    return null;
+  }
+  return tree?.CONTENTS?.rnbo?.CONTENTS?.inst?.CONTENTS?.[instanceId] ?? null;
+}
+
+function readMessageOutports(instanceNode) {
+  const contents = instanceNode?.CONTENTS?.messages?.CONTENTS?.out?.CONTENTS ?? {};
+  return {
+    shadowscore_ack: normalizeAddress(contents.shadowscore_ack?.FULL_PATH),
+    current_stage: normalizeAddress(contents.current_stage?.FULL_PATH)
+  };
+}
+
+function readClientId(inportNode, instanceNode) {
+  const candidates = [
+    firstListNumber(inportNode?.VALUE),
+    firstListNumber(instanceNode?.CONTENTS?.messages?.CONTENTS?.out?.CONTENTS?.shadowscore_ack?.VALUE)
+  ];
+  const clientId = candidates.find((value) => Number.isInteger(value) && value > 0);
+  return clientId === undefined ? undefined : String(clientId);
+}
+
+function firstListNumber(value) {
+  if (Array.isArray(value) && typeof value[0] === "number") {
+    return Math.round(value[0]);
+  }
+  return undefined;
 }
 
 function isShadowScoreMessagePath(path, node, addressPattern) {
@@ -141,6 +177,8 @@ function normalizeConfiguredTarget(target, rnbo, index) {
     address,
     instanceId,
     messagePath: address,
+    ackPath: target.ackPath,
+    currentStagePath: target.currentStagePath,
     voiceId: target.voiceId,
     clientId: target.clientId,
     source: "config",

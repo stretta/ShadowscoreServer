@@ -85,45 +85,71 @@ export function compileScoreTransaction(score, config, transactionId, target = r
   const patternLength = clampInt((selectionEnd - selectionStart) * stagesPerBeat, 1, 2147483647);
   const prefix = target.clientId === undefined ? [] : [clampInt(target.clientId, 0, 2147483647)];
 
+  const clearRowCount = clampInt(config.rnbo.clearRowCount ?? 0, 0, 1024);
+  const transmittedRowCount = Math.max(notes.length, clearRowCount);
   const messages = [
     {
       label: "BEGIN_REPLACE",
-      values: [...prefix, OPCODES.BEGIN_REPLACE, transactionId, 1, notes.length, patternLength, stagesPerBeat, 0]
+      values: [...prefix, OPCODES.BEGIN_REPLACE, transactionId, 1, transmittedRowCount, patternLength, stagesPerBeat, 0]
     }
   ];
 
-  notes.forEach((note, index) => {
+  for (let index = 0; index < transmittedRowCount; index += 1) {
+    const note = notes[index];
     messages.push({
-      label: `NOTE_${index}`,
-      values: [
-        ...prefix,
-        OPCODES.NOTE,
-        transactionId,
-        index,
-        clampInt(note.note_id ?? index + 1, 0, 2147483647),
-        clampInt(note.pitch, 0, 127),
-        clampInt((readNumber(note.start_time, 0) - selectionStart) * stagesPerBeat, 0, 2147483647),
-        clampInt(readNumber(note.duration, 0) * stagesPerBeat, 1, 2147483647),
-        clampInt(note.velocity, 0, 127),
-        clampInt(note.mute ?? 0, 0, 1),
-        clampInt(readNumber(note.probability, 1) * 10000, 0, 10000),
-        clampInt(note.velocity_deviation ?? 0, 0, 127),
-        clampInt(note.release_velocity ?? 64, 0, 127)
-      ]
+      label: note ? `NOTE_${index}` : `CLEAR_${index}`,
+      values: noteValues(prefix, transactionId, index, note, selectionStart, stagesPerBeat)
     });
-  });
+  }
 
   messages.push({
     label: "COMMIT",
-    values: [...prefix, OPCODES.COMMIT, transactionId, notes.length, 0]
+    values: [...prefix, OPCODES.COMMIT, transactionId, transmittedRowCount, 0]
   });
 
   return {
     messages,
     noteCount: notes.length,
+    transmittedRowCount,
     patternLength,
     stagesPerBeat
   };
+}
+
+function noteValues(prefix, transactionId, index, note, selectionStart, stagesPerBeat) {
+  if (!note) {
+    return [
+      ...prefix,
+      OPCODES.NOTE,
+      transactionId,
+      index,
+      0,
+      0,
+      0,
+      1,
+      0,
+      1,
+      0,
+      0,
+      64
+    ];
+  }
+
+  return [
+    ...prefix,
+    OPCODES.NOTE,
+    transactionId,
+    index,
+    clampInt(note.note_id ?? index + 1, 0, 2147483647),
+    clampInt(note.pitch, 0, 127),
+    clampInt((readNumber(note.start_time, 0) - selectionStart) * stagesPerBeat, 0, 2147483647),
+    clampInt(readNumber(note.duration, 0) * stagesPerBeat, 1, 2147483647),
+    clampInt(note.velocity, 0, 127),
+    clampInt(note.mute ?? 0, 0, 1),
+    clampInt(readNumber(note.probability, 1) * 10000, 0, 10000),
+    clampInt(note.velocity_deviation ?? 0, 0, 127),
+    clampInt(note.release_velocity ?? 64, 0, 127)
+  ];
 }
 
 function flattenScoreNotes(score, voiceFilter) {

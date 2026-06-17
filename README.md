@@ -26,6 +26,7 @@ curl http://127.0.0.1:8790/healthz
 curl http://127.0.0.1:8790/score
 curl http://127.0.0.1:8790/session
 open http://127.0.0.1:8790/
+open http://127.0.0.1:8790/event-list
 open http://127.0.0.1:8790/admin
 ```
 
@@ -67,6 +68,11 @@ subscribes to `/events`, renders all voice layers, and writes the selected voice
 through `POST /voices/:voiceId/notes`. A production Matrix Edit build can replace
 the contents of that folder without changing server routes.
 
+The `/event-list` route serves a server-bundled event list editor from
+`public/event-list`. It reads the same ShadowScore note documents directly from
+the server, presents them as editable note event rows, and writes the selected
+voice back through `POST /voices/:voiceId/notes`.
+
 By default, score state persists to `data/score.json` and the previous snapshot
 is kept at `data/score.previous.json`.
 
@@ -90,6 +96,7 @@ configured RNBO inport address.
 - `POST /voices/:voiceId/notes`: replace a voice's ShadowScore notes document.
 - `POST /admin/reset`: clear selected score sections with a JSON body containing `context`, `voices`, and/or `assignments` booleans.
 - `GET /admin`: simple lab admin page for voice assignments and basic resets.
+- `GET /event-list`: event list editor for direct voice note inspection and edits.
 - `GET /events`: server-sent event stream of score changes.
 - `GET /collab`: WebSocket collaboration endpoint for realtime JSON commands.
 

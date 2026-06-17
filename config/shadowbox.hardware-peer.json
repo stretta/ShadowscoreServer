@@ -18,7 +18,7 @@
   "rnbo": {
     "enabled": true,
     "host": "127.0.0.1",
-    "port": 9000,
+    "port": 1234,
     "address": "/rnbo/inst/2/messages/in/shadowscore",
     "oscQuery": {
       "enabled": true,
@@ -27,6 +27,7 @@
       "addressPattern": "shadowscore"
     },
     "stagesPerBeat": 16,
+    "clearRowCount": 64,
     "transactionStart": 1000,
     "sendDelayMs": 5
   }

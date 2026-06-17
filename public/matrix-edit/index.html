@@ -7,8 +7,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/app/assets/index-BR02-WG7.js"></script>
-    <link rel="stylesheet" crossorigin href="/app/assets/index-BCwxodsr.css">
+    <script type="module" crossorigin src="/app/assets/index-CWOCHJkM.js"></script>
+    <link rel="stylesheet" crossorigin href="/app/assets/index-EtFXyTbk.css">
   </head>
   <body>
     <main>
@@ -17,8 +17,12 @@
           <option value="shadowscore" selected>ShadowScore Server</option>
           <option value="rnbo">RNBO Packed Notes</option>
         </select>
-        <input id="server" value="http://127.0.0.1:8790" aria-label="ShadowScore server" />
-        <input id="voice" value="player-1" aria-label="ShadowScore voice" />
+        <select id="server-select" aria-label="ShadowScore servers"></select>
+        <button id="discover" type="button">Scan</button>
+        <input id="server" value="" aria-label="ShadowScore server" placeholder="Custom server" />
+        <input id="voice" value="player-1" aria-label="ShadowScore voice" type="hidden" />
+        <div id="voice-picker" class="voice-picker" aria-label="ShadowScore voices"></div>
+        <select id="rnbo-target" aria-label="RNBO client"></select>
         <input id="assignee" value="" aria-label="ShadowScore assignee" placeholder="Assignee" />
         <input id="device-id" value="" aria-label="ShadowScore device" placeholder="Device" />
         <input id="client-id" value="" aria-label="ShadowScore client" placeholder="Client" />
@@ -29,10 +33,12 @@
           Locked
         </label>
         <button id="assign" type="button">Assign</button>
+        <button id="clear" class="danger-button" type="button">Clear Voice</button>
         <input id="target" value="http://192.168.68.96:5678" aria-label="RNBO target" />
         <input id="bridge" value="http://127.0.0.1:8790" aria-label="RNBO OSC bridge" />
         <button id="refresh" type="button">Refresh</button>
         <button id="sync" type="button">Sync</button>
+        <span id="stage-status" class="stage-status"></span>
       </div>
       <div class="toolbar compact">
         <label>
@@ -83,7 +89,6 @@
             </span>
           </span>
         </label>
-        <button id="clear" type="button">Clear</button>
       </div>
       <canvas id="matrix" aria-label="RNBO matrix parameter"></canvas>
       <p id="status"></p>

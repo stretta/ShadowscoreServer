@@ -15,6 +15,7 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
     },
     endpoints: {
       app: `${baseUrl}/`,
+      eventList: `${baseUrl}/event-list`,
       admin: `${baseUrl}/admin`,
       score: `${baseUrl}/score`,
       events: `${baseUrl}/events`,

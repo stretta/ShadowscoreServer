@@ -9,7 +9,9 @@ test("hardware smoke passes required host checks and skips host-only registratio
     fetchImpl: createFetch({
       "http://127.0.0.1:8790/healthz": { ok: true },
       "http://127.0.0.1:8790/session": { voices: [{ id: "player-1" }] },
-      "http://127.0.0.1:8790/rnbo/targets": { targets: [] }
+      "http://127.0.0.1:8790/rnbo/targets": { targets: [] },
+      "http://127.0.0.1:8790/": "ShadowScore Matrix Edit",
+      "http://127.0.0.1:8790/event-list": "ShadowScore Event List"
     }),
     netConnect: createNetConnect(),
     timeoutMs: 20
@@ -34,6 +36,8 @@ test("hardware smoke fails when peer is not visible on the session host", async 
       "http://127.0.0.1:8790/healthz": { ok: true },
       "http://127.0.0.1:8790/session": { voices: [{ id: "player-1" }] },
       "http://127.0.0.1:8790/rnbo/targets": { targets: [] },
+      "http://127.0.0.1:8790/": "ShadowScore Matrix Edit",
+      "http://127.0.0.1:8790/event-list": "ShadowScore Event List",
       "http://shadowbox-host.local:8790/hardware/units": { hardwareUnits: [] }
     }),
     netConnect: createNetConnect(),
@@ -64,6 +68,9 @@ function createFetch(payloads) {
         status: 404,
         async json() {
           return {};
+        },
+        async text() {
+          return "";
         }
       };
     }
@@ -72,6 +79,9 @@ function createFetch(payloads) {
       status: 200,
       async json() {
         return payload;
+      },
+      async text() {
+        return String(payload);
       }
     };
   };

@@ -174,9 +174,9 @@ Exit criteria:
 Goal: the system can be installed and updated repeatedly on actual Shadowbox hardware units.
 
 - Publish ShadowscoreServer to GitHub.
-- Add Pi install/update commands. Done: `deploy/install-shadowscore.sh` handles prerequisites, clone/update, config, systemd install, service start, and smoke testing; `docs/deployment/shadowbox-hardware.md` documents fresh install and update commands for `/home/pi/ShadowscoreServer`.
+- Add Pi install/update commands. Done: `deploy/install-shadowscore.sh` handles prerequisites, clone/update, generated config with bundled Matrix Edit and Event List routes, install-dir aware systemd install, service start, editor readiness checks, and smoke testing; `docs/deployment/shadowbox-hardware.md` documents fresh install and update commands for `/home/pi/ShadowscoreServer`.
 - Add systemd unit templates and config examples. Done: `deploy/systemd/shadowscore-server.service`, `deploy/systemd/shadowscore-registration-agent.service`, `config/shadowbox.hardware-host.json`, and `config/shadowbox.hardware-peer.json`.
-- Add a smoke-test command for the hardware unit. Done: `npm run smoke:hardware -- --config <config>` checks the server, RNBO targets, HTTP port, RNBOOSCQuery when enabled, and peer host visibility when applicable.
+- Add a smoke-test command for the hardware unit. Done: `npm run smoke:hardware -- --config <config>` checks the server, bundled Matrix Edit and Event List pages, RNBO targets, HTTP port, RNBOOSCQuery when enabled, and peer host visibility when applicable.
 - Add a deployment checklist that verifies ports, services, browser access, RNBOOSCQuery, registration, persistence, and RNBO output. Done: see the checklist in `docs/deployment/shadowbox-hardware.md`.
 
 Exit criteria:
@@ -184,7 +184,7 @@ Exit criteria:
 - A fresh hardware unit can install ShadowscoreServer from GitHub.
 - Updating from GitHub does not disturb existing Shadowbox software state.
 - Services restart cleanly after reboot.
-- The checklist catches missing network, port, RNBOOSCQuery, and registration problems.
+- The checklist catches missing network, port, bundled editor, RNBOOSCQuery, and registration problems.
 
 Phase 5 server-side status:
 

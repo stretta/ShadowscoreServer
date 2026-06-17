@@ -4,8 +4,8 @@ This is the Phase 5 install/update path for running ShadowscoreServer beside the
 
 ## Assumptions
 
-- Node.js 20 or newer is installed on the hardware unit.
-- The repo lives at `/home/pi/ShadowscoreServer`.
+- Node.js 18 or newer is installed on the hardware unit, or the installer can install the distro `nodejs` and `npm` packages.
+- The repo lives at `/home/pi/ShadowscoreServer` by default. Use `--install-dir` if a unit needs a different path.
 - ShadowscoreServer listens on HTTP port `8790`.
 - RNBOOSCQuery is reachable at `http://127.0.0.1:5678/`.
 - ShadowScoreClient receives OSC at `127.0.0.1:9000` and message path `/rnbo/inst/2/messages/in/shadowscore`.
@@ -28,7 +28,7 @@ curl -L https://raw.githubusercontent.com/stretta/ShadowscoreServer/main/deploy/
 bash /tmp/install-shadowscore.sh --role peer --host-identity pt6 --advertised-name pt6 --session-host-url http://pt5.local:8790
 ```
 
-The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages, clones or updates the repo, writes the role-specific generated config, installs the matching systemd unit, starts the service, and runs the hardware smoke test.
+The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages, clones or updates the repo, writes the role-specific generated config, installs the matching systemd unit for the selected install directory, starts the service, waits for `/healthz`, Matrix Edit (`/`), and the Event List editor (`/event-list`), then runs the hardware smoke test.
 
 Manual install remains available:
 
@@ -109,6 +109,8 @@ The smoke test checks:
 - `/healthz`
 - `/session`
 - `/rnbo/targets`
+- Matrix Edit at `/`
+- Event List editor at `/event-list`
 - local HTTP port reachability
 - RNBOOSCQuery reachability when enabled
 - peer visibility on the host when running in peer role
@@ -120,7 +122,8 @@ Before students connect:
 - `systemctl is-active shadowscore-server.service` reports `active` on the host.
 - `journalctl -u shadowscore-server.service -n 80 --no-pager` shows the server listening on `8790`.
 - `curl http://127.0.0.1:8790/healthz` returns `"ok":true`.
-- A laptop can open `http://<host>.local:8790/`.
+- A laptop can open Matrix Edit at `http://<host>.local:8790/`.
+- A laptop can open the Event List editor at `http://<host>.local:8790/event-list`.
 - `curl http://127.0.0.1:5678/` returns RNBOOSCQuery JSON on each unit.
 - `curl http://<host>.local:8790/rnbo/targets` lists the expected ShadowScoreClient targets.
 - `curl http://<host>.local:8790/hardware/units` shows peer units as `online`.

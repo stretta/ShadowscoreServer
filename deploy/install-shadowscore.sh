@@ -127,6 +127,22 @@ config.server.role = process.env.SHADOWSCORE_ROLE_VALUE;
 config.server.hostIdentity = process.env.SHADOWSCORE_HOST_IDENTITY_VALUE;
 config.server.advertisedName = process.env.SHADOWSCORE_ADVERTISED_NAME_VALUE;
 config.http ??= {};
+config.static ??= {};
+config.static.enabled = true;
+config.static.root = "public/matrix-edit";
+config.static.index = "index.html";
+config.static.apps = {
+  matrixEdit: {
+    root: "public/matrix-edit",
+    index: "index.html",
+    routes: ["/", "/app"]
+  },
+  eventList: {
+    root: "public/event-list",
+    index: "index.html",
+    routes: ["/event-list"]
+  }
+};
 if (process.env.SHADOWSCORE_ROLE_VALUE === "host") {
   config.http.publicUrl = process.env.SHADOWSCORE_PUBLIC_URL_VALUE;
   config.registration ??= {};
@@ -150,7 +166,10 @@ fi
 log "Installing systemd service $SERVICE_NAME"
 SERVICE_CONFIG_PATH="$INSTALL_DIR/$CONFIG_PATH"
 tmp_service="$(mktemp)"
-sed "s#$SERVICE_CONFIG_DEFAULT#$SERVICE_CONFIG_PATH#g" "deploy/systemd/$SERVICE_NAME" > "$tmp_service"
+sed \
+  -e "s#$SERVICE_CONFIG_DEFAULT#$SERVICE_CONFIG_PATH#g" \
+  -e "s#/home/pi/ShadowscoreServer#$INSTALL_DIR#g" \
+  "deploy/systemd/$SERVICE_NAME" > "$tmp_service"
 $SUDO cp "$tmp_service" "/etc/systemd/system/$SERVICE_NAME"
 rm -f "$tmp_service"
 $SUDO systemctl daemon-reload
@@ -161,14 +180,16 @@ if [[ "$ROLE" == "host" ]]; then
   log "Waiting for host readiness"
   ready=0
   for _ in $(seq 1 20); do
-    if curl -fsS --max-time 1 "http://127.0.0.1:8790/healthz" >/dev/null 2>&1; then
+    if curl -fsS --max-time 1 "http://127.0.0.1:8790/healthz" >/dev/null 2>&1 \
+      && curl -fsS --max-time 1 "http://127.0.0.1:8790/" | grep -q "ShadowScore Matrix Edit" \
+      && curl -fsS --max-time 1 "http://127.0.0.1:8790/event-list" | grep -q "ShadowScore Event List"; then
       ready=1
       break
     fi
     sleep 0.5
   done
   if [[ "$ready" != "1" ]]; then
-    echo "ShadowscoreServer did not become ready at http://127.0.0.1:8790/healthz" >&2
+    echo "ShadowscoreServer did not serve /healthz, /, and /event-list successfully" >&2
     $SUDO journalctl -u "$SERVICE_NAME" -n 80 --no-pager || true
     exit 1
   fi

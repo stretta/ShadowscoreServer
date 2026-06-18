@@ -171,10 +171,10 @@ test("sends score updates to assignment-bound RNBO targets", async () => {
   assert.deepEqual(result.messages[0].values, [2202, 1, 700, 1, 1, 32, 16, 0]);
 });
 
-test("RNBO adapter ignores assignment-only score events", () => {
-  assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.replaced", detail: {} }), false);
+test("RNBO adapter resends score transactions when assignments change", () => {
+  assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.replaced", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.cleared", detail: {} }), false);
-  assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { assignments: true } }), false);
+  assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { assignments: true } }), true);
   assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { voices: true } }), true);
   assert.equal(shouldSendScoreTransaction({ type: "voice.notes.replaced", detail: {} }), true);
 });

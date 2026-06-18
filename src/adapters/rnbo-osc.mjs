@@ -73,7 +73,8 @@ export function shouldSendScoreTransaction(event) {
   return Boolean(
     event.type === "context.updated" ||
     event.type === "voice.notes.replaced" ||
-    (event.type === "admin.reset" && (event.detail?.context || event.detail?.voices))
+    event.type === "voice.assignment.replaced" ||
+    (event.type === "admin.reset" && (event.detail?.context || event.detail?.voices || event.detail?.assignments))
   );
 }
 

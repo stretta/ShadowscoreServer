@@ -4,7 +4,7 @@
 
 ShadowscoreServer is the shared score server for an ensemble. It replaces the older "ShadowscoreBridge" idea with a clearer responsibility: the server is the source of truth for ensemble score state, while bridges and adapters connect that state to RNBO, Matrix Edit, or other clients.
 
-The first target environment is Shadowbox hardware in the Berklee B51 lab.
+The first target environment is Shadowbox hardware in the Berklee B51 lab. Early testing used a six-player setup, but the data model and protocol treat voices as an arbitrary session-sized collection rather than a fixed ensemble size.
 
 ## Core Model
 
@@ -43,6 +43,8 @@ The canonical score state is:
 
 Each `voice` owns a ShadowScore `notes` document. The first performance model assumes a player edits their own voice while seeing everyone else's voice as read-only reference material on the same grid.
 
+A voice is not the same thing as a browser client, hardware unit, or human performer. One performer may manage multiple clients, multiple clients may observe or edit the same voice, and the active voice set can be configured, restored from a score backup, or changed at runtime.
+
 ## Transport
 
 The first implementation uses HTTP JSON plus server-sent events:
@@ -56,6 +58,8 @@ Draft endpoints:
 - `GET /healthz`
 - `GET /score`
 - `GET /assignments`
+- `POST /voices`
+- `DELETE /voices/:voiceId`
 - `POST /context`
 - `POST /voices/:voiceId/assignment`
 - `DELETE /voices/:voiceId/assignment`

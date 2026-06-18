@@ -46,12 +46,14 @@ export function adminPage() {
       grid-template-columns: 1fr auto;
       margin-bottom: 12px;
     }
-    .preset-row, .backup-row {
+    .preset-row, .backup-row, .voice-tools {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       margin-top: 10px;
     }
+    .voice-tools { margin: 0 0 12px; }
+    .voice-tools input { max-width: 240px; }
     .qr {
       border: 1px solid #d5d8dc;
       display: block;
@@ -184,6 +186,10 @@ export function adminPage() {
       <h2>Hardware units</h2>
       <div class="unit-list" id="hardware-units"></div>
     </section>
+    <div class="voice-tools">
+      <input id="new-voice-id" autocomplete="off" aria-label="New voice ID" placeholder="voice-id">
+      <button class="primary" id="add-voice" type="button">Add voice</button>
+    </div>
     <table>
       <thead>
         <tr>
@@ -211,6 +217,7 @@ export function adminPage() {
     const sessionHintEl = document.querySelector("#session-hint");
     const assignmentPresetEl = document.querySelector("#assignment-preset");
     const restoreFileEl = document.querySelector("#restore-file");
+    const newVoiceIdEl = document.querySelector("#new-voice-id");
     const inputs = new Map();
     let discoveredTargets = [];
     let hardwareUnits = [];
@@ -222,6 +229,7 @@ export function adminPage() {
     document.querySelector("#apply-preset").addEventListener("click", applyAssignmentPreset);
     document.querySelector("#download-backup").addEventListener("click", () => { window.location.href = "/admin/backup"; });
     document.querySelector("#restore-backup").addEventListener("click", () => restoreFileEl.click());
+    document.querySelector("#add-voice").addEventListener("click", addVoice);
     restoreFileEl.addEventListener("change", restoreBackup);
 
     loadSession();
@@ -230,6 +238,8 @@ export function adminPage() {
     events.addEventListener("voice.assignment.replaced", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.assignment.cleared", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.assignment.preset.applied", (event) => render(JSON.parse(event.data).score));
+    events.addEventListener("voice.added", (event) => render(JSON.parse(event.data).score));
+    events.addEventListener("voice.removed", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.reset", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.restore", (event) => render(JSON.parse(event.data).score));
     events.onerror = () => setStatus("Event stream reconnecting...");
@@ -388,9 +398,17 @@ export function adminPage() {
       clear.dataset.action = "clear-assignment";
       clear.addEventListener("click", () => clearAssignment(voiceId));
 
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "danger";
+      remove.textContent = "Remove";
+      remove.dataset.voice = voiceId;
+      remove.dataset.action = "remove-voice";
+      remove.addEventListener("click", () => removeVoice(voiceId));
+
       const actions = document.createElement("div");
       actions.className = "actions";
-      actions.append(save, clear);
+      actions.append(save, clear, remove);
 
       const td = document.createElement("td");
       td.dataset.label = "Actions";
@@ -471,6 +489,23 @@ export function adminPage() {
       setStatus("Copied Matrix Edit URL.");
     }
 
+    async function addVoice() {
+      const voiceId = newVoiceIdEl.value.trim();
+      if (!voiceId) return;
+      const response = await fetch("/voices", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ voiceId, assignment: { label: voiceId } })
+      });
+      const score = await response.json();
+      if (score.ok === false) {
+        setStatus(score.error);
+        return;
+      }
+      newVoiceIdEl.value = "";
+      render(score);
+    }
+
     async function applyAssignmentPreset() {
       if (!assignmentPresetEl.value) return;
       if (!confirm("Apply this assignment preset?")) return;
@@ -511,6 +546,12 @@ export function adminPage() {
 
     async function clearAssignment(voiceId) {
       const response = await fetch("/voices/" + encodeURIComponent(voiceId) + "/assignment", { method: "DELETE" });
+      render(await response.json());
+    }
+
+    async function removeVoice(voiceId) {
+      if (!confirm("Remove " + voiceId + " and its notes?")) return;
+      const response = await fetch("/voices/" + encodeURIComponent(voiceId), { method: "DELETE" });
       render(await response.json());
     }
 

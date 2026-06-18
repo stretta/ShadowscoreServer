@@ -56,6 +56,41 @@ test("collaboration rejects stale same-voice edits", () => {
   assert.equal(store.getScore().voices["player-1"].notes[0].pitch, 60);
 });
 
+test("collaboration can add arbitrary voices", () => {
+  const { hub, store } = createContext();
+  const client = createClient("client-a");
+  hub.addClient(client);
+  client.messages.length = 0;
+
+  client.onMessage({
+    type: "voice.add",
+    requestId: "req-add",
+    voiceId: "player-12",
+    assignment: { label: "Player 12" }
+  });
+
+  assert.equal(store.getScore().voices["player-12"].version, 0);
+  assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack"]);
+  assert.equal(client.messages[1].score.assignments["player-12"].label, "Player 12");
+});
+
+test("collaboration can remove voices", () => {
+  const { hub, store } = createContext();
+  store.addVoice("player-12");
+  const client = createClient("client-a");
+  hub.addClient(client);
+  client.messages.length = 0;
+
+  client.onMessage({
+    type: "voice.remove",
+    requestId: "req-remove",
+    voiceId: "player-12"
+  });
+
+  assert.equal(store.getScore().voices["player-12"], undefined);
+  assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack"]);
+});
+
 test("collaboration broadcasts presence updates", () => {
   const { hub } = createContext();
   const clientA = createClient("client-a");

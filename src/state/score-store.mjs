@@ -30,6 +30,50 @@ export function createScoreStore(initialScore) {
     getScore() {
       return structuredClone(score);
     },
+    addVoice(voiceId, assignmentDocument = {}, options = {}) {
+      const id = normalizeVoiceId(voiceId);
+      if (score.voices[id]) {
+        throw new Error(`voice '${id}' already exists`);
+      }
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      const assignment = normalizeAssignment({
+        ...assignmentDefaults[id],
+        ...assignmentDocument
+      });
+      score = {
+        ...score,
+        version: score.version + 1,
+        assignments: {
+          ...ensureAssignments(score, assignmentDefaults),
+          [id]: assignment
+        },
+        voices: {
+          ...score.voices,
+          [id]: {
+            version: 0,
+            notes: []
+          }
+        }
+      };
+      emitChange(events, "voice.added", score, { voiceId: id, assignment }, options);
+      return structuredClone(score);
+    },
+    removeVoice(voiceId, options = {}) {
+      assertKnownVoice(score, voiceId);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      const nextVoices = { ...score.voices };
+      const nextAssignments = { ...ensureAssignments(score, assignmentDefaults) };
+      delete nextVoices[voiceId];
+      delete nextAssignments[voiceId];
+      score = {
+        ...score,
+        version: score.version + 1,
+        assignments: nextAssignments,
+        voices: nextVoices
+      };
+      emitChange(events, "voice.removed", score, { voiceId }, options);
+      return structuredClone(score);
+    },
     updateContext(nextContext, options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
       score = {
@@ -205,7 +249,10 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
       notes: structuredClone(voice.notes)
     };
   }
-  const voiceIds = Object.keys(fallbackScore?.voices ?? restoredVoices);
+  const voiceIds = [...new Set([
+    ...Object.keys(fallbackScore?.voices ?? {}),
+    ...Object.keys(restoredVoices)
+  ])];
   const voices = Object.fromEntries(
     voiceIds.map((voiceId) => [
       voiceId,
@@ -270,6 +317,17 @@ function assertKnownVoice(score, voiceId) {
     const known = Object.keys(score.voices).join(", ");
     throw new Error(`unknown voice '${voiceId}'. Known voices: ${known}`);
   }
+}
+
+function normalizeVoiceId(voiceId) {
+  const id = stringField(voiceId);
+  if (!id) {
+    throw new Error("voiceId is required");
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(id)) {
+    throw new Error("voiceId must start with a letter or number and contain only letters, numbers, '.', '_', ':', or '-'");
+  }
+  return id;
 }
 
 function assertExpectedScoreVersion(score, expectedVersion) {

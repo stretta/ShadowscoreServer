@@ -6,7 +6,7 @@ This plan describes the next implementation target for ShadowscoreServer on Shad
 
 A Shadowbox hardware unit is a Raspberry Pi-based device that already runs the Shadowbox software. ShadowscoreServer will run alongside that existing software on the same hardware. The Shadowbox software remains responsible for its current local UI, audio, RNBO Runner integration, and device operation. ShadowscoreServer is responsible for ensemble score authority, browser collaboration, voice assignment, and forwarding committed ShadowScore documents into the selected RNBO targets.
 
-The first field target is a six-unit ensemble. Each Shadowbox hardware unit joins the local Wi-Fi network at boot. One ShadowscoreServer instance is selected as the session host. Browser clients open Matrix Edit from that local host and edit one assigned voice while seeing the rest of the ensemble as reference layers.
+The first field target used a six-unit ensemble, but six is a deployment preset rather than a data-model limit. Each Shadowbox hardware unit joins the local Wi-Fi network at boot. One ShadowscoreServer instance is selected as the session host. Browser clients open Matrix Edit from that local host and edit one assigned voice while seeing the rest of the ensemble as reference layers. A performer may manage multiple browser or RNBO clients, and a session may contain any practical number of voices.
 
 ## Terminology
 
@@ -17,6 +17,7 @@ The first field target is a six-unit ensemble. Each Shadowbox hardware unit join
 - **Peer hardware unit**: a Shadowbox hardware unit that is participating in the session but is not the session host.
 - **RNBOOSCQuery**: the local RNBO discovery surface used to inspect running RNBO instances, params, messages, and inports on a hardware unit.
 - **Voice**: one editable ShadowScore note document in the ensemble score.
+- **Client**: a browser, RNBO, or other software surface connected to the session. Clients are not counted as voices and multiple clients may be associated with the same performer or assignment.
 - **RNBO target**: a specific RNBO instance/message path that can receive a ShadowScore document.
 
 ## Target User Flow
@@ -153,7 +154,7 @@ Exit criteria:
 
 ### Phase 4: Ensemble Matrix Edit UI
 
-Goal: Matrix Edit supports the six-player ensemble workflow.
+Goal: Matrix Edit supports an arbitrary-size ensemble workflow.
 
 - Replace single-target editing assumptions with server voice assignment state.
 - Add the voice radio-list UI using server labels and colors.
@@ -164,7 +165,7 @@ Goal: Matrix Edit supports the six-player ensemble workflow.
 
 Exit criteria:
 
-- Six voices are visible in Matrix Edit.
+- All voices reported by `/session` are visible in Matrix Edit.
 - Exactly one voice is editable at a time.
 - Assignment colors are stable across reloads.
 - Other browsers receive updates without manual refresh.
@@ -201,7 +202,7 @@ Goal: make the classroom flow robust enough for students.
 - Add a QR code or copyable local URL in `/admin`.
 - Add a clear "no session host selected" or "server unavailable" state for Matrix Edit when opened outside the session host.
 - Add friendly device labels such as `Shadowbox A / Source`.
-- Add assignment presets for common six-player layouts.
+- Add assignment presets for common layouts, including the initial six-Shadowbox lab layout.
 - Add backup/restore controls for the ensemble score snapshot.
 
 Exit criteria:
@@ -215,7 +216,7 @@ Phase 6 server-side status:
 - `/admin` now shows the Matrix Edit session URL, a copy button, and a QR image for student connection.
 - Matrix Edit reports a clear unavailable state when it is opened against a non-host server or unreachable session endpoints.
 - RNBO target displays use friendly labels such as `Shadowbox A / Source` when ShadowScoreClient targets are discovered.
-- `ensemble.assignmentPresets` supports a default six-Shadowbox layout with `Shadowbox A / Source` through `Shadowbox F / Source`.
+- `ensemble.assignmentPresets` supports a default six-Shadowbox layout with `Shadowbox A / Source` through `Shadowbox F / Source`; this is a convenience preset, not a protocol limit.
 - `/admin/backup`, `/admin/restore`, and admin page controls support downloading and restoring ensemble score snapshots.
 
 ## Coexistence Requirements
@@ -240,7 +241,7 @@ These questions are no longer open for the first implementation:
 - Peer hardware units do not need a custom RNBO message relay path. If an application needs to send messages directly to an RNBO instance, OSC remains the direct transport.
 - The existing `obo` app can remain published at `stretta.com` for standalone MIDI-oriented applications. Ensemble use requires ShadowscoreServer, so the server-hosted app should be treated as a related ShadowScore-specific Matrix Edit surface rather than the same deployment target.
 - A ShadowScore-capable RNBO target is identified initially by the presence of a ShadowScoreClient instance. Additional target introspection can be added through ShadowScoreClient opcodes if needed.
-- Assignment colors should start as six fixed contrasting colors in config or defaults. Editable color UI is out of scope for now.
+- Assignment colors should start from configured contrasting colors or assignment presets. Editable color UI is out of scope for now.
 
 ## First Implementation Slice
 
@@ -248,7 +249,7 @@ The smallest useful slice is:
 
 1. Add a static Matrix Edit hosting route to ShadowscoreServer.
 2. Add `GET /session`.
-3. Add a simple local hardware config with six voices and colors.
+3. Add a simple local hardware config with a starter voice set and colors.
 4. Build Matrix Edit into a folder that ShadowscoreServer can serve.
 5. Verify one hardware unit can host the app and edit/persist one selected voice without affecting the existing Shadowbox software.
 
@@ -256,7 +257,7 @@ Phase 1 server-side status:
 
 - Static app hosting is implemented for `/` and `/app/*`, backed by `public/matrix-edit`.
 - `GET /session` reports host role, advertised name, app/API endpoints, voices, assignments, local RNBO config, and an empty hardware-unit list for the local-host prototype.
-- `config/shadowbox.local.json` defines six voices with fixed contrasting assignment colors and keeps RNBO output pointed at `127.0.0.1:9000`.
+- `config/shadowbox.local.json` defines a starter voice set with fixed contrasting assignment colors and keeps RNBO output pointed at `127.0.0.1:9000`.
 - `public/matrix-edit/index.html` is a lightweight local browser prototype. It can be replaced by a full Matrix Edit static build while preserving the same server route.
 
 This proves the browser and score-authority shape before adding peer registration and multi-unit RNBO routing.

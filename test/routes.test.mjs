@@ -63,7 +63,24 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.hardwareUnits[0].local, true);
 });
 
-test("admin assignment preset applies friendly six-player labels", async () => {
+test("voice routes add and remove arbitrary voices", async () => {
+  const context = createRouteContext();
+
+  const added = await requestJson(context, "POST", "/voices", {
+    voiceId: "player-12",
+    assignment: { label: "Player 12", color: "#2457a6" }
+  });
+  assert.equal(added.voices["player-12"].version, 0);
+  assert.equal(added.assignments["player-12"].label, "Player 12");
+
+  const session = await requestJson(context, "GET", "/session");
+  assert.equal(session.voices.some((voice) => voice.id === "player-12"), true);
+
+  const removed = await requestJson(context, "DELETE", "/voices/player-12");
+  assert.equal(removed.voices["player-12"], undefined);
+});
+
+test("admin assignment preset applies friendly shadowbox labels", async () => {
   const context = createRouteContext();
 
   const score = await requestJson(context, "POST", "/admin/assignment-preset", {

@@ -50,6 +50,39 @@ test("voice notes can be replaced from a ShadowScore notes document", () => {
   assert.equal(score.voices["player-1"].notes[0].pitch, 60);
 });
 
+test("voices can be added and removed at runtime", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+
+  const added = store.addVoice("player-12", { label: "Player 12", color: "#2457a6" });
+  assert.equal(added.version, 1);
+  assert.deepEqual(added.voices["player-12"], { version: 0, notes: [] });
+  assert.equal(added.assignments["player-12"].label, "Player 12");
+  assert.equal(added.assignments["player-12"].color, "#2457a6");
+
+  const removed = store.removeVoice("player-12");
+  assert.equal(removed.version, 2);
+  assert.equal(removed.voices["player-12"], undefined);
+  assert.equal(removed.assignments["player-12"], undefined);
+});
+
+test("restore can import voices that are not in the current score", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const restored = store.restore({
+    ...createInitialScore(defaultConfig),
+    version: 4,
+    voices: {
+      guest: { version: 3, notes: [{ pitch: 72 }] }
+    },
+    assignments: {
+      guest: { label: "Guest", color: "#2457a6" }
+    }
+  });
+
+  assert.deepEqual(restored.voices.guest.notes, [{ pitch: 72 }]);
+  assert.equal(restored.assignments.guest.label, "Guest");
+  assert.equal(restored.voices["player-1"].notes.length, 0);
+});
+
 test("voice notes can reject stale collaboration writes", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceVoiceNotes("player-1", [{ pitch: 60 }], { expectedVoiceVersion: 0 });

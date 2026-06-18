@@ -96,6 +96,18 @@ export function createCollaborationHub(store, config = {}) {
             sourceClientId: client.id
           }));
           break;
+        case "voice.add":
+          ack(client, requestId, store.addVoice(requireString(payload.voiceId ?? payload.id, "voiceId"), payload.assignment ?? {}, {
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
+        case "voice.remove":
+          ack(client, requestId, store.removeVoice(requireString(payload.voiceId, "voiceId"), {
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
         case "voice.notes.replace":
           ack(client, requestId, store.replaceVoiceNotes(requireString(payload.voiceId, "voiceId"), notesDocumentFor(payload), {
             expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),

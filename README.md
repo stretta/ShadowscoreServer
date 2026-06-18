@@ -2,13 +2,13 @@
 
 ShadowscoreServer is the ensemble score authority for ShadowScore clients running on Shadowbox hardware.
 
-The server owns one shared musical context for the ensemble and one note document per voice. Matrix Edit and other ShadowScore clients connect to edit their assigned voice while watching the rest of the ensemble on the same grid.
+The server owns one shared musical context for the ensemble and one note document per voice. Voices are arbitrary score lanes, not a fixed count of human players: a session can have six voices, twelve voices, or any other configured/runtime set. Matrix Edit and other ShadowScore clients connect to edit their assigned voice while watching the rest of the ensemble on the same grid.
 
 ## First Shape
 
 - Shared `context`: scale, root, grid, clip, and seed.
 - Per-voice `notes`: ShadowScore note documents owned by ensemble players.
-- Per-voice `assignments`: lab-facing player/device/client labels for each voice.
+- Per-voice `assignments`: lab-facing player/device/client labels for each voice. Multiple browser or RNBO clients can refer to the same assignment when a performer manages more than one surface.
 - Versioned state updates so clients can detect stale edits.
 - Realtime event stream for connected clients.
 - Optional RNBO/OSC adapter, configured explicitly so it does not claim RNBO's usual ports by accident.
@@ -91,6 +91,8 @@ configured RNBO inport address.
 - `GET /rnbo/targets`: local and registered RNBO targets with availability state.
 - `GET /assignments`: current voice assignment map.
 - `POST /context`: replace or merge shared ShadowScore context.
+- `POST /voices`: add a voice with `{ "voiceId": "...", "assignment": { ... } }`.
+- `DELETE /voices/:voiceId`: remove a voice and its assignment.
 - `POST /voices/:voiceId/assignment`: assign a voice to a player, device, or client.
 - `DELETE /voices/:voiceId/assignment`: clear one voice assignment.
 - `POST /voices/:voiceId/notes`: replace a voice's ShadowScore notes document.
@@ -111,6 +113,8 @@ Client command messages are JSON objects:
 - `get.score`: request a fresh `snapshot`.
 - `presence.update`: broadcast editing presence with `voiceId`, `name` or `assignee`, `deviceId`, and `editing`.
 - `context.update`: update shared context with `context`, optional `replace`, and optional `expectedVersion`.
+- `voice.add`: add one voice with `voiceId` and optional `assignment`.
+- `voice.remove`: remove one voice with `voiceId`.
 - `voice.notes.replace`: replace one voice with `voiceId`, `notes` or `document`, and optional `expectedVoiceVersion`.
 - `voice.assignment.replace`: replace assignment metadata with `voiceId` and `assignment`.
 - `voice.assignment.clear`: clear one assignment with `voiceId`.

@@ -99,6 +99,18 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/voices") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.addVoice(body.voiceId ?? body.id, body.assignment ?? {}, {
+        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
+      }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/admin/reset") {
     try {
       const body = await readJson(request);
@@ -156,6 +168,17 @@ export async function routeRequest(request, response, store, config, runtime = {
           ? store.clearVoiceAssignment(voiceId)
           : store.replaceVoiceAssignment(voiceId, await readJson(request));
       writeJson(response, 200, score);
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const deleteVoiceMatch = url.pathname.match(/^\/voices\/([^/]+)$/);
+  if (request.method === "DELETE" && deleteVoiceMatch) {
+    try {
+      const voiceId = decodeURIComponent(deleteVoiceMatch[1]);
+      writeJson(response, 200, store.removeVoice(voiceId));
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }

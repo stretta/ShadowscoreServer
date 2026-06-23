@@ -192,7 +192,114 @@ test("hardware heartbeat refreshes a registered unit", async () => {
   assert.match(heartbeat.unit.lastSeenAt, /1970-01-01T00:00:02.000Z/);
 });
 
-test("root route serves static app html", async () => {
+test("RNBO target param route writes playback transport params", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/rnbo/targets/source-client/params", {
+    params: {
+      Tempo: 120,
+      MaxSteps: 32,
+      ClockInterval: 125
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(writes, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Tempo",
+      value: 120
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/MaxSteps",
+      value: 32
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/ClockInterval",
+      value: 125
+    }
+  ]);
+});
+
+test("RNBO target param route rejects unsupported params", async () => {
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    })
+  });
+
+  const response = await request(context, "POST", "/rnbo/targets/source-client/params", {
+    Gain: 1
+  });
+
+  assert.equal(response.status, 400);
+  assert.match(response.body, /unsupported RNBO transport parameter 'Gain'/);
+});
+
+test("matrix edit route serves static app html", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/matrix-edit");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /ShadowScore Matrix Edit/);
+});
+
+test("matrix edit route works with legacy generated static config", async () => {
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      static: {
+        apps: {
+          matrixEdit: {
+            root: "public/matrix-edit",
+            index: "index.html",
+            routes: ["/", "/app"]
+          }
+        }
+      }
+    })
+  });
+  const response = await request(context, "GET", "/matrix-edit");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /ShadowScore Matrix Edit/);
+});
+
+test("root route remains a matrix edit compatibility alias", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/");
 
@@ -215,6 +322,11 @@ test("event list route serves server-bundled editor html", async () => {
   assert.match(response.body, /id="ableton-notes"/);
   assert.match(response.body, /id="replace-array"/);
   assert.match(response.body, /id="add-array"/);
+  assert.match(response.body, /id="rnbo-target"/);
+  assert.match(response.body, /id="tempo"/);
+  assert.match(response.body, /id="max-steps"/);
+  assert.match(response.body, /id="clock-interval"/);
+  assert.match(response.body, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
   assert.match(response.body, /POST/);
   assert.match(response.body, /\/voices\/\$\{encodeURIComponent\(state\.voiceId\)\}\/notes/);
 });

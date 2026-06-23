@@ -113,7 +113,7 @@ Goal: one Shadowbox hardware unit hosts ShadowscoreServer and serves Matrix Edit
 
 Exit criteria:
 
-- `http://<host>.local:8790/` opens Matrix Edit.
+- `http://<host>.local:8790/matrix-edit` opens Matrix Edit.
 - `/healthz`, `/score`, `/session`, `/admin`, and `/collab` work from a laptop.
 - A selected voice can be edited and persisted.
 - Existing Shadowbox software still starts and operates normally.
@@ -255,10 +255,10 @@ The smallest useful slice is:
 
 Phase 1 server-side status:
 
-- Static app hosting is implemented for `/` and `/app/*`, backed by `public/matrix-edit`.
+- Static Matrix Edit hosting is implemented for `/matrix-edit` with `/` retained as a compatibility alias, backed by `public/matrix-edit`.
 - `GET /session` reports host role, advertised name, app/API endpoints, voices, assignments, local RNBO config, and an empty hardware-unit list for the local-host prototype.
 - `config/shadowbox.local.json` defines a starter voice set with fixed contrasting assignment colors and keeps RNBO output pointed at `127.0.0.1:9000`.
-- `public/matrix-edit/index.html` is a lightweight local browser prototype. It can be replaced by a full Matrix Edit static build while preserving the same server route.
+- `public/matrix-edit/index.html` is a lightweight local browser prototype. It can be replaced by a full Matrix Edit static build while preserving the same `/matrix-edit` server route.
 
 This proves the browser and score-authority shape before adding peer registration and multi-unit RNBO routing.
 

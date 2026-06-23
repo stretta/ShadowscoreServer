@@ -3,35 +3,42 @@ import os from "node:os";
 import { configuredRnboTargets, discoverRnboTargets } from "./adapters/rnbo-oscquery.mjs";
 import { loadConfig } from "./config.mjs";
 
-const config = await loadConfig();
-const once = process.argv.includes("--once");
-const sessionHostUrl = stripTrailingSlash(config.registration?.sessionHostUrl);
-
-if (!sessionHostUrl) {
-  console.error("[registration-agent] config.registration.sessionHostUrl is required");
-  process.exit(1);
-}
-
-const unitId = config.server?.hostIdentity || os.hostname();
-const intervalMs = clampMs(config.registration?.heartbeatIntervalMs, 10000, 1000, 3600000);
-
-await register();
-
-if (once) {
-  process.exit(0);
-}
-
-setInterval(() => {
-  void heartbeat().catch(async (error) => {
-    console.error(`[registration-agent] heartbeat failed: ${messageForError(error)}`);
-    await register().catch((registerError) => {
-      console.error(`[registration-agent] re-register failed: ${messageForError(registerError)}`);
-    });
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const config = await loadConfig();
+  await runRegistrationAgent(config, { once: process.argv.includes("--once") }).catch((error) => {
+    console.error(`[registration-agent] ${messageForError(error)}`);
+    process.exit(1);
   });
-}, intervalMs);
+}
 
-async function register() {
-  const targets = await readLocalTargets();
+export async function runRegistrationAgent(config, options = {}) {
+  const sessionHostUrl = stripTrailingSlash(config.registration?.sessionHostUrl);
+
+  if (!sessionHostUrl) {
+    throw new Error("config.registration.sessionHostUrl is required");
+  }
+
+  const unitId = config.server?.hostIdentity || os.hostname();
+  const intervalMs = clampMs(config.registration?.heartbeatIntervalMs, 10000, 1000, 3600000);
+
+  await register(config, sessionHostUrl, unitId);
+
+  if (options.once) {
+    return;
+  }
+
+  setInterval(() => {
+    void heartbeat(sessionHostUrl, unitId).catch(async (error) => {
+      console.error(`[registration-agent] heartbeat failed: ${messageForError(error)}`);
+      await register(config, sessionHostUrl, unitId).catch((registerError) => {
+        console.error(`[registration-agent] re-register failed: ${messageForError(registerError)}`);
+      });
+    });
+  }, intervalMs);
+}
+
+async function register(config, sessionHostUrl, unitId) {
+  const targets = await readLocalTargets(config, unitId);
   const body = {
     id: unitId,
     role: "peer",
@@ -46,19 +53,24 @@ async function register() {
   return response;
 }
 
-async function heartbeat() {
+async function heartbeat(sessionHostUrl, unitId) {
   await postJson(`${sessionHostUrl}/hardware/units/${encodeURIComponent(unitId)}/heartbeat`, {});
   console.log(`[registration-agent] heartbeat ${unitId}`);
 }
 
-async function readLocalTargets() {
+export async function readLocalTargets(config, unitId = config.server?.hostIdentity || os.hostname()) {
   const discovered = await discoverRnboTargets(config);
   const targets = discovered.length > 0 ? discovered : configuredRnboTargets(config);
-  return targets.map((target) => ({
-    ...target,
-    hardwareUnitId: unitId,
-    hardwareUnitName: config.server?.advertisedName || unitId
-  }));
+  const registrationHost = registrationTargetHost(config, unitId);
+  return targets.map((target) => {
+    const host = isLoopbackHost(target.host) ? registrationHost : target.host;
+    return {
+      ...target,
+      host,
+      hardwareUnitId: unitId,
+      hardwareUnitName: config.server?.advertisedName || unitId
+    };
+  });
 }
 
 async function postJson(url, body) {
@@ -76,6 +88,21 @@ async function postJson(url, body) {
 
 function stripTrailingSlash(value) {
   return String(value ?? "").replace(/\/+$/, "");
+}
+
+function registrationTargetHost(config, unitId) {
+  return stringField(config.rnbo?.oscQuery?.oscHost)
+    || stringField(config.rnbo?.registrationHost)
+    || `${unitId}.local`;
+}
+
+function isLoopbackHost(host) {
+  const value = stringField(host).toLowerCase();
+  return !value || value === "127.0.0.1" || value === "localhost" || value === "::1";
+}
+
+function stringField(value) {
+  return value === undefined || value === null ? "" : String(value).trim();
 }
 
 function clampMs(value, fallback, min, max) {

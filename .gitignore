@@ -5,4 +5,7 @@ coverage/
 dist/
 data/*.json
 !data/.gitkeep
+
+# Machine/session-specific generated configs.
 config/*.local.json
+config/shadowscore.*.local.json

@@ -1,6 +1,6 @@
 import { adminPage } from "./admin-page.mjs";
 import { serveStaticAsset } from "./static-files.mjs";
-import { configuredRnboTargets, discoverRnboTargets } from "../adapters/rnbo-oscquery.mjs";
+import { configuredRnboTargets, discoverRnboTargets, writeRnboTransportParams } from "../adapters/rnbo-oscquery.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 
@@ -42,6 +42,26 @@ export async function routeRequest(request, response, store, config, runtime = {
 
   if (request.method === "GET" && url.pathname === "/rnbo/targets") {
     writeJson(response, 200, { targets: await readAllRnboTargets(config, runtime) });
+    return;
+  }
+
+  const rnboParamsMatch = url.pathname.match(/^\/rnbo\/targets\/([^/]+)\/params$/);
+  if (request.method === "POST" && rnboParamsMatch) {
+    try {
+      const targetId = decodeURIComponent(rnboParamsMatch[1]);
+      const target = await findRnboTarget(config, runtime, targetId);
+      if (!target) {
+        throw new Error(`unknown RNBO target '${targetId}'`);
+      }
+      const body = await readJson(request);
+      const params = body.params ?? body;
+      const writes = await writeRnboTransportParams(config, target, params, {
+        writer: runtime.rnboParamWriter
+      });
+      writeJson(response, 200, { ok: true, targetId, writes });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
     return;
   }
 
@@ -275,6 +295,11 @@ async function readSessionRuntime(config, runtime) {
 async function readAllRnboTargets(config, runtime) {
   const sessionRuntime = await readSessionRuntime(config, runtime);
   return sessionRuntime.rnboTargets;
+}
+
+async function findRnboTarget(config, runtime, targetId) {
+  const targets = await readAllRnboTargets(config, runtime);
+  return targets.find((target) => target.id === targetId);
 }
 
 async function readHardwareUnits(config, runtime) {

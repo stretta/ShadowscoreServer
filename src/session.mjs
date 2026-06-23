@@ -14,7 +14,8 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       url: baseUrl
     },
     endpoints: {
-      app: `${baseUrl}/`,
+      app: `${baseUrl}/matrix-edit`,
+      matrixEdit: `${baseUrl}/matrix-edit`,
       eventList: `${baseUrl}/event-list`,
       admin: `${baseUrl}/admin`,
       score: `${baseUrl}/score`,

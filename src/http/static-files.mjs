@@ -66,7 +66,7 @@ function staticApps(staticConfig) {
     normalizeStaticApp({
       root: staticConfig.root,
       index: staticConfig.index,
-      routes: ["/", "/app"]
+      routes: ["/matrix-edit", "/"]
     })
   ].filter(Boolean);
 }
@@ -75,12 +75,20 @@ function normalizeStaticApp(app) {
   if (!app?.root) {
     return undefined;
   }
-  const routes = Array.isArray(app.routes) ? app.routes : [app.route ?? "/app"];
+  const routes = Array.isArray(app.routes) ? app.routes : [app.route ?? "/matrix-edit"];
   return {
     root: app.root,
     index: app.index ?? "index.html",
-    routes: routes.map(normalizeRoute)
+    routes: normalizeRoutesForApp(app.root, routes)
   };
+}
+
+function normalizeRoutesForApp(root, routes) {
+  const normalized = routes.map(normalizeRoute);
+  if (String(root).replace(/\\/g, "/").endsWith("public/matrix-edit") && !normalized.includes("/matrix-edit")) {
+    return ["/matrix-edit", ...normalized];
+  }
+  return normalized;
 }
 
 function normalizeRoute(route) {

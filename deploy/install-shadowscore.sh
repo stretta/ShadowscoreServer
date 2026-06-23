@@ -135,7 +135,7 @@ config.static.apps = {
   matrixEdit: {
     root: "public/matrix-edit",
     index: "index.html",
-    routes: ["/", "/app"]
+    routes: ["/matrix-edit", "/"]
   },
   eventList: {
     root: "public/event-list",
@@ -151,6 +151,11 @@ if (process.env.SHADOWSCORE_ROLE_VALUE === "host") {
   config.http.publicUrl = "";
   config.registration ??= {};
   config.registration.sessionHostUrl = process.env.SHADOWSCORE_SESSION_HOST_URL_VALUE;
+  config.rnbo ??= {};
+  config.rnbo.oscQuery ??= {};
+  if (!config.rnbo.oscQuery.oscHost) {
+    config.rnbo.oscQuery.oscHost = `${process.env.SHADOWSCORE_HOST_IDENTITY_VALUE}.local`;
+  }
 }
 fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
 NODE
@@ -181,7 +186,7 @@ if [[ "$ROLE" == "host" ]]; then
   ready=0
   for _ in $(seq 1 20); do
     if curl -fsS --max-time 1 "http://127.0.0.1:8790/healthz" >/dev/null 2>&1 \
-      && curl -fsS --max-time 1 "http://127.0.0.1:8790/" | grep -q "ShadowScore Matrix Edit" \
+      && curl -fsS --max-time 1 "http://127.0.0.1:8790/matrix-edit" | grep -q "ShadowScore Matrix Edit" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/event-list" | grep -q "ShadowScore Event List"; then
       ready=1
       break

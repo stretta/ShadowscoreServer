@@ -7,7 +7,7 @@ After=network-online.target shadowscore-server.service
 Type=simple
 User=pi
 WorkingDirectory=/home/pi/ShadowscoreServer
-ExecStart=/usr/bin/npm run agent -- --config /home/pi/ShadowscoreServer/config/shadowbox.hardware-peer.json
+ExecStart=/usr/bin/node src/registration-agent.mjs --config /home/pi/ShadowscoreServer/config/shadowbox.hardware-peer.json
 Restart=on-failure
 RestartSec=5
 Environment=NODE_ENV=production

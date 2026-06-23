@@ -28,7 +28,7 @@ curl -L https://raw.githubusercontent.com/stretta/ShadowscoreServer/main/deploy/
 bash /tmp/install-shadowscore.sh --role peer --host-identity pt6 --advertised-name pt6 --session-host-url http://pt5.local:8790
 ```
 
-The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages, clones or updates the repo, writes the role-specific generated config, installs the matching systemd unit for the selected install directory, starts the service, waits for `/healthz`, Matrix Edit (`/`), and the Event List editor (`/event-list`), then runs the hardware smoke test.
+The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages, clones or updates the repo, writes the role-specific generated config, installs the matching systemd unit for the selected install directory, starts the service, waits for `/healthz`, Matrix Edit (`/matrix-edit`), and the Event List editor (`/event-list`), then runs the hardware smoke test.
 
 Manual install remains available:
 
@@ -50,6 +50,8 @@ For a peer unit, copy `config/shadowbox.hardware-peer.json` instead and set:
 
 - `registration.sessionHostUrl` to the selected host URL.
 - `server.advertisedName` and `server.hostIdentity` to this peer unit.
+- `rnbo.oscQuery.oscHost` to the peer's LAN name, for example `pt6.local`, if
+  the local RNBO OSC target is otherwise configured as `127.0.0.1`.
 
 ## Systemd Services
 
@@ -109,7 +111,7 @@ The smoke test checks:
 - `/healthz`
 - `/session`
 - `/rnbo/targets`
-- Matrix Edit at `/`
+- Matrix Edit at `/matrix-edit`
 - Event List editor at `/event-list`
 - local HTTP port reachability
 - RNBOOSCQuery reachability when enabled
@@ -122,7 +124,7 @@ Before students connect:
 - `systemctl is-active shadowscore-server.service` reports `active` on the host.
 - `journalctl -u shadowscore-server.service -n 80 --no-pager` shows the server listening on `8790`.
 - `curl http://127.0.0.1:8790/healthz` returns `"ok":true`.
-- A laptop can open Matrix Edit at `http://<host>.local:8790/`.
+- A laptop can open Matrix Edit at `http://<host>.local:8790/matrix-edit`.
 - A laptop can open the Event List editor at `http://<host>.local:8790/event-list`.
 - `curl http://127.0.0.1:5678/` returns RNBOOSCQuery JSON on each unit.
 - `curl http://<host>.local:8790/rnbo/targets` lists the expected ShadowScoreClient targets.

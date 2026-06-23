@@ -21,7 +21,7 @@ export async function runHardwareSmoke(config, options = {}) {
   checks.push(await checkHttpJson("healthz", `${baseUrl}/healthz`, fetchImpl, timeoutMs, (payload) => payload.ok === true));
   checks.push(await checkHttpJson("session", `${baseUrl}/session`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.voices) && payload.voices.length > 0));
   checks.push(await checkHttpJson("rnbo targets", `${baseUrl}/rnbo/targets`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.targets)));
-  checks.push(await checkHttpText("matrix edit", `${baseUrl}/`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Matrix Edit")));
+  checks.push(await checkHttpText("matrix edit", `${baseUrl}/matrix-edit`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Matrix Edit")));
   checks.push(await checkHttpText("event list", `${baseUrl}/event-list`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Event List")));
   checks.push(await checkTcpPort("http port", config.http?.host ?? "127.0.0.1", config.http?.port ?? 8790, timeoutMs, options.netConnect));
 

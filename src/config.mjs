@@ -26,7 +26,7 @@ export const defaultConfig = Object.freeze({
       matrixEdit: {
         root: "public/matrix-edit",
         index: "index.html",
-        routes: ["/", "/app"]
+        routes: ["/matrix-edit", "/"]
       },
       eventList: {
         root: "public/event-list",

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { discoverRnboTargets, extractRnboTargets } from "../src/adapters/rnbo-oscquery.mjs";
+import { discoverRnboTargets, extractRnboTargets, rnboTransportParamWrites } from "../src/adapters/rnbo-oscquery.mjs";
 
 test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () => {
   const config = mergeConfig(defaultConfig, {
@@ -74,6 +74,54 @@ test("RNBOOSCQuery discovery returns an empty target list on fetch failure", asy
   });
 
   assert.deepEqual(targets, []);
+});
+
+test("plans scoped RNBO transport param writes", () => {
+  const writes = rnboTransportParamWrites({
+    id: "rnbo-inst-2:shadowscore",
+    host: "192.168.68.96",
+    port: 9000,
+    address: "/rnbo/inst/2/messages/in/shadowscore"
+  }, {
+    MaxSteps: 64,
+    ClockInterval: 125,
+    Tempo: 120
+  });
+
+  assert.deepEqual(writes, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/MaxSteps",
+      value: 64
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/ClockInterval",
+      value: 125
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Tempo",
+      value: 120
+    }
+  ]);
+});
+
+test("rejects unsupported RNBO transport param writes", () => {
+  assert.throws(
+    () => rnboTransportParamWrites({
+      id: "rnbo-inst-2:shadowscore",
+      host: "192.168.68.96",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore"
+    }, {
+      Gain: 1
+    }),
+    /unsupported RNBO transport parameter 'Gain'/
+  );
 });
 
 function createOscQueryTree() {

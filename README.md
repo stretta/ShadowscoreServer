@@ -25,7 +25,7 @@ The default HTTP server listens on `0.0.0.0:8790`.
 curl http://127.0.0.1:8790/healthz
 curl http://127.0.0.1:8790/score
 curl http://127.0.0.1:8790/session
-open http://127.0.0.1:8790/
+open http://127.0.0.1:8790/matrix-edit
 open http://127.0.0.1:8790/event-list
 open http://127.0.0.1:8790/admin
 ```
@@ -56,13 +56,17 @@ set `registration.sessionHostUrl` in its config and run:
 npm run agent -- --config config/shadowbox.peer.json
 ```
 
+When the peer's local RNBO target is configured as `127.0.0.1`, the registration
+agent advertises it to the host as `<server.hostIdentity>.local` so the session
+host can send OSC to the peer over the LAN.
+
 Use `--once` for a single registration without the heartbeat loop:
 
 ```sh
 npm run agent -- --config config/shadowbox.peer.json --once
 ```
 
-The root route serves static app assets from `public/matrix-edit` by default.
+The `/matrix-edit` route serves static Matrix Edit assets from `public/matrix-edit` by default.
 The bundled page is a lightweight Phase 1 browser prototype that loads `/score`,
 subscribes to `/events`, renders all voice layers, and writes the selected voice
 through `POST /voices/:voiceId/notes`. A production Matrix Edit build can replace
@@ -89,6 +93,7 @@ configured RNBO inport address.
 - `POST /hardware/register`: register a peer hardware unit and its RNBO targets.
 - `POST /hardware/units/:unitId/heartbeat`: refresh a registered peer heartbeat.
 - `GET /rnbo/targets`: local and registered RNBO targets with availability state.
+- `POST /rnbo/targets/:targetId/params`: set playback transport RNBO params for a target. The current allowlist is `Tempo`, `MaxSteps`, and `ClockInterval`, for example `{ "params": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`.
 - `GET /assignments`: current voice assignment map.
 - `POST /context`: replace or merge shared ShadowScore context.
 - `POST /voices`: add a voice with `{ "voiceId": "...", "assignment": { ... } }`.

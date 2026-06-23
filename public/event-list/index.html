@@ -66,6 +66,10 @@
       grid-template-columns: minmax(180px, 260px) auto minmax(220px, 1fr);
     }
 
+    .transport-toolbar {
+      grid-template-columns: minmax(200px, 1fr) minmax(100px, 130px) minmax(110px, 150px) minmax(130px, 170px) auto;
+    }
+
     label {
       color: var(--muted);
       display: grid;
@@ -315,6 +319,21 @@
       <span id="version"></span>
       <span id="assignment"></span>
     </section>
+    <section class="toolbar transport-toolbar" aria-label="RNBO playback transport">
+      <label>RNBO target
+        <select id="rnbo-target"></select>
+      </label>
+      <label>Tempo
+        <input id="tempo" type="number" min="20" max="400" step="0.01" value="120">
+      </label>
+      <label>Steps
+        <input id="max-steps" type="number" min="1" max="1024" step="1" value="64">
+      </label>
+      <label>Clock interval
+        <input id="clock-interval" type="number" min="1" step="1" value="125">
+      </label>
+      <button id="apply-transport" type="button">Apply</button>
+    </section>
     <section class="paste-panel" aria-label="Ableton note array import">
       <label>Ableton note array
         <textarea id="ableton-notes" spellcheck="false" placeholder='[{"pitch":60,"start_time":0,"duration":0.25,"velocity":100}]'></textarea>
@@ -355,7 +374,8 @@
       voiceId: "",
       notes: [],
       dirty: false,
-      saving: false
+      saving: false,
+      transportSaving: false
     };
 
     const els = {
@@ -374,6 +394,11 @@
       abletonNotes: document.querySelector("#ableton-notes"),
       replaceArray: document.querySelector("#replace-array"),
       addArray: document.querySelector("#add-array"),
+      rnboTarget: document.querySelector("#rnbo-target"),
+      tempo: document.querySelector("#tempo"),
+      maxSteps: document.querySelector("#max-steps"),
+      clockInterval: document.querySelector("#clock-interval"),
+      applyTransport: document.querySelector("#apply-transport"),
       newStart: document.querySelector("#new-start"),
       newDuration: document.querySelector("#new-duration"),
       newPitch: document.querySelector("#new-pitch"),
@@ -394,12 +419,14 @@
         return;
       }
       state.voiceId = els.voice.value;
+      renderRnboTargets();
       loadVoice();
     });
     els.add.addEventListener("click", addNote);
     els.save.addEventListener("click", saveNotes);
     els.replaceArray.addEventListener("click", () => importAbletonNotes("replace"));
     els.addArray.addEventListener("click", () => importAbletonNotes("add"));
+    els.applyTransport.addEventListener("click", applyTransportParams);
 
     await boot();
 
@@ -460,6 +487,7 @@
         }
         renderServerOptions();
         els.serverSelect.value = serverUrl;
+        renderRnboTargets();
         renderVoicePicker();
         loadVoice();
         connectEvents(endpointUrl("events", "/events"));
@@ -478,6 +506,7 @@
         }
         state.score = payload.score;
         renderVoicePicker();
+        renderRnboTargets();
         if (!state.dirty && !state.saving) {
           loadVoice();
         } else {
@@ -545,6 +574,35 @@
       els.save.disabled = locked || state.saving || !state.voiceId || !state.dirty;
       els.replaceArray.disabled = locked || state.saving || !state.voiceId;
       els.addArray.disabled = locked || state.saving || !state.voiceId;
+      els.rnboTarget.disabled = state.transportSaving || !rnboTargets().length;
+      els.tempo.disabled = state.transportSaving || !els.rnboTarget.value;
+      els.maxSteps.disabled = state.transportSaving || !els.rnboTarget.value;
+      els.clockInterval.disabled = state.transportSaving || !els.rnboTarget.value;
+      els.applyTransport.disabled = state.transportSaving || !els.rnboTarget.value;
+    }
+
+    function renderRnboTargets() {
+      const targets = rnboTargets();
+      els.rnboTarget.replaceChildren();
+      if (!targets.length) {
+        const option = document.createElement("option");
+        option.value = "";
+        option.textContent = "No RNBO targets";
+        els.rnboTarget.append(option);
+        updateButtons();
+        return;
+      }
+      for (const target of targets) {
+        const option = document.createElement("option");
+        option.value = target.id;
+        option.textContent = rnboTargetLabel(target);
+        els.rnboTarget.append(option);
+      }
+      const assignmentTargetId = state.score?.assignments?.[state.voiceId]?.rnboTargetId;
+      if (targets.some((target) => target.id === assignmentTargetId)) {
+        els.rnboTarget.value = assignmentTargetId;
+      }
+      updateButtons();
     }
 
     function noteRow(note, index) {
@@ -644,6 +702,31 @@
         setStatus(`Save failed: ${error.message}`);
       } finally {
         state.saving = false;
+        updateButtons();
+      }
+    }
+
+    async function applyTransportParams() {
+      const targetId = els.rnboTarget.value;
+      if (!targetId) {
+        setStatus("Select an RNBO target first.");
+        return;
+      }
+      state.transportSaving = true;
+      updateButtons();
+      try {
+        await postJson(apiUrl(`/rnbo/targets/${encodeURIComponent(targetId)}/params`), {
+          params: {
+            Tempo: clamp(readNumber(els.tempo.value, 120), 20, 400),
+            MaxSteps: clampInt(readNumber(els.maxSteps.value, 64), 1, 1024),
+            ClockInterval: Math.max(1, readNumber(els.clockInterval.value, 125))
+          }
+        });
+        setStatus(`Applied playback transport to ${rnboTargetLabel(rnboTargets().find((target) => target.id === targetId))}.`);
+      } catch (error) {
+        setStatus(`Transport apply failed: ${error.message}`);
+      } finally {
+        state.transportSaving = false;
         updateButtons();
       }
     }
@@ -866,6 +949,20 @@
       const name = session?.server?.advertisedName || session?.server?.hostIdentity || session?.ensembleId || "ShadowScore";
       const role = session?.server?.role ? ` ${session.server.role}` : "";
       return `${name}${role} (${url})`;
+    }
+
+    function rnboTargets() {
+      return state.session?.rnbo?.targets ?? [];
+    }
+
+    function rnboTargetLabel(target) {
+      if (!target) {
+        return "RNBO target";
+      }
+      const unit = target.hardwareUnitName || target.hardwareUnitId;
+      const name = target.name || target.id;
+      const instance = target.instanceId ? ` inst ${target.instanceId}` : "";
+      return unit ? `${unit}: ${name}${instance}` : `${name}${instance}`;
     }
 
     function currentServerUrl() {

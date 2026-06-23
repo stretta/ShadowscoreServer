@@ -1,3 +1,8 @@
+import dgram from "node:dgram";
+import { encodeOscMessage } from "./osc.mjs";
+
+const TRANSPORT_PARAMS = new Set(["MaxSteps", "ClockInterval", "Tempo"]);
+
 export async function discoverRnboTargets(config, options = {}) {
   const rnbo = config.rnbo ?? {};
   const oscQuery = rnbo.oscQuery ?? {};
@@ -14,6 +19,46 @@ export async function discoverRnboTargets(config, options = {}) {
     }
     return [];
   }
+}
+
+export async function writeRnboTransportParams(config, target, params, options = {}) {
+  const writes = rnboTransportParamWrites(target, params);
+  const writer = options.writer ?? sendOscParamWrite;
+
+  for (const write of writes) {
+    await writer(write);
+  }
+
+  return writes;
+}
+
+export function rnboTransportParamWrites(target, params) {
+  if (!target || typeof target !== "object") {
+    throw new Error("RNBO target is required");
+  }
+
+  const instanceId = target.instanceId ?? readInstanceId(target.address ?? target.messagePath ?? "");
+  if (!instanceId) {
+    throw new Error(`RNBO target '${target.id ?? ""}' does not include an instance id`);
+  }
+
+  const host = target.host;
+  const port = Number(target.oscPort ?? target.port);
+  if (!host || !Number.isFinite(port)) {
+    throw new Error(`RNBO target '${target.id ?? ""}' is missing host or port`);
+  }
+
+  const entries = Object.entries(params ?? {});
+  if (entries.length === 0) {
+    throw new Error("params must include at least one transport parameter");
+  }
+
+  return entries.map(([name, value]) => ({
+    host,
+    port,
+    path: `/rnbo/inst/${instanceId}/params/${normalizeTransportParamName(name)}`,
+    value: finiteNumber(value, name)
+  }));
 }
 
 export function configuredRnboTargets(config) {
@@ -151,6 +196,40 @@ function joinAddress(base, name) {
 function readInstanceId(address) {
   const match = address.match(/\/rnbo\/inst\/([^/]+)/);
   return match ? match[1] : "";
+}
+
+async function sendOscParamWrite(write) {
+  const socket = dgram.createSocket("udp4");
+  try {
+    const packet = encodeOscMessage(write.path, [write.value]);
+    await new Promise((resolve, reject) => {
+      socket.send(packet, write.port, write.host, (error) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve();
+        }
+      });
+    });
+  } finally {
+    socket.close();
+  }
+}
+
+function normalizeTransportParamName(name) {
+  const paramName = String(name ?? "");
+  if (!TRANSPORT_PARAMS.has(paramName)) {
+    throw new Error(`unsupported RNBO transport parameter '${paramName}'`);
+  }
+  return paramName;
+}
+
+function finiteNumber(value, name) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) {
+    throw new Error(`${name} must be a finite number`);
+  }
+  return number;
 }
 
 function dedupeTargets(targets) {

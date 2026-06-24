@@ -13,6 +13,7 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
   assert.match(html, /<link rel="stylesheet" crossorigin href="\/matrix-edit\/assets\/[^"]+\.css">/);
   assert.match(html, /id="start-transport"/);
   assert.match(html, /id="stop-transport"/);
+  assert.match(html, /id="duration"[^>]+value="0\.25"/);
   assert.match(html, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
   assert.match(html, /Clock/);
 });
@@ -20,8 +21,8 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
 test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   const { html, js } = await readBuiltApp();
 
-  assert.match(html, /<select id="voice" aria-label="ShadowScore client"><\/select>/);
-  assert.doesNotMatch(html, /<input id="voice"/);
+  assert.match(html, /<select id="voice" aria-label="ShadowScore voice"><\/select>/);
+  assert.doesNotMatch(html, /voice-picker/);
   assert.match(js, /\/session/);
   assert.match(js, /\/score/);
   assert.match(js, /\/collab/);
@@ -33,6 +34,10 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(js, /presence\.update/);
   assert.match(js, /voice\.notes\.replace/);
   assert.match(js, /voice\.assignment\.replace/);
+  assert.match(js, /Switch the whole score to/);
+  assert.match(js, /\/admin\/restore/);
+  assert.match(js, /rowIndicators:[A-Za-z_$][\w$]*\(e\.size\.height\)/);
+  assert.doesNotMatch(js, /rowIndicators:m\(\)\?\[\]:vo\(e\.size\.height\)/);
 });
 
 test("Matrix Edit static app includes build provenance", async () => {

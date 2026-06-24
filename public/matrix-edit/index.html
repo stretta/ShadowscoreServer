@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/matrix-edit/assets/index-BFM_7h-8.js"></script>
+    <script type="module" crossorigin src="/matrix-edit/assets/index-S8wQ7uvV.js"></script>
     <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-1IK8VDXA.css">
   </head>
   <body>
@@ -20,8 +20,7 @@
         <select id="server-select" aria-label="ShadowScore servers"></select>
         <button id="discover" type="button">Scan</button>
         <input id="server" value="" aria-label="ShadowScore server" placeholder="Custom server" />
-        <select id="voice" aria-label="ShadowScore client"></select>
-        <datalist id="voice-picker" hidden></datalist>
+        <select id="voice" aria-label="ShadowScore voice"></select>
         <select id="rnbo-target" aria-label="RNBO client"></select>
         <input id="assignee" value="" aria-label="ShadowScore assignee" placeholder="Assignee" />
         <input id="device-id" value="" aria-label="ShadowScore device" placeholder="Device" />
@@ -74,7 +73,7 @@
         <label>
           Duration
           <span class="stepper">
-            <input id="duration" type="number" min="0.000001" max="255" step="any" value="4" />
+            <input id="duration" type="number" min="0.000001" max="255" step="any" value="0.25" />
             <span class="stepper-buttons">
               <button type="button" class="stepper-button" data-step-target="duration" data-step-amount="1" aria-label="Increase duration">+</button>
               <button type="button" class="stepper-button" data-step-target="duration" data-step-amount="-1" aria-label="Decrease duration">-</button>

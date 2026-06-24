@@ -83,12 +83,19 @@ test("plans scoped RNBO transport param writes", () => {
     port: 9000,
     address: "/rnbo/inst/2/messages/in/shadowscore"
   }, {
+    Clock: 1,
     MaxSteps: 64,
     ClockInterval: 125,
     Tempo: 120
   });
 
   assert.deepEqual(writes, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Clock",
+      value: 1
+    },
     {
       host: "192.168.68.96",
       port: 9000,

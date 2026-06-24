@@ -67,7 +67,7 @@
     }
 
     .transport-toolbar {
-      grid-template-columns: minmax(200px, 1fr) minmax(100px, 130px) minmax(110px, 150px) minmax(130px, 170px) auto;
+      grid-template-columns: minmax(200px, 1fr) minmax(100px, 130px) minmax(110px, 150px) minmax(130px, 170px) auto auto auto;
     }
 
     label {
@@ -333,6 +333,8 @@
         <input id="clock-interval" type="number" min="1" step="1" value="125">
       </label>
       <button id="apply-transport" type="button">Apply</button>
+      <button class="primary" id="start-transport" type="button">Start</button>
+      <button id="stop-transport" type="button">Stop</button>
     </section>
     <section class="paste-panel" aria-label="Ableton note array import">
       <label>Ableton note array
@@ -399,6 +401,8 @@
       maxSteps: document.querySelector("#max-steps"),
       clockInterval: document.querySelector("#clock-interval"),
       applyTransport: document.querySelector("#apply-transport"),
+      startTransport: document.querySelector("#start-transport"),
+      stopTransport: document.querySelector("#stop-transport"),
       newStart: document.querySelector("#new-start"),
       newDuration: document.querySelector("#new-duration"),
       newPitch: document.querySelector("#new-pitch"),
@@ -427,6 +431,8 @@
     els.replaceArray.addEventListener("click", () => importAbletonNotes("replace"));
     els.addArray.addEventListener("click", () => importAbletonNotes("add"));
     els.applyTransport.addEventListener("click", applyTransportParams);
+    els.startTransport.addEventListener("click", () => setTransportClock(1));
+    els.stopTransport.addEventListener("click", () => setTransportClock(0));
 
     await boot();
 
@@ -579,6 +585,8 @@
       els.maxSteps.disabled = state.transportSaving || !els.rnboTarget.value;
       els.clockInterval.disabled = state.transportSaving || !els.rnboTarget.value;
       els.applyTransport.disabled = state.transportSaving || !els.rnboTarget.value;
+      els.startTransport.disabled = state.transportSaving || !els.rnboTarget.value;
+      els.stopTransport.disabled = state.transportSaving || !els.rnboTarget.value;
     }
 
     function renderRnboTargets() {
@@ -725,6 +733,35 @@
         setStatus(`Applied playback transport to ${rnboTargetLabel(rnboTargets().find((target) => target.id === targetId))}.`);
       } catch (error) {
         setStatus(`Transport apply failed: ${error.message}`);
+      } finally {
+        state.transportSaving = false;
+        updateButtons();
+      }
+    }
+
+    async function setTransportClock(value) {
+      const targetId = els.rnboTarget.value;
+      if (!targetId) {
+        setStatus("Select an RNBO target first.");
+        return;
+      }
+      state.transportSaving = true;
+      updateButtons();
+      try {
+        const params = value
+          ? {
+              Tempo: clamp(readNumber(els.tempo.value, 120), 20, 400),
+              MaxSteps: clampInt(readNumber(els.maxSteps.value, 64), 1, 1024),
+              ClockInterval: Math.max(1, readNumber(els.clockInterval.value, 125)),
+              Clock: value
+            }
+          : { Clock: value };
+        await postJson(apiUrl(`/rnbo/targets/${encodeURIComponent(targetId)}/params`), {
+          params
+        });
+        setStatus(`${value ? "Started" : "Stopped"} transport from ${rnboTargetLabel(rnboTargets().find((target) => target.id === targetId))}.`);
+      } catch (error) {
+        setStatus(`Transport ${value ? "start" : "stop"} failed: ${error.message}`);
       } finally {
         state.transportSaving = false;
         updateButtons();

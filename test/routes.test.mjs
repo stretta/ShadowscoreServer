@@ -216,6 +216,7 @@ test("RNBO target param route writes playback transport params", async () => {
 
   const result = await requestJson(context, "POST", "/rnbo/targets/source-client/params", {
     params: {
+      Clock: 1,
       Tempo: 120,
       MaxSteps: 32,
       ClockInterval: 125
@@ -241,6 +242,82 @@ test("RNBO target param route writes playback transport params", async () => {
       port: 9000,
       path: "/rnbo/inst/2/params/ClockInterval",
       value: 125
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Clock",
+      value: 1
+    }
+  ]);
+});
+
+test("RNBO target param route derives MaxSteps for assigned targets and starts clock last", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        stagesPerBeat: 16,
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      }
+    }
+  });
+  await requestJson(context, "POST", "/context?replace=1", {
+    clip: {
+      time_selection_start: 0,
+      time_selection_end: 4
+    },
+    scale: {},
+    grid: {},
+    seed: 0
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "source-client",
+    rnboHost: "192.168.68.96",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-1/notes", [
+    {
+      pitch: 60,
+      start_time: 3.75,
+      duration: 0.25,
+      velocity: 100
+    }
+  ]);
+
+  const result = await requestJson(context, "POST", "/rnbo/targets/source-client/params", {
+    params: {
+      MaxSteps: 16,
+      Clock: 1
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(writes, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/MaxSteps",
+      value: 64
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Clock",
+      value: 1
     }
   ]);
 });
@@ -276,6 +353,9 @@ test("matrix edit route serves static app html", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore Matrix Edit/);
+  assert.match(response.body, /id="start-transport"/);
+  assert.match(response.body, /id="stop-transport"/);
+  assert.match(response.body, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
 });
 
 test("matrix edit route works with legacy generated static config", async () => {
@@ -326,6 +406,8 @@ test("event list route serves server-bundled editor html", async () => {
   assert.match(response.body, /id="tempo"/);
   assert.match(response.body, /id="max-steps"/);
   assert.match(response.body, /id="clock-interval"/);
+  assert.match(response.body, /id="start-transport"/);
+  assert.match(response.body, /id="stop-transport"/);
   assert.match(response.body, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
   assert.match(response.body, /POST/);
   assert.match(response.body, /\/voices\/\$\{encodeURIComponent\(state\.voiceId\)\}\/notes/);

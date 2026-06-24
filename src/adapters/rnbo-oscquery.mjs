@@ -1,7 +1,7 @@
 import dgram from "node:dgram";
 import { encodeOscMessage } from "./osc.mjs";
 
-const TRANSPORT_PARAMS = new Set(["MaxSteps", "ClockInterval", "Tempo"]);
+const TRANSPORT_PARAMS = new Set(["Clock", "MaxSteps", "ClockInterval", "Tempo", "SetStage"]);
 
 export async function discoverRnboTargets(config, options = {}) {
   const rnbo = config.rnbo ?? {};

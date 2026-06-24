@@ -1,5 +1,6 @@
 import { adminPage } from "./admin-page.mjs";
 import { serveStaticAsset } from "./static-files.mjs";
+import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
 import { configuredRnboTargets, discoverRnboTargets, writeRnboTransportParams } from "../adapters/rnbo-oscquery.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
@@ -55,7 +56,8 @@ export async function routeRequest(request, response, store, config, runtime = {
       }
       const body = await readJson(request);
       const params = body.params ?? body;
-      const writes = await writeRnboTransportParams(config, target, params, {
+      const preparedParams = prepareRnboTransportParams(store.getScore(), config, target, params);
+      const writes = await writeRnboTransportParams(config, target, preparedParams, {
         writer: runtime.rnboParamWriter
       });
       writeJson(response, 200, { ok: true, targetId, writes });
@@ -300,6 +302,45 @@ async function readAllRnboTargets(config, runtime) {
 async function findRnboTarget(config, runtime, targetId) {
   const targets = await readAllRnboTargets(config, runtime);
   return targets.find((target) => target.id === targetId);
+}
+
+function prepareRnboTransportParams(score, config, target, params) {
+  const entries = Object.entries(params ?? {});
+  const assignedVoiceId = assignedVoiceForTarget(score, target);
+  const prepared = new Map(entries);
+
+  if (assignedVoiceId) {
+    const compiled = compileScoreTransaction(score, config, 0, { ...target, voiceId: assignedVoiceId });
+    prepared.set("MaxSteps", compiled.patternLength);
+  }
+
+  if (prepared.has("Clock")) {
+    const clock = prepared.get("Clock");
+    prepared.delete("Clock");
+    prepared.set("Clock", clock);
+  }
+
+  return Object.fromEntries(prepared);
+}
+
+function assignedVoiceForTarget(score, target) {
+  for (const [voiceId, assignment] of Object.entries(score.assignments ?? {})) {
+    if (!assignment?.rnboAddress) {
+      continue;
+    }
+    const targetIds = new Set([target.id, target.localId].filter(Boolean));
+    if (targetIds.has(assignment.rnboTargetId)) {
+      return voiceId;
+    }
+    if (
+      assignment.rnboAddress === target.address &&
+      String(assignment.rnboHost || "") === String(target.host || "") &&
+      Number(assignment.rnboPort) === Number(target.port)
+    ) {
+      return voiceId;
+    }
+  }
+  return "";
 }
 
 async function readHardwareUnits(config, runtime) {

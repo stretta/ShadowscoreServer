@@ -93,7 +93,7 @@ configured RNBO inport address.
 - `POST /hardware/register`: register a peer hardware unit and its RNBO targets.
 - `POST /hardware/units/:unitId/heartbeat`: refresh a registered peer heartbeat.
 - `GET /rnbo/targets`: local and registered RNBO targets with availability state.
-- `POST /rnbo/targets/:targetId/params`: set playback transport RNBO params for a target. The current allowlist is `Tempo`, `MaxSteps`, and `ClockInterval`, for example `{ "params": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`.
+- `POST /rnbo/targets/:targetId/params`: set playback transport RNBO params for a target. The current allowlist is `Clock`, `Tempo`, `MaxSteps`, and `ClockInterval`, for example `{ "params": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`. Editor transport start/stop uses this route with `{ "params": { "Clock": 1 } }` or `{ "params": { "Clock": 0 } }`; sending the off/on message to one target is sufficient for the linked transport.
 - `GET /assignments`: current voice assignment map.
 - `POST /context`: replace or merge shared ShadowScore context.
 - `POST /voices`: add a voice with `{ "voiceId": "...", "assignment": { ... } }`.

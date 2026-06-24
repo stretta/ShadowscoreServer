@@ -20,8 +20,8 @@
         <select id="server-select" aria-label="ShadowScore servers"></select>
         <button id="discover" type="button">Scan</button>
         <input id="server" value="" aria-label="ShadowScore server" placeholder="Custom server" />
-        <input id="voice" value="" aria-label="ShadowScore voice" placeholder="Voice" list="voice-picker" />
-        <datalist id="voice-picker"></datalist>
+        <select id="voice" aria-label="ShadowScore client"></select>
+        <datalist id="voice-picker" hidden></datalist>
         <select id="rnbo-target" aria-label="RNBO client"></select>
         <input id="assignee" value="" aria-label="ShadowScore assignee" placeholder="Assignee" />
         <input id="device-id" value="" aria-label="ShadowScore device" placeholder="Device" />
@@ -38,6 +38,8 @@
         <input id="bridge" value="http://127.0.0.1:8790" aria-label="RNBO OSC bridge" />
         <button id="refresh" type="button">Refresh</button>
         <button id="sync" type="button">Sync</button>
+        <button id="start-transport" type="button">Start</button>
+        <button id="stop-transport" type="button">Stop</button>
         <span id="stage-status" class="stage-status"></span>
       </div>
       <div class="toolbar compact">
@@ -93,5 +95,52 @@
       <canvas id="matrix" aria-label="RNBO matrix parameter"></canvas>
       <p id="status"></p>
     </main>
+    <script>
+      (() => {
+        const serverInput = document.querySelector("#server");
+        const targetSelect = document.querySelector("#rnbo-target");
+        const status = document.querySelector("#status");
+        const start = document.querySelector("#start-transport");
+        const stop = document.querySelector("#stop-transport");
+        const serverUrl = () => {
+          const value = String(serverInput?.value || window.location.origin).trim().replace(/\/+$/, "");
+          return value.startsWith("http://") || value.startsWith("https://") ? value : `http://${value}`;
+        };
+        const setClock = async (value) => {
+          const targetId = targetSelect?.value;
+          if (!targetId) {
+            if (status) {
+              status.textContent = "Select an RNBO target first.";
+            }
+            return;
+          }
+          start.disabled = true;
+          stop.disabled = true;
+          try {
+            const response = await fetch(`${serverUrl()}/rnbo/targets/${encodeURIComponent(targetId)}/params`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ params: { Clock: value } })
+            });
+            if (!response.ok) {
+              throw new Error(await response.text());
+            }
+            await response.json();
+            if (status) {
+              status.textContent = `${value ? "Started" : "Stopped"} transport from ${targetSelect.options[targetSelect.selectedIndex]?.textContent || targetId}.`;
+            }
+          } catch (error) {
+            if (status) {
+              status.textContent = `Transport ${value ? "start" : "stop"} failed: ${error.message}`;
+            }
+          } finally {
+            start.disabled = false;
+            stop.disabled = false;
+          }
+        };
+        start?.addEventListener("click", () => setClock(1));
+        stop?.addEventListener("click", () => setClock(0));
+      })();
+    </script>
   </body>
 </html>

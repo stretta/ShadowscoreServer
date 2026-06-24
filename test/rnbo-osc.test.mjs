@@ -91,7 +91,7 @@ test("sends one OSC packet per compiled transaction message", async () => {
   const compiled = await sendScoreTransaction(socket, config, createScore(), 124);
 
   assert.equal(compiled.messages.length, 4);
-  assert.equal(packets.length, 4);
+  assert.equal(packets.length, 5);
   assert.equal(packets[0].host, "127.0.0.1");
   assert.equal(packets[0].port, 9000);
 });
@@ -130,7 +130,7 @@ test("sends one transaction per configured RNBO target", async () => {
   const result = await sendScoreTransaction(socket, config, createScore(), 500);
 
   assert.equal(result.targets.length, 2);
-  assert.equal(packets.length, 6);
+  assert.equal(packets.length, 8);
 });
 
 test("sends score updates to assignment-bound RNBO targets", async () => {
@@ -165,7 +165,7 @@ test("sends score updates to assignment-bound RNBO targets", async () => {
   const result = await sendScoreTransaction(socket, config, score, 700);
 
   assert.equal(result.noteCount, 1);
-  assert.equal(packets.length, 3);
+  assert.equal(packets.length, 4);
   assert.equal(packets[0].host, "192.168.68.96");
   assert.equal(packets[0].port, 1234);
   assert.deepEqual(result.messages[0].values, [2202, 1, 700, 1, 1, 32, 16, 0]);

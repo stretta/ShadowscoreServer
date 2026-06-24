@@ -11,11 +11,17 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
 
   assert.match(html, /<script type="module" crossorigin src="\/matrix-edit\/assets\/[^"]+\.js"><\/script>/);
   assert.match(html, /<link rel="stylesheet" crossorigin href="\/matrix-edit\/assets\/[^"]+\.css">/);
+  assert.match(html, /id="start-transport"/);
+  assert.match(html, /id="stop-transport"/);
+  assert.match(html, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
+  assert.match(html, /Clock/);
 });
 
 test("Matrix Edit static app includes ShadowScore client wiring", async () => {
-  const { js } = await readBuiltApp();
+  const { html, js } = await readBuiltApp();
 
+  assert.match(html, /<select id="voice" aria-label="ShadowScore client"><\/select>/);
+  assert.doesNotMatch(html, /<input id="voice"/);
   assert.match(js, /\/session/);
   assert.match(js, /\/score/);
   assert.match(js, /\/collab/);

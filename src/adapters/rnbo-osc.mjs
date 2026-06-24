@@ -58,10 +58,11 @@ export async function sendScoreTransaction(socket, config, score, transactionId)
         await delay(config.rnbo.sendDelayMs);
       }
     }
+    await sendOscParamWrite(socket, target, "MaxSteps", compiled.patternLength);
     compiledTargets.push({ target, compiled });
     if (config.rnbo.log !== false) {
       console.log(
-        `[rnbo] sent score v${score.version} txn=${transactionId} voice=${target.voiceId ?? "*"} notes=${compiled.noteCount} -> ${target.host}:${target.port}${target.address}`
+        `[rnbo] sent score v${score.version} txn=${transactionId} voice=${target.voiceId ?? "*"} notes=${compiled.noteCount} maxSteps=${compiled.patternLength} -> ${target.host}:${target.port}${target.address}`
       );
     }
   }
@@ -191,6 +192,23 @@ async function sendOscMessage(socket, config, target, values) {
   });
 }
 
+async function sendOscParamWrite(socket, target, name, value) {
+  const instanceId = readInstanceId(target.address);
+  if (!instanceId) {
+    throw new Error(`RNBO target '${target.id ?? ""}' does not include an instance id`);
+  }
+  const packet = encodeOscMessage(`/rnbo/inst/${instanceId}/params/${name}`, [value]);
+  await new Promise((resolve, reject) => {
+    socket.send(packet, target.port, target.host, (error) => {
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    });
+  });
+}
+
 function rnboTargets(config, score) {
   const assignedTargets = assignmentRnboTargets(config, score);
   if (assignedTargets.length > 0) {
@@ -241,6 +259,11 @@ function clampInt(value, min, max) {
     return min;
   }
   return Math.min(max, Math.max(min, rounded));
+}
+
+function readInstanceId(address) {
+  const match = String(address ?? "").match(/\/rnbo\/inst\/([^/]+)/);
+  return match ? match[1] : "";
 }
 
 function delay(ms) {

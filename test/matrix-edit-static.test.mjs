@@ -36,7 +36,12 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(js, /voice\.assignment\.replace/);
   assert.match(js, /Switch the whole score to/);
   assert.match(js, /\/admin\/restore/);
-  assert.match(js, /rowIndicators:[A-Za-z_$][\w$]*\(e\.size\.height\)/);
+  assert.match(js, /cellFillFractions/);
+  assert.match(js, /setCellFillFractions/);
+  assert.match(js, /dragWithinCell/);
+  assert.match(js, /cellY/);
+  assert.match(js, /Velocity \$\{[^}]+\} selected for new notes\./);
+  assert.match(js, /stage \$\{[^}]+\} velocity \$\{[^}]+\}\. Saving/);
   assert.doesNotMatch(js, /rowIndicators:m\(\)\?\[\]:vo\(e\.size\.height\)/);
 });
 

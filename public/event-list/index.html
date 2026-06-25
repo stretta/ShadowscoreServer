@@ -330,7 +330,7 @@
         <input id="max-steps" type="number" min="1" max="1024" step="1" value="64">
       </label>
       <label>Clock interval
-        <input id="clock-interval" type="number" min="1" step="1" value="125">
+        <input id="clock-interval" type="number" min="1" step="1" value="120">
       </label>
       <button id="apply-transport" type="button">Apply</button>
       <button class="primary" id="start-transport" type="button">Start</button>
@@ -727,7 +727,7 @@
           params: {
             Tempo: clamp(readNumber(els.tempo.value, 120), 20, 400),
             MaxSteps: clampInt(readNumber(els.maxSteps.value, 64), 1, 1024),
-            ClockInterval: Math.max(1, readNumber(els.clockInterval.value, 125))
+            ClockInterval: Math.max(1, readNumber(els.clockInterval.value, 120))
           }
         });
         setStatus(`Applied playback transport to ${rnboTargetLabel(rnboTargets().find((target) => target.id === targetId))}.`);
@@ -752,7 +752,7 @@
           ? {
               Tempo: clamp(readNumber(els.tempo.value, 120), 20, 400),
               MaxSteps: clampInt(readNumber(els.maxSteps.value, 64), 1, 1024),
-              ClockInterval: Math.max(1, readNumber(els.clockInterval.value, 125)),
+              ClockInterval: Math.max(1, readNumber(els.clockInterval.value, 120)),
               Clock: value
             }
           : { Clock: value };

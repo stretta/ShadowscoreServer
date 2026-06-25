@@ -58,7 +58,12 @@ export async function sendScoreTransaction(socket, config, score, transactionId)
         await delay(config.rnbo.sendDelayMs);
       }
     }
-    await sendOscParamWrite(socket, target, "MaxSteps", compiled.patternLength);
+    for (const message of scoreTransportInportMessages(config, compiled)) {
+      await sendOscInportMessage(socket, target, message.name, message.value);
+      if (config.rnbo.sendDelayMs > 0) {
+        await delay(config.rnbo.sendDelayMs);
+      }
+    }
     compiledTargets.push({ target, compiled });
     if (config.rnbo.log !== false) {
       console.log(
@@ -68,6 +73,15 @@ export async function sendScoreTransaction(socket, config, score, transactionId)
   }
 
   return compiledTargets.length === 1 ? compiledTargets[0].compiled : { targets: compiledTargets };
+}
+
+export function scoreTransportInportMessages(config, compiled) {
+  const transport = config.rnbo?.transport ?? {};
+  return [
+    { name: "Tempo", value: finiteNumber(transport.Tempo, 120) },
+    { name: "ClockInterval", value: finiteNumber(transport.ClockInterval, 120) },
+    { name: "MaxSteps", value: compiled.patternLength }
+  ];
 }
 
 export function shouldSendScoreTransaction(event) {
@@ -192,12 +206,12 @@ async function sendOscMessage(socket, config, target, values) {
   });
 }
 
-async function sendOscParamWrite(socket, target, name, value) {
+async function sendOscInportMessage(socket, target, name, value) {
   const instanceId = readInstanceId(target.address);
   if (!instanceId) {
     throw new Error(`RNBO target '${target.id ?? ""}' does not include an instance id`);
   }
-  const packet = encodeOscMessage(`/rnbo/inst/${instanceId}/params/${name}`, [value]);
+  const packet = encodeOscMessage(`/rnbo/inst/${instanceId}/messages/in/${name}`, [value]);
   await new Promise((resolve, reject) => {
     socket.send(packet, target.port, target.host, (error) => {
       if (error) {
@@ -259,6 +273,11 @@ function clampInt(value, min, max) {
     return min;
   }
   return Math.min(max, Math.max(min, rounded));
+}
+
+function finiteNumber(value, fallback) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function readInstanceId(address) {

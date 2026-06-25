@@ -60,6 +60,7 @@ export async function routeRequest(request, response, store, config, runtime = {
       const writes = await writeRnboTransportParams(config, target, preparedParams, {
         writer: runtime.rnboParamWriter
       });
+      rememberRnboTransportParams(config, preparedParams);
       writeJson(response, 200, { ok: true, targetId, writes });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
@@ -321,6 +322,19 @@ function prepareRnboTransportParams(score, config, target, params) {
   }
 
   return Object.fromEntries(prepared);
+}
+
+function rememberRnboTransportParams(config, params) {
+  config.rnbo.transport ??= {};
+  for (const [name, value] of Object.entries(params ?? {})) {
+    if (name === "Clock") {
+      continue;
+    }
+    const number = Number(value);
+    if (Number.isFinite(number)) {
+      config.rnbo.transport[name] = number;
+    }
+  }
 }
 
 function assignedVoiceForTarget(score, target) {

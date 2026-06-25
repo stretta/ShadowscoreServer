@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { compileScoreTransaction, sendScoreTransaction, shouldSendScoreTransaction } from "../src/adapters/rnbo-osc.mjs";
+import { compileScoreTransaction, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction } from "../src/adapters/rnbo-osc.mjs";
 
 test("compiles ensemble score into RNBO ShadowScore transaction messages", () => {
   const config = mergeConfig(defaultConfig, {
@@ -91,9 +91,50 @@ test("sends one OSC packet per compiled transaction message", async () => {
   const compiled = await sendScoreTransaction(socket, config, createScore(), 124);
 
   assert.equal(compiled.messages.length, 4);
-  assert.equal(packets.length, 5);
+  assert.equal(packets.length, 7);
   assert.equal(packets[0].host, "127.0.0.1");
   assert.equal(packets[0].port, 9000);
+  assert.equal(readOscAddress(packets[0].packet), "/rnbo/inst/2/messages/in/shadowscore");
+  assert.equal(readOscAddress(packets[6].packet), "/rnbo/inst/2/messages/in/MaxSteps");
+});
+
+test("sends score-owned transport state as RNBO message inports after score data", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      stagesPerBeat: 16,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      log: false,
+      transport: {
+        Tempo: 132.5,
+        ClockInterval: 100,
+        MaxSteps: 16
+      }
+    }
+  });
+  const packets = [];
+  const socket = {
+    send(packet, port, host, callback) {
+      packets.push({ packet, port, host });
+      callback();
+    }
+  };
+
+  await sendScoreTransaction(socket, config, createScore(), 124);
+
+  assert.deepEqual(packets.slice(-3).map(({ packet }) => readOscAddress(packet)), [
+    "/rnbo/inst/2/messages/in/Tempo",
+    "/rnbo/inst/2/messages/in/ClockInterval",
+    "/rnbo/inst/2/messages/in/MaxSteps"
+  ]);
+  assert.deepEqual(scoreTransportInportMessages(config, { patternLength: 32 }), [
+    { name: "Tempo", value: 132.5 },
+    { name: "ClockInterval", value: 100 },
+    { name: "MaxSteps", value: 32 }
+  ]);
 });
 
 test("sends one transaction per configured RNBO target", async () => {
@@ -130,7 +171,7 @@ test("sends one transaction per configured RNBO target", async () => {
   const result = await sendScoreTransaction(socket, config, createScore(), 500);
 
   assert.equal(result.targets.length, 2);
-  assert.equal(packets.length, 8);
+  assert.equal(packets.length, 12);
 });
 
 test("sends score updates to assignment-bound RNBO targets", async () => {
@@ -165,7 +206,7 @@ test("sends score updates to assignment-bound RNBO targets", async () => {
   const result = await sendScoreTransaction(socket, config, score, 700);
 
   assert.equal(result.noteCount, 1);
-  assert.equal(packets.length, 4);
+  assert.equal(packets.length, 6);
   assert.equal(packets[0].host, "192.168.68.96");
   assert.equal(packets[0].port, 1234);
   assert.deepEqual(result.messages[0].values, [2202, 1, 700, 1, 1, 32, 16, 0]);
@@ -230,4 +271,9 @@ function createScore() {
       }
     }
   };
+}
+
+function readOscAddress(packet) {
+  const end = packet.indexOf(0, 0);
+  return packet.subarray(0, end).toString("utf8");
 }

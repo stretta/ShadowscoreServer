@@ -192,7 +192,7 @@ test("hardware heartbeat refreshes a registered unit", async () => {
   assert.match(heartbeat.unit.lastSeenAt, /1970-01-01T00:00:02.000Z/);
 });
 
-test("RNBO target param route writes playback transport params", async () => {
+test("RNBO target param route writes playback transport controls", async () => {
   const writes = [];
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
@@ -219,7 +219,9 @@ test("RNBO target param route writes playback transport params", async () => {
       Clock: 1,
       Tempo: 120,
       MaxSteps: 32,
-      ClockInterval: 125
+      ClockInterval: 125,
+      SetStage: 0,
+      Stage: 0
     }
   });
 
@@ -228,20 +230,32 @@ test("RNBO target param route writes playback transport params", async () => {
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Tempo",
+      path: "/rnbo/inst/2/messages/in/Tempo",
       value: 120
     },
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/MaxSteps",
+      path: "/rnbo/inst/2/messages/in/MaxSteps",
       value: 32
     },
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/ClockInterval",
+      path: "/rnbo/inst/2/messages/in/ClockInterval",
       value: 125
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/messages/in/SetStage",
+      value: 0
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/messages/in/Stage",
+      value: 0
     },
     {
       host: "192.168.68.96",
@@ -250,6 +264,8 @@ test("RNBO target param route writes playback transport params", async () => {
       value: 1
     }
   ]);
+  assert.equal(context.config.rnbo.transport.MaxSteps, 32);
+  assert.equal(context.config.rnbo.transport.Clock, undefined);
 });
 
 test("RNBO target param route derives MaxSteps for assigned targets and starts clock last", async () => {
@@ -310,7 +326,7 @@ test("RNBO target param route derives MaxSteps for assigned targets and starts c
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/MaxSteps",
+      path: "/rnbo/inst/2/messages/in/MaxSteps",
       value: 64
     },
     {
@@ -320,6 +336,7 @@ test("RNBO target param route derives MaxSteps for assigned targets and starts c
       value: 1
     }
   ]);
+  assert.equal(context.config.rnbo.transport.MaxSteps, 64);
 });
 
 test("RNBO target param route rejects unsupported params", async () => {
@@ -343,7 +360,7 @@ test("RNBO target param route rejects unsupported params", async () => {
   });
 
   assert.equal(response.status, 400);
-  assert.match(response.body, /unsupported RNBO transport parameter 'Gain'/);
+  assert.match(response.body, /unsupported RNBO transport control 'Gain'/);
 });
 
 test("matrix edit route serves static app html", async () => {

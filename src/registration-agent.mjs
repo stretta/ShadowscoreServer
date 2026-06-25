@@ -28,17 +28,25 @@ export async function runRegistrationAgent(config, options = {}) {
   }
 
   setInterval(() => {
-    void heartbeat(sessionHostUrl, unitId).catch(async (error) => {
-      console.error(`[registration-agent] heartbeat failed: ${messageForError(error)}`);
-      await register(config, sessionHostUrl, unitId).catch((registerError) => {
-        console.error(`[registration-agent] re-register failed: ${messageForError(registerError)}`);
+    void refreshRegistration(config, sessionHostUrl, unitId).catch(async (error) => {
+      console.error(`[registration-agent] refresh failed: ${messageForError(error)}`);
+      await heartbeat(sessionHostUrl, unitId).catch((heartbeatError) => {
+        console.error(`[registration-agent] heartbeat failed: ${messageForError(heartbeatError)}`);
       });
     });
   }, intervalMs);
 }
 
-async function register(config, sessionHostUrl, unitId) {
+export async function refreshRegistration(config, sessionHostUrl, unitId, options = {}) {
   const targets = await readLocalTargets(config, unitId);
+  if (targets.length > 0) {
+    return register(config, sessionHostUrl, unitId, { ...options, targets });
+  }
+  return heartbeat(sessionHostUrl, unitId, options);
+}
+
+async function register(config, sessionHostUrl, unitId, options = {}) {
+  const targets = options.targets ?? await readLocalTargets(config, unitId);
   const body = {
     id: unitId,
     role: "peer",
@@ -48,13 +56,13 @@ async function register(config, sessionHostUrl, unitId) {
     heartbeatTtlMs: config.registration?.heartbeatTtlMs,
     targets
   };
-  const response = await postJson(`${sessionHostUrl}/hardware/register`, body);
+  const response = await postJson(`${sessionHostUrl}/hardware/register`, body, options.fetchImpl);
   console.log(`[registration-agent] registered ${unitId} with ${targets.length} target(s)`);
   return response;
 }
 
-async function heartbeat(sessionHostUrl, unitId) {
-  await postJson(`${sessionHostUrl}/hardware/units/${encodeURIComponent(unitId)}/heartbeat`, {});
+async function heartbeat(sessionHostUrl, unitId, options = {}) {
+  await postJson(`${sessionHostUrl}/hardware/units/${encodeURIComponent(unitId)}/heartbeat`, {}, options.fetchImpl);
   console.log(`[registration-agent] heartbeat ${unitId}`);
 }
 
@@ -73,8 +81,8 @@ export async function readLocalTargets(config, unitId = config.server?.hostIdent
   });
 }
 
-async function postJson(url, body) {
-  const response = await fetch(url, {
+async function postJson(url, body, fetchImpl = globalThis.fetch) {
+  const response = await fetchImpl(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body)

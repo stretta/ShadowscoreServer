@@ -1,7 +1,8 @@
 import dgram from "node:dgram";
 import { encodeOscMessage } from "./osc.mjs";
 
-const TRANSPORT_PARAMS = new Set(["Clock", "MaxSteps", "ClockInterval", "Tempo", "SetStage"]);
+const TRANSPORT_PARAMS = new Set(["Clock"]);
+const TRANSPORT_INPORTS = new Set(["MaxSteps", "ClockInterval", "Tempo", "SetStage", "Stage"]);
 
 export async function discoverRnboTargets(config, options = {}) {
   const rnbo = config.rnbo ?? {};
@@ -23,7 +24,7 @@ export async function discoverRnboTargets(config, options = {}) {
 
 export async function writeRnboTransportParams(config, target, params, options = {}) {
   const writes = rnboTransportParamWrites(target, params);
-  const writer = options.writer ?? sendOscParamWrite;
+  const writer = options.writer ?? sendOscInportMessage;
 
   for (const write of writes) {
     await writer(write);
@@ -53,12 +54,16 @@ export function rnboTransportParamWrites(target, params) {
     throw new Error("params must include at least one transport parameter");
   }
 
-  return entries.map(([name, value]) => ({
-    host,
-    port,
-    path: `/rnbo/inst/${instanceId}/params/${normalizeTransportParamName(name)}`,
-    value: finiteNumber(value, name)
-  }));
+  return entries.map(([name, value]) => {
+    const controlName = normalizeTransportControlName(name);
+    const controlRoot = TRANSPORT_PARAMS.has(controlName) ? "params" : "messages/in";
+    return {
+      host,
+      port,
+      path: `/rnbo/inst/${instanceId}/${controlRoot}/${controlName}`,
+      value: finiteNumber(value, name)
+    };
+  });
 }
 
 export function configuredRnboTargets(config) {
@@ -198,7 +203,7 @@ function readInstanceId(address) {
   return match ? match[1] : "";
 }
 
-async function sendOscParamWrite(write) {
+async function sendOscInportMessage(write) {
   const socket = dgram.createSocket("udp4");
   try {
     const packet = encodeOscMessage(write.path, [write.value]);
@@ -216,12 +221,12 @@ async function sendOscParamWrite(write) {
   }
 }
 
-function normalizeTransportParamName(name) {
-  const paramName = String(name ?? "");
-  if (!TRANSPORT_PARAMS.has(paramName)) {
-    throw new Error(`unsupported RNBO transport parameter '${paramName}'`);
+function normalizeTransportControlName(name) {
+  const controlName = String(name ?? "");
+  if (!TRANSPORT_PARAMS.has(controlName) && !TRANSPORT_INPORTS.has(controlName)) {
+    throw new Error(`unsupported RNBO transport control '${controlName}'`);
   }
-  return paramName;
+  return controlName;
 }
 
 function finiteNumber(value, name) {

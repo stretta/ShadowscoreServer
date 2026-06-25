@@ -76,7 +76,7 @@ test("RNBOOSCQuery discovery returns an empty target list on fetch failure", asy
   assert.deepEqual(targets, []);
 });
 
-test("plans scoped RNBO transport param writes", () => {
+test("plans scoped RNBO transport writes", () => {
   const writes = rnboTransportParamWrites({
     id: "rnbo-inst-2:shadowscore",
     host: "192.168.68.96",
@@ -86,7 +86,9 @@ test("plans scoped RNBO transport param writes", () => {
     Clock: 1,
     MaxSteps: 64,
     ClockInterval: 125,
-    Tempo: 120
+    Tempo: 120,
+    SetStage: 0,
+    Stage: 0
   });
 
   assert.deepEqual(writes, [
@@ -99,25 +101,37 @@ test("plans scoped RNBO transport param writes", () => {
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/MaxSteps",
+      path: "/rnbo/inst/2/messages/in/MaxSteps",
       value: 64
     },
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/ClockInterval",
+      path: "/rnbo/inst/2/messages/in/ClockInterval",
       value: 125
     },
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Tempo",
+      path: "/rnbo/inst/2/messages/in/Tempo",
       value: 120
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/messages/in/SetStage",
+      value: 0
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/messages/in/Stage",
+      value: 0
     }
   ]);
 });
 
-test("rejects unsupported RNBO transport param writes", () => {
+test("rejects unsupported RNBO transport writes", () => {
   assert.throws(
     () => rnboTransportParamWrites({
       id: "rnbo-inst-2:shadowscore",
@@ -127,7 +141,7 @@ test("rejects unsupported RNBO transport param writes", () => {
     }, {
       Gain: 1
     }),
-    /unsupported RNBO transport parameter 'Gain'/
+    /unsupported RNBO transport control 'Gain'/
   );
 });
 

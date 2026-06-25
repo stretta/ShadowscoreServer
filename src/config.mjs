@@ -78,6 +78,11 @@ export const defaultConfig = Object.freeze({
       addressPattern: "shadowscore"
     },
     stagesPerBeat: 16,
+    transport: {
+      Tempo: 120,
+      ClockInterval: 120,
+      MaxSteps: 64
+    },
     clearRowCount: 64,
     transactionStart: 1000,
     sendDelayMs: 5

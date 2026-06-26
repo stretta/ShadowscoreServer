@@ -4,6 +4,7 @@ import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
 import { routeRequest } from "./http/routes.mjs";
+import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { createPeerRegistry } from "./registration/peer-registry.mjs";
 import { createScorePersistence, loadPersistedScore } from "./state/persistence.mjs";
 import { createInitialScore, createScoreStore } from "./state/score-store.mjs";
@@ -14,10 +15,11 @@ const store = createScoreStore(initialScore);
 const persistence = createScorePersistence(store, config);
 const rnbo = createRnboOscAdapter(config);
 const peerRegistry = createPeerRegistry(config);
+const macroPlayback = createMacroPlayback(store, config);
 rnbo.attach(store);
 
 const server = http.createServer((request, response) => {
-  routeRequest(request, response, store, config, { peerRegistry }).catch((error) => {
+  routeRequest(request, response, store, config, { macroPlayback, peerRegistry }).catch((error) => {
     response.writeHead(500, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ ok: false, error: error.message }));
   });
@@ -45,6 +47,7 @@ function shutdown() {
     try {
       await persistence.close();
       collaboration.close();
+      macroPlayback.close();
       rnbo.close();
       process.exit(0);
     } catch (error) {

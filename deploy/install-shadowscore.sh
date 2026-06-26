@@ -135,12 +135,17 @@ config.static.apps = {
   matrixEdit: {
     root: "public/matrix-edit",
     index: "index.html",
-    routes: ["/matrix-edit", "/"]
+    routes: ["/matrix-edit"]
   },
   eventList: {
     root: "public/event-list",
     index: "index.html",
     routes: ["/event-list"]
+  },
+  structureEditor: {
+    root: "public/structure-editor",
+    index: "index.html",
+    routes: ["/structure-editor", "/"]
   }
 };
 if (process.env.SHADOWSCORE_ROLE_VALUE === "host") {
@@ -186,6 +191,7 @@ if [[ "$ROLE" == "host" ]]; then
   ready=0
   for _ in $(seq 1 20); do
     if curl -fsS --max-time 1 "http://127.0.0.1:8790/healthz" >/dev/null 2>&1 \
+      && curl -fsS --max-time 1 "http://127.0.0.1:8790/" | grep -q "ShadowScore Structure Editor" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/matrix-edit" | grep -q "ShadowScore Matrix Edit" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/event-list" | grep -q "ShadowScore Event List"; then
       ready=1

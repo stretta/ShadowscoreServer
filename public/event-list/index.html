@@ -66,8 +66,38 @@
       grid-template-columns: minmax(180px, 260px) auto minmax(220px, 1fr);
     }
 
-    .transport-toolbar {
-      grid-template-columns: minmax(200px, 1fr) minmax(100px, 130px) minmax(110px, 150px) minmax(130px, 170px) auto auto auto;
+    .clip-toolbar {
+      grid-template-columns: minmax(220px, 1fr) auto auto auto;
+    }
+
+    .clip-wrap {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: auto;
+    }
+
+    .inline {
+      align-items: center;
+      display: grid;
+      gap: 6px;
+      grid-template-columns: minmax(80px, 1fr) minmax(72px, auto);
+    }
+
+    .clip-attributes {
+      align-items: end;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(120px, 150px) minmax(170px, 210px) minmax(140px, 180px) minmax(110px, auto) minmax(110px, auto) minmax(140px, 1fr) auto;
+      padding: 12px;
+    }
+
+    .check-label {
+      align-items: center;
+      align-self: center;
+      display: flex;
+      gap: 8px;
+      padding-bottom: 7px;
     }
 
     label {
@@ -239,6 +269,10 @@
       min-width: 80px;
     }
 
+    td select {
+      min-width: 130px;
+    }
+
     td input[name="note_id"] {
       min-width: 96px;
     }
@@ -295,10 +329,55 @@
         <input id="server" value="" placeholder="http://pt5.local:8790">
       </label>
     </section>
-    <section class="toolbar" aria-label="Voice note controls">
-      <label>Voice
-        <select id="voice"></select>
+    <section class="toolbar clip-toolbar" aria-label="Clip selection">
+      <label>Clip
+        <select id="clip"></select>
       </label>
+      <button id="new-clip" type="button">New</button>
+      <button id="rename-clip" type="button">Rename</button>
+      <button class="danger" id="delete-clip" type="button">Delete</button>
+    </section>
+    <section class="clip-wrap clip-attributes" aria-label="Clip attributes">
+      <label>Playback
+        <select id="clip-playback-type">
+          <option value="looped">looped</option>
+          <option value="one-shot">one-shot</option>
+        </select>
+      </label>
+      <label>Duration
+        <span class="inline">
+          <input id="clip-duration-value" type="number" min="0.001" step="0.001">
+          <select id="clip-duration-unit">
+            <option value="bars">bars</option>
+            <option value="beats">beats</option>
+          </select>
+        </span>
+      </label>
+      <label>Time
+        <span class="inline">
+          <input id="clip-time-numerator" type="number" min="1" max="64" step="1" value="4">
+          <input id="clip-time-denominator" type="number" min="1" max="64" step="1" value="4">
+        </span>
+      </label>
+      <label class="check-label">
+        <input id="clip-follows-pitch" type="checkbox">
+        followsPitch
+      </label>
+      <label class="check-label">
+        <input id="clip-follows-scale" type="checkbox">
+        followsScale
+      </label>
+      <label>Transpose
+        <input id="clip-transpose-mode" spellcheck="false" value="scale-degree">
+      </label>
+      <button class="primary" id="save-clip-attributes" type="button">Save Attributes</button>
+    </section>
+    <section class="summary" aria-live="polite">
+      <span><strong id="note-count">0</strong> notes</span>
+      <span id="version"></span>
+      <span id="assignment"></span>
+    </section>
+    <section class="toolbar" aria-label="Clip note controls">
       <label>Start
         <input id="new-start" type="number" min="0" step="0.001" value="0">
       </label>
@@ -314,28 +393,6 @@
       <button id="add" type="button">Add</button>
       <button class="primary" id="save" type="button">Save</button>
     </section>
-    <section class="summary" aria-live="polite">
-      <span><strong id="note-count">0</strong> notes</span>
-      <span id="version"></span>
-      <span id="assignment"></span>
-    </section>
-    <section class="toolbar transport-toolbar" aria-label="RNBO playback transport">
-      <label>RNBO target
-        <select id="rnbo-target"></select>
-      </label>
-      <label>Tempo
-        <input id="tempo" type="number" min="20" max="400" step="0.01" value="120">
-      </label>
-      <label>Steps
-        <input id="max-steps" type="number" min="1" max="1024" step="1" value="64">
-      </label>
-      <label>Clock interval
-        <input id="clock-interval" type="number" min="1" step="1" value="120">
-      </label>
-      <button id="apply-transport" type="button">Apply</button>
-      <button class="primary" id="start-transport" type="button">Start</button>
-      <button id="stop-transport" type="button">Stop</button>
-    </section>
     <section class="paste-panel" aria-label="Ableton note array import">
       <label>Ableton note array
         <textarea id="ableton-notes" spellcheck="false" placeholder='[{"pitch":60,"start_time":0,"duration":0.25,"velocity":100}]'></textarea>
@@ -343,7 +400,7 @@
       <button id="replace-array" type="button">Replace</button>
       <button id="add-array" type="button">Add</button>
     </section>
-    <section class="table-wrap" aria-label="Voice note events">
+    <section class="table-wrap" aria-label="Clip note events">
       <table>
         <thead>
           <tr>
@@ -362,7 +419,7 @@
         </thead>
         <tbody id="notes"></tbody>
       </table>
-      <div class="empty" id="empty">No notes for this voice.</div>
+      <div class="empty" id="empty">No notes for this clip.</div>
     </section>
   </main>
   <script type="module">
@@ -373,11 +430,11 @@
       serverUrl: "",
       servers: [],
       eventSource: undefined,
-      voiceId: "",
+      clipId: "",
       notes: [],
       dirty: false,
-      saving: false,
-      transportSaving: false
+      attributesDirty: false,
+      saving: false
     };
 
     const els = {
@@ -385,7 +442,19 @@
       serverSelect: document.querySelector("#server-select"),
       discover: document.querySelector("#discover"),
       server: document.querySelector("#server"),
-      voice: document.querySelector("#voice"),
+      clip: document.querySelector("#clip"),
+      newClip: document.querySelector("#new-clip"),
+      renameClip: document.querySelector("#rename-clip"),
+      deleteClip: document.querySelector("#delete-clip"),
+      clipPlaybackType: document.querySelector("#clip-playback-type"),
+      clipDurationValue: document.querySelector("#clip-duration-value"),
+      clipDurationUnit: document.querySelector("#clip-duration-unit"),
+      clipTimeNumerator: document.querySelector("#clip-time-numerator"),
+      clipTimeDenominator: document.querySelector("#clip-time-denominator"),
+      clipFollowsPitch: document.querySelector("#clip-follows-pitch"),
+      clipFollowsScale: document.querySelector("#clip-follows-scale"),
+      clipTransposeMode: document.querySelector("#clip-transpose-mode"),
+      saveClipAttributes: document.querySelector("#save-clip-attributes"),
       notes: document.querySelector("#notes"),
       empty: document.querySelector("#empty"),
       count: document.querySelector("#note-count"),
@@ -396,13 +465,6 @@
       abletonNotes: document.querySelector("#ableton-notes"),
       replaceArray: document.querySelector("#replace-array"),
       addArray: document.querySelector("#add-array"),
-      rnboTarget: document.querySelector("#rnbo-target"),
-      tempo: document.querySelector("#tempo"),
-      maxSteps: document.querySelector("#max-steps"),
-      clockInterval: document.querySelector("#clock-interval"),
-      applyTransport: document.querySelector("#apply-transport"),
-      startTransport: document.querySelector("#start-transport"),
-      stopTransport: document.querySelector("#stop-transport"),
       newStart: document.querySelector("#new-start"),
       newDuration: document.querySelector("#new-duration"),
       newPitch: document.querySelector("#new-pitch"),
@@ -417,22 +479,32 @@
     els.server.addEventListener("change", () => {
       void loadServer(els.server.value);
     });
-    els.voice.addEventListener("change", () => {
-      if (state.dirty && !window.confirm("Discard unsaved edits for this voice?")) {
-        els.voice.value = state.voiceId;
+    els.clip.addEventListener("change", () => {
+      if ((state.dirty || state.attributesDirty) && !window.confirm("Discard unsaved edits for this clip?")) {
+        els.clip.value = state.clipId;
         return;
       }
-      state.voiceId = els.voice.value;
-      renderRnboTargets();
-      loadVoice();
+      state.clipId = els.clip.value;
+      loadClip();
     });
+    els.newClip.addEventListener("click", createClip);
+    els.renameClip.addEventListener("click", renameClip);
+    els.deleteClip.addEventListener("click", deleteClip);
+    [
+      els.clipPlaybackType,
+      els.clipDurationValue,
+      els.clipDurationUnit,
+      els.clipTimeNumerator,
+      els.clipTimeDenominator,
+      els.clipFollowsPitch,
+      els.clipFollowsScale,
+      els.clipTransposeMode
+    ].forEach((input) => input.addEventListener("input", markAttributesDirty));
+    els.saveClipAttributes.addEventListener("click", saveClipAttributes);
     els.add.addEventListener("click", addNote);
     els.save.addEventListener("click", saveNotes);
     els.replaceArray.addEventListener("click", () => importAbletonNotes("replace"));
     els.addArray.addEventListener("click", () => importAbletonNotes("add"));
-    els.applyTransport.addEventListener("click", applyTransportParams);
-    els.startTransport.addEventListener("click", () => setTransportClock(1));
-    els.stopTransport.addEventListener("click", () => setTransportClock(0));
 
     await boot();
 
@@ -487,15 +559,14 @@
       try {
         state.session = session ?? await fetchJson(`${serverUrl}/session`);
         state.score = await fetchJson(endpointUrl("score", "/score"));
-        state.voiceId = state.session.voices?.[0]?.id ?? Object.keys(state.score.voices ?? {})[0] ?? "";
+        state.clipId = Object.keys(state.score.clips ?? {}).sort(naturalCompare)[0] ?? "";
         if (!state.servers.some((server) => server.url === serverUrl)) {
           state.servers = [{ url: serverUrl, session: state.session }, ...state.servers];
         }
         renderServerOptions();
         els.serverSelect.value = serverUrl;
-        renderRnboTargets();
-        renderVoicePicker();
-        loadVoice();
+        renderClipPicker();
+        loadClip();
         connectEvents(endpointUrl("events", "/events"));
         setStatus(`Connected to ${serverLabel(serverUrl, state.session)}.`);
       } catch (error) {
@@ -511,10 +582,9 @@
           return;
         }
         state.score = payload.score;
-        renderVoicePicker();
-        renderRnboTargets();
-        if (!state.dirty && !state.saving) {
-          loadVoice();
+        renderClipPicker();
+        if (!state.dirty && !state.attributesDirty && !state.saving) {
+          loadClip();
         } else {
           renderSummary();
         }
@@ -525,6 +595,10 @@
       events.addEventListener("voice.assignment.replaced", refresh);
       events.addEventListener("voice.assignment.cleared", refresh);
       events.addEventListener("voice.assignment.preset.applied", refresh);
+      events.addEventListener("clip.added", refresh);
+      events.addEventListener("clip.replaced", refresh);
+      events.addEventListener("clip.renamed", refresh);
+      events.addEventListener("clip.removed", refresh);
       events.addEventListener("admin.reset", refresh);
       events.addEventListener("admin.restore", refresh);
       events.onerror = () => setStatus("Event stream reconnecting...");
@@ -536,26 +610,26 @@
       state.eventSource = undefined;
     }
 
-    function renderVoicePicker() {
-      const voices = state.session?.voices?.length
-        ? state.session.voices.map((voice) => voice.id)
-        : Object.keys(state.score?.voices ?? {});
-      els.voice.replaceChildren(...voices.map((voiceId) => {
+    function renderClipPicker() {
+      const clips = Object.keys(state.score?.clips ?? {}).sort(naturalCompare);
+      els.clip.replaceChildren(...clips.map((clipId) => {
         const option = document.createElement("option");
-        option.value = voiceId;
-        option.textContent = labelForVoice(voiceId);
+        option.value = clipId;
+        option.textContent = clipId;
         return option;
       }));
-      if (!voices.includes(state.voiceId)) {
-        state.voiceId = voices[0] ?? "";
+      if (!clips.includes(state.clipId)) {
+        state.clipId = clips[0] ?? "";
       }
-      els.voice.value = state.voiceId;
+      els.clip.value = state.clipId;
     }
 
-    function loadVoice() {
-      const voice = state.score?.voices?.[state.voiceId];
-      state.notes = normalizeNotes(voice?.notes ?? []);
+    function loadClip() {
+      const clip = selectedClip();
+      state.notes = normalizeNotes(clip?.notes ?? []);
       state.dirty = false;
+      state.attributesDirty = false;
+      renderClipAttributes();
       render();
     }
 
@@ -566,51 +640,143 @@
       updateButtons();
     }
 
+    function renderClipAttributes() {
+      const clip = selectedClip();
+      const [unit, value] = durationParts(clip?.duration);
+      els.clipPlaybackType.value = clip?.playbackType ?? "looped";
+      els.clipDurationUnit.value = unit;
+      els.clipDurationValue.value = value === "" ? "" : String(value);
+      const timeSignature = timeSignatureParts(clip);
+      els.clipTimeNumerator.value = String(timeSignature.numerator);
+      els.clipTimeDenominator.value = String(timeSignature.denominator);
+      els.clipFollowsPitch.checked = clip?.behavior?.followsPitch !== false;
+      els.clipFollowsScale.checked = clip?.behavior?.followsScale !== false;
+      els.clipTransposeMode.value = clip?.behavior?.transposeMode ?? "scale-degree";
+    }
+
+    function durationParts(duration) {
+      if (Number.isFinite(duration?.beats)) {
+        return ["beats", duration.beats];
+      }
+      if (Number.isFinite(duration?.bars)) {
+        return ["bars", duration.bars];
+      }
+      return ["bars", ""];
+    }
+
+    function durationDocument(unit, value) {
+      const number = Number(value);
+      if (!Number.isFinite(number) || number <= 0) {
+        return {};
+      }
+      return { [unit === "beats" ? "beats" : "bars"]: number };
+    }
+
+    function durationLabel(duration) {
+      const [unit, value] = durationParts(duration);
+      return value === "" ? "" : `, ${value} ${unit}`;
+    }
+
+    function timeSignatureParts(clip) {
+      const signature = clip?.context?.clip?.TimeSignature ?? {};
+      return {
+        numerator: clampInt(readNumber(signature.numerator, 4), 1, 64),
+        denominator: clampInt(readNumber(signature.denominator, 4), 1, 64)
+      };
+    }
+
+    function clipContextWithTimeSignature(context = {}) {
+      return {
+        ...context,
+        clip: {
+          ...(context.clip ?? {}),
+          TimeSignature: {
+            numerator: clampInt(readNumber(els.clipTimeNumerator.value, 4), 1, 64),
+            denominator: clampInt(readNumber(els.clipTimeDenominator.value, 4), 1, 64)
+          }
+        },
+        scale: context.scale ?? {},
+        grid: context.grid ?? {},
+        seed: context.seed ?? 0
+      };
+    }
+
+    function selectedClip() {
+      return state.clipId ? state.score?.clips?.[state.clipId] : undefined;
+    }
+
+    function requireSelectedClipId() {
+      if (!state.clipId || !selectedClip()) {
+        throw new Error("Select a clip first.");
+      }
+      return state.clipId;
+    }
+
+    function defaultClipDocument() {
+      return {
+        notes: [],
+        context: {
+          clip: {
+            TimeSignature: {
+              numerator: 4,
+              denominator: 4
+            }
+          },
+          scale: {},
+          grid: {},
+          seed: 0
+        },
+        duration: { bars: 1 },
+        playbackType: "looped",
+        behavior: {
+          followsPitch: true,
+          followsScale: true,
+          transposeMode: "scale-degree"
+        }
+      };
+    }
+
+    function nextClipId() {
+      const existing = new Set(Object.keys(state.score?.clips ?? {}));
+      let index = existing.size + 1;
+      let candidate = `clip-${index}`;
+      while (existing.has(candidate)) {
+        index += 1;
+        candidate = `clip-${index}`;
+      }
+      return candidate;
+    }
+
+    function normalizeId(value) {
+      return String(value ?? "").trim().replace(/\s+/g, "-");
+    }
+
     function renderSummary() {
-      const voice = state.score?.voices?.[state.voiceId];
-      const assignment = state.score?.assignments?.[state.voiceId];
+      const clip = selectedClip();
       els.count.textContent = String(state.notes.length);
-      els.version.textContent = voice ? `voice v${voice.version}, score v${state.score.version}` : "";
-      els.assignment.textContent = assignmentSummary(assignment);
+      els.version.textContent = state.clipId ? `clip ${state.clipId}, score v${state.score?.version ?? 0}` : "No clip selected";
+      els.assignment.textContent = clip ? `${clip.playbackType ?? "looped"}${durationLabel(clip.duration)}` : "";
     }
 
     function updateButtons() {
-      const locked = Boolean(state.score?.assignments?.[state.voiceId]?.locked);
-      els.add.disabled = locked || state.saving || !state.voiceId;
-      els.save.disabled = locked || state.saving || !state.voiceId || !state.dirty;
-      els.replaceArray.disabled = locked || state.saving || !state.voiceId;
-      els.addArray.disabled = locked || state.saving || !state.voiceId;
-      els.rnboTarget.disabled = state.transportSaving || !rnboTargets().length;
-      els.tempo.disabled = state.transportSaving || !els.rnboTarget.value;
-      els.maxSteps.disabled = state.transportSaving || !els.rnboTarget.value;
-      els.clockInterval.disabled = state.transportSaving || !els.rnboTarget.value;
-      els.applyTransport.disabled = state.transportSaving || !els.rnboTarget.value;
-      els.startTransport.disabled = state.transportSaving || !els.rnboTarget.value;
-      els.stopTransport.disabled = state.transportSaving || !els.rnboTarget.value;
-    }
-
-    function renderRnboTargets() {
-      const targets = rnboTargets();
-      els.rnboTarget.replaceChildren();
-      if (!targets.length) {
-        const option = document.createElement("option");
-        option.value = "";
-        option.textContent = "No RNBO targets";
-        els.rnboTarget.append(option);
-        updateButtons();
-        return;
-      }
-      for (const target of targets) {
-        const option = document.createElement("option");
-        option.value = target.id;
-        option.textContent = rnboTargetLabel(target);
-        els.rnboTarget.append(option);
-      }
-      const assignmentTargetId = state.score?.assignments?.[state.voiceId]?.rnboTargetId;
-      if (targets.some((target) => target.id === assignmentTargetId)) {
-        els.rnboTarget.value = assignmentTargetId;
-      }
-      updateButtons();
+      const hasClip = Boolean(selectedClip());
+      els.clip.disabled = state.saving;
+      els.newClip.disabled = state.saving;
+      els.renameClip.disabled = state.saving || !hasClip;
+      els.deleteClip.disabled = state.saving || !hasClip;
+      els.add.disabled = state.saving || !hasClip;
+      els.save.disabled = state.saving || !hasClip || !state.dirty;
+      els.replaceArray.disabled = state.saving || !hasClip;
+      els.addArray.disabled = state.saving || !hasClip;
+      els.clipPlaybackType.disabled = state.saving || !hasClip;
+      els.clipDurationValue.disabled = state.saving || !hasClip;
+      els.clipDurationUnit.disabled = state.saving || !hasClip;
+      els.clipTimeNumerator.disabled = state.saving || !hasClip;
+      els.clipTimeDenominator.disabled = state.saving || !hasClip;
+      els.clipFollowsPitch.disabled = state.saving || !hasClip;
+      els.clipFollowsScale.disabled = state.saving || !hasClip;
+      els.clipTransposeMode.disabled = state.saving || !hasClip;
+      els.saveClipAttributes.disabled = state.saving || !hasClip || !state.attributesDirty;
     }
 
     function noteRow(note, index) {
@@ -696,16 +862,20 @@
       state.saving = true;
       updateButtons();
       try {
-        const voice = state.score?.voices?.[state.voiceId];
-        const score = await postJson(apiUrl(`/voices/${encodeURIComponent(state.voiceId)}/notes`), {
+        const clipId = requireSelectedClipId();
+        const clip = selectedClip();
+        const score = await postJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), {
+          ...defaultClipDocument(),
+          ...clip,
+          context: clipContextWithTimeSignature(clip?.context),
           notes: state.notes.map(cleanNote),
-          expectedVersion: state.score?.version,
-          expectedVoiceVersion: voice?.version
+          playbackType: clip?.playbackType ?? "looped",
+          behavior: clip?.behavior ?? defaultClipDocument().behavior
         });
         state.score = score;
         state.dirty = false;
-        loadVoice();
-        setStatus(`Saved ${state.notes.length} notes for ${labelForVoice(state.voiceId)}.`);
+        loadClip();
+        setStatus(`Saved ${state.notes.length} notes for ${clipId}.`);
       } catch (error) {
         setStatus(`Save failed: ${error.message}`);
       } finally {
@@ -714,56 +884,97 @@
       }
     }
 
-    async function applyTransportParams() {
-      const targetId = els.rnboTarget.value;
-      if (!targetId) {
-        setStatus("Select an RNBO target first.");
-        return;
-      }
-      state.transportSaving = true;
+    async function saveClipAttributes() {
+      state.saving = true;
       updateButtons();
       try {
-        await postJson(apiUrl(`/rnbo/targets/${encodeURIComponent(targetId)}/params`), {
-          params: {
-            Tempo: clamp(readNumber(els.tempo.value, 120), 20, 400),
-            MaxSteps: clampInt(readNumber(els.maxSteps.value, 64), 1, 1024),
-            ClockInterval: Math.max(1, readNumber(els.clockInterval.value, 120))
+        const clipId = requireSelectedClipId();
+        const clip = selectedClip();
+        state.score = await postJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), {
+          ...defaultClipDocument(),
+          ...clip,
+          context: clipContextWithTimeSignature(clip?.context),
+          notes: state.notes.map(cleanNote),
+          playbackType: els.clipPlaybackType.value,
+          duration: durationDocument(els.clipDurationUnit.value, els.clipDurationValue.value),
+          behavior: {
+            ...(clip?.behavior ?? {}),
+            followsPitch: els.clipFollowsPitch.checked,
+            followsScale: els.clipFollowsScale.checked,
+            transposeMode: els.clipTransposeMode.value.trim() || "scale-degree"
           }
         });
-        setStatus(`Applied playback transport to ${rnboTargetLabel(rnboTargets().find((target) => target.id === targetId))}.`);
+        state.attributesDirty = false;
+        loadClip();
+        setStatus(`Saved clip attributes for ${clipId}.`);
       } catch (error) {
-        setStatus(`Transport apply failed: ${error.message}`);
+        setStatus(`Clip save failed: ${error.message}`);
       } finally {
-        state.transportSaving = false;
+        state.saving = false;
         updateButtons();
       }
     }
 
-    async function setTransportClock(value) {
-      const targetId = els.rnboTarget.value;
-      if (!targetId) {
-        setStatus("Select an RNBO target first.");
+    async function createClip() {
+      const clipId = normalizeId(window.prompt("New clip id", nextClipId()));
+      if (!clipId) {
         return;
       }
-      state.transportSaving = true;
+      state.saving = true;
       updateButtons();
       try {
-        const params = value
-          ? {
-              Tempo: clamp(readNumber(els.tempo.value, 120), 20, 400),
-              MaxSteps: clampInt(readNumber(els.maxSteps.value, 64), 1, 1024),
-              ClockInterval: Math.max(1, readNumber(els.clockInterval.value, 120)),
-              Clock: value
-            }
-          : { Clock: value };
-        await postJson(apiUrl(`/rnbo/targets/${encodeURIComponent(targetId)}/params`), {
-          params
-        });
-        setStatus(`${value ? "Started" : "Stopped"} transport from ${rnboTargetLabel(rnboTargets().find((target) => target.id === targetId))}.`);
+        state.score = await postJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), defaultClipDocument());
+        state.clipId = clipId;
+        renderClipPicker();
+        loadClip();
+        setStatus(`Created clip ${clipId}.`);
       } catch (error) {
-        setStatus(`Transport ${value ? "start" : "stop"} failed: ${error.message}`);
+        setStatus(`Create clip failed: ${error.message}`);
       } finally {
-        state.transportSaving = false;
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
+    async function renameClip() {
+      const current = requireSelectedClipId();
+      const next = normalizeId(window.prompt("Rename clip", current));
+      if (!next || next === current) {
+        return;
+      }
+      state.saving = true;
+      updateButtons();
+      try {
+        state.score = await postJson(apiUrl(`/clips/${encodeURIComponent(current)}/rename`), { clipId: next });
+        state.clipId = next;
+        renderClipPicker();
+        loadClip();
+        setStatus(`Renamed ${current} to ${next}.`);
+      } catch (error) {
+        setStatus(`Rename failed: ${error.message}`);
+      } finally {
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
+    async function deleteClip() {
+      const clipId = requireSelectedClipId();
+      if (!window.confirm(`Delete clip ${clipId}? This will fail if the clip is assigned in structure.`)) {
+        return;
+      }
+      state.saving = true;
+      updateButtons();
+      try {
+        state.score = await fetchJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), undefined, { method: "DELETE" });
+        state.clipId = Object.keys(state.score.clips ?? {}).sort(naturalCompare)[0] ?? "";
+        renderClipPicker();
+        loadClip();
+        setStatus(`Deleted clip ${clipId}.`);
+      } catch (error) {
+        setStatus(`Delete failed: ${error.message}`);
+      } finally {
+        state.saving = false;
         updateButtons();
       }
     }
@@ -771,6 +982,12 @@
     function markDirty() {
       state.dirty = true;
       setStatus("Unsaved edits.");
+      updateButtons();
+    }
+
+    function markAttributesDirty() {
+      state.attributesDirty = true;
+      setStatus("Unsaved clip attributes.");
       updateButtons();
     }
 
@@ -886,22 +1103,6 @@
       return td;
     }
 
-    function labelForVoice(voiceId) {
-      const assignment = state.score?.assignments?.[voiceId];
-      return assignment?.label || assignment?.assignee || voiceId;
-    }
-
-    function assignmentSummary(assignment) {
-      if (!assignment) {
-        return "";
-      }
-      const bits = [assignment.assignee, assignment.deviceId].filter(Boolean);
-      if (assignment.locked) {
-        bits.push("locked");
-      }
-      return bits.length ? bits.join(" / ") : "";
-    }
-
     function stepForField(field) {
       return field === "start_time" || field === "duration" || field === "probability" ? "0.001" : "1";
     }
@@ -919,11 +1120,11 @@
       }[field] ?? 0;
     }
 
-    async function fetchJson(url, timeoutMs) {
+    async function fetchJson(url, timeoutMs, init = {}) {
       const controller = timeoutMs ? new AbortController() : undefined;
       const timeout = controller ? window.setTimeout(() => controller.abort(), timeoutMs) : undefined;
       try {
-        const response = await fetch(url, controller ? { signal: controller.signal } : {});
+        const response = await fetch(url, controller ? { ...init, signal: controller.signal } : init);
         if (!response.ok) {
           throw new Error(await response.text());
         }
@@ -988,20 +1189,6 @@
       return `${name}${role} (${url})`;
     }
 
-    function rnboTargets() {
-      return state.session?.rnbo?.targets ?? [];
-    }
-
-    function rnboTargetLabel(target) {
-      if (!target) {
-        return "RNBO target";
-      }
-      const unit = target.hardwareUnitName || target.hardwareUnitId;
-      const name = target.name || target.id;
-      const instance = target.instanceId ? ` inst ${target.instanceId}` : "";
-      return unit ? `${unit}: ${name}${instance}` : `${name}${instance}`;
-    }
-
     function currentServerUrl() {
       return normalizeServerUrl(els.server.value) || normalizeServerUrl(els.serverSelect.value) || normalizeServerUrl(state.serverUrl);
     }
@@ -1037,6 +1224,10 @@
 
     function clampInt(value, min, max) {
       return Math.round(clamp(value, min, max));
+    }
+
+    function naturalCompare(a, b) {
+      return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
     }
 
     function setStatus(message) {

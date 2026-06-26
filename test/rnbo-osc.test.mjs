@@ -45,6 +45,156 @@ test("compiles client-prefixed transactions for a specific voice target", () => 
   assert.deepEqual(compiled.messages[2].values, [4404, 90, 321, 1, 0]);
 });
 
+test("compiles the active mesostructural block from assigned clips", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 0
+    }
+  });
+  const score = createScore();
+  delete score.context.clip.time_selection_end;
+  score.voices["player-1"].notes = [{ note_id: 99, pitch: 72, start_time: 0, duration: 1, velocity: 100 }];
+  score.clips = {
+    "bass-a": {
+      notes: [{ note_id: 7, pitch: 48, start_time: 0, duration: 1, velocity: 96 }],
+      context: { clip: {}, scale: {}, grid: {}, seed: 0 },
+      playbackType: "one-shot",
+      behavior: { followsPitch: true, followsScale: true, transposeMode: "scale-degree" }
+    },
+    "lead-a": {
+      notes: [{ note_id: 8, pitch: 67, start_time: 1, duration: 0.5, velocity: 88 }],
+      context: { clip: {}, scale: {}, grid: {}, seed: 0 },
+      playbackType: "one-shot",
+      behavior: { followsPitch: true, followsScale: true, transposeMode: "scale-degree" }
+    }
+  };
+  score.mesostructure = {
+    A: {
+      duration: { beats: 8 },
+      scale: {},
+      players: {
+        "player-1": { clipId: "bass-a" },
+        "player-2": { clipId: "lead-a" }
+      }
+    }
+  };
+  score.macrostructure = { tempo: 120, blocks: ["A"] };
+
+  const compiled = compileScoreTransaction(score, config, 222);
+
+  assert.equal(compiled.noteCount, 2);
+  assert.equal(compiled.patternLength, 128);
+  assert.deepEqual(compiled.messages[1].values, [20, 222, 0, 7, 48, 0, 16, 96, 0, 10000, 0, 64]);
+  assert.deepEqual(compiled.messages[2].values, [20, 222, 1, 8, 67, 16, 8, 88, 0, 10000, 0, 64]);
+});
+
+test("compiles short-form mesostructural clip assignments", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 0
+    }
+  });
+  const score = createScore();
+  delete score.context.clip.time_selection_end;
+  score.voices["player-1"].notes = [{ note_id: 99, pitch: 72, start_time: 0, duration: 1, velocity: 100 }];
+  score.clips = {
+    "bass-a": {
+      notes: [{ note_id: 7, pitch: 48, start_time: 0, duration: 1, velocity: 96 }],
+      context: { clip: {}, scale: {}, grid: {}, seed: 0 },
+      playbackType: "one-shot",
+      behavior: { followsPitch: true, followsScale: true, transposeMode: "scale-degree" }
+    }
+  };
+  score.mesostructure = {
+    A: {
+      duration: { beats: 4 },
+      scale: {},
+      players: {
+        "player-1": "bass-a"
+      }
+    }
+  };
+  score.macrostructure = { tempo: 120, blocks: ["A"] };
+
+  const compiled = compileScoreTransaction(score, config, 223);
+
+  assert.equal(compiled.noteCount, 1);
+  assert.deepEqual(compiled.messages[1].values, [20, 223, 0, 7, 48, 0, 16, 96, 0, 10000, 0, 64]);
+});
+
+test("looped clips repeat across the containing mesostructural block duration", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 0
+    }
+  });
+  const score = createScore();
+  delete score.context.clip.time_selection_end;
+  score.clips = {
+    "bass-loop": {
+      notes: [{ note_id: 7, pitch: 48, start_time: 0, duration: 1, velocity: 96 }],
+      context: { clip: {}, scale: {}, grid: {}, seed: 0 },
+      duration: { bars: 1 },
+      playbackType: "looped",
+      behavior: { followsPitch: true, followsScale: true, transposeMode: "scale-degree" }
+    }
+  };
+  score.mesostructure = {
+    A: {
+      duration: { bars: 8 },
+      scale: {},
+      players: {
+        "player-1": { clipId: "bass-loop" }
+      }
+    }
+  };
+  score.macrostructure = { tempo: 120, blocks: ["A"] };
+
+  const compiled = compileScoreTransaction(score, config, 333);
+
+  assert.equal(compiled.noteCount, 8);
+  assert.equal(compiled.patternLength, 512);
+  assert.deepEqual(compiled.messages.slice(1, 9).map((message) => message.values[5]), [0, 64, 128, 192, 256, 320, 384, 448]);
+});
+
+test("clip bar duration uses the clip time signature when looped in a block", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 0
+    }
+  });
+  const score = createScore();
+  delete score.context.clip.time_selection_end;
+  score.clips = {
+    "three-four": {
+      notes: [{ note_id: 7, pitch: 48, start_time: 0, duration: 1, velocity: 96 }],
+      context: { clip: { TimeSignature: { numerator: 3, denominator: 4 } }, scale: {}, grid: {}, seed: 0 },
+      duration: { bars: 1 },
+      playbackType: "looped",
+      behavior: { followsPitch: true, followsScale: true, transposeMode: "scale-degree" }
+    }
+  };
+  score.mesostructure = {
+    A: {
+      duration: { beats: 6 },
+      scale: {},
+      players: {
+        "player-1": { clipId: "three-four" }
+      }
+    }
+  };
+  score.macrostructure = { tempo: 120, blocks: ["A"] };
+
+  const compiled = compileScoreTransaction(score, config, 444);
+
+  assert.equal(compiled.noteCount, 2);
+  assert.equal(compiled.patternLength, 96);
+  assert.deepEqual(compiled.messages.slice(1, 3).map((message) => message.values[5]), [0, 48]);
+});
 
 test("pads clear rows so RNBO playback lookup overwrites stale note rows", () => {
   const config = mergeConfig(defaultConfig, {
@@ -214,7 +364,12 @@ test("sends score updates to assignment-bound RNBO targets", async () => {
 
 test("RNBO adapter resends score transactions when assignments change", () => {
   assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.replaced", detail: {} }), true);
+  assert.equal(shouldSendScoreTransaction({ type: "clip.replaced", detail: {} }), true);
+  assert.equal(shouldSendScoreTransaction({ type: "mesostructure.block.replaced", detail: {} }), true);
+  assert.equal(shouldSendScoreTransaction({ type: "macrostructure.updated", detail: {} }), true);
+  assert.equal(shouldSendScoreTransaction({ type: "structure.playhead.updated", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.cleared", detail: {} }), false);
+  assert.equal(shouldSendScoreTransaction({ type: "admin.legacyVoiceNotes.imported", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { assignments: true } }), true);
   assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { voices: true } }), true);
   assert.equal(shouldSendScoreTransaction({ type: "voice.notes.replaced", detail: {} }), true);

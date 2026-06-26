@@ -27,13 +27,13 @@ export function adminPage() {
     main { margin: 0 auto; max-width: 1120px; padding: 24px clamp(16px, 4vw, 40px) 40px; }
     .status { color: #c8d1da; font-size: 14px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
-    .session-tools, .targets, .hardware {
+    .session-tools, .scores, .targets, .hardware {
       background: #fff;
       border: 1px solid #d5d8dc;
       margin-bottom: 18px;
       padding: 14px;
     }
-    .session-tools h2, .targets h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
+    .session-tools h2, .scores h2, .targets h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
     .session-grid {
       align-items: start;
       display: grid;
@@ -46,12 +46,14 @@ export function adminPage() {
       grid-template-columns: 1fr auto;
       margin-bottom: 12px;
     }
-    .preset-row, .backup-row, .voice-tools {
+    .preset-row, .backup-row, .score-save-row, .voice-tools {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       margin-top: 10px;
     }
+    .score-save-row { margin: 0 0 10px; }
+    .score-save-row input { max-width: 360px; }
     .voice-tools { margin: 0 0 12px; }
     .voice-tools input { max-width: 240px; }
     .qr {
@@ -65,8 +67,8 @@ export function adminPage() {
       font-size: 13px;
       margin-top: 6px;
     }
-    .target-list, .unit-list { display: grid; gap: 8px; }
-    .target, .unit {
+    .target-list, .unit-list, .score-list { display: grid; gap: 8px; }
+    .target, .unit, .score-item {
       align-items: center;
       border: 1px solid #e1e4e8;
       display: flex;
@@ -74,6 +76,7 @@ export function adminPage() {
       justify-content: space-between;
       padding: 9px;
     }
+    .score-detail { color: #66717d; font-size: 12px; margin-top: 3px; }
     .target code { color: #38414a; font-size: 12px; }
     .badge {
       border: 1px solid #bac2ca;
@@ -171,12 +174,22 @@ export function adminPage() {
           <div class="backup-row">
             <button id="download-backup" type="button">Download backup</button>
             <button id="restore-backup" type="button">Restore backup</button>
+            <button id="import-legacy-notes" type="button">Import voice notes to clips</button>
             <input id="restore-file" type="file" accept="application/json,.json" hidden>
           </div>
           <div class="hint" id="session-hint"></div>
         </div>
         <img class="qr" id="qr-code" alt="Matrix Edit QR code">
       </div>
+    </section>
+    <section class="scores">
+      <h2>Saved scores</h2>
+      <div class="score-save-row">
+        <input id="saved-score-name" autocomplete="off" aria-label="Saved score name" placeholder="Score name">
+        <button class="primary" id="save-score" type="button">Save score</button>
+        <button id="refresh-scores" type="button">Refresh</button>
+      </div>
+      <div class="score-list" id="saved-scores"></div>
     </section>
     <section class="targets">
       <h2>Discovered RNBO targets</h2>
@@ -218,6 +231,8 @@ export function adminPage() {
     const assignmentPresetEl = document.querySelector("#assignment-preset");
     const restoreFileEl = document.querySelector("#restore-file");
     const newVoiceIdEl = document.querySelector("#new-voice-id");
+    const savedScoreNameEl = document.querySelector("#saved-score-name");
+    const savedScoresEl = document.querySelector("#saved-scores");
     const inputs = new Map();
     let discoveredTargets = [];
     let hardwareUnits = [];
@@ -229,7 +244,10 @@ export function adminPage() {
     document.querySelector("#apply-preset").addEventListener("click", applyAssignmentPreset);
     document.querySelector("#download-backup").addEventListener("click", () => { window.location.href = "/admin/backup"; });
     document.querySelector("#restore-backup").addEventListener("click", () => restoreFileEl.click());
+    document.querySelector("#import-legacy-notes").addEventListener("click", importLegacyVoiceNotes);
     document.querySelector("#add-voice").addEventListener("click", addVoice);
+    document.querySelector("#save-score").addEventListener("click", saveScoreToLibrary);
+    document.querySelector("#refresh-scores").addEventListener("click", loadSavedScores);
     restoreFileEl.addEventListener("change", restoreBackup);
 
     loadSession();
@@ -242,6 +260,7 @@ export function adminPage() {
     events.addEventListener("voice.removed", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.reset", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.restore", (event) => render(JSON.parse(event.data).score));
+    events.addEventListener("admin.legacyVoiceNotes.imported", (event) => render(JSON.parse(event.data).score));
     events.onerror = () => setStatus("Event stream reconnecting...");
 
     async function loadSession() {
@@ -252,6 +271,7 @@ export function adminPage() {
       renderSessionTools(session);
       renderTargets(discoveredTargets);
       renderHardwareUnits(hardwareUnits);
+      await loadSavedScores();
       const scoreResponse = await fetch("/score");
       render(await scoreResponse.json());
     }
@@ -317,6 +337,49 @@ export function adminPage() {
         row.append(label, detail, statusBadge(unit.status ?? "offline"));
         hardwareUnitsEl.append(row);
       }
+    }
+
+    function renderSavedScores(scores) {
+      savedScoresEl.textContent = "";
+      if (scores.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "score-item";
+        empty.textContent = "No saved scores on this Pi.";
+        savedScoresEl.append(empty);
+        return;
+      }
+      for (const savedScore of scores) {
+        const row = document.createElement("div");
+        row.className = "score-item";
+        const label = document.createElement("div");
+        const name = document.createElement("strong");
+        name.textContent = savedScore.name;
+        const detail = document.createElement("div");
+        detail.className = "score-detail";
+        detail.textContent = savedScore.id + " · v" + savedScore.version + " · " + formatDate(savedScore.savedAt);
+        label.append(name, detail);
+
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        const load = document.createElement("button");
+        load.type = "button";
+        load.className = "primary";
+        load.textContent = "Load";
+        load.addEventListener("click", () => loadSavedScore(savedScore.id));
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "danger";
+        remove.textContent = "Delete";
+        remove.addEventListener("click", () => deleteSavedScore(savedScore.id));
+        actions.append(load, remove);
+        row.append(label, actions);
+        savedScoresEl.append(row);
+      }
+    }
+
+    function formatDate(value) {
+      const date = new Date(value);
+      return Number.isFinite(date.valueOf()) ? date.toLocaleString() : value;
     }
 
     function statusBadge(status) {
@@ -506,6 +569,57 @@ export function adminPage() {
       render(score);
     }
 
+    async function loadSavedScores() {
+      const response = await fetch("/admin/scores");
+      const body = await response.json();
+      if (body.ok === false) {
+        setStatus(body.error);
+        return;
+      }
+      renderSavedScores(body.scores ?? []);
+    }
+
+    async function saveScoreToLibrary() {
+      const name = savedScoreNameEl.value.trim();
+      const response = await fetch("/admin/scores", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name })
+      });
+      const body = await response.json();
+      if (body.ok === false) {
+        setStatus(body.error);
+        return;
+      }
+      savedScoreNameEl.value = "";
+      setStatus("Saved score " + body.score.name + ".");
+      await loadSavedScores();
+    }
+
+    async function loadSavedScore(id) {
+      if (!confirm("Load this saved score? Current score state will be replaced.")) return;
+      const response = await fetch("/admin/scores/" + encodeURIComponent(id) + "/load", { method: "POST" });
+      const score = await response.json();
+      if (score.ok === false) {
+        setStatus(score.error);
+        return;
+      }
+      render(score);
+      await loadSavedScores();
+    }
+
+    async function deleteSavedScore(id) {
+      if (!confirm("Delete this saved score from the Pi?")) return;
+      const response = await fetch("/admin/scores/" + encodeURIComponent(id), { method: "DELETE" });
+      const body = await response.json();
+      if (body.ok === false) {
+        setStatus(body.error);
+        return;
+      }
+      renderSavedScores(body.scores ?? []);
+      setStatus("Deleted saved score.");
+    }
+
     async function applyAssignmentPreset() {
       if (!assignmentPresetEl.value) return;
       if (!confirm("Apply this assignment preset?")) return;
@@ -528,6 +642,21 @@ export function adminPage() {
         body: await file.text()
       });
       render(await response.json());
+    }
+
+    async function importLegacyVoiceNotes() {
+      if (!confirm("Import non-empty legacy voice notes into looped clips assigned to block A? Existing clips will not be overwritten.")) return;
+      const response = await fetch("/admin/import-legacy-voice-notes", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ blockId: "A" })
+      });
+      const score = await response.json();
+      if (score.ok === false) {
+        setStatus(score.error);
+        return;
+      }
+      render(score);
     }
 
     function displayTargetLabel(target) {

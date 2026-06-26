@@ -1,0 +1,1369 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShadowScore Structure Editor</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f6f2;
+      --band: #ffffff;
+      --ink: #171a1f;
+      --muted: #66717d;
+      --line: #d6dacf;
+      --field: #fbfcf8;
+      --accent: #226c5f;
+      --accent-ink: #ffffff;
+      --danger: #aa2e25;
+      --focus: #c78a12;
+      --soft: #e8efe9;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+    }
+
+    header {
+      align-items: center;
+      background: #20242a;
+      color: white;
+      display: flex;
+      gap: 16px;
+      min-height: 56px;
+      padding: 10px 18px;
+    }
+
+    h1 {
+      font-size: 18px;
+      line-height: 1.1;
+      margin: 0;
+      white-space: nowrap;
+    }
+
+    .status {
+      color: #d9dee5;
+      flex: 1;
+      font-size: 13px;
+      overflow: hidden;
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    main {
+      display: grid;
+      gap: 14px;
+      padding: 14px;
+    }
+
+    section {
+      min-width: 0;
+    }
+
+    .server {
+      align-items: end;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(180px, 260px) auto minmax(220px, 1fr);
+    }
+
+    .workspace {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: minmax(180px, 240px) minmax(360px, 1fr) minmax(300px, 420px);
+    }
+
+    .panel {
+      background: var(--band);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      min-width: 0;
+      overflow: hidden;
+    }
+
+    .panel-header {
+      align-items: center;
+      background: var(--soft);
+      border-bottom: 1px solid var(--line);
+      display: flex;
+      gap: 8px;
+      min-height: 42px;
+      padding: 8px 10px;
+    }
+
+    h2 {
+      flex: 1;
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0;
+      margin: 0;
+      text-transform: uppercase;
+    }
+
+    .panel-body {
+      display: grid;
+      gap: 12px;
+      padding: 12px;
+    }
+
+    label {
+      color: var(--muted);
+      display: grid;
+      font-size: 12px;
+      font-weight: 700;
+      gap: 4px;
+      letter-spacing: 0;
+    }
+
+    input,
+    select,
+    button {
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      font: inherit;
+      min-height: 34px;
+    }
+
+    input,
+    select {
+      background: var(--field);
+      color: var(--ink);
+      padding: 6px 8px;
+      width: 100%;
+    }
+
+    button {
+      background: #ffffff;
+      color: var(--ink);
+      cursor: pointer;
+      font-weight: 750;
+      padding: 6px 10px;
+      white-space: nowrap;
+    }
+
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: var(--accent-ink);
+    }
+
+    button.danger {
+      border-color: #e2aaa5;
+      color: var(--danger);
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.55;
+    }
+
+    input:focus,
+    select:focus,
+    button:focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 1px;
+    }
+
+    .list {
+      display: grid;
+      gap: 6px;
+    }
+
+    .block-button {
+      align-items: center;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 1fr auto auto;
+      min-height: 40px;
+      text-align: left;
+      width: 100%;
+    }
+
+    .block-button[aria-selected="true"] {
+      background: #dcece6;
+      border-color: #8fb9aa;
+    }
+
+    .block-button[data-active="true"] {
+      box-shadow: inset 4px 0 0 var(--focus);
+    }
+
+    .block-id {
+      font-weight: 850;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .block-duration {
+      color: var(--muted);
+      font-size: 12px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .block-active {
+      color: var(--focus);
+      font-size: 11px;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .form-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .wide {
+      grid-column: 1 / -1;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 6px;
+      text-align: left;
+      vertical-align: middle;
+    }
+
+    th {
+      color: #3d4650;
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    td:first-child {
+      color: var(--muted);
+      font-weight: 750;
+      width: 34%;
+    }
+
+    .chain {
+      display: grid;
+      gap: 8px;
+    }
+
+    .playhead {
+      align-items: end;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(140px, 1fr) auto auto auto auto auto;
+    }
+
+    .playback-status {
+      align-self: center;
+      display: grid;
+      gap: 2px;
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.2;
+      white-space: nowrap;
+    }
+
+    .playback-status strong {
+      color: var(--text);
+      font-size: 0.9rem;
+    }
+
+    .chain-row {
+      align-items: center;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+    }
+
+    .chain-index {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 18px;
+      text-align: center;
+    }
+
+    @media (max-width: 1100px) {
+      .workspace {
+        grid-template-columns: minmax(180px, 240px) minmax(0, 1fr);
+      }
+
+      .macro-panel {
+        grid-column: 1 / -1;
+      }
+    }
+
+    @media (max-width: 720px) {
+      header {
+        align-items: flex-start;
+        display: grid;
+      }
+
+      .status {
+        text-align: left;
+        white-space: normal;
+      }
+
+      .server,
+      .workspace,
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>ShadowScore Structure Editor</h1>
+    <div class="status" id="status">Loading session...</div>
+  </header>
+  <main>
+    <section class="server" aria-label="Server">
+      <label>Server
+        <select id="server-select"></select>
+      </label>
+      <button id="discover" type="button">Scan</button>
+      <label>Custom server
+        <input id="server" placeholder="http://pt5.local:8790">
+      </label>
+    </section>
+
+    <div class="workspace">
+      <section class="panel" aria-label="Mesostructural blocks">
+        <div class="panel-header">
+          <h2>Sections</h2>
+          <button id="add-block" type="button">Add</button>
+        </div>
+        <div class="panel-body">
+          <div class="list" id="block-list"></div>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="Selected mesostructural block">
+        <div class="panel-header">
+          <h2>Meso Block</h2>
+          <button class="danger" id="delete-block" type="button">Remove</button>
+        </div>
+        <div class="panel-body">
+          <div class="form-grid">
+            <label>Block id
+              <input id="block-id" spellcheck="false">
+            </label>
+            <label>Duration unit
+              <select id="duration-unit">
+                <option value="bars">Bars</option>
+                <option value="beats">Beats</option>
+              </select>
+            </label>
+            <label>Duration
+              <input id="duration-value" type="number" min="0.001" step="0.001" value="8">
+            </label>
+            <label>Root
+              <select id="scale-root">
+                <option value="">None</option>
+              </select>
+            </label>
+            <label class="wide">Scale
+              <input id="scale-name" spellcheck="false" placeholder="Major">
+            </label>
+          </div>
+          <div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Player</th>
+                  <th>Clip</th>
+                </tr>
+              </thead>
+              <tbody id="players"></tbody>
+            </table>
+            <div class="empty" id="players-empty">No voices in this score.</div>
+          </div>
+          <div class="actions">
+            <button id="revert-block" type="button">Revert</button>
+            <button class="primary" id="save-block" type="button">Save block</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel macro-panel" aria-label="Macrostructure">
+        <div class="panel-header">
+          <h2>Macro Chain</h2>
+          <button id="add-chain" type="button">Add</button>
+        </div>
+        <div class="panel-body">
+          <label>Tempo
+            <input id="tempo" type="number" min="20" max="400" step="0.01" value="120">
+          </label>
+          <div class="playhead" aria-label="Playback playhead">
+            <label>Active block
+              <select id="active-block"></select>
+            </label>
+            <button id="set-active-block" type="button">Set Active</button>
+            <button id="advance-block" type="button">Advance</button>
+            <button id="reset-block" type="button">Reset</button>
+            <button id="start-macro" type="button">Start Chain</button>
+            <button id="stop-macro" type="button">Stop Chain</button>
+            <div class="playback-status" id="macro-playback-status">
+              <strong id="macro-playback-state">Stopped</strong>
+              <span id="macro-playback-detail">A · 1/6 · -- remaining</span>
+            </div>
+          </div>
+          <div class="chain" id="chain"></div>
+          <div class="actions">
+            <button id="revert-macro" type="button">Revert</button>
+            <button class="primary" id="save-macro" type="button">Save chain</button>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script type="module">
+    const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const state = {
+      score: undefined,
+      session: undefined,
+      serverUrl: "",
+      servers: [],
+      eventSource: undefined,
+      selectedBlockId: "",
+      macroPlayback: undefined,
+      macroPlaybackTimer: undefined,
+      blockDirty: false,
+      macroDirty: false,
+      saving: false
+    };
+
+    const els = {
+      status: document.querySelector("#status"),
+      serverSelect: document.querySelector("#server-select"),
+      discover: document.querySelector("#discover"),
+      server: document.querySelector("#server"),
+      blockList: document.querySelector("#block-list"),
+      addBlock: document.querySelector("#add-block"),
+      deleteBlock: document.querySelector("#delete-block"),
+      blockId: document.querySelector("#block-id"),
+      durationUnit: document.querySelector("#duration-unit"),
+      durationValue: document.querySelector("#duration-value"),
+      scaleRoot: document.querySelector("#scale-root"),
+      scaleName: document.querySelector("#scale-name"),
+      players: document.querySelector("#players"),
+      playersEmpty: document.querySelector("#players-empty"),
+      revertBlock: document.querySelector("#revert-block"),
+      saveBlock: document.querySelector("#save-block"),
+      tempo: document.querySelector("#tempo"),
+      activeBlock: document.querySelector("#active-block"),
+      setActiveBlock: document.querySelector("#set-active-block"),
+      advanceBlock: document.querySelector("#advance-block"),
+      resetBlock: document.querySelector("#reset-block"),
+      startMacro: document.querySelector("#start-macro"),
+      stopMacro: document.querySelector("#stop-macro"),
+      macroPlaybackStatus: document.querySelector("#macro-playback-status"),
+      macroPlaybackState: document.querySelector("#macro-playback-state"),
+      macroPlaybackDetail: document.querySelector("#macro-playback-detail"),
+      chain: document.querySelector("#chain"),
+      addChain: document.querySelector("#add-chain"),
+      revertMacro: document.querySelector("#revert-macro"),
+      saveMacro: document.querySelector("#save-macro")
+    };
+
+    initScaleRoots();
+    bindEvents();
+    await discoverServers();
+
+    function bindEvents() {
+      els.discover.addEventListener("click", discoverServers);
+      els.serverSelect.addEventListener("change", () => {
+        els.server.value = els.serverSelect.value;
+        void loadServer(els.serverSelect.value);
+      });
+      els.server.addEventListener("change", () => {
+        void loadServer(els.server.value);
+      });
+      els.addBlock.addEventListener("click", addBlock);
+      els.deleteBlock.addEventListener("click", deleteBlock);
+      els.revertBlock.addEventListener("click", () => {
+        state.blockDirty = false;
+        renderBlockEditor();
+      });
+      els.saveBlock.addEventListener("click", saveBlock);
+      els.addChain.addEventListener("click", addChainEntry);
+      els.revertMacro.addEventListener("click", () => {
+        state.macroDirty = false;
+        renderMacroEditor();
+      });
+      els.saveMacro.addEventListener("click", saveMacrostructure);
+      els.setActiveBlock.addEventListener("click", setActiveBlock);
+      els.advanceBlock.addEventListener("click", advanceBlock);
+      els.resetBlock.addEventListener("click", resetBlock);
+      els.startMacro.addEventListener("click", startMacroPlayback);
+      els.stopMacro.addEventListener("click", stopMacroPlayback);
+      [els.blockId, els.durationUnit, els.durationValue, els.scaleRoot, els.scaleName].forEach((el) => {
+        el.addEventListener("input", () => {
+          state.blockDirty = true;
+          updateButtons();
+        });
+        el.addEventListener("change", () => {
+          state.blockDirty = true;
+          updateButtons();
+        });
+      });
+      els.tempo.addEventListener("input", () => {
+        state.macroDirty = true;
+        updateButtons();
+      });
+    }
+
+    async function discoverServers() {
+      setStatus("Scanning for local ShadowScore servers...");
+      els.discover.disabled = true;
+      try {
+        const servers = (await Promise.all(serverCandidates().map(async (url) => {
+          try {
+            return { url, session: await fetchJson(`${url}/session`, 1200) };
+          } catch {
+            return undefined;
+          }
+        }))).filter(Boolean);
+        state.servers = servers;
+        renderServerOptions();
+        if (!servers.length) {
+          setStatus("No local ShadowScore servers found.");
+          return;
+        }
+        const preferred = servers.find((entry) => entry.url === currentServerUrl()) ?? servers[0];
+        els.serverSelect.value = preferred.url;
+        els.server.value = preferred.url;
+        await loadServer(preferred.url, preferred.session);
+      } finally {
+        els.discover.disabled = false;
+      }
+    }
+
+    async function loadServer(url, session) {
+      const serverUrl = normalizeServerUrl(url);
+      if (!serverUrl) {
+        setStatus("Enter a ShadowScore server URL.");
+        return;
+      }
+      if (!confirmDiscard()) {
+        els.server.value = state.serverUrl;
+        els.serverSelect.value = state.serverUrl;
+        return;
+      }
+      closeEvents();
+      state.serverUrl = serverUrl;
+      els.server.value = serverUrl;
+      setStatus(`Loading ${serverUrl}...`);
+      try {
+        state.session = session ?? await fetchJson(`${serverUrl}/session`);
+        state.score = await fetchJson(`${serverUrl}/score`);
+        state.macroPlayback = state.session.macroPlayback;
+        state.blockDirty = false;
+        state.macroDirty = false;
+        state.selectedBlockId = firstBlockId();
+        if (!state.servers.some((entry) => entry.url === serverUrl)) {
+          state.servers = [{ url: serverUrl, session: state.session }, ...state.servers];
+        }
+        renderServerOptions();
+        els.serverSelect.value = serverUrl;
+        renderAll();
+        connectEvents(`${serverUrl}/events`);
+        setStatus(`Connected to ${serverLabel(serverUrl, state.session)}.`);
+      } catch (error) {
+        setStatus(`Load failed: ${error.message}`);
+      }
+    }
+
+    function connectEvents(url) {
+      const events = new EventSource(url);
+      events.addEventListener("snapshot", handleScoreEvent);
+      events.addEventListener("mesostructure.block.replaced", handleScoreEvent);
+      events.addEventListener("mesostructure.block.removed", handleScoreEvent);
+      events.addEventListener("macrostructure.updated", handleScoreEvent);
+      events.addEventListener("structure.playhead.updated", handleScoreEvent);
+      events.addEventListener("admin.reset", handleScoreEvent);
+      events.onerror = () => {
+        setStatus("Structure updates disconnected.");
+      };
+      state.eventSource = events;
+    }
+
+    function handleScoreEvent(event) {
+      const payload = JSON.parse(event.data);
+      if (!payload.score) {
+        return;
+      }
+      state.score = payload.score;
+      if (state.macroPlayback?.running) {
+        state.macroPlayback = {
+          ...state.macroPlayback,
+          activeBlockId: state.score.structureState?.activeBlockId ?? "",
+          macroIndex: state.score.structureState?.macroIndex ?? 0
+        };
+        void refreshMacroPlayback();
+      }
+      if (!state.score.mesostructure?.[state.selectedBlockId]) {
+        state.selectedBlockId = firstBlockId();
+        state.blockDirty = false;
+      }
+      if (!state.blockDirty && !state.macroDirty && !state.saving) {
+        renderAll();
+      } else {
+        renderBlockList();
+        updateButtons();
+      }
+    }
+
+    function renderAll() {
+      renderBlockList();
+      renderBlockEditor();
+      renderMacroEditor();
+      updateButtons();
+    }
+
+    function renderServerOptions() {
+      els.serverSelect.innerHTML = "";
+      state.servers.forEach((entry) => {
+        const option = document.createElement("option");
+        option.value = entry.url;
+        option.textContent = serverLabel(entry.url, entry.session);
+        els.serverSelect.append(option);
+      });
+    }
+
+    function renderBlockList() {
+      els.blockList.innerHTML = "";
+      const blocks = Object.entries(state.score?.mesostructure ?? {});
+      if (!blocks.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No sections.";
+        els.blockList.append(empty);
+        return;
+      }
+      blocks.sort(([a], [b]) => naturalCompare(a, b)).forEach(([blockId, block]) => {
+        const button = document.createElement("button");
+        button.className = "block-button";
+        button.type = "button";
+        button.setAttribute("aria-selected", String(blockId === state.selectedBlockId));
+        button.dataset.active = String(blockId === state.score?.structureState?.activeBlockId);
+        button.addEventListener("click", () => selectBlock(blockId));
+
+        const id = document.createElement("span");
+        id.className = "block-id";
+        id.textContent = blockId;
+        const duration = document.createElement("span");
+        duration.className = "block-duration";
+        duration.textContent = durationLabel(block);
+        button.append(id, duration);
+        if (blockId === state.score?.structureState?.activeBlockId) {
+          const active = document.createElement("span");
+          active.className = "block-active";
+          active.textContent = "Active";
+          button.append(active);
+        }
+        els.blockList.append(button);
+      });
+    }
+
+    function renderBlockEditor() {
+      const block = currentBlock();
+      const enabled = Boolean(block);
+      [els.blockId, els.durationUnit, els.durationValue, els.scaleRoot, els.scaleName].forEach((el) => {
+        el.disabled = !enabled;
+      });
+      els.players.innerHTML = "";
+      if (!block) {
+        els.blockId.value = "";
+        els.durationValue.value = "8";
+        els.playersEmpty.hidden = false;
+        updateButtons();
+        return;
+      }
+      const [durationUnit, durationValue] = durationParts(block);
+      els.blockId.value = state.selectedBlockId;
+      els.durationUnit.value = durationUnit;
+      els.durationValue.value = String(durationValue);
+      els.scaleRoot.value = Number.isFinite(block.scale?.root_note) ? String(block.scale.root_note) : "";
+      els.scaleName.value = block.scale?.scale_name ?? "";
+
+      const voices = state.session?.voices ?? Object.keys(state.score?.voices ?? {}).map((id) => ({ id, label: id }));
+      els.playersEmpty.hidden = voices.length > 0;
+      voices.forEach((voice) => {
+        const row = document.createElement("tr");
+        const label = document.createElement("td");
+        label.textContent = voice.assignment?.label || voice.label || voice.id;
+        const clip = document.createElement("td");
+        const input = clipSelectForVoice(voice.id, block.players?.[voice.id]?.clipId ?? "");
+        input.addEventListener("change", async () => {
+          if (input.value === "__create__") {
+            await createClipForSlot(input, voice.id);
+            return;
+          }
+          state.blockDirty = true;
+          updateButtons();
+        });
+        clip.append(input);
+        row.append(label, clip);
+        els.players.append(row);
+      });
+      updateButtons();
+    }
+
+    function renderMacroEditor() {
+      const macro = state.score?.macrostructure ?? { tempo: 120, blocks: [] };
+      els.tempo.value = String(macro.tempo ?? 120);
+      renderPlayheadControls();
+      els.chain.innerHTML = "";
+      (macro.blocks ?? []).forEach((blockId, index) => {
+        els.chain.append(chainRow(index, blockId));
+      });
+      if (!(macro.blocks ?? []).length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No macro chain entries.";
+        els.chain.append(empty);
+      }
+      updateButtons();
+    }
+
+    function renderPlayheadControls() {
+      const blockIds = Object.keys(state.score?.mesostructure ?? {}).sort(naturalCompare);
+      els.activeBlock.replaceChildren(...blockIds.map((blockId) => {
+        const option = document.createElement("option");
+        option.value = blockId;
+        option.textContent = blockId;
+        return option;
+      }));
+      const activeBlockId = state.score?.structureState?.activeBlockId;
+      els.activeBlock.value = blockIds.includes(activeBlockId) ? activeBlockId : blockIds[0] ?? "";
+      renderMacroPlaybackStatus();
+    }
+
+    function renderMacroPlaybackStatus() {
+      const playback = state.macroPlayback;
+      if (!playback?.running) {
+        stopMacroPlaybackTimer();
+        els.macroPlaybackState.textContent = "Stopped";
+        els.macroPlaybackDetail.textContent = playbackDetailText(playback);
+        return;
+      }
+      els.macroPlaybackState.textContent = "Running";
+      els.macroPlaybackDetail.textContent = playbackDetailText(playback);
+      startMacroPlaybackTimer();
+    }
+
+    function playbackDetailText(playback = state.macroPlayback) {
+      const macroBlocks = state.score?.macrostructure?.blocks ?? [];
+      const activeBlockId = playback?.activeBlockId || state.score?.structureState?.activeBlockId || "";
+      const macroIndex = Number.isFinite(playback?.macroIndex)
+        ? playback.macroIndex
+        : Math.max(0, macroBlocks.indexOf(activeBlockId));
+      const position = macroBlocks.length ? `${macroIndex + 1}/${macroBlocks.length}` : "0/0";
+      const remaining = playback?.running ? `${formatRemaining(playback.nextAdvanceAt)} remaining` : "-- remaining";
+      return `${activeBlockId || "No block"} · ${position} · ${remaining}`;
+    }
+
+    function formatRemaining(nextAdvanceAt) {
+      if (!Number.isFinite(Number(nextAdvanceAt))) {
+        return "--";
+      }
+      const remainingMs = Math.max(0, Number(nextAdvanceAt) - Date.now());
+      const totalSeconds = Math.ceil(remainingMs / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return minutes > 0 ? `${minutes}:${String(seconds).padStart(2, "0")}` : `${seconds}s`;
+    }
+
+    function startMacroPlaybackTimer() {
+      if (state.macroPlaybackTimer !== undefined) {
+        return;
+      }
+      state.macroPlaybackTimer = window.setInterval(() => {
+        if (!state.macroPlayback?.running) {
+          stopMacroPlaybackTimer();
+          renderMacroPlaybackStatus();
+          return;
+        }
+        els.macroPlaybackDetail.textContent = playbackDetailText();
+      }, 1000);
+    }
+
+    function stopMacroPlaybackTimer() {
+      if (state.macroPlaybackTimer === undefined) {
+        return;
+      }
+      window.clearInterval(state.macroPlaybackTimer);
+      state.macroPlaybackTimer = undefined;
+    }
+
+    function chainRow(index, blockId) {
+      const row = document.createElement("div");
+      row.className = "chain-row";
+      const number = document.createElement("div");
+      number.className = "chain-index";
+      number.textContent = String(index + 1);
+      const select = document.createElement("select");
+      select.dataset.chainIndex = String(index);
+      Object.keys(state.score?.mesostructure ?? {}).sort(naturalCompare).forEach((id) => {
+        const option = document.createElement("option");
+        option.value = id;
+        option.textContent = id;
+        select.append(option);
+      });
+      select.value = blockId;
+      select.addEventListener("change", () => {
+        state.macroDirty = true;
+        updateButtons();
+      });
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "danger";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", () => {
+        row.remove();
+        renumberChain();
+        state.macroDirty = true;
+        updateButtons();
+      });
+      row.append(number, select, remove);
+      return row;
+    }
+
+    function selectBlock(blockId) {
+      if (blockId === state.selectedBlockId) {
+        return;
+      }
+      if (state.blockDirty && !window.confirm("Discard unsaved block edits?")) {
+        return;
+      }
+      state.selectedBlockId = blockId;
+      state.blockDirty = false;
+      renderBlockList();
+      renderBlockEditor();
+    }
+
+    function addBlock() {
+      if (!state.score) {
+        return;
+      }
+      if (state.blockDirty && !window.confirm("Discard unsaved block edits?")) {
+        return;
+      }
+      const id = nextBlockId();
+      state.score = {
+        ...state.score,
+        mesostructure: {
+          ...state.score.mesostructure,
+          [id]: {
+            duration: { bars: 8 },
+            scale: {},
+            players: {}
+          }
+        }
+      };
+      state.selectedBlockId = id;
+      state.blockDirty = true;
+      renderAll();
+    }
+
+    async function deleteBlock() {
+      if (!state.score || !state.selectedBlockId || !window.confirm(`Remove section ${state.selectedBlockId}?`)) {
+        return;
+      }
+      const blockId = state.selectedBlockId;
+      setStatus(`Removing ${blockId}...`);
+      try {
+        state.saving = true;
+        state.score = await fetchJson(`${state.serverUrl}/mesostructure/${encodeURIComponent(blockId)}`, undefined, {
+          method: "DELETE"
+        });
+        state.selectedBlockId = firstBlockId();
+        state.blockDirty = false;
+        state.macroDirty = false;
+        renderAll();
+        setStatus(`Removed ${blockId}.`);
+      } catch (error) {
+        setStatus(`Remove failed: ${error.message}`);
+      } finally {
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
+    async function saveBlock() {
+      if (!state.score || !state.selectedBlockId) {
+        return;
+      }
+      const originalId = state.selectedBlockId;
+      const nextId = normalizeId(els.blockId.value);
+      if (!nextId) {
+        setStatus("Block id is required.");
+        return;
+      }
+      const block = blockFromForm();
+      setStatus(`Saving ${nextId}...`);
+      try {
+        state.saving = true;
+        let score = await fetchJson(`${state.serverUrl}/mesostructure/${encodeURIComponent(nextId)}`, undefined, {
+          method: "POST",
+          body: block
+        });
+        if (originalId !== nextId && score.mesostructure?.[originalId]) {
+          score = await fetchJson(`${state.serverUrl}/macrostructure`, undefined, {
+            method: "POST",
+            body: {
+              ...score.macrostructure,
+              blocks: (score.macrostructure?.blocks ?? []).map((blockId) => blockId === originalId ? nextId : blockId)
+            }
+          });
+          score = await fetchJson(`${state.serverUrl}/mesostructure/${encodeURIComponent(originalId)}`, undefined, {
+            method: "DELETE"
+          });
+        }
+        state.score = score;
+        state.selectedBlockId = nextId;
+        state.blockDirty = false;
+        state.macroDirty = false;
+        renderAll();
+        setStatus(`Saved ${nextId}.`);
+      } catch (error) {
+        setStatus(`Save failed: ${error.message}`);
+      } finally {
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
+    function addChainEntry() {
+      const blockIds = Object.keys(state.score?.mesostructure ?? {}).sort(naturalCompare);
+      if (!blockIds.length) {
+        return;
+      }
+      const empty = els.chain.querySelector(".empty");
+      empty?.remove();
+      els.chain.append(chainRow(chainSelects().length, state.selectedBlockId || blockIds[0]));
+      state.macroDirty = true;
+      updateButtons();
+    }
+
+    async function saveMacrostructure() {
+      if (!state.score) {
+        return;
+      }
+      const macrostructure = {
+        ...state.score.macrostructure,
+        tempo: numberValue(els.tempo.value, 120),
+        blocks: chainSelects().map((select) => select.value).filter(Boolean)
+      };
+      setStatus("Saving macro chain...");
+      try {
+        state.saving = true;
+        state.score = await fetchJson(`${state.serverUrl}/macrostructure`, undefined, {
+          method: "POST",
+          body: macrostructure
+        });
+        state.macroDirty = false;
+        renderAll();
+        setStatus("Saved macro chain.");
+      } catch (error) {
+        setStatus(`Macro save failed: ${error.message}`);
+      } finally {
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
+    async function setActiveBlock() {
+      const activeBlockId = els.activeBlock.value || state.selectedBlockId;
+      if (!activeBlockId) {
+        return;
+      }
+      await updatePlayhead("/structure/playhead", { activeBlockId });
+    }
+
+    async function advanceBlock() {
+      await updatePlayhead("/macrostructure/advance", {});
+    }
+
+    async function resetBlock() {
+      await updatePlayhead("/macrostructure/reset", {});
+    }
+
+    async function startMacroPlayback() {
+      if (!state.score) {
+        return;
+      }
+      setStatus("Starting macro chain...");
+      try {
+        state.saving = true;
+        const result = await fetchJson(`${state.serverUrl}/macrostructure/playback/start`, undefined, {
+          method: "POST",
+          body: {}
+        });
+        state.macroPlayback = result.playback;
+        renderPlayheadControls();
+        setStatus("Macro chain running.");
+      } catch (error) {
+        setStatus(`Macro chain start failed: ${error.message}`);
+      } finally {
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
+    async function stopMacroPlayback() {
+      if (!state.score) {
+        return;
+      }
+      setStatus("Stopping macro chain...");
+      try {
+        state.saving = true;
+        const result = await fetchJson(`${state.serverUrl}/macrostructure/playback/stop`, undefined, {
+          method: "POST",
+          body: {}
+        });
+        state.macroPlayback = result.playback;
+        renderPlayheadControls();
+        setStatus("Macro chain stopped.");
+      } catch (error) {
+        setStatus(`Macro chain stop failed: ${error.message}`);
+      } finally {
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
+    async function refreshMacroPlayback() {
+      if (!state.serverUrl) {
+        return;
+      }
+      try {
+        state.macroPlayback = await fetchJson(`${state.serverUrl}/macrostructure/playback`);
+        renderPlayheadControls();
+        updateButtons();
+      } catch {
+        // The next score/session refresh will recover playback display state.
+      }
+    }
+
+    async function updatePlayhead(path, body) {
+      if (!state.score) {
+        return;
+      }
+      setStatus("Updating playback block...");
+      try {
+        state.saving = true;
+        state.score = await fetchJson(`${state.serverUrl}${path}`, undefined, {
+          method: "POST",
+          body: {
+            ...body,
+            expectedVersion: state.score.version
+          }
+        });
+        state.selectedBlockId = state.score.structureState?.activeBlockId || state.selectedBlockId;
+        renderAll();
+        setStatus(`Active block ${state.score.structureState?.activeBlockId ?? ""}.`);
+      } catch (error) {
+        setStatus(`Playhead update failed: ${error.message}`);
+      } finally {
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
+    function blockFromForm() {
+      const unit = els.durationUnit.value === "beats" ? "beats" : "bars";
+      const scale = {};
+      if (els.scaleRoot.value !== "") {
+        scale.root_note = numberValue(els.scaleRoot.value, 0);
+      }
+      if (els.scaleName.value.trim()) {
+        scale.scale_name = els.scaleName.value.trim();
+      }
+      const players = {};
+      els.players.querySelectorAll("select[data-voice-id]").forEach((input) => {
+        const clipId = input.value.trim();
+        if (clipId) {
+          players[input.dataset.voiceId] = { clipId };
+        }
+      });
+      return {
+        ...currentBlock(),
+        duration: { [unit]: numberValue(els.durationValue.value, 8) },
+        scale,
+        players
+      };
+    }
+
+    function clipSelectForVoice(voiceId, selectedClipId) {
+      const select = document.createElement("select");
+      select.dataset.voiceId = voiceId;
+
+      const none = document.createElement("option");
+      none.value = "";
+      none.textContent = "None";
+      select.append(none);
+
+      const create = document.createElement("option");
+      create.value = "__create__";
+      create.textContent = "Create new clip...";
+      select.append(create);
+
+      Object.keys(state.score?.clips ?? {}).sort(naturalCompare).forEach((clipId) => {
+        const option = document.createElement("option");
+        option.value = clipId;
+        option.textContent = clipId;
+        select.append(option);
+      });
+
+      if (selectedClipId && !state.score?.clips?.[selectedClipId]) {
+        const missing = document.createElement("option");
+        missing.value = selectedClipId;
+        missing.textContent = `${selectedClipId} (missing)`;
+        select.append(missing);
+      }
+      select.value = selectedClipId;
+      return select;
+    }
+
+    async function createClipForSlot(select, voiceId) {
+      const suggestion = `${state.selectedBlockId.toLowerCase()}-${voiceId}`;
+      const clipId = normalizeId(window.prompt("New clip id", suggestion));
+      if (!clipId) {
+        select.value = currentBlock()?.players?.[voiceId]?.clipId ?? "";
+        return;
+      }
+      setStatus(`Creating ${clipId}...`);
+      try {
+        state.saving = true;
+        state.score = await fetchJson(`${state.serverUrl}/clips/${encodeURIComponent(clipId)}`, undefined, {
+          method: "POST",
+          body: defaultClipDocument()
+        });
+        state.blockDirty = true;
+        renderBlockList();
+        renderMacroEditor();
+        renderBlockEditor();
+        const refreshed = els.players.querySelector(`select[data-voice-id="${cssEscape(voiceId)}"]`);
+        if (refreshed) {
+          refreshed.value = clipId;
+        }
+        await saveBlock();
+      } catch (error) {
+        select.value = currentBlock()?.players?.[voiceId]?.clipId ?? "";
+        setStatus(`Clip create failed: ${error.message}`);
+      } finally {
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
+    function defaultClipDocument() {
+      return {
+        notes: [],
+        context: {
+          clip: {
+            TimeSignature: {
+              numerator: 4,
+              denominator: 4
+            }
+          },
+          scale: {},
+          grid: {},
+          seed: 0
+        },
+        duration: { bars: 1 },
+        playbackType: "looped",
+        behavior: {
+          followsPitch: true,
+          followsScale: true,
+          transposeMode: "scale-degree"
+        }
+      };
+    }
+
+    function currentBlock() {
+      return state.score?.mesostructure?.[state.selectedBlockId];
+    }
+
+    function firstBlockId() {
+      return Object.keys(state.score?.mesostructure ?? {}).sort(naturalCompare)[0] ?? "";
+    }
+
+    function nextBlockId() {
+      const existing = new Set(Object.keys(state.score?.mesostructure ?? {}));
+      for (const id of "ABCDEFGHIJKLMNOPQRSTUVWXYZ") {
+        if (!existing.has(id)) {
+          return id;
+        }
+      }
+      let index = 1;
+      while (existing.has(`section-${index}`)) {
+        index += 1;
+      }
+      return `section-${index}`;
+    }
+
+    function durationParts(block) {
+      if (Number.isFinite(block?.duration?.beats)) {
+        return ["beats", block.duration.beats];
+      }
+      return ["bars", Number.isFinite(block?.duration?.bars) ? block.duration.bars : 8];
+    }
+
+    function durationLabel(block) {
+      const [unit, value] = durationParts(block);
+      return `${value} ${unit}`;
+    }
+
+    function renumberChain() {
+      els.chain.querySelectorAll(".chain-row").forEach((row, index) => {
+        row.querySelector(".chain-index").textContent = String(index + 1);
+        row.querySelector("select").dataset.chainIndex = String(index);
+      });
+      if (!chainSelects().length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = "No macro chain entries.";
+        els.chain.append(empty);
+      }
+    }
+
+    function chainSelects() {
+      return [...els.chain.querySelectorAll("select[data-chain-index]")];
+    }
+
+    function updateButtons() {
+      const hasScore = Boolean(state.score);
+      const hasBlock = Boolean(state.selectedBlockId && currentBlock());
+      els.addBlock.disabled = !hasScore || state.saving;
+      els.deleteBlock.disabled = !hasBlock || state.saving;
+      els.saveBlock.disabled = !hasBlock || !state.blockDirty || state.saving;
+      els.revertBlock.disabled = !state.blockDirty || state.saving;
+      els.addChain.disabled = !hasScore || state.saving || !Object.keys(state.score?.mesostructure ?? {}).length;
+      els.saveMacro.disabled = !hasScore || !state.macroDirty || state.saving;
+      els.revertMacro.disabled = !state.macroDirty || state.saving;
+      els.activeBlock.disabled = !hasScore || state.saving || !Object.keys(state.score?.mesostructure ?? {}).length;
+      els.setActiveBlock.disabled = !hasScore || state.saving || !els.activeBlock.value;
+      els.advanceBlock.disabled = !hasScore || state.saving || !(state.score?.macrostructure?.blocks ?? []).length;
+      els.resetBlock.disabled = !hasScore || state.saving;
+      els.startMacro.disabled = !hasScore || state.saving || Boolean(state.macroPlayback?.running) || !(state.score?.macrostructure?.blocks ?? []).length;
+      els.stopMacro.disabled = !hasScore || state.saving || !state.macroPlayback?.running;
+    }
+
+    function confirmDiscard() {
+      return !(state.blockDirty || state.macroDirty) || window.confirm("Discard unsaved structure edits?");
+    }
+
+    function closeEvents() {
+      state.eventSource?.close();
+      state.eventSource = undefined;
+      stopMacroPlaybackTimer();
+    }
+
+    function initScaleRoots() {
+      noteNames.forEach((name, index) => {
+        const option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = name;
+        els.scaleRoot.append(option);
+      });
+    }
+
+    function serverCandidates() {
+      const values = [
+        els.server.value,
+        els.serverSelect.value,
+        window.location.origin,
+        "http://pt5.local:8790",
+        "http://pt4.local:8790",
+        "http://shadowbox.local:8790",
+        "http://127.0.0.1:8790"
+      ].map(normalizeServerUrl).filter(Boolean);
+      return [...new Set(values)];
+    }
+
+    function currentServerUrl() {
+      return normalizeServerUrl(els.server.value) || normalizeServerUrl(els.serverSelect.value) || normalizeServerUrl(window.location.origin);
+    }
+
+    function normalizeServerUrl(url) {
+      return String(url ?? "").trim().replace(/\/+$/, "");
+    }
+
+    async function fetchJson(url, timeoutMs, options = {}) {
+      const controller = new AbortController();
+      const timer = timeoutMs ? window.setTimeout(() => controller.abort(), timeoutMs) : undefined;
+      try {
+        const response = await fetch(url, {
+          method: options.method ?? "GET",
+          headers: options.body ? { "content-type": "application/json" } : undefined,
+          body: options.body ? JSON.stringify(options.body) : undefined,
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          throw new Error(`${response.status} ${response.statusText}`);
+        }
+        return await response.json();
+      } finally {
+        if (timer) {
+          window.clearTimeout(timer);
+        }
+      }
+    }
+
+    function serverLabel(url, session) {
+      const name = session?.server?.advertisedName || session?.server?.hostIdentity || session?.ensembleId || "ShadowScore";
+      return `${name} (${url})`;
+    }
+
+    function normalizeId(value) {
+      return String(value ?? "").trim();
+    }
+
+    function numberValue(value, fallback) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : fallback;
+    }
+
+    function naturalCompare(a, b) {
+      return String(a).localeCompare(String(b), undefined, { numeric: true, sensitivity: "base" });
+    }
+
+    function cssEscape(value) {
+      if (window.CSS?.escape) {
+        return window.CSS.escape(value);
+      }
+      return String(value).replace(/["\\]/g, "\\$&");
+    }
+
+    function setStatus(message) {
+      els.status.textContent = message;
+    }
+  </script>
+</body>
+</html>

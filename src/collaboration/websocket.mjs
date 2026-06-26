@@ -96,6 +96,67 @@ export function createCollaborationHub(store, config = {}) {
             sourceClientId: client.id
           }));
           break;
+        case "mesostructure.block.replace":
+          ack(client, requestId, store.replaceMesoBlock(requireString(payload.blockId ?? payload.id, "blockId"), payload.block ?? payload.document ?? {}, {
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
+        case "mesostructure.block.remove":
+          ack(client, requestId, store.removeMesoBlock(requireString(payload.blockId ?? payload.id, "blockId"), {
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
+        case "macrostructure.update":
+          ack(client, requestId, store.updateMacrostructure(payload.macrostructure ?? {}, {
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            replace: Boolean(payload.replace),
+            sourceClientId: client.id
+          }));
+          break;
+        case "structure.playhead.update":
+          ack(client, requestId, store.updateStructureState(payload.structureState ?? payload.playhead ?? {}, {
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
+        case "macrostructure.advance":
+          ack(client, requestId, store.advanceStructurePlayhead({
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
+        case "macrostructure.reset":
+          ack(client, requestId, store.resetStructurePlayhead({
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
+        case "clip.add":
+          ack(client, requestId, store.addClip(requireString(payload.clipId ?? payload.id, "clipId"), payload.clip ?? payload.document ?? {}, {
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
+        case "clip.replace":
+          ack(client, requestId, store.replaceClip(requireString(payload.clipId ?? payload.id, "clipId"), payload.clip ?? payload.document ?? {}, {
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
+        case "clip.rename":
+          ack(client, requestId, store.renameClip(requireString(payload.clipId ?? payload.oldClipId, "clipId"), requireString(payload.newClipId ?? payload.id, "newClipId"), {
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
+        case "clip.remove":
+          ack(client, requestId, store.removeClip(requireString(payload.clipId ?? payload.id, "clipId"), {
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
+          }));
+          break;
         case "voice.add":
           ack(client, requestId, store.addVoice(requireString(payload.voiceId ?? payload.id, "voiceId"), payload.assignment ?? {}, {
             expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
@@ -131,8 +192,19 @@ export function createCollaborationHub(store, config = {}) {
           ack(client, requestId, store.reset({
             assignments: Boolean(payload.assignments),
             context: Boolean(payload.context),
+            structure: Boolean(payload.structure),
             sourceClientId: client.id,
             voices: Boolean(payload.voices)
+          }));
+          break;
+        case "admin.importLegacyVoiceNotes":
+          ack(client, requestId, store.importLegacyVoiceNotes({
+            blockId: payload.blockId,
+            suffix: payload.suffix,
+            overwriteClips: Boolean(payload.overwriteClips),
+            includeEmpty: Boolean(payload.includeEmpty),
+            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            sourceClientId: client.id
           }));
           break;
         default:

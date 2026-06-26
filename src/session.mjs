@@ -14,10 +14,14 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       url: baseUrl
     },
     endpoints: {
-      app: `${baseUrl}/matrix-edit`,
+      app: `${baseUrl}/`,
       matrixEdit: `${baseUrl}/matrix-edit`,
       eventList: `${baseUrl}/event-list`,
+      structureEditor: `${baseUrl}/`,
+      structurePlayhead: `${baseUrl}/structure/playhead`,
+      macroPlayback: `${baseUrl}/macrostructure/playback`,
       admin: `${baseUrl}/admin`,
+      structure: `${baseUrl}/structure`,
       score: `${baseUrl}/score`,
       events: `${baseUrl}/events`,
       collab: websocketUrl(baseUrl, "/collab")
@@ -33,6 +37,13 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       label: preset.label ?? id
     })),
     hardwareUnits,
+    macroPlayback: runtime.macroPlayback?.snapshot?.() ?? {
+      running: false,
+      activeBlockId: score.structureState?.activeBlockId ?? "",
+      macroIndex: score.structureState?.macroIndex ?? 0,
+      nextAdvanceAt: null,
+      currentBlockDurationMs: 0
+    },
     rnbo: {
       enabled: Boolean(config.rnbo?.enabled),
       host: config.rnbo?.host ?? "",

@@ -4,6 +4,7 @@ import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
 import { configuredRnboTargets, discoverRnboTargets, writeRnboTransportParams } from "../adapters/rnbo-oscquery.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
+import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
 
 export async function routeRequest(request, response, store, config, runtime = {}) {
   setCors(response);
@@ -101,6 +102,32 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/clips") {
+    writeJson(response, 200, store.getScore().clips ?? {});
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/structure") {
+    const score = store.getScore();
+    writeJson(response, 200, {
+      clips: score.clips ?? {},
+      mesostructure: score.mesostructure ?? {},
+      macrostructure: score.macrostructure ?? {},
+      structureState: score.structureState ?? {}
+    });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/structure/playhead") {
+    writeJson(response, 200, store.getScore().structureState ?? {});
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/macrostructure/playback") {
+    writeJson(response, 200, macroPlaybackSnapshot(runtime, store));
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/admin") {
     writeHtml(response, 200, adminPage());
     return;
@@ -140,7 +167,8 @@ export async function routeRequest(request, response, store, config, runtime = {
       writeJson(response, 200, store.reset({
         context: Boolean(body.context),
         voices: Boolean(body.voices),
-        assignments: Boolean(body.assignments)
+        assignments: Boolean(body.assignments),
+        structure: Boolean(body.structure)
       }));
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
@@ -158,9 +186,66 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/admin/scores") {
+    try {
+      writeJson(response, 200, { scores: await listSavedScores(config) });
+    } catch (error) {
+      writeJson(response, 500, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/scores") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, { ok: true, score: await saveScoreToLibrary(config, store.getScore(), { name: body.name }) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const savedScoreLoadMatch = url.pathname.match(/^\/admin\/scores\/([^/]+)\/load$/);
+  if (request.method === "POST" && savedScoreLoadMatch) {
+    try {
+      const snapshot = await loadScoreFromLibrary(config, decodeURIComponent(savedScoreLoadMatch[1]));
+      writeJson(response, 200, store.restore(snapshot));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const savedScoreMatch = url.pathname.match(/^\/admin\/scores\/([^/]+)$/);
+  if (request.method === "DELETE" && savedScoreMatch) {
+    try {
+      await deleteScoreFromLibrary(config, decodeURIComponent(savedScoreMatch[1]));
+      writeJson(response, 200, { ok: true, scores: await listSavedScores(config) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/admin/restore") {
     try {
       writeJson(response, 200, store.restore(await readJson(request)));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/import-legacy-voice-notes") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.importLegacyVoiceNotes({
+        blockId: body.blockId,
+        suffix: body.suffix,
+        overwriteClips: Boolean(body.overwriteClips),
+        includeEmpty: Boolean(body.includeEmpty),
+        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
+      }));
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -190,6 +275,162 @@ export async function routeRequest(request, response, store, config, runtime = {
         request.method === "DELETE"
           ? store.clearVoiceAssignment(voiceId)
           : store.replaceVoiceAssignment(voiceId, await readJson(request));
+      writeJson(response, 200, score);
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/clips") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.addClip(body.clipId ?? body.id, body.clip ?? body.document ?? withoutControlFields(body, ["clipId", "id", "expectedVersion"]), {
+        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
+      }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const clipRenameMatch = url.pathname.match(/^\/clips\/([^/]+)\/rename$/);
+  if (request.method === "POST" && clipRenameMatch) {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.renameClip(decodeURIComponent(clipRenameMatch[1]), body.clipId ?? body.id, {
+        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
+      }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const clipMatch = url.pathname.match(/^\/clips\/([^/]+)$/);
+  if ((request.method === "POST" || request.method === "DELETE") && clipMatch) {
+    try {
+      const clipId = decodeURIComponent(clipMatch[1]);
+      const body = request.method === "DELETE" ? undefined : await readJson(request);
+      const score =
+        request.method === "DELETE"
+          ? store.removeClip(clipId)
+          : store.replaceClip(clipId, body.clip ?? body.document ?? withoutControlFields(body, ["expectedVersion"]), {
+            expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
+          });
+      writeJson(response, 200, score);
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/macrostructure") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.updateMacrostructure(body.macrostructure ?? withoutControlFields(body, ["expectedVersion", "replace"]), {
+        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion"),
+        replace: url.searchParams.get("replace") === "1" || Boolean(body.replace)
+      }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/structure/playhead") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.updateStructureState(body.structureState ?? withoutControlFields(body, ["expectedVersion"]), {
+        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
+      }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/macrostructure/advance") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.advanceStructurePlayhead({
+        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
+      }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/macrostructure/reset") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.resetStructurePlayhead({
+        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
+      }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/macrostructure/playback/start") {
+    try {
+      const body = await readJson(request);
+      const playback = requireMacroPlayback(runtime);
+      const clockWrites = await writeTransportParamsToAvailableTargets(config, runtime, { Clock: 1 });
+      writeJson(response, 200, {
+        ok: true,
+        clockWrites,
+        playback: playback.start({
+          reset: Boolean(body.reset),
+          sourceClientId: "http"
+        })
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/macrostructure/playback/stop") {
+    try {
+      const playback = requireMacroPlayback(runtime);
+      const clockWrites = await writeTransportParamsToAvailableTargets(config, runtime, { Clock: 0 });
+      writeJson(response, 200, {
+        ok: true,
+        clockWrites,
+        playback: playback.stop()
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/mesostructure") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.replaceMesoBlock(body.blockId ?? body.id, body.block ?? body.document ?? withoutControlFields(body, ["blockId", "id", "expectedVersion"]), {
+        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
+      }));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const mesoBlockMatch = url.pathname.match(/^\/mesostructure\/([^/]+)$/);
+  if ((request.method === "POST" || request.method === "DELETE") && mesoBlockMatch) {
+    try {
+      const blockId = decodeURIComponent(mesoBlockMatch[1]);
+      const body = request.method === "DELETE" ? undefined : await readJson(request);
+      const score =
+        request.method === "DELETE"
+          ? store.removeMesoBlock(blockId)
+          : store.replaceMesoBlock(blockId, body.block ?? body.document ?? withoutControlFields(body, ["expectedVersion"]), {
+            expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
+          });
       writeJson(response, 200, score);
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
@@ -291,7 +532,8 @@ async function readSessionRuntime(config, runtime) {
   const peerTargets = runtime.peerRegistry?.targets?.() ?? [];
   return {
     rnboTargets: [...localUnit.targets, ...peerTargets],
-    hardwareUnits: [localUnit, ...peerUnits]
+    hardwareUnits: [localUnit, ...peerUnits],
+    macroPlayback: runtime.macroPlayback
   };
 }
 
@@ -303,6 +545,21 @@ async function readAllRnboTargets(config, runtime) {
 async function findRnboTarget(config, runtime, targetId) {
   const targets = await readAllRnboTargets(config, runtime);
   return targets.find((target) => target.id === targetId);
+}
+
+async function writeTransportParamsToAvailableTargets(config, runtime, params) {
+  const targets = (await readAllRnboTargets(config, runtime)).filter((target) => target.available !== false);
+  const writes = [];
+  for (const target of targets) {
+    const targetWrites = await writeRnboTransportParams(config, target, params, {
+      writer: runtime.rnboParamWriter
+    });
+    writes.push(...targetWrites.map((write) => ({
+      ...write,
+      targetId: target.id
+    })));
+  }
+  return writes;
 }
 
 function prepareRnboTransportParams(score, config, target, params) {
@@ -369,6 +626,27 @@ function requirePeerRegistry(runtime) {
   return runtime.peerRegistry;
 }
 
+function requireMacroPlayback(runtime) {
+  if (!runtime.macroPlayback) {
+    throw new Error("macro playback is not available");
+  }
+  return runtime.macroPlayback;
+}
+
+function macroPlaybackSnapshot(runtime, store) {
+  if (runtime.macroPlayback?.snapshot) {
+    return runtime.macroPlayback.snapshot();
+  }
+  const score = store.getScore();
+  return {
+    running: false,
+    activeBlockId: score.structureState?.activeBlockId ?? "",
+    macroIndex: score.structureState?.macroIndex ?? 0,
+    nextAdvanceAt: null,
+    currentBlockDurationMs: 0
+  };
+}
+
 function messageForError(error) {
   return error instanceof Error ? error.message : String(error);
 }
@@ -382,4 +660,12 @@ function optionalInteger(value, field) {
     throw new Error(`${field} must be an integer`);
   }
   return number;
+}
+
+function withoutControlFields(document, fields) {
+  const clone = { ...(document ?? {}) };
+  for (const field of fields) {
+    delete clone[field];
+  }
+  return clone;
 }

@@ -91,6 +91,124 @@ test("collaboration can remove voices", () => {
   assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack"]);
 });
 
+test("collaboration can edit mesostructural blocks and macrostructure", () => {
+  const { hub, store } = createContext();
+  const client = createClient("client-a");
+  hub.addClient(client);
+  client.messages.length = 0;
+
+  client.onMessage({
+    type: "mesostructure.block.replace",
+    requestId: "req-block",
+    blockId: "G",
+    block: {
+      duration: { beats: 16 },
+      players: {
+        "player-1": { clipId: "clip-a" }
+      }
+    }
+  });
+  client.onMessage({
+    type: "macrostructure.update",
+    requestId: "req-macro",
+    macrostructure: {
+      blocks: ["A", "G", "B"]
+    }
+  });
+
+  assert.equal(store.getScore().mesostructure.G.duration.beats, 16);
+  assert.deepEqual(store.getScore().macrostructure.blocks, ["A", "G", "B"]);
+  assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack", "score.changed", "ack"]);
+});
+
+test("collaboration can remove mesostructural blocks", () => {
+  const { hub, store } = createContext();
+  store.replaceMesoBlock("G", { duration: { bars: 4 }, players: {} });
+  store.updateMacrostructure({ blocks: ["A", "G"] });
+  const client = createClient("client-a");
+  hub.addClient(client);
+  client.messages.length = 0;
+
+  client.onMessage({
+    type: "mesostructure.block.remove",
+    requestId: "req-remove",
+    blockId: "G"
+  });
+
+  assert.equal(store.getScore().mesostructure.G, undefined);
+  assert.deepEqual(store.getScore().macrostructure.blocks, ["A"]);
+  assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack"]);
+});
+
+test("collaboration can update structure playhead", () => {
+  const { hub, store } = createContext();
+  const client = createClient("client-a");
+  hub.addClient(client);
+  client.messages.length = 0;
+
+  client.onMessage({
+    type: "structure.playhead.update",
+    requestId: "req-playhead",
+    structureState: {
+      activeBlockId: "C"
+    }
+  });
+  client.onMessage({
+    type: "macrostructure.advance",
+    requestId: "req-advance"
+  });
+
+  assert.equal(store.getScore().structureState.activeBlockId, "D");
+  assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack", "score.changed", "ack"]);
+});
+
+test("collaboration can manage clips", () => {
+  const { hub, store } = createContext();
+  const client = createClient("client-a");
+  hub.addClient(client);
+  client.messages.length = 0;
+
+  client.onMessage({
+    type: "clip.add",
+    requestId: "req-add",
+    clipId: "bass-a",
+    clip: {
+      notes: [{ pitch: 48, start_time: 0, duration: 1, velocity: 100 }],
+      playbackType: "one-shot"
+    }
+  });
+  client.onMessage({
+    type: "clip.rename",
+    requestId: "req-rename",
+    clipId: "bass-a",
+    newClipId: "bass-main"
+  });
+
+  assert.equal(store.getScore().clips["bass-a"], undefined);
+  assert.equal(store.getScore().clips["bass-main"].notes[0].pitch, 48);
+  assert.equal(store.getScore().clips["bass-main"].playbackType, "one-shot");
+  assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack", "score.changed", "ack"]);
+});
+
+test("collaboration can import legacy voice notes into clips", () => {
+  const { hub, store } = createContext();
+  const client = createClient("client-a");
+  store.replaceVoiceNotes("player-1", [{ pitch: 60, start_time: 0, duration: 1, velocity: 100 }]);
+  hub.addClient(client);
+  client.messages.length = 0;
+
+  client.onMessage({
+    type: "admin.importLegacyVoiceNotes",
+    requestId: "req-import",
+    blockId: "A"
+  });
+
+  const score = store.getScore();
+  assert.equal(score.clips["player-1-main"].notes[0].pitch, 60);
+  assert.equal(score.mesostructure.A.players["player-1"].clipId, "player-1-main");
+  assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack"]);
+});
+
 test("collaboration broadcasts presence updates", () => {
   const { hub } = createContext();
   const clientA = createClient("client-a");

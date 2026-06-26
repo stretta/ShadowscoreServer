@@ -26,12 +26,17 @@ export const defaultConfig = Object.freeze({
       matrixEdit: {
         root: "public/matrix-edit",
         index: "index.html",
-        routes: ["/matrix-edit", "/"]
+        routes: ["/matrix-edit"]
       },
       eventList: {
         root: "public/event-list",
         index: "index.html",
         routes: ["/event-list"]
+      },
+      structureEditor: {
+        root: "public/structure-editor",
+        index: "index.html",
+        routes: ["/structure-editor", "/"]
       }
     }
   },
@@ -64,6 +69,7 @@ export const defaultConfig = Object.freeze({
     enabled: true,
     path: "data/score.json",
     backupPath: "data/score.previous.json",
+    libraryPath: "data/scores",
     debounceMs: 150
   },
   rnbo: {

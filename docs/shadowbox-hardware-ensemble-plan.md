@@ -217,7 +217,7 @@ Phase 6 server-side status:
 - Matrix Edit reports a clear unavailable state when it is opened against a non-host server or unreachable session endpoints.
 - RNBO target displays use friendly labels such as `Shadowbox A / Source` when ShadowScoreClient targets are discovered.
 - `ensemble.assignmentPresets` supports a default six-Shadowbox layout with `Shadowbox A / Source` through `Shadowbox F / Source`; this is a convenience preset, not a protocol limit.
-- `/admin/backup`, `/admin/restore`, and admin page controls support downloading and restoring ensemble score snapshots.
+- `/admin/backup`, `/admin/restore`, and admin page controls support downloading and restoring ensemble score snapshots. `/admin/scores` additionally supports Pi-local named score JSON files under `data/scores/`.
 
 ## Coexistence Requirements
 
@@ -255,10 +255,10 @@ The smallest useful slice is:
 
 Phase 1 server-side status:
 
-- Static Matrix Edit hosting is implemented for `/matrix-edit` with `/` retained as a compatibility alias, backed by `public/matrix-edit`.
-- `GET /session` reports host role, advertised name, app/API endpoints, voices, assignments, local RNBO config, and an empty hardware-unit list for the local-host prototype.
+- Static Matrix Edit hosting is implemented for `/matrix-edit`, backed by `public/matrix-edit`. The root `/` route now serves Structure Editor, with `/structure-editor` retained as an explicit alias.
+- `GET /session` reports host role, advertised name, app/API endpoints, voices, assignments, local and registered RNBO targets, hardware units, and macro playback state.
 - `config/shadowbox.local.json` defines a starter voice set with fixed contrasting assignment colors and keeps RNBO output pointed at `127.0.0.1:9000`.
-- `public/matrix-edit/index.html` is a lightweight local browser prototype. It can be replaced by a full Matrix Edit static build while preserving the same `/matrix-edit` server route.
+- `public/matrix-edit` contains the exported ShadowScore Matrix Edit build. Matrix Edit selects a mesostructural block, edits the selected player's assigned clip, and shows other assigned clips as contextual reference layers.
 
 This proves the browser and score-authority shape before adding peer registration and multi-unit RNBO routing.
 

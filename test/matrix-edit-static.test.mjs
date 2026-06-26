@@ -13,6 +13,8 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
   assert.match(html, /<link rel="stylesheet" crossorigin href="\/matrix-edit\/assets\/[^"]+\.css">/);
   assert.match(html, /id="start-transport"/);
   assert.match(html, /id="stop-transport"/);
+  assert.match(html, /id="create-clip"/);
+  assert.match(html, /Create Clip/);
   assert.match(html, /id="duration"[^>]+value="0\.25"/);
   assert.match(html, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
   assert.match(html, /Clock/);
@@ -34,6 +36,9 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(js, /presence\.update/);
   assert.match(js, /voice\.notes\.replace/);
   assert.match(js, /voice\.assignment\.replace/);
+  assert.match(js, /clip\.add/);
+  assert.match(js, /mesostructure\.block\.replace/);
+  assert.match(js, /needs a clip in section/);
   assert.match(js, /Switch the whole score to/);
   assert.match(js, /\/admin\/restore/);
   assert.match(js, /cellFillFractions/);

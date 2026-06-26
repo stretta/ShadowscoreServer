@@ -87,17 +87,28 @@ export function scoreTransportInportMessages(config, compiled) {
 export function shouldSendScoreTransaction(event) {
   return Boolean(
     event.type === "context.updated" ||
+    event.type === "clip.added" ||
+    event.type === "clip.replaced" ||
+    event.type === "clip.renamed" ||
+    event.type === "clip.removed" ||
+    event.type === "mesostructure.block.replaced" ||
+    event.type === "mesostructure.block.removed" ||
+    event.type === "macrostructure.updated" ||
+    event.type === "structure.playhead.updated" ||
     event.type === "voice.notes.replaced" ||
     event.type === "voice.assignment.replaced" ||
-    (event.type === "admin.reset" && (event.detail?.context || event.detail?.voices || event.detail?.assignments))
+    event.type === "admin.legacyVoiceNotes.imported" ||
+    (event.type === "admin.reset" && (event.detail?.context || event.detail?.voices || event.detail?.assignments || event.detail?.structure))
   );
 }
 
 export function compileScoreTransaction(score, config, transactionId, target = rnboTargets(config, score)[0]) {
   const stagesPerBeat = clampInt(config.rnbo.stagesPerBeat, 1, 960);
-  const notes = flattenScoreNotes(score, target.voiceId);
+  const activeBlock = activeMesoBlock(score);
   const selectionStart = readNumber(score.context.clip?.time_selection_start, 0);
-  const selectionEnd = inferSelectionEnd(score, notes, selectionStart);
+  const blockBeats = blockDurationBeats(activeBlock, score.context);
+  const notes = activeBlock ? flattenBlockNotes(score, activeBlock, target.voiceId, blockBeats) : flattenScoreNotes(score, target.voiceId);
+  const selectionEnd = inferSelectionEnd(score, notes, selectionStart, activeBlock);
   const patternLength = clampInt((selectionEnd - selectionStart) * stagesPerBeat, 1, 2147483647);
   const prefix = target.clientId === undefined ? [] : [clampInt(target.clientId, 0, 2147483647)];
 
@@ -181,16 +192,122 @@ function flattenScoreNotes(score, voiceFilter) {
     .sort((a, b) => readNumber(a.start_time, 0) - readNumber(b.start_time, 0) || readNumber(a.pitch, 0) - readNumber(b.pitch, 0));
 }
 
-function inferSelectionEnd(score, notes, selectionStart) {
+function flattenBlockNotes(score, block, voiceFilter, blockBeats = 0) {
+  return Object.entries(block.players ?? {})
+    .filter(([voiceId]) => voiceFilter === undefined || voiceId === voiceFilter)
+    .flatMap(([voiceId, assignment]) => {
+      const clipId = mesoPlayerClipId(assignment);
+      const clip = score.clips?.[clipId];
+      return expandClipNotes(clip, {
+        voiceId,
+        clipId,
+        blockBeats,
+        context: score.context
+      });
+    })
+    .sort((a, b) => readNumber(a.start_time, 0) - readNumber(b.start_time, 0) || readNumber(a.pitch, 0) - readNumber(b.pitch, 0));
+}
+
+function expandClipNotes(clip, { voiceId, clipId, blockBeats, context }) {
+  if (!clip) {
+    return [];
+  }
+  const clipNotes = clip.notes ?? [];
+  const clipBeats = clipDurationBeats(clip, context);
+  const playbackType = clip.playbackType === "one-shot" ? "one-shot" : "looped";
+  if (playbackType === "one-shot" || blockBeats <= 0 || clipBeats <= 0) {
+    return clipNotes.map((note, voiceIndex) => ({
+      ...note,
+      voiceId,
+      clipId,
+      voiceIndex
+    }));
+  }
+
+  const notes = [];
+  for (let offset = 0, iteration = 0; offset < blockBeats; offset += clipBeats, iteration += 1) {
+    for (let voiceIndex = 0; voiceIndex < clipNotes.length; voiceIndex += 1) {
+      const note = clipNotes[voiceIndex];
+      const start = readNumber(note.start_time, 0) + offset;
+      if (start >= blockBeats) {
+        continue;
+      }
+      const duration = Math.min(Math.max(0, readNumber(note.duration, 0)), Math.max(0, blockBeats - start));
+      if (duration <= 0) {
+        continue;
+      }
+      notes.push({
+        ...note,
+        note_id: note.note_id === undefined ? undefined : readNumber(note.note_id, voiceIndex + 1) + iteration * clipNotes.length,
+        start_time: start,
+        duration,
+        voiceId,
+        clipId,
+        voiceIndex
+      });
+    }
+  }
+  return notes;
+}
+
+function activeMesoBlock(score) {
+  const blockId = score.structureState?.activeBlockId ?? score.macrostructure?.blocks?.[0];
+  const block = blockId ? score.mesostructure?.[blockId] : undefined;
+  if (!block) {
+    return undefined;
+  }
+  const hasAssignedClips = Object.values(block.players ?? {}).some((assignment) => score.clips?.[mesoPlayerClipId(assignment)]);
+  return hasAssignedClips ? block : undefined;
+}
+
+function mesoPlayerClipId(assignment) {
+  return typeof assignment === "string" ? assignment : assignment?.clipId;
+}
+
+function inferSelectionEnd(score, notes, selectionStart, activeBlock) {
   const configuredEnd = score.context.clip?.time_selection_end;
   if (typeof configuredEnd === "number" && configuredEnd > selectionStart) {
     return configuredEnd;
+  }
+  const blockBeats = blockDurationBeats(activeBlock, score.context);
+  if (blockBeats > 0) {
+    return selectionStart + blockBeats;
   }
   const lastNoteEnd = Math.max(
     selectionStart + 4,
     ...notes.map((note) => readNumber(note.start_time, 0) + Math.max(0, readNumber(note.duration, 0)))
   );
   return lastNoteEnd;
+}
+
+function blockDurationBeats(block, context) {
+  return durationBeats(block?.duration, context);
+}
+
+function clipDurationBeats(clip, context) {
+  const configured = durationBeats(clip?.duration, clip?.context ?? context);
+  if (configured > 0) {
+    return configured;
+  }
+  const contextClip = clip?.context?.clip;
+  if (typeof contextClip?.time_selection_start === "number" && typeof contextClip.time_selection_end === "number" && contextClip.time_selection_end > contextClip.time_selection_start) {
+    return contextClip.time_selection_end - contextClip.time_selection_start;
+  }
+  return Math.max(0, ...(clip?.notes ?? []).map((note) => readNumber(note.start_time, 0) + Math.max(0, readNumber(note.duration, 0))));
+}
+
+function durationBeats(duration, context) {
+  if (!duration) {
+    return 0;
+  }
+  if (Number.isFinite(duration.beats)) {
+    return Number(duration.beats);
+  }
+  if (Number.isFinite(duration.bars)) {
+    const numerator = readNumber(context?.clip?.TimeSignature?.numerator, 4);
+    return Number(duration.bars) * Math.max(1, numerator);
+  }
+  return 0;
 }
 
 async function sendOscMessage(socket, config, target, values) {

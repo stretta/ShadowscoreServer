@@ -37,6 +37,10 @@ test("reconciles persisted voices with configured voices", () => {
     assignments: {
       "player-1": { assignee: "Ari", deviceId: "shadowbox-05", clientId: "5505", label: "", color: "", locked: true }
     },
+    clips: {
+      oldClip: { notes: [{ pitch: 48 }], context: { clip: {}, scale: {}, grid: {}, seed: 0 }, behavior: {} },
+      oneShot: { notes: [], context: { clip: {}, scale: {}, grid: {}, seed: 0 }, duration: { beats: 2 }, playbackType: "one-shot", behavior: {} }
+    },
     voices: {
       "player-1": { version: 2, notes: [{ pitch: 60 }] },
       guest: { version: 1, notes: [] }
@@ -52,6 +56,10 @@ test("reconciles persisted voices with configured voices", () => {
   assert.deepEqual(reconciled.voices.guest, { version: 1, notes: [] });
   assert.equal(reconciled.assignments["player-1"].assignee, "Ari");
   assert.equal(reconciled.assignments["player-7"].assignee, "");
+  assert.equal(reconciled.clips.oldClip.playbackType, "looped");
+  assert.equal(reconciled.clips.oneShot.playbackType, "one-shot");
+  assert.deepEqual(reconciled.clips.oldClip.duration, {});
+  assert.deepEqual(reconciled.clips.oneShot.duration, { beats: 2 });
 });
 
 test("writes score snapshots and keeps previous backup", async () => {

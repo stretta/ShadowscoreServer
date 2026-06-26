@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
@@ -46,6 +49,10 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /Shadowscore Lab Admin/);
   assert.match(response.body, /Session link/);
   assert.match(response.body, /Download backup/);
+  assert.match(response.body, /Saved scores/);
+  assert.match(response.body, /\/admin\/scores/);
+  assert.match(response.body, /Import voice notes to clips/);
+  assert.match(response.body, /\/admin\/import-legacy-voice-notes/);
 });
 
 test("session route exposes host metadata and voice assignments", async () => {
@@ -54,8 +61,14 @@ test("session route exposes host metadata and voice assignments", async () => {
 
   assert.equal(session.ensembleId, "berklee-b51");
   assert.equal(session.server.role, "host");
+  assert.equal(session.endpoints.app, "http://127.0.0.1/");
   assert.equal(session.endpoints.collab, "ws://127.0.0.1/collab");
   assert.equal(session.endpoints.eventList, "http://127.0.0.1/event-list");
+  assert.equal(session.endpoints.structureEditor, "http://127.0.0.1/");
+  assert.equal(session.endpoints.structure, "http://127.0.0.1/structure");
+  assert.equal(session.endpoints.structurePlayhead, "http://127.0.0.1/structure/playhead");
+  assert.equal(session.endpoints.macroPlayback, "http://127.0.0.1/macrostructure/playback");
+  assert.equal(session.macroPlayback.running, false);
   assert.equal(session.voices.length, 6);
   assert.equal(session.voices[0].assignment.label, "Player 1");
   assert.equal(session.assignmentPresets[0].id, "six-player-shadowbox");
@@ -78,6 +91,200 @@ test("voice routes add and remove arbitrary voices", async () => {
 
   const removed = await requestJson(context, "DELETE", "/voices/player-12");
   assert.equal(removed.voices["player-12"], undefined);
+});
+
+test("structure routes expose and mutate meso and macro organization", async () => {
+  const context = createRouteContext();
+
+  const initial = await requestJson(context, "GET", "/structure");
+  assert.deepEqual(Object.keys(initial.mesostructure), ["A", "B", "C", "D", "E", "F"]);
+  assert.deepEqual(initial.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
+  assert.deepEqual(initial.structureState, { activeBlockId: "A", macroIndex: 0 });
+
+  const added = await requestJson(context, "POST", "/mesostructure/G", {
+    duration: { bars: 12 },
+    players: {
+      "player-1": { clipId: "clip-a" }
+    }
+  });
+  assert.equal(added.mesostructure.G.duration.bars, 12);
+
+  const chained = await requestJson(context, "POST", "/macrostructure", {
+    expectedVersion: added.version,
+    blocks: ["A", "G", "B"]
+  });
+  assert.deepEqual(chained.macrostructure.blocks, ["A", "G", "B"]);
+  assert.equal(chained.macrostructure.expectedVersion, undefined);
+
+  const removed = await requestJson(context, "DELETE", "/mesostructure/G");
+  assert.equal(removed.mesostructure.G, undefined);
+  assert.deepEqual(removed.macrostructure.blocks, ["A", "B"]);
+});
+
+test("structure playhead routes select, advance, and reset active blocks", async () => {
+  const context = createRouteContext();
+
+  const selected = await requestJson(context, "POST", "/structure/playhead", {
+    activeBlockId: "C"
+  });
+  assert.equal(selected.structureState.activeBlockId, "C");
+  assert.equal(selected.structureState.macroIndex, 2);
+
+  const playhead = await requestJson(context, "GET", "/structure/playhead");
+  assert.deepEqual(playhead, selected.structureState);
+
+  const advanced = await requestJson(context, "POST", "/macrostructure/advance", {
+    expectedVersion: selected.version
+  });
+  assert.equal(advanced.structureState.activeBlockId, "D");
+  assert.equal(advanced.structureState.macroIndex, 3);
+
+  const reset = await requestJson(context, "POST", "/macrostructure/reset", {
+    expectedVersion: advanced.version
+  });
+  assert.deepEqual(reset.structureState, { activeBlockId: "A", macroIndex: 0 });
+
+  const rejected = await request(context, "POST", "/structure/playhead", {
+    activeBlockId: "missing"
+  });
+  assert.equal(rejected.status, 400);
+  assert.match(rejected.body, /unknown mesostructural block 'missing'/);
+});
+
+test("macro playback routes expose, start, and stop the chain runner", async () => {
+  let running = false;
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          activeBlockId: "A",
+          macroIndex: 0,
+          nextAdvanceAt: running ? 1000 : null,
+          currentBlockDurationMs: running ? 16000 : 0
+        }),
+        start: () => {
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => {
+          running = false;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  const initial = await requestJson(context, "GET", "/macrostructure/playback");
+  assert.equal(initial.running, false);
+
+  const started = await requestJson(context, "POST", "/macrostructure/playback/start", {});
+  assert.equal(started.ok, true);
+  assert.equal(started.playback.running, true);
+  assert.equal(started.playback.currentBlockDurationMs, 16000);
+  assert.deepEqual(writes, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Clock",
+      value: 1
+    }
+  ]);
+  assert.deepEqual(started.clockWrites, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Clock",
+      targetId: "source-client",
+      value: 1
+    }
+  ]);
+
+  const stopped = await requestJson(context, "POST", "/macrostructure/playback/stop", {});
+  assert.equal(stopped.ok, true);
+  assert.equal(stopped.playback.running, false);
+  assert.deepEqual(writes.at(-1), {
+    host: "192.168.68.96",
+    port: 9000,
+    path: "/rnbo/inst/2/params/Clock",
+    value: 0
+  });
+  assert.deepEqual(stopped.clockWrites, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Clock",
+      targetId: "source-client",
+      value: 0
+    }
+  ]);
+});
+
+test("clip routes expose and mutate reusable clips", async () => {
+  const context = createRouteContext();
+
+  const added = await requestJson(context, "POST", "/clips/bass-a", {
+    notes: [{ pitch: 48, start_time: 0, duration: 1, velocity: 100 }],
+    duration: { bars: 1 }
+  });
+  assert.equal(added.clips["bass-a"].notes[0].pitch, 48);
+  assert.deepEqual(added.clips["bass-a"].duration, { bars: 1 });
+  assert.equal(added.clips["bass-a"].playbackType, "looped");
+
+  await requestJson(context, "POST", "/clips/bass-a", {
+    notes: [{ pitch: 48, start_time: 0, duration: 1, velocity: 100 }],
+    duration: { beats: 2 },
+    playbackType: "one-shot"
+  });
+  const clips = await requestJson(context, "GET", "/clips");
+  assert.equal(clips["bass-a"].notes[0].pitch, 48);
+  assert.deepEqual(clips["bass-a"].duration, { beats: 2 });
+  assert.equal(clips["bass-a"].playbackType, "one-shot");
+
+  const renamed = await requestJson(context, "POST", "/clips/bass-a/rename", {
+    clipId: "bass-main"
+  });
+  assert.equal(renamed.clips["bass-a"], undefined);
+  assert.equal(renamed.clips["bass-main"].notes[0].pitch, 48);
+
+  await requestJson(context, "POST", "/mesostructure/A", {
+    duration: { bars: 8 },
+    players: { "player-1": { clipId: "bass-main" } }
+  });
+  const rejected = await request(context, "DELETE", "/clips/bass-main");
+  assert.equal(rejected.status, 400);
+  assert.match(rejected.body, /clip 'bass-main' is assigned in A\/player-1/);
+});
+
+test("admin reset route can restore seeded structure", async () => {
+  const context = createRouteContext();
+
+  await requestJson(context, "POST", "/mesostructure/G", { duration: { bars: 12 }, players: {} });
+  await requestJson(context, "POST", "/macrostructure", { blocks: ["G"] });
+
+  const reset = await requestJson(context, "POST", "/admin/reset", {
+    structure: true
+  });
+
+  assert.equal(reset.mesostructure.G, undefined);
+  assert.deepEqual(Object.keys(reset.mesostructure), ["A", "B", "C", "D", "E", "F"]);
+  assert.deepEqual(reset.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
 });
 
 test("admin assignment preset applies friendly shadowbox labels", async () => {
@@ -105,6 +312,54 @@ test("admin backup downloads and restore replaces score snapshot", async () => {
   assert.deepEqual(restored.voices["player-1"].notes, [{ pitch: 72 }]);
   assert.equal(restored.ensembleId, "berklee-b51");
   assert.equal(restored.version > snapshot.version, true);
+});
+
+test("admin saved score library saves, loads, lists, and deletes score files", async (t) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-scores-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      persistence: {
+        libraryPath: directory
+      }
+    })
+  });
+  await requestJson(context, "POST", "/voices/player-1/notes", [{ pitch: 60 }]);
+
+  const saved = await requestJson(context, "POST", "/admin/scores", { name: "First Sketch" });
+  assert.equal(saved.ok, true);
+  assert.equal(saved.score.name, "First Sketch");
+  assert.match(saved.score.id, /^first-sketch-/);
+
+  const listed = await requestJson(context, "GET", "/admin/scores");
+  assert.equal(listed.scores.length, 1);
+  assert.equal(listed.scores[0].name, "First Sketch");
+
+  await requestJson(context, "POST", "/voices/player-1/notes", [{ pitch: 72 }]);
+  const loaded = await requestJson(context, "POST", `/admin/scores/${encodeURIComponent(saved.score.id)}/load`);
+  assert.deepEqual(loaded.voices["player-1"].notes, [{ pitch: 60 }]);
+  assert.equal(loaded.version > listed.scores[0].version, true);
+
+  const deleted = await requestJson(context, "DELETE", `/admin/scores/${encodeURIComponent(saved.score.id)}`);
+  assert.equal(deleted.ok, true);
+  assert.deepEqual(deleted.scores, []);
+});
+
+test("admin import route migrates legacy voice notes into block clips", async () => {
+  const context = createRouteContext();
+  await requestJson(context, "POST", "/voices/player-1/notes", [{ pitch: 60, start_time: 0, duration: 1, velocity: 100 }]);
+  await requestJson(context, "POST", "/voices/player-3/notes", [{ pitch: 72, start_time: 4, duration: 1, velocity: 90 }]);
+
+  const imported = await requestJson(context, "POST", "/admin/import-legacy-voice-notes", {
+    blockId: "A"
+  });
+
+  assert.equal(imported.clips["player-1-main"].notes[0].pitch, 60);
+  assert.equal(imported.clips["player-3-main"].notes[0].pitch, 72);
+  assert.equal(imported.mesostructure.A.players["player-1"].clipId, "player-1-main");
+  assert.equal(imported.mesostructure.A.players["player-3"].clipId, "player-3-main");
+  assert.equal(imported.clips["player-2-main"], undefined);
+  assert.equal(imported.voices["player-1"].notes[0].pitch, 60);
 });
 
 test("hardware registration appears in session and RNBO targets", async () => {
@@ -396,13 +651,13 @@ test("matrix edit route works with legacy generated static config", async () => 
   assert.match(response.body, /ShadowScore Matrix Edit/);
 });
 
-test("root route remains a matrix edit compatibility alias", async () => {
+test("root route serves structure editor", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/");
 
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
-  assert.match(response.body, /ShadowScore Matrix Edit/);
+  assert.match(response.body, /ShadowScore Structure Editor/);
 });
 
 test("event list route serves server-bundled editor html", async () => {
@@ -412,6 +667,18 @@ test("event list route serves server-bundled editor html", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore Event List/);
+  assert.match(response.body, /id="clip"/);
+  assert.match(response.body, /id="new-clip"/);
+  assert.match(response.body, /id="rename-clip"/);
+  assert.match(response.body, /id="delete-clip"/);
+  assert.match(response.body, /id="clip-playback-type"/);
+  assert.match(response.body, /id="clip-time-numerator"/);
+  assert.match(response.body, /id="clip-time-denominator"/);
+  assert.match(response.body, /TimeSignature/);
+  assert.match(response.body, /id="save-clip-attributes"/);
+  assert.match(response.body, /playbackType/);
+  assert.match(response.body, /duration/);
+  assert.match(response.body, /one-shot/);
   assert.match(response.body, /id="server-select"/);
   assert.match(response.body, /id="discover"/);
   assert.match(response.body, /pt5\.local:8790/);
@@ -419,15 +686,39 @@ test("event list route serves server-bundled editor html", async () => {
   assert.match(response.body, /id="ableton-notes"/);
   assert.match(response.body, /id="replace-array"/);
   assert.match(response.body, /id="add-array"/);
-  assert.match(response.body, /id="rnbo-target"/);
-  assert.match(response.body, /id="tempo"/);
-  assert.match(response.body, /id="max-steps"/);
-  assert.match(response.body, /id="clock-interval"/);
-  assert.match(response.body, /id="start-transport"/);
-  assert.match(response.body, /id="stop-transport"/);
-  assert.match(response.body, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
   assert.match(response.body, /POST/);
-  assert.match(response.body, /\/voices\/\$\{encodeURIComponent\(state\.voiceId\)\}\/notes/);
+  assert.match(response.body, /\/clips\/\$\{encodeURIComponent\(clipId\)\}/);
+});
+
+test("structure editor route serves server-bundled editor html", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/structure-editor");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /ShadowScore Structure Editor/);
+  assert.match(response.body, /id="block-list"/);
+  assert.match(response.body, /id="players"/);
+  assert.match(response.body, /id="chain"/);
+  assert.match(response.body, /id="active-block"/);
+  assert.match(response.body, /id="set-active-block"/);
+  assert.match(response.body, /id="advance-block"/);
+  assert.match(response.body, /id="reset-block"/);
+  assert.match(response.body, /id="start-macro"/);
+  assert.match(response.body, /id="stop-macro"/);
+  assert.match(response.body, /id="macro-playback-status"/);
+  assert.match(response.body, /id="macro-playback-state"/);
+  assert.match(response.body, /id="macro-playback-detail"/);
+  assert.match(response.body, /formatRemaining/);
+  assert.match(response.body, /Create new clip/);
+  assert.match(response.body, /\/mesostructure\/\$\{encodeURIComponent\(nextId\)\}/);
+  assert.match(response.body, /\/clips\/\$\{encodeURIComponent\(clipId\)\}/);
+  assert.match(response.body, /\/macrostructure/);
+  assert.match(response.body, /\/structure\/playhead/);
+  assert.match(response.body, /\/macrostructure\/advance/);
+  assert.match(response.body, /\/macrostructure\/reset/);
+  assert.match(response.body, /\/macrostructure\/playback\/start/);
+  assert.match(response.body, /\/macrostructure\/playback\/stop/);
 });
 
 test("voice note route rejects stale expected voice versions", async () => {

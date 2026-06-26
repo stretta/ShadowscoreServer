@@ -8,6 +8,10 @@ test("initial score creates configured voices", () => {
   assert.equal(score.ensembleId, "berklee-b51");
   assert.deepEqual(Object.keys(score.voices), defaultConfig.ensemble.voices);
   assert.deepEqual(Object.keys(score.assignments), defaultConfig.ensemble.voices);
+  assert.deepEqual(Object.keys(score.mesostructure), ["A", "B", "C", "D", "E", "F"]);
+  assert.deepEqual(score.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
+  assert.equal(score.macrostructure.tempo, 120);
+  assert.deepEqual(score.structureState, { activeBlockId: "A", macroIndex: 0 });
   assert.equal(score.assignments["player-1"].label, "Player 1");
   assert.equal(score.assignments["player-1"].color, "#d1453b");
 });
@@ -65,6 +69,138 @@ test("voices can be added and removed at runtime", () => {
   assert.equal(removed.assignments["player-12"], undefined);
 });
 
+test("mesostructural blocks can be added, replaced, and removed at runtime", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+
+  const added = store.replaceMesoBlock("G", {
+    duration: { beats: 24 },
+    scale: { root_note: 2, scale_name: "Dorian" },
+    players: {
+      "player-1": { clipId: "clip-a" },
+      "player-2": "clip-b"
+    }
+  });
+  assert.equal(added.version, 1);
+  assert.equal(added.mesostructure.G.duration.beats, 24);
+  assert.equal(added.mesostructure.G.players["player-1"].clipId, "clip-a");
+  assert.equal(added.mesostructure.G.players["player-2"].clipId, "clip-b");
+
+  const chained = store.updateMacrostructure({ blocks: ["A", "G", "B"] });
+  assert.deepEqual(chained.macrostructure.blocks, ["A", "G", "B"]);
+
+  const removed = store.removeMesoBlock("G");
+  assert.equal(removed.mesostructure.G, undefined);
+  assert.deepEqual(removed.macrostructure.blocks, ["A", "B"]);
+});
+
+test("clips can be added, replaced, renamed, and removed", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+
+  const added = store.addClip("bass-a", {
+    notes: [{ pitch: 48, start_time: 0, duration: 1, velocity: 100 }],
+    duration: { bars: 1 },
+    behavior: { transposeMode: "chromatic" }
+  });
+  assert.equal(added.clips["bass-a"].notes[0].pitch, 48);
+  assert.deepEqual(added.clips["bass-a"].duration, { bars: 1 });
+  assert.equal(added.clips["bass-a"].playbackType, "looped");
+  assert.equal(added.clips["bass-a"].behavior.transposeMode, "chromatic");
+
+  const replaced = store.replaceClip("bass-a", {
+    notes: [{ pitch: 50, start_time: 0, duration: 1, velocity: 100 }],
+    duration: { beats: 2 },
+    playbackType: "one-shot"
+  });
+  assert.equal(replaced.clips["bass-a"].notes[0].pitch, 50);
+  assert.deepEqual(replaced.clips["bass-a"].duration, { beats: 2 });
+  assert.equal(replaced.clips["bass-a"].playbackType, "one-shot");
+
+  store.replaceMesoBlock("A", {
+    duration: { bars: 8 },
+    players: { "player-1": { clipId: "bass-a" } }
+  });
+  assert.throws(() => store.removeClip("bass-a"), /clip 'bass-a' is assigned in A\/player-1/);
+
+  const renamed = store.renameClip("bass-a", "bass-main");
+  assert.equal(renamed.clips["bass-a"], undefined);
+  assert.equal(renamed.clips["bass-main"].notes[0].pitch, 50);
+  assert.equal(renamed.mesostructure.A.players["player-1"].clipId, "bass-main");
+
+  store.replaceMesoBlock("A", { duration: { bars: 8 }, players: {} });
+  const removed = store.removeClip("bass-main");
+  assert.equal(removed.clips["bass-main"], undefined);
+});
+
+test("macrostructure rejects unknown mesostructural blocks", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+
+  assert.throws(
+    () => store.updateMacrostructure({ blocks: ["A", "missing"] }),
+    /macrostructure references unknown mesostructural block 'missing'/
+  );
+});
+
+test("structure playhead selects, advances, and resets active blocks", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+
+  const selected = store.updateStructureState({ activeBlockId: "C" });
+  assert.equal(selected.structureState.activeBlockId, "C");
+  assert.equal(selected.structureState.macroIndex, 2);
+
+  const advanced = store.advanceStructurePlayhead();
+  assert.equal(advanced.structureState.activeBlockId, "D");
+  assert.equal(advanced.structureState.macroIndex, 3);
+
+  const reset = store.resetStructurePlayhead();
+  assert.deepEqual(reset.structureState, { activeBlockId: "A", macroIndex: 0 });
+
+  assert.throws(
+    () => store.updateStructureState({ activeBlockId: "missing" }),
+    /unknown|structureState|activeBlockId/
+  );
+});
+
+test("structure playhead preserves macro position for repeated block ids", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.updateMacrostructure({ blocks: ["A", "B", "A"] });
+
+  const firstAdvance = store.advanceStructurePlayhead();
+  assert.deepEqual(firstAdvance.structureState, { activeBlockId: "B", macroIndex: 1 });
+
+  const secondAdvance = store.advanceStructurePlayhead();
+  assert.deepEqual(secondAdvance.structureState, { activeBlockId: "A", macroIndex: 2 });
+});
+
+test("legacy voice notes import into clips assigned to a mesostructural block", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.updateContext({
+    scale: {
+      scale_name: "Dorian",
+      root_note: 2
+    }
+  });
+  store.replaceVoiceNotes("player-1", [{ pitch: 60, start_time: 0, duration: 1, velocity: 100 }]);
+  store.replaceVoiceNotes("player-2", [{ pitch: 67, start_time: 2, duration: 1, velocity: 96 }]);
+
+  const imported = store.importLegacyVoiceNotes({ blockId: "A" });
+
+  assert.equal(imported.clips["player-1-main"].notes[0].pitch, 60);
+  assert.equal(imported.clips["player-1-main"].context.scale.scale_name, "Dorian");
+  assert.deepEqual(imported.clips["player-1-main"].duration, { bars: 1 });
+  assert.equal(imported.clips["player-1-main"].playbackType, "looped");
+  assert.equal(imported.clips["player-2-main"].notes[0].pitch, 67);
+  assert.equal(imported.mesostructure.A.players["player-1"].clipId, "player-1-main");
+  assert.equal(imported.mesostructure.A.players["player-2"].clipId, "player-2-main");
+  assert.equal(imported.voices["player-1"].notes[0].pitch, 60);
+
+  store.replaceVoiceNotes("player-1", [{ pitch: 61 }]);
+  const repeated = store.importLegacyVoiceNotes({ blockId: "A" });
+  assert.equal(repeated.clips["player-1-main"].notes[0].pitch, 60);
+
+  const overwritten = store.importLegacyVoiceNotes({ blockId: "A", overwriteClips: true });
+  assert.equal(overwritten.clips["player-1-main"].notes[0].pitch, 61);
+});
+
 test("restore can import voices that are not in the current score", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   const restored = store.restore({
@@ -75,11 +211,20 @@ test("restore can import voices that are not in the current score", () => {
     },
     assignments: {
       guest: { label: "Guest", color: "#2457a6" }
+    },
+    mesostructure: {
+      Intro: { duration: { bars: 4 }, players: {} }
+    },
+    macrostructure: {
+      tempo: 96,
+      blocks: ["Intro"]
     }
   });
 
   assert.deepEqual(restored.voices.guest.notes, [{ pitch: 72 }]);
   assert.equal(restored.assignments.guest.label, "Guest");
+  assert.equal(restored.mesostructure.Intro.duration.bars, 4);
+  assert.deepEqual(restored.macrostructure.blocks, ["Intro"]);
   assert.equal(restored.voices["player-1"].notes.length, 0);
 });
 

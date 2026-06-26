@@ -87,6 +87,70 @@ export async function writeScoreSnapshot(scorePath, score, options = {}) {
   await fs.rename(tempPath, resolvedScorePath);
 }
 
+export async function listSavedScores(config) {
+  const directory = scoreLibraryDirectory(config);
+  try {
+    const entries = await fs.readdir(directory, { withFileTypes: true });
+    const scores = [];
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith(".json")) {
+        continue;
+      }
+      const id = entry.name.slice(0, -5);
+      try {
+        const filePath = path.join(directory, entry.name);
+        const [stat, score] = await Promise.all([
+          fs.stat(filePath),
+          readScoreSnapshot(filePath)
+        ]);
+        scores.push({
+          id,
+          name: typeof score.savedScoreName === "string" && score.savedScoreName.trim() ? score.savedScoreName.trim() : id,
+          savedAt: typeof score.savedAt === "string" ? score.savedAt : stat.mtime.toISOString(),
+          ensembleId: score.ensembleId,
+          version: score.version
+        });
+      } catch {
+        // Ignore malformed library entries so one bad file does not hide the rest.
+      }
+    }
+    return scores.sort((a, b) => String(b.savedAt).localeCompare(String(a.savedAt)));
+  } catch (error) {
+    if (error?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+export async function saveScoreToLibrary(config, score, options = {}) {
+  assertScoreShape(score);
+  const name = scoreLibraryName(options.name);
+  const savedAt = new Date().toISOString();
+  const id = await uniqueSavedScoreId(scoreLibraryDirectory(config), `${slugify(name)}-${savedAt.replace(/[:.]/g, "-")}`);
+  const filePath = savedScorePath(config, id);
+  await writeScoreSnapshot(filePath, {
+    ...structuredClone(score),
+    savedScoreName: name,
+    savedAt
+  });
+  return {
+    id,
+    name,
+    savedAt,
+    ensembleId: score.ensembleId,
+    version: score.version
+  };
+}
+
+export async function loadScoreFromLibrary(config, id) {
+  return readScoreSnapshot(savedScorePath(config, id));
+}
+
+export async function deleteScoreFromLibrary(config, id) {
+  await fs.unlink(savedScorePath(config, id));
+}
+
 export function reconcileScore(config, fallbackScore, persistedScore) {
   assertScoreShape(persistedScore);
 
@@ -109,6 +173,10 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
     ensembleId: config.ensemble.id,
     version: persistedScore.version,
     context: structuredClone(persistedScore.context),
+    clips: normalizePersistedClips(persistedScore.clips ?? fallbackScore.clips ?? {}),
+    mesostructure: structuredClone(persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}),
+    macrostructure: structuredClone(persistedScore.macrostructure ?? fallbackScore.macrostructure ?? {}),
+    structureState: normalizePersistedStructureState(persistedScore.structureState ?? fallbackScore.structureState ?? {}, persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}, persistedScore.macrostructure ?? fallbackScore.macrostructure ?? {}),
     assignments,
     voices
   };
@@ -126,6 +194,26 @@ export function assertScoreShape(score) {
   }
   if (!isPlainObject(score.context)) {
     throw new Error("score.context must be an object");
+  }
+  if (score.clips !== undefined && !isPlainObject(score.clips)) {
+    throw new Error("score.clips must be an object");
+  }
+  if (score.mesostructure !== undefined && !isPlainObject(score.mesostructure)) {
+    throw new Error("score.mesostructure must be an object");
+  }
+  if (score.macrostructure !== undefined && !isPlainObject(score.macrostructure)) {
+    throw new Error("score.macrostructure must be an object");
+  }
+  if (score.structureState !== undefined && !isPlainObject(score.structureState)) {
+    throw new Error("score.structureState must be an object");
+  }
+  if (score.macrostructure !== undefined) {
+    if (!Number.isFinite(score.macrostructure.tempo)) {
+      throw new Error("score.macrostructure.tempo must be numeric");
+    }
+    if (!Array.isArray(score.macrostructure.blocks)) {
+      throw new Error("score.macrostructure.blocks must be an array");
+    }
   }
   if (!isPlainObject(score.voices)) {
     throw new Error("score.voices must be an object");
@@ -172,6 +260,94 @@ export function assertScoreShape(score) {
       throw new Error(`voice ${voiceId}.notes must be an array`);
     }
   }
+}
+
+async function readScoreSnapshot(scorePath) {
+  const raw = await fs.readFile(scorePath, "utf8");
+  const score = JSON.parse(raw);
+  assertScoreShape(score);
+  return score;
+}
+
+function scoreLibraryDirectory(config) {
+  return resolvePath(config.persistence?.libraryPath ?? "data/scores");
+}
+
+function savedScorePath(config, id) {
+  return path.join(scoreLibraryDirectory(config), `${scoreLibraryId(id)}.json`);
+}
+
+function scoreLibraryName(value) {
+  const name = typeof value === "string" ? value.trim() : "";
+  return name || "Untitled score";
+}
+
+function scoreLibraryId(value) {
+  const id = typeof value === "string" ? value.trim() : "";
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)) {
+    throw new Error("saved score id must contain only letters, numbers, dots, dashes, and underscores");
+  }
+  return id;
+}
+
+async function uniqueSavedScoreId(directory, baseId) {
+  let id = scoreLibraryId(baseId);
+  for (let index = 2; ; index += 1) {
+    try {
+      await fs.access(path.join(directory, `${id}.json`));
+      id = scoreLibraryId(`${baseId}-${index}`);
+    } catch (error) {
+      if (error?.code === "ENOENT") {
+        return id;
+      }
+      throw error;
+    }
+  }
+}
+
+function slugify(value) {
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 64) || "score";
+}
+
+function normalizePersistedClips(clips) {
+  if (!isPlainObject(clips)) {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(clips).map(([clipId, clip]) => [
+      clipId,
+      {
+        ...structuredClone(clip),
+        notes: Array.isArray(clip?.notes) ? structuredClone(clip.notes) : [],
+        context: isPlainObject(clip?.context) ? structuredClone(clip.context) : { clip: {}, scale: {}, grid: {}, seed: 0 },
+        duration: isPlainObject(clip?.duration) ? structuredClone(clip.duration) : {},
+        playbackType: clip?.playbackType === "one-shot" ? "one-shot" : "looped",
+        behavior: isPlainObject(clip?.behavior) ? structuredClone(clip.behavior) : {}
+      }
+    ])
+  );
+}
+
+function normalizePersistedStructureState(structureState, mesostructure, macrostructure) {
+  const blocks = Array.isArray(macrostructure?.blocks) ? macrostructure.blocks : [];
+  const fallbackBlockId = blocks.find((blockId) => mesostructure?.[blockId]) ?? Object.keys(mesostructure ?? {})[0] ?? "";
+  const activeBlockId = typeof structureState?.activeBlockId === "string" && mesostructure?.[structureState.activeBlockId]
+    ? structureState.activeBlockId
+    : fallbackBlockId;
+  const activeIndex = blocks.indexOf(activeBlockId);
+  const macroIndex = Number.isFinite(structureState?.macroIndex)
+    ? Math.max(0, Math.min(Math.max(0, blocks.length - 1), Math.floor(structureState.macroIndex)))
+    : Math.max(0, activeIndex);
+  return {
+    ...structuredClone(structureState ?? {}),
+    activeBlockId,
+    macroIndex
+  };
 }
 
 async function backupExistingSnapshot(scorePath, backupPath) {

@@ -84,6 +84,18 @@ export const defaultConfig = Object.freeze({
       addressPattern: "shadowscore"
     },
     stagesPerBeat: 16,
+    resolution: {
+      mode: "fixed",
+      defaultStagesPerBeat: 16,
+      maxStages: 4096,
+      maxNoteRows: 819,
+      noteDataFloatCount: 8192,
+      noteRowWidth: 10,
+      contextDataFloatCount: 64,
+      quantizationErrorTargetBeats: 0.0020833333333333333,
+      candidateStagesPerBeat: [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 16, 20, 24, 30, 32, 40, 48, 60, 80, 96, 120, 160, 240, 480],
+      supportedClockIntervals: [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 16, 20, 24, 30, 32, 40, 48, 60, 80, 96, 120, 160, 240, 480]
+    },
     transport: {
       Tempo: 120,
       ClockInterval: 120,

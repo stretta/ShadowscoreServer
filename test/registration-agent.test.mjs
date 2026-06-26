@@ -15,7 +15,11 @@ test("peer registration rewrites loopback RNBO targets to the unit hostname", as
       targets: [
         {
           id: "source",
-          address: "/rnbo/inst/1/messages/in/shadowscore"
+          address: "/rnbo/inst/1/messages/in/shadowscore",
+          capabilities: {
+            maxStages: 1024,
+            maxNoteRows: 256
+          }
         }
       ]
     }
@@ -27,6 +31,9 @@ test("peer registration rewrites loopback RNBO targets to the unit hostname", as
   assert.equal(targets[0].host, "finch.local");
   assert.equal(targets[0].hardwareUnitId, "finch");
   assert.equal(targets[0].hardwareUnitName, "Finch");
+  assert.equal(targets[0].capabilities.maxStages, 1024);
+  assert.equal(targets[0].capabilities.maxNoteRows, 256);
+  assert.equal(targets[0].capabilities.noteRowWidth, 10);
 });
 
 test("peer registration preserves explicit non-loopback RNBO targets", async () => {

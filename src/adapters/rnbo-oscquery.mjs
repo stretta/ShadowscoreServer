@@ -1,5 +1,6 @@
 import dgram from "node:dgram";
 import { encodeOscMessage } from "./osc.mjs";
+import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 
 const TRANSPORT_PARAMS = new Set(["Clock"]);
 const TRANSPORT_INPORTS = new Set(["MaxSteps", "ClockInterval", "Tempo", "SetStage", "Stage"]);
@@ -114,6 +115,7 @@ export function extractRnboTargets(tree, config) {
       ackPath: outports.shadowscore_ack,
       currentStagePath: outports.current_stage,
       clientId: readClientId(node, instanceNode),
+      capabilities: rnboPlaybackCapabilities(config, node?.CONTENTS?.capabilities?.VALUE),
       source: "rnbooscquery",
       available: true
     });
@@ -265,6 +267,7 @@ function normalizeConfiguredTarget(target, rnbo, index) {
     currentStagePath: target.currentStagePath,
     voiceId: target.voiceId,
     clientId: target.clientId,
+    capabilities: rnboPlaybackCapabilities({ rnbo }, target.capabilities),
     source: "config",
     available: true
   };

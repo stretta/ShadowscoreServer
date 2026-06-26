@@ -126,9 +126,10 @@ containing block duration; one-shot clips play once.
 - `GET /score`: current ensemble score snapshot.
 - `GET /session`: host/session metadata, app URLs, voices, assignments, and local RNBO target config.
 - `GET /hardware/units`: local and registered hardware units with online/offline state.
-- `POST /hardware/register`: register a peer hardware unit and its RNBO targets.
+- `POST /hardware/register`: register a peer hardware unit and its RNBO targets. Targets may include `capabilities` such as `maxStages`, `maxNoteRows`, `noteDataFloatCount`, `noteRowWidth`, `contextDataFloatCount`, and `supportedClockIntervals`; registered peer targets that omit `capabilities` are treated as legacy `1024` stage / `512` note-row clients until their agent advertises expanded support.
 - `POST /hardware/units/:unitId/heartbeat`: refresh a registered peer heartbeat.
 - `GET /rnbo/targets`: local and registered RNBO targets with availability state.
+- `GET /playback/timing-contracts`: target-specific compiled playback timing contracts for the active block, including selected stage resolution, `ClockInterval`/ticks-per-stage, `MaxSteps`/pattern length, target capacities, and quantization diagnostics when adaptive fidelity modes are enabled.
 - `POST /rnbo/targets/:targetId/params`: set playback transport RNBO controls for a target. `Clock` is written to the RNBO param path, while `Tempo`, `MaxSteps`, `ClockInterval`, `SetStage`, and `Stage` are written to message inports, for example `{ "params": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`. Editor transport start/stop uses this route with `{ "params": { "Clock": 1 } }` or `{ "params": { "Clock": 0 } }`; sending the off/on message to one target is sufficient for the linked transport. Score-data resends only reassert `Tempo`, `ClockInterval`, and score-derived `MaxSteps`; stage/step reset or direct advancement controls should be sent only by explicit sync/direct-drive operations.
 - `GET /assignments`: current voice assignment map.
 - `GET /clips`: current reusable clip map.

@@ -18,7 +18,8 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
   const targets = extractRnboTargets(createOscQueryTree(), config);
 
   assert.equal(targets.length, 1);
-  assert.deepEqual(targets[0], {
+  const { capabilities, ...target } = targets[0];
+  assert.deepEqual(target, {
     id: "rnbo-inst-2:shadowscore",
     name: "ShadowScoreClient / shadowscore",
     host: "192.168.68.96",
@@ -32,6 +33,10 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
     source: "rnbooscquery",
     available: true
   });
+  assert.equal(capabilities.maxStages, 4096);
+  assert.equal(capabilities.maxNoteRows, 819);
+  assert.equal(capabilities.noteRowWidth, 10);
+  assert.equal(capabilities.supportsAdaptiveResolution, true);
 });
 
 test("ignores nested ShadowScore metadata message paths", () => {

@@ -20,6 +20,7 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       structureEditor: `${baseUrl}/`,
       structurePlayhead: `${baseUrl}/structure/playhead`,
       macroPlayback: `${baseUrl}/macrostructure/playback`,
+      playbackTimingContracts: `${baseUrl}/playback/timing-contracts`,
       admin: `${baseUrl}/admin`,
       structure: `${baseUrl}/structure`,
       score: `${baseUrl}/score`,

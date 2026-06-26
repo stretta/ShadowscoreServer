@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { compileScoreTransaction, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction } from "../src/adapters/rnbo-osc.mjs";
+import { compileScoreTransaction, compileTimingContract, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction } from "../src/adapters/rnbo-osc.mjs";
 
 test("compiles ensemble score into RNBO ShadowScore transaction messages", () => {
   const config = mergeConfig(defaultConfig, {
@@ -16,10 +16,237 @@ test("compiles ensemble score into RNBO ShadowScore transaction messages", () =>
 
   assert.equal(compiled.noteCount, 2);
   assert.equal(compiled.patternLength, 32);
+  assert.equal(compiled.stagesPerBeat, 16);
+  assert.deepEqual(compiled.timing, {
+    blockId: "",
+    stagesPerBeat: 16,
+    ticksPerStage: 120,
+    patternLength: 32,
+    maxStages: 4096,
+    maxNoteRows: 819,
+    resolutionMode: "fixed",
+    quantizationError: null
+  });
   assert.deepEqual(compiled.messages[0].values, [1, 123, 1, 2, 32, 16, 0]);
   assert.deepEqual(compiled.messages[1].values, [20, 123, 0, 10, 60, 0, 4, 100, 0, 10000, 0, 64]);
   assert.deepEqual(compiled.messages[2].values, [20, 123, 1, 20, 64, 8, 8, 90, 0, 7500, 2, 50]);
   assert.deepEqual(compiled.messages[3].values, [90, 123, 2, 0]);
+});
+
+test("builds a fixed timing contract from config and target capabilities", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 12,
+      resolution: {
+        mode: "fixed",
+        defaultStagesPerBeat: 24,
+        maxStages: 4096,
+        maxNoteRows: 819
+      },
+      transport: {
+        ClockInterval: 80
+      }
+    }
+  });
+
+  const timing = compileTimingContract(createScore(), config, {
+    capabilities: {
+      maxStages: 1024,
+      maxNoteRows: 256
+    }
+  }, {
+    blockId: "A",
+    selectionStart: 2,
+    selectionEnd: 6
+  });
+
+  assert.deepEqual(timing, {
+    blockId: "A",
+    stagesPerBeat: 24,
+    ticksPerStage: 80,
+    patternLength: 96,
+    maxStages: 1024,
+    maxNoteRows: 256,
+    resolutionMode: "fixed",
+    quantizationError: null
+  });
+});
+
+test("fit timing contract chooses the highest 480-grid resolution that fits target stages", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      resolution: {
+        mode: "fit",
+        defaultStagesPerBeat: 16,
+        maxStages: 4096,
+        maxNoteRows: 819,
+        candidateStagesPerBeat: [1, 2, 4, 8, 16, 24, 30, 48, 60, 80, 96, 120, 160, 240, 480]
+      },
+      transport: {
+        ClockInterval: 999
+      }
+    }
+  });
+
+  const shortBlock = compileTimingContract(createScore(), config, {
+    capabilities: { maxStages: 1024 }
+  }, {
+    blockId: "short",
+    selectionStart: 0,
+    selectionEnd: 4
+  });
+  const longBlock = compileTimingContract(createScore(), config, {
+    capabilities: { maxStages: 1024 }
+  }, {
+    blockId: "long",
+    selectionStart: 0,
+    selectionEnd: 64
+  });
+
+  assert.equal(shortBlock.stagesPerBeat, 240);
+  assert.equal(shortBlock.ticksPerStage, 2);
+  assert.equal(shortBlock.patternLength, 960);
+  assert.equal(longBlock.stagesPerBeat, 16);
+  assert.equal(longBlock.ticksPerStage, 30);
+  assert.equal(longBlock.patternLength, 1024);
+});
+
+test("fit transactions send derived ClockInterval with compiled MaxSteps", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      resolution: {
+        mode: "fit",
+        maxStages: 1024,
+        candidateStagesPerBeat: [16, 24, 30, 48, 60, 80, 96, 120, 160, 240, 480]
+      },
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      log: false,
+      transport: {
+        Tempo: 120,
+        ClockInterval: 999
+      }
+    }
+  });
+  const packets = [];
+  const socket = {
+    send(packet, port, host, callback) {
+      packets.push({ packet, port, host });
+      callback();
+    }
+  };
+
+  const compiled = await sendScoreTransaction(socket, config, createScore(), 124);
+
+  assert.equal(compiled.stagesPerBeat, 480);
+  assert.equal(compiled.patternLength, 960);
+  assert.deepEqual(scoreTransportInportMessages(config, compiled), [
+    { name: "Tempo", value: 120 },
+    { name: "ClockInterval", value: 1 },
+    { name: "MaxSteps", value: 960 }
+  ]);
+  assert.deepEqual(packets.slice(-3).map(({ packet }) => readOscAddress(packet)), [
+    "/rnbo/inst/2/messages/in/Tempo",
+    "/rnbo/inst/2/messages/in/ClockInterval",
+    "/rnbo/inst/2/messages/in/MaxSteps"
+  ]);
+});
+
+test("fidelity timing contract chooses the lowest grid that meets the error target", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      resolution: {
+        mode: "fidelity",
+        maxStages: 4096,
+        quantizationErrorTargetBeats: 0,
+        candidateStagesPerBeat: [16, 32, 64, 128]
+      }
+    }
+  });
+
+  const timing = compileTimingContract(createScore(), config, {}, {
+    selectionStart: 0,
+    selectionEnd: 2,
+    notes: [
+      { start_time: 0.03125, duration: 0.09375 },
+      { start_time: 0.5, duration: 0.25 }
+    ]
+  });
+
+  assert.equal(timing.stagesPerBeat, 32);
+  assert.equal(timing.ticksPerStage, 15);
+  assert.equal(timing.patternLength, 64);
+  assert.deepEqual(timing.quantizationError, {
+    targetBeats: 0,
+    noteCount: 2,
+    worstBeats: 0,
+    worstOnsetBeats: 0,
+    worstDurationBeats: 0,
+    meanAbsoluteBeats: 0,
+    meanSignedOnsetBeats: 0,
+    meanSignedDurationBeats: 0
+  });
+});
+
+test("fidelity timing contract reports quantization sloppiness and beat-relative offset", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      resolution: {
+        mode: "fidelity",
+        maxStages: 4096,
+        quantizationErrorTargetBeats: 0,
+        candidateStagesPerBeat: [16]
+      }
+    }
+  });
+
+  const timing = compileTimingContract(createScore(), config, {}, {
+    selectionStart: 0,
+    selectionEnd: 2,
+    notes: [
+      { start_time: 0.03125, duration: 0.09375 }
+    ]
+  });
+
+  assert.equal(timing.stagesPerBeat, 16);
+  assert.deepEqual(timing.quantizationError, {
+    targetBeats: 0,
+    noteCount: 1,
+    worstBeats: 0.03125,
+    worstOnsetBeats: 0.03125,
+    worstDurationBeats: 0.03125,
+    meanAbsoluteBeats: 0.03125,
+    meanSignedOnsetBeats: 0.03125,
+    meanSignedDurationBeats: 0.03125
+  });
+});
+
+test("hybrid timing contract falls back to fit when fidelity target cannot be met", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      resolution: {
+        mode: "hybrid",
+        maxStages: 1024,
+        quantizationErrorTargetBeats: 0,
+        candidateStagesPerBeat: [16, 32]
+      }
+    }
+  });
+
+  const timing = compileTimingContract(createScore(), config, {}, {
+    selectionStart: 0,
+    selectionEnd: 64,
+    notes: [
+      { start_time: 0.03125, duration: 0.09375 }
+    ]
+  });
+
+  assert.equal(timing.stagesPerBeat, 16);
+  assert.equal(timing.patternLength, 1024);
+  assert.equal(timing.quantizationError.worstBeats, 0.03125);
 });
 
 test("compiles client-prefixed transactions for a specific voice target", () => {
@@ -85,6 +312,7 @@ test("compiles the active mesostructural block from assigned clips", () => {
 
   assert.equal(compiled.noteCount, 2);
   assert.equal(compiled.patternLength, 128);
+  assert.equal(compiled.timing.blockId, "A");
   assert.deepEqual(compiled.messages[1].values, [20, 222, 0, 7, 48, 0, 16, 96, 0, 10000, 0, 64]);
   assert.deepEqual(compiled.messages[2].values, [20, 222, 1, 8, 67, 16, 8, 88, 0, 10000, 0, 64]);
 });
@@ -285,6 +513,47 @@ test("sends score-owned transport state as RNBO message inports after score data
     { name: "ClockInterval", value: 100 },
     { name: "MaxSteps", value: 32 }
   ]);
+});
+
+test("configured RNBO target capabilities constrain score transactions", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      resolution: {
+        mode: "fit",
+        maxStages: 4096,
+        candidateStagesPerBeat: [16, 60, 120, 240, 480]
+      },
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      log: false,
+      targets: [
+        {
+          id: "legacy-client",
+          address: "/rnbo/inst/2/messages/in/shadowscore",
+          capabilities: {
+            maxStages: 1024,
+            maxNoteRows: 256
+          }
+        }
+      ]
+    }
+  });
+  const score = createScore();
+  score.context.clip.time_selection_end = 16;
+  const socket = {
+    send(packet, port, host, callback) {
+      callback();
+    }
+  };
+
+  const result = await sendScoreTransaction(socket, config, score, 501);
+
+  assert.equal(result.timing.maxStages, 1024);
+  assert.equal(result.timing.maxNoteRows, 256);
+  assert.equal(result.timing.stagesPerBeat, 60);
+  assert.equal(result.patternLength, 960);
 });
 
 test("sends one transaction per configured RNBO target", async () => {

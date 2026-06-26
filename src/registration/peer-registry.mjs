@@ -1,4 +1,5 @@
 import os from "node:os";
+import { legacyRnboPlaybackCapabilities, rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 
 export function createPeerRegistry(config, options = {}) {
   const units = new Map();
@@ -82,6 +83,7 @@ export function createLocalHardwareUnit(config, targets = []) {
     expiresAt: null,
     targets: targets.map((target) => ({
       ...target,
+      capabilities: target.capabilities ?? rnboPlaybackCapabilities(config),
       hardwareUnitId: id,
       hardwareUnitName: config.server?.advertisedName || id,
       available: target.available !== false,
@@ -119,11 +121,11 @@ function normalizeUnit(document, config, metadata, timestamp) {
     lastSeenAt: registeredAt,
     expiresAt: new Date(timestamp + ttlMs).toISOString(),
     heartbeatTtlMs: ttlMs,
-    targets: normalizeTargets(document.targets, id, advertisedName)
+    targets: normalizeTargets(document.targets, id, advertisedName, config)
   };
 }
 
-function normalizeTargets(targets, hardwareUnitId, hardwareUnitName) {
+function normalizeTargets(targets, hardwareUnitId, hardwareUnitName, config) {
   if (!Array.isArray(targets)) {
     return [];
   }
@@ -142,6 +144,9 @@ function normalizeTargets(targets, hardwareUnitId, hardwareUnitName) {
       messagePath: stringField(target.messagePath) || address,
       voiceId: stringField(target.voiceId) || undefined,
       clientId: target.clientId === undefined ? undefined : nullableStringField(target.clientId),
+      capabilities: target.capabilities
+        ? rnboPlaybackCapabilities(config, target.capabilities)
+        : legacyRnboPlaybackCapabilities(config),
       source: stringField(target.source) || "registration",
       hardwareUnitId,
       hardwareUnitName,

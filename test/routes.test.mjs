@@ -68,6 +68,7 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.endpoints.structure, "http://127.0.0.1/structure");
   assert.equal(session.endpoints.structurePlayhead, "http://127.0.0.1/structure/playhead");
   assert.equal(session.endpoints.macroPlayback, "http://127.0.0.1/macrostructure/playback");
+  assert.equal(session.endpoints.playbackTimingContracts, "http://127.0.0.1/playback/timing-contracts");
   assert.equal(session.macroPlayback.running, false);
   assert.equal(session.voices.length, 6);
   assert.equal(session.voices[0].assignment.label, "Player 1");
@@ -391,7 +392,159 @@ test("hardware registration appears in session and RNBO targets", async () => {
   assert.equal(session.rnbo.targets.some((target) => target.hardwareUnitId === "shadowbox-b"), true);
 
   const targets = await requestJson(context, "GET", "/rnbo/targets");
-  assert.equal(targets.targets.some((target) => target.id === "shadowbox-b:b-source"), true);
+  const target = targets.targets.find((target) => target.id === "shadowbox-b:b-source");
+  assert.equal(Boolean(target), true);
+  assert.equal(target.capabilities.maxStages, 1024);
+  assert.equal(target.capabilities.maxNoteRows, 512);
+});
+
+test("playback timing contract route exposes target-specific compiled contracts", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      resolution: {
+        mode: "fit",
+        maxStages: 1024,
+        candidateStagesPerBeat: [16, 24, 30, 48, 60, 80, 96, 120, 160, 240, 480]
+      },
+      targets: [
+        {
+          id: "source-client",
+          host: "192.168.68.96",
+          port: 9000,
+          address: "/rnbo/inst/2/messages/in/shadowscore"
+        }
+      ]
+    }
+  });
+  const context = createRouteContext({ config });
+
+  await requestJson(context, "POST", "/context?replace=1", {
+    clip: {
+      time_selection_start: 0,
+      time_selection_end: 4
+    },
+    scale: {},
+    grid: {},
+    seed: 0
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "source-client",
+    rnboHost: "192.168.68.96",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-1/notes", [
+    {
+      pitch: 60,
+      start_time: 0,
+      duration: 0.25,
+      velocity: 100
+    }
+  ]);
+
+  const result = await requestJson(context, "GET", "/playback/timing-contracts");
+
+  assert.equal(result.contracts.length, 1);
+  assert.deepEqual(result.contracts[0], {
+    targetId: "source-client",
+    targetType: "rnbo",
+    contractTransport: "rnbo-osc",
+    available: true,
+    assignedVoiceId: "player-1",
+    timing: {
+      blockId: "",
+      stagesPerBeat: 240,
+      ticksPerStage: 2,
+      patternLength: 960,
+      maxStages: 1024,
+      maxNoteRows: 819,
+      resolutionMode: "fit",
+      quantizationError: null
+    },
+    noteCount: 1,
+    transmittedRowCount: 64
+  });
+});
+
+test("playback timing contracts honor per-target registered stage capacity", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      resolution: {
+        mode: "fit",
+        maxStages: 4096,
+        candidateStagesPerBeat: [16, 60, 120, 240, 480]
+      }
+    }
+  });
+  const context = createRouteContext({
+    config,
+    runtime: {
+      peerRegistry: createPeerRegistry(config)
+    }
+  });
+
+  await requestJson(context, "POST", "/hardware/register", {
+    id: "shadowbox-b",
+    advertisedName: "Shadowbox B",
+    targets: [
+      {
+        id: "old-client",
+        host: "192.168.68.71",
+        port: 9000,
+        address: "/rnbo/inst/2/messages/in/shadowscore",
+        capabilities: {
+          maxStages: 1024,
+          maxNoteRows: 256
+        }
+      },
+      {
+        id: "expanded-client",
+        host: "192.168.68.72",
+        port: 9000,
+        address: "/rnbo/inst/3/messages/in/shadowscore",
+        capabilities: {
+          maxStages: 4096,
+          maxNoteRows: 819
+        }
+      }
+    ]
+  });
+  await requestJson(context, "POST", "/context?replace=1", {
+    clip: {
+      time_selection_start: 0,
+      time_selection_end: 16
+    },
+    scale: {},
+    grid: {},
+    seed: 0
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "shadowbox-b:old-client",
+    rnboHost: "192.168.68.71",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "shadowbox-b:expanded-client",
+    rnboHost: "192.168.68.72",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/3/messages/in/shadowscore"
+  });
+
+  const result = await requestJson(context, "GET", "/playback/timing-contracts");
+  const oldClient = result.contracts.find((contract) => contract.targetId === "shadowbox-b:old-client");
+  const expandedClient = result.contracts.find((contract) => contract.targetId === "shadowbox-b:expanded-client");
+
+  assert.equal(oldClient.assignedVoiceId, "player-1");
+  assert.equal(oldClient.timing.maxStages, 1024);
+  assert.equal(oldClient.timing.maxNoteRows, 256);
+  assert.equal(oldClient.timing.stagesPerBeat, 60);
+  assert.equal(oldClient.timing.patternLength, 960);
+  assert.equal(expandedClient.assignedVoiceId, "player-2");
+  assert.equal(expandedClient.timing.maxStages, 4096);
+  assert.equal(expandedClient.timing.maxNoteRows, 819);
+  assert.equal(expandedClient.timing.stagesPerBeat, 240);
+  assert.equal(expandedClient.timing.patternLength, 3840);
 });
 
 test("hardware units expire offline without removing voice assignments", async () => {
@@ -587,11 +740,76 @@ test("RNBO target param route derives MaxSteps for assigned targets and starts c
     {
       host: "192.168.68.96",
       port: 9000,
+      path: "/rnbo/inst/2/messages/in/ClockInterval",
+      value: 120
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
       path: "/rnbo/inst/2/params/Clock",
       value: 1
     }
   ]);
   assert.equal(context.config.rnbo.transport.MaxSteps, 64);
+  assert.equal(context.config.rnbo.transport.ClockInterval, 120);
+});
+
+test("RNBO target param route derives adaptive ClockInterval for assigned targets", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        resolution: {
+          mode: "fit",
+          maxStages: 1024,
+          candidateStagesPerBeat: [16, 24, 30, 48, 60, 80, 96, 120, 160, 240, 480]
+        },
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      }
+    }
+  });
+  await requestJson(context, "POST", "/context?replace=1", {
+    clip: {
+      time_selection_start: 0,
+      time_selection_end: 4
+    },
+    scale: {},
+    grid: {},
+    seed: 0
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "source-client",
+    rnboHost: "192.168.68.96",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+
+  const result = await requestJson(context, "POST", "/rnbo/targets/source-client/params", {
+    params: {
+      Clock: 1
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(writes.map((write) => [write.path, write.value]), [
+    ["/rnbo/inst/2/messages/in/MaxSteps", 960],
+    ["/rnbo/inst/2/messages/in/ClockInterval", 2],
+    ["/rnbo/inst/2/params/Clock", 1]
+  ]);
+  assert.equal(context.config.rnbo.transport.MaxSteps, 960);
+  assert.equal(context.config.rnbo.transport.ClockInterval, 2);
 });
 
 test("RNBO target param route rejects unsupported params", async () => {

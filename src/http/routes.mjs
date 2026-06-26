@@ -47,6 +47,13 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/playback/timing-contracts") {
+    writeJson(response, 200, {
+      contracts: await readPlaybackTimingContracts(store.getScore(), config, runtime)
+    });
+    return;
+  }
+
   const rnboParamsMatch = url.pathname.match(/^\/rnbo\/targets\/([^/]+)\/params$/);
   if (request.method === "POST" && rnboParamsMatch) {
     try {
@@ -542,6 +549,24 @@ async function readAllRnboTargets(config, runtime) {
   return sessionRuntime.rnboTargets;
 }
 
+async function readPlaybackTimingContracts(score, config, runtime) {
+  const targets = await readAllRnboTargets(config, runtime);
+  return targets.map((target) => {
+    const assignedVoiceId = assignedVoiceForTarget(score, target);
+    const compiled = compileScoreTransaction(score, config, 0, assignedVoiceId ? { ...target, voiceId: assignedVoiceId } : target);
+    return {
+      targetId: target.id ?? "",
+      targetType: "rnbo",
+      contractTransport: "rnbo-osc",
+      available: target.available !== false,
+      assignedVoiceId,
+      timing: compiled.timing,
+      noteCount: compiled.noteCount,
+      transmittedRowCount: compiled.transmittedRowCount
+    };
+  });
+}
+
 async function findRnboTarget(config, runtime, targetId) {
   const targets = await readAllRnboTargets(config, runtime);
   return targets.find((target) => target.id === targetId);
@@ -570,6 +595,7 @@ function prepareRnboTransportParams(score, config, target, params) {
   if (assignedVoiceId) {
     const compiled = compileScoreTransaction(score, config, 0, { ...target, voiceId: assignedVoiceId });
     prepared.set("MaxSteps", compiled.patternLength);
+    prepared.set("ClockInterval", compiled.timing.ticksPerStage);
   }
 
   if (prepared.has("Clock")) {

@@ -1,5 +1,6 @@
 import dgram from "node:dgram";
 import { encodeOscMessage } from "./osc.mjs";
+import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 
 const OPCODES = Object.freeze({
   BEGIN_REPLACE: 1,
@@ -79,7 +80,7 @@ export function scoreTransportInportMessages(config, compiled) {
   const transport = config.rnbo?.transport ?? {};
   return [
     { name: "Tempo", value: finiteNumber(transport.Tempo, 120) },
-    { name: "ClockInterval", value: finiteNumber(transport.ClockInterval, 120) },
+    { name: "ClockInterval", value: finiteNumber(compiled.timing?.ticksPerStage, finiteNumber(transport.ClockInterval, 120)) },
     { name: "MaxSteps", value: compiled.patternLength }
   ];
 }
@@ -102,14 +103,48 @@ export function shouldSendScoreTransaction(event) {
   );
 }
 
+export function compileTimingContract(score, config, target = rnboTargets(config, score)[0], options = {}) {
+  const resolution = config.rnbo?.resolution ?? {};
+  const mode = resolutionMode(resolution.mode);
+  const maxStages = clampInt(target?.capabilities?.maxStages ?? resolution.maxStages ?? 4096, 1, 2147483647);
+  const maxNoteRows = clampInt(target?.capabilities?.maxNoteRows ?? resolution.maxNoteRows ?? 819, 1, 2147483647);
+  const selectionStart = readNumber(options.selectionStart, 0);
+  const selectionEnd = readNumber(options.selectionEnd, selectionStart + readNumber(options.blockBeats, 0));
+  const blockBeats = Math.max(0, selectionEnd - selectionStart);
+  const selected = chooseTimingResolution(mode, resolution, config, blockBeats, maxStages, options.notes ?? [], selectionStart);
+  const stagesPerBeat = selected.stagesPerBeat;
+  const patternLength = clampInt((selectionEnd - selectionStart) * stagesPerBeat, 1, 2147483647);
+  const ticksPerStage = usesDerivedClock(mode)
+    ? 480 / stagesPerBeat
+    : finiteNumber(config.rnbo?.transport?.ClockInterval, 120);
+
+  return {
+    blockId: stringField(options.blockId, ""),
+    stagesPerBeat,
+    ticksPerStage,
+    patternLength,
+    maxStages,
+    maxNoteRows,
+    resolutionMode: mode,
+    quantizationError: selected.quantizationError
+  };
+}
+
 export function compileScoreTransaction(score, config, transactionId, target = rnboTargets(config, score)[0]) {
-  const stagesPerBeat = clampInt(config.rnbo.stagesPerBeat, 1, 960);
   const activeBlock = activeMesoBlock(score);
+  const activeBlockId = activeMesoBlockId(score);
   const selectionStart = readNumber(score.context.clip?.time_selection_start, 0);
   const blockBeats = blockDurationBeats(activeBlock, score.context);
   const notes = activeBlock ? flattenBlockNotes(score, activeBlock, target.voiceId, blockBeats) : flattenScoreNotes(score, target.voiceId);
   const selectionEnd = inferSelectionEnd(score, notes, selectionStart, activeBlock);
-  const patternLength = clampInt((selectionEnd - selectionStart) * stagesPerBeat, 1, 2147483647);
+  const timing = compileTimingContract(score, config, target, {
+    blockId: activeBlock ? activeBlockId : "",
+    blockBeats,
+    notes,
+    selectionStart,
+    selectionEnd
+  });
+  const { patternLength, stagesPerBeat } = timing;
   const prefix = target.clientId === undefined ? [] : [clampInt(target.clientId, 0, 2147483647)];
 
   const clearRowCount = clampInt(config.rnbo.clearRowCount ?? 0, 0, 1024);
@@ -139,7 +174,8 @@ export function compileScoreTransaction(score, config, transactionId, target = r
     noteCount: notes.length,
     transmittedRowCount,
     patternLength,
-    stagesPerBeat
+    stagesPerBeat,
+    timing
   };
 }
 
@@ -177,6 +213,114 @@ function noteValues(prefix, transactionId, index, note, selectionStart, stagesPe
     clampInt(note.velocity_deviation ?? 0, 0, 127),
     clampInt(note.release_velocity ?? 64, 0, 127)
   ];
+}
+
+function chooseTimingResolution(mode, resolution, config, blockBeats, maxStages, notes, selectionStart) {
+  const fixedStagesPerBeat = clampInt(resolution.defaultStagesPerBeat ?? config.rnbo?.stagesPerBeat ?? 16, 1, 960);
+  if (mode !== "fit" && mode !== "fidelity" && mode !== "hybrid") {
+    return { stagesPerBeat: fixedStagesPerBeat, quantizationError: null };
+  }
+
+  const candidates = stageCandidates(resolution.candidateStagesPerBeat);
+  const maxFitStagesPerBeat = blockBeats > 0 ? Math.floor(maxStages / blockBeats) : maxStages;
+  const fitting = candidates.filter((candidate) => candidate <= maxFitStagesPerBeat);
+  const fallback = fitting.at(-1) ?? candidates[0] ?? fixedStagesPerBeat;
+
+  if (mode === "fit") {
+    return { stagesPerBeat: fallback, quantizationError: null };
+  }
+
+  const targetBeats = finiteNumber(resolution.quantizationErrorTargetBeats, 1 / 480);
+  const scored = (fitting.length ? fitting : [fallback]).map((candidate) => ({
+    stagesPerBeat: candidate,
+    quantizationError: quantizationErrorForCandidate(candidate, notes, selectionStart, targetBeats)
+  }));
+  const acceptable = scored.find((candidate) => candidate.quantizationError.worstBeats <= targetBeats);
+  if (acceptable) {
+    return acceptable;
+  }
+  if (mode === "hybrid") {
+    return scored.at(-1);
+  }
+  return [...scored].sort(compareQuantizationScores)[0];
+}
+
+function stageCandidates(values) {
+  const candidates = Array.isArray(values) ? values : [];
+  return [...new Set(candidates.map((value) => clampInt(value, 1, 480)).filter((value) => 480 % value === 0))]
+    .sort((a, b) => a - b);
+}
+
+function quantizationErrorForCandidate(stagesPerBeat, notes, selectionStart, targetBeats) {
+  const values = notes.flatMap((note) => [
+    { type: "onset", value: readNumber(note.start_time, 0) - selectionStart },
+    { type: "duration", value: readNumber(note.duration, 0) }
+  ]);
+  if (values.length === 0) {
+    return {
+      targetBeats,
+      noteCount: 0,
+      worstBeats: 0,
+      worstOnsetBeats: 0,
+      worstDurationBeats: 0,
+      meanAbsoluteBeats: 0,
+      meanSignedOnsetBeats: 0,
+      meanSignedDurationBeats: 0
+    };
+  }
+
+  let absoluteTotal = 0;
+  let onsetSignedTotal = 0;
+  let onsetCount = 0;
+  let durationSignedTotal = 0;
+  let durationCount = 0;
+  let worstOnsetBeats = 0;
+  let worstDurationBeats = 0;
+
+  for (const entry of values) {
+    const quantized = Math.round(entry.value * stagesPerBeat) / stagesPerBeat;
+    const signed = quantized - entry.value;
+    const absolute = Math.abs(signed);
+    absoluteTotal += absolute;
+    if (entry.type === "onset") {
+      onsetSignedTotal += signed;
+      onsetCount += 1;
+      worstOnsetBeats = Math.max(worstOnsetBeats, absolute);
+    } else {
+      durationSignedTotal += signed;
+      durationCount += 1;
+      worstDurationBeats = Math.max(worstDurationBeats, absolute);
+    }
+  }
+
+  return {
+    targetBeats,
+    noteCount: notes.length,
+    worstBeats: roundBeat(Math.max(worstOnsetBeats, worstDurationBeats)),
+    worstOnsetBeats: roundBeat(worstOnsetBeats),
+    worstDurationBeats: roundBeat(worstDurationBeats),
+    meanAbsoluteBeats: roundBeat(absoluteTotal / values.length),
+    meanSignedOnsetBeats: roundBeat(onsetCount ? onsetSignedTotal / onsetCount : 0),
+    meanSignedDurationBeats: roundBeat(durationCount ? durationSignedTotal / durationCount : 0)
+  };
+}
+
+function compareQuantizationScores(a, b) {
+  return a.quantizationError.worstBeats - b.quantizationError.worstBeats ||
+    a.quantizationError.meanAbsoluteBeats - b.quantizationError.meanAbsoluteBeats ||
+    a.stagesPerBeat - b.stagesPerBeat;
+}
+
+function usesDerivedClock(mode) {
+  return mode === "fit" || mode === "fidelity" || mode === "hybrid";
+}
+
+function resolutionMode(value) {
+  return ["fixed", "fit", "fidelity", "hybrid"].includes(value) ? value : "fixed";
+}
+
+function roundBeat(value) {
+  return Math.round(value * 1e12) / 1e12;
 }
 
 function flattenScoreNotes(score, voiceFilter) {
@@ -251,13 +395,17 @@ function expandClipNotes(clip, { voiceId, clipId, blockBeats, context }) {
 }
 
 function activeMesoBlock(score) {
-  const blockId = score.structureState?.activeBlockId ?? score.macrostructure?.blocks?.[0];
+  const blockId = activeMesoBlockId(score);
   const block = blockId ? score.mesostructure?.[blockId] : undefined;
   if (!block) {
     return undefined;
   }
   const hasAssignedClips = Object.values(block.players ?? {}).some((assignment) => score.clips?.[mesoPlayerClipId(assignment)]);
   return hasAssignedClips ? block : undefined;
+}
+
+function activeMesoBlockId(score) {
+  return score.structureState?.activeBlockId ?? score.macrostructure?.blocks?.[0] ?? "";
 }
 
 function mesoPlayerClipId(assignment) {
@@ -351,7 +499,8 @@ function rnboTargets(config, score) {
       port: target.port ?? config.rnbo.port,
       address: target.address ?? config.rnbo.address,
       voiceId: target.voiceId,
-      clientId: target.clientId
+      clientId: target.clientId,
+      capabilities: rnboPlaybackCapabilities(config, target.capabilities)
     }));
   }
   return [
@@ -359,7 +508,8 @@ function rnboTargets(config, score) {
       host: config.rnbo.host,
       port: config.rnbo.port,
       address: config.rnbo.address,
-      clientId: config.rnbo.clientId
+      clientId: config.rnbo.clientId,
+      capabilities: rnboPlaybackCapabilities(config)
     }
   ];
 }
@@ -370,14 +520,29 @@ function assignmentRnboTargets(config, score) {
   }
   return Object.entries(score.assignments)
     .filter(([, assignment]) => assignment?.rnboAddress)
-    .map(([voiceId, assignment]) => ({
-      host: assignment.rnboHost || config.rnbo.host,
-      port: assignment.rnboPort ?? config.rnbo.port,
-      address: assignment.rnboAddress,
-      voiceId,
-      clientId: assignment.clientId ?? undefined,
-      id: assignment.rnboTargetId || undefined
-    }));
+    .map(([voiceId, assignment]) => {
+      const configuredTarget = configuredTargetForAssignment(config, assignment);
+      return {
+        host: assignment.rnboHost || config.rnbo.host,
+        port: assignment.rnboPort ?? config.rnbo.port,
+        address: assignment.rnboAddress,
+        voiceId,
+        clientId: assignment.clientId ?? undefined,
+        id: assignment.rnboTargetId || undefined,
+        capabilities: rnboPlaybackCapabilities(config, configuredTarget?.capabilities)
+      };
+    });
+}
+
+function configuredTargetForAssignment(config, assignment) {
+  return (config.rnbo?.targets ?? []).find((target) => {
+    if (assignment.rnboTargetId && target.id === assignment.rnboTargetId) {
+      return true;
+    }
+    return target.address === assignment.rnboAddress &&
+      String(target.host ?? config.rnbo?.host ?? "") === String(assignment.rnboHost || config.rnbo?.host || "") &&
+      Number(target.port ?? config.rnbo?.port) === Number(assignment.rnboPort ?? config.rnbo?.port);
+  });
 }
 
 function readNumber(value, fallback) {
@@ -395,6 +560,10 @@ function clampInt(value, min, max) {
 function finiteNumber(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
+}
+
+function stringField(value, fallback) {
+  return typeof value === "string" && value.trim() ? value : fallback;
 }
 
 function readInstanceId(address) {

@@ -3,7 +3,8 @@ import { EventEmitter } from "node:events";
 export function createInitialScore(config) {
   const voices = {};
   const assignments = {};
-  for (const voiceId of config.ensemble.voices) {
+  const voiceIds = config.ensemble.voices;
+  for (const voiceId of voiceIds) {
     voices[voiceId] = {
       version: 0,
       notes: []
@@ -15,8 +16,8 @@ export function createInitialScore(config) {
     ensembleId: config.ensemble.id,
     version: 0,
     context: createDefaultContext(),
-    clips: {},
-    mesostructure: createDefaultMesostructure(),
+    clips: createDefaultClips(voiceIds),
+    mesostructure: createDefaultMesostructure(voiceIds),
     macrostructure: createDefaultMacrostructure(),
     structureState: createDefaultStructureState(),
     assignments,
@@ -414,8 +415,8 @@ export function createScoreStore(initialScore) {
         ...score,
         version: score.version + 1,
         context: options.context ? createDefaultContext() : score.context,
-        clips: options.structure ? {} : score.clips,
-        mesostructure: options.structure ? createDefaultMesostructure() : score.mesostructure,
+        clips: options.structure ? createDefaultClips(Object.keys(voices)) : score.clips,
+        mesostructure: options.structure ? createDefaultMesostructure(Object.keys(voices)) : score.mesostructure,
         macrostructure: options.structure ? createDefaultMacrostructure() : score.macrostructure,
         structureState: options.structure ? createDefaultStructureState() : score.structureState,
         assignments,
@@ -452,14 +453,62 @@ function createDefaultContext() {
   };
 }
 
-function createDefaultMesostructure() {
+const DEFAULT_BLOCK_IDS = ["A", "B", "C", "D", "E", "F"];
+
+function createDefaultClips(voiceIds = []) {
   return Object.fromEntries(
-    ["A", "B", "C", "D", "E", "F"].map((blockId) => [
+    DEFAULT_BLOCK_IDS.flatMap((blockId, blockIndex) => voiceIds.map((voiceId, voiceIndex) => {
+      const clipId = defaultClipId(blockId, voiceId);
+      return [clipId, createSeededClipDocument(blockIndex, voiceIndex)];
+    }))
+  );
+}
+
+function createSeededClipDocument(blockIndex, voiceIndex) {
+  const pitch = 60 + (voiceIndex * 2) + (blockIndex % 2);
+  return normalizeClipDocument({
+    notes: [
+      {
+        note_id: 1,
+        pitch,
+        start_time: 0,
+        duration: 1,
+        velocity: 96
+      },
+      {
+        note_id: 2,
+        pitch: pitch + 7,
+        start_time: 4,
+        duration: 1,
+        velocity: 88
+      }
+    ],
+    context: {
+      clip: {
+        TimeSignature: {
+          numerator: 4,
+          denominator: 4
+        }
+      },
+      scale: {},
+      grid: {},
+      seed: blockIndex
+    },
+    duration: { bars: 2 },
+    playbackType: "looped"
+  });
+}
+
+function createDefaultMesostructure(voiceIds = []) {
+  return Object.fromEntries(
+    DEFAULT_BLOCK_IDS.map((blockId) => [
       blockId,
       {
-        duration: { bars: 8 },
+        duration: { bars: 4 },
         scale: {},
-        players: {}
+        players: Object.fromEntries(
+          voiceIds.map((voiceId) => [voiceId, { clipId: defaultClipId(blockId, voiceId) }])
+        )
       }
     ])
   );
@@ -468,8 +517,12 @@ function createDefaultMesostructure() {
 function createDefaultMacrostructure() {
   return {
     tempo: 120,
-    blocks: ["A", "B", "C", "D", "E", "F"]
+    blocks: DEFAULT_BLOCK_IDS
   };
+}
+
+function defaultClipId(blockId, voiceId) {
+  return `${blockId.toLowerCase()}-${voiceId}`;
 }
 
 function createDefaultStructureState() {

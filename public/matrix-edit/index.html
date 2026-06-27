@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/matrix-edit/assets/index-A86UpjqB.js"></script>
+    <script type="module" crossorigin src="/matrix-edit/assets/index-TKTTmmFF.js"></script>
     <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-1IK8VDXA.css">
   </head>
   <body>
@@ -107,40 +107,35 @@
           const value = String(serverInput?.value || window.location.origin).trim().replace(/\/+$/, "");
           return value.startsWith("http://") || value.startsWith("https://") ? value : `http://${value}`;
         };
-        const setClock = async (value) => {
-          const targetId = targetSelect?.value;
-          if (!targetId) {
-            if (status) {
-              status.textContent = "Select an RNBO target first.";
-            }
-            return;
-          }
+        const setMacroPlayback = async (running) => {
           start.disabled = true;
           stop.disabled = true;
           try {
-            const response = await fetch(`${serverUrl()}/rnbo/targets/${encodeURIComponent(targetId)}/params`, {
+            const response = await fetch(`${serverUrl()}/macrostructure/playback/${running ? "start" : "stop"}`, {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ params: { Clock: value } })
+              body: JSON.stringify(targetSelect?.value ? { targetId: targetSelect.value } : {})
             });
             if (!response.ok) {
               throw new Error(await response.text());
             }
-            await response.json();
+            const result = await response.json();
+            const playback = result.playback || {};
             if (status) {
-              status.textContent = `${value ? "Started" : "Stopped"} transport from ${targetSelect.options[targetSelect.selectedIndex]?.textContent || targetId}.`;
+              const block = playback.activeBlockId ? ` at block ${playback.activeBlockId}` : "";
+              status.textContent = `${running ? "Started" : "Stopped"} macro playback${block}.`;
             }
           } catch (error) {
             if (status) {
-              status.textContent = `Transport ${value ? "start" : "stop"} failed: ${error.message}`;
+              status.textContent = `Macro playback ${running ? "start" : "stop"} failed: ${error.message}`;
             }
           } finally {
             start.disabled = false;
             stop.disabled = false;
           }
         };
-        start?.addEventListener("click", () => setClock(1));
-        stop?.addEventListener("click", () => setClock(0));
+        start?.addEventListener("click", () => setMacroPlayback(true));
+        stop?.addEventListener("click", () => setMacroPlayback(false));
       })();
     </script>
   </body>

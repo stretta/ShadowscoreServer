@@ -385,7 +385,9 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const body = await readJson(request);
       const playback = requireMacroPlayback(runtime);
-      const clockWrites = await writeTransportParamsToAvailableTargets(config, runtime, { Clock: 1 });
+      const clockWrites = await writeTransportParamsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 1 }, {
+        targetId: optionalString(body.targetId)
+      });
       writeJson(response, 200, {
         ok: true,
         clockWrites,
@@ -402,8 +404,11 @@ export async function routeRequest(request, response, store, config, runtime = {
 
   if (request.method === "POST" && url.pathname === "/macrostructure/playback/stop") {
     try {
+      const body = await readJson(request);
       const playback = requireMacroPlayback(runtime);
-      const clockWrites = await writeTransportParamsToAvailableTargets(config, runtime, { Clock: 0 });
+      const clockWrites = await writeTransportParamsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 0 }, {
+        targetId: optionalString(body.targetId)
+      });
       writeJson(response, 200, {
         ok: true,
         clockWrites,
@@ -587,6 +592,25 @@ async function writeTransportParamsToAvailableTargets(config, runtime, params) {
   return writes;
 }
 
+async function writeTransportParamsToPlaybackTargets(score, config, runtime, params, options = {}) {
+  const targetId = optionalString(options.targetId);
+  if (!targetId) {
+    return writeTransportParamsToAvailableTargets(config, runtime, params);
+  }
+  const target = await findRnboTarget(config, runtime, targetId);
+  if (!target || target.available === false) {
+    throw new Error(`unknown RNBO target '${targetId}'`);
+  }
+  const preparedParams = prepareRnboTransportParams(score, config, target, params);
+  const writes = await writeRnboTransportParams(config, target, preparedParams, {
+    writer: runtime.rnboParamWriter
+  });
+  return writes.map((write) => ({
+    ...write,
+    targetId: target.id
+  }));
+}
+
 function prepareRnboTransportParams(score, config, target, params) {
   const entries = Object.entries(params ?? {});
   const assignedVoiceId = assignedVoiceForTarget(score, target);
@@ -686,6 +710,10 @@ function optionalInteger(value, field) {
     throw new Error(`${field} must be an integer`);
   }
   return number;
+}
+
+function optionalString(value) {
+  return value === undefined || value === null ? "" : String(value).trim();
 }
 
 function withoutControlFields(document, fields) {

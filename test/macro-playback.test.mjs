@@ -9,17 +9,17 @@ test("macro playback advances according to the active block duration and tempo",
   const timers = createFakeTimers();
   const playback = createMacroPlayback(store, defaultConfig, { timers });
 
-  assert.equal(macroBlockDurationMs(store.getScore(), defaultConfig), 16000);
+  assert.equal(macroBlockDurationMs(store.getScore(), defaultConfig), 8000);
 
   const started = playback.start();
   assert.equal(started.running, true);
-  assert.equal(started.currentBlockDurationMs, 16000);
-  assert.equal(timers.pending[0].delayMs, 16000);
+  assert.equal(started.currentBlockDurationMs, 8000);
+  assert.equal(timers.pending[0].delayMs, 8000);
 
   timers.fire(0);
   assert.equal(store.getScore().structureState.activeBlockId, "B");
   assert.equal(playback.snapshot().running, true);
-  assert.equal(timers.pending.at(-1).delayMs, 16000);
+  assert.equal(timers.pending.at(-1).delayMs, 8000);
 
   const stopped = playback.stop();
   assert.equal(stopped.running, false);

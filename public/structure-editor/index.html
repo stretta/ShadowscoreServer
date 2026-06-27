@@ -879,7 +879,7 @@
         mesostructure: {
           ...state.score.mesostructure,
           [id]: {
-            duration: { bars: 8 },
+            duration: { bars: 4 },
             scale: {},
             players: {}
           }
@@ -1070,7 +1070,7 @@
       }
     }
 
-    async function updatePlayhead(path, body) {
+    async function updatePlayhead(path, body, options = {}) {
       if (!state.score) {
         return;
       }
@@ -1088,6 +1088,11 @@
         renderAll();
         setStatus(`Active block ${state.score.structureState?.activeBlockId ?? ""}.`);
       } catch (error) {
+        if (!options.retried && isStaleScoreError(error)) {
+          state.score = await fetchJson(`${state.serverUrl}/score`);
+          await updatePlayhead(path, body, { retried: true });
+          return;
+        }
         setStatus(`Playhead update failed: ${error.message}`);
       } finally {
         state.saving = false;
@@ -1196,7 +1201,7 @@
           grid: {},
           seed: 0
         },
-        duration: { bars: 1 },
+        duration: { bars: 2 },
         playbackType: "looped",
         behavior: {
           followsPitch: true,
@@ -1326,7 +1331,7 @@
           signal: controller.signal
         });
         if (!response.ok) {
-          throw new Error(`${response.status} ${response.statusText}`);
+          throw await responseError(response);
         }
         return await response.json();
       } finally {
@@ -1334,6 +1339,22 @@
           window.clearTimeout(timer);
         }
       }
+    }
+
+    async function responseError(response) {
+      try {
+        const payload = await response.clone().json();
+        if (payload?.error) {
+          return new Error(payload.error);
+        }
+      } catch {
+        // Fall back to the HTTP status below when the server did not return JSON.
+      }
+      return new Error(`${response.status} ${response.statusText}`);
+    }
+
+    function isStaleScoreError(error) {
+      return /stale score version \d+; current version is \d+/.test(error?.message ?? "");
     }
 
     function serverLabel(url, session) {

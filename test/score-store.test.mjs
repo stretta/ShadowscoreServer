@@ -10,10 +10,24 @@ test("initial score creates configured voices", () => {
   assert.deepEqual(Object.keys(score.assignments), defaultConfig.ensemble.voices);
   assert.deepEqual(Object.keys(score.mesostructure), ["A", "B", "C", "D", "E", "F"]);
   assert.deepEqual(score.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
+  assert.equal(Object.keys(score.clips).length, 36);
   assert.equal(score.macrostructure.tempo, 120);
   assert.deepEqual(score.structureState, { activeBlockId: "A", macroIndex: 0 });
   assert.equal(score.assignments["player-1"].label, "Player 1");
   assert.equal(score.assignments["player-1"].color, "#d1453b");
+  assert.deepEqual(score.mesostructure.A.duration, { bars: 4 });
+  assert.equal(score.mesostructure.A.players["player-1"].clipId, "a-player-1");
+  assert.deepEqual(score.clips["a-player-1"].duration, { bars: 2 });
+  assert.equal(score.clips["a-player-1"].notes.length, 2);
+  assert.equal(score.clips["a-player-1"].playbackType, "looped");
+  for (const block of Object.values(score.mesostructure)) {
+    assert.deepEqual(block.duration, { bars: 4 });
+    assert.equal(Object.keys(block.players).length, 6);
+    for (const assignment of Object.values(block.players)) {
+      assert.ok(score.clips[assignment.clipId]);
+      assert.ok(score.clips[assignment.clipId].notes.length > 0);
+    }
+  }
 });
 
 test("context updates merge into shared score context", () => {

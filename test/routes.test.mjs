@@ -237,6 +237,68 @@ test("macro playback routes expose, start, and stop the chain runner", async () 
   ]);
 });
 
+test("macro playback start can scope clock writes to a selected RNBO target", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          },
+          {
+            id: "other-client",
+            host: "192.168.68.97",
+            port: 9001,
+            address: "/rnbo/inst/3/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          activeBlockId: "A",
+          macroIndex: 0,
+          nextAdvanceAt: 1000,
+          currentBlockDurationMs: 16000
+        }),
+        start: () => context.runtime.macroPlayback.snapshot()
+      }
+    }
+  });
+
+  const started = await requestJson(context, "POST", "/macrostructure/playback/start", {
+    targetId: "other-client"
+  });
+
+  assert.equal(started.ok, true);
+  assert.deepEqual(writes, [
+    {
+      host: "192.168.68.97",
+      port: 9001,
+      path: "/rnbo/inst/3/params/Clock",
+      value: 1
+    }
+  ]);
+  assert.deepEqual(started.clockWrites, [
+    {
+      host: "192.168.68.97",
+      port: 9001,
+      path: "/rnbo/inst/3/params/Clock",
+      targetId: "other-client",
+      value: 1
+    }
+  ]);
+});
+
 test("clip routes expose and mutate reusable clips", async () => {
   const context = createRouteContext();
 
@@ -285,6 +347,11 @@ test("admin reset route can restore seeded structure", async () => {
 
   assert.equal(reset.mesostructure.G, undefined);
   assert.deepEqual(Object.keys(reset.mesostructure), ["A", "B", "C", "D", "E", "F"]);
+  assert.equal(Object.keys(reset.clips).length, 36);
+  assert.deepEqual(reset.mesostructure.A.duration, { bars: 4 });
+  assert.equal(reset.mesostructure.A.players["player-1"].clipId, "a-player-1");
+  assert.deepEqual(reset.clips["a-player-1"].duration, { bars: 2 });
+  assert.ok(reset.clips["a-player-1"].notes.length > 0);
   assert.deepEqual(reset.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
 });
 
@@ -452,7 +519,7 @@ test("playback timing contract route exposes target-specific compiled contracts"
     available: true,
     assignedVoiceId: "player-1",
     timing: {
-      blockId: "",
+      blockId: "A",
       stagesPerBeat: 240,
       ticksPerStage: 2,
       patternLength: 960,
@@ -461,7 +528,7 @@ test("playback timing contract route exposes target-specific compiled contracts"
       resolutionMode: "fit",
       quantizationError: null
     },
-    noteCount: 1,
+    noteCount: 4,
     transmittedRowCount: 64
   });
 });
@@ -845,7 +912,8 @@ test("matrix edit route serves static app html", async () => {
   assert.match(response.body, /ShadowScore Matrix Edit/);
   assert.match(response.body, /id="start-transport"/);
   assert.match(response.body, /id="stop-transport"/);
-  assert.match(response.body, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
+  assert.match(response.body, /\/macrostructure\/playback\/\$\{running \? "start" : "stop"\}/);
+  assert.doesNotMatch(response.body, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
 });
 
 test("matrix edit route works with legacy generated static config", async () => {

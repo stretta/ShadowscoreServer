@@ -16,8 +16,10 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
   assert.match(html, /id="create-clip"/);
   assert.match(html, /Create Clip/);
   assert.match(html, /id="duration"[^>]+value="0\.25"/);
-  assert.match(html, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
-  assert.match(html, /Clock/);
+  assert.match(html, /\/macrostructure\/playback\/\$\{running \? "start" : "stop"\}/);
+  assert.match(html, /targetId: targetSelect\.value/);
+  assert.match(html, /Macro playback/);
+  assert.doesNotMatch(html, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
 });
 
 test("Matrix Edit static app includes ShadowScore client wiring", async () => {

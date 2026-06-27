@@ -631,6 +631,59 @@ test("sends score updates to assignment-bound RNBO targets", async () => {
   assert.deepEqual(result.messages[0].values, [2202, 1, 700, 1, 1, 32, 16, 0]);
 });
 
+test("assignment-bound RNBO targets inherit live target connection details", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      stagesPerBeat: 16,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      log: false
+    }
+  });
+  const score = createScore();
+  score.assignments = {
+    "player-1": {
+      rnboTargetId: "peer-a:rnbo-inst-4:shadowscore",
+      rnboHost: "192.168.68.67",
+      rnboPort: 1234,
+      rnboAddress: "/rnbo/inst/4/messages/in/shadowscore",
+      clientId: null
+    }
+  };
+  const packets = [];
+  const socket = {
+    send(packet, port, host, callback) {
+      packets.push({ packet, port, host });
+      callback();
+    }
+  };
+  const runtime = {
+    peerRegistry: {
+      targets() {
+        return [
+          {
+            id: "peer-a:rnbo-inst-4:shadowscore",
+            localId: "rnbo-inst-4:shadowscore",
+            host: "192.168.68.88",
+            port: 1234,
+            address: "/rnbo/inst/4/messages/in/shadowscore",
+            clientId: "90"
+          }
+        ];
+      }
+    }
+  };
+
+  const result = await sendScoreTransaction(socket, config, score, 701, { runtime });
+
+  assert.equal(packets[0].host, "192.168.68.88");
+  assert.equal(packets[0].port, 1234);
+  assert.deepEqual(result.messages[0].values, [90, 1, 701, 1, 1, 32, 16, 0]);
+  assert.deepEqual(result.messages.at(-1).values, [90, 90, 701, 1, 0]);
+});
+
 test("RNBO adapter resends score transactions when assignments change", () => {
   assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.replaced", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "clip.replaced", detail: {} }), true);

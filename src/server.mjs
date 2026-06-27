@@ -13,8 +13,8 @@ const config = await loadConfig();
 const initialScore = await loadPersistedScore(config, createInitialScore(config));
 const store = createScoreStore(initialScore);
 const persistence = createScorePersistence(store, config);
-const rnbo = createRnboOscAdapter(config);
 const peerRegistry = createPeerRegistry(config);
+const rnbo = createRnboOscAdapter(config, { peerRegistry });
 const macroPlayback = createMacroPlayback(store, config);
 rnbo.attach(store);
 

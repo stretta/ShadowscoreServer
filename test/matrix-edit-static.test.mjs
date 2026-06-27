@@ -26,6 +26,7 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   const { html, js } = await readBuiltApp();
 
   assert.match(html, /<select id="voice" aria-label="ShadowScore voice"><\/select>/);
+  assert.match(html, /<select id="clip" aria-label="ShadowScore clip"><\/select>/);
   assert.doesNotMatch(html, /voice-picker/);
   assert.match(js, /\/session/);
   assert.match(js, /\/score/);
@@ -40,6 +41,8 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(js, /voice\.assignment\.replace/);
   assert.match(js, /clip\.add/);
   assert.match(js, /mesostructure\.block\.replace/);
+  assert.match(js, /Switching \$\{[^}]+\} to clip/);
+  assert.match(js, /Switch clip failed/);
   assert.match(js, /needs a clip in section/);
   assert.match(js, /Switch the whole score to/);
   assert.match(js, /\/admin\/restore/);

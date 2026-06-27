@@ -1,5 +1,6 @@
 import dgram from "node:dgram";
 import { encodeOscMessage } from "./osc.mjs";
+import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 
 const OPCODES = Object.freeze({
@@ -8,7 +9,7 @@ const OPCODES = Object.freeze({
   COMMIT: 90
 });
 
-export function createRnboOscAdapter(config) {
+export function createRnboOscAdapter(config, runtime = {}) {
   if (!config.rnbo.enabled) {
     return {
       enabled: false,
@@ -27,7 +28,7 @@ export function createRnboOscAdapter(config) {
         if (!shouldSendScoreTransaction(event)) {
           return;
         }
-        void sendScoreTransaction(socket, config, event.score, nextTransactionId()).catch((error) => {
+        void sendScoreTransaction(socket, config, event.score, nextTransactionId(), { runtime }).catch((error) => {
           console.error(`[rnbo] send failed: ${messageForError(error)}`);
         });
       });
@@ -47,8 +48,8 @@ export function createRnboOscAdapter(config) {
   }
 }
 
-export async function sendScoreTransaction(socket, config, score, transactionId) {
-  const targets = rnboTargets(config, score);
+export async function sendScoreTransaction(socket, config, score, transactionId, options = {}) {
+  const targets = await rnboTargetsForSend(config, score, options.runtime);
   const compiledTargets = [];
 
   for (const target of targets) {
@@ -74,6 +75,17 @@ export async function sendScoreTransaction(socket, config, score, transactionId)
   }
 
   return compiledTargets.length === 1 ? compiledTargets[0].compiled : { targets: compiledTargets };
+}
+
+async function rnboTargetsForSend(config, score, runtime = {}) {
+  const liveTargets = await readLiveRnboTargets(config, runtime);
+  return rnboTargets(config, score, liveTargets);
+}
+
+async function readLiveRnboTargets(config, runtime = {}) {
+  const localTargets = await discoverRnboTargets(config).catch(() => []);
+  const peerTargets = runtime.peerRegistry?.targets?.() ?? [];
+  return [...localTargets, ...peerTargets];
 }
 
 export function scoreTransportInportMessages(config, compiled) {
@@ -488,8 +500,8 @@ async function sendOscInportMessage(socket, target, name, value) {
   });
 }
 
-function rnboTargets(config, score) {
-  const assignedTargets = assignmentRnboTargets(config, score);
+function rnboTargets(config, score, liveTargets = []) {
+  const assignedTargets = assignmentRnboTargets(config, score, liveTargets);
   if (assignedTargets.length > 0) {
     return assignedTargets;
   }
@@ -514,24 +526,35 @@ function rnboTargets(config, score) {
   ];
 }
 
-function assignmentRnboTargets(config, score) {
+function assignmentRnboTargets(config, score, liveTargets = []) {
   if (!score?.assignments) {
     return [];
   }
   return Object.entries(score.assignments)
     .filter(([, assignment]) => assignment?.rnboAddress)
     .map(([voiceId, assignment]) => {
-      const configuredTarget = configuredTargetForAssignment(config, assignment);
+      const configuredTarget = liveTargetForAssignment(liveTargets, assignment) ?? configuredTargetForAssignment(config, assignment);
       return {
-        host: assignment.rnboHost || config.rnbo.host,
-        port: assignment.rnboPort ?? config.rnbo.port,
-        address: assignment.rnboAddress,
+        host: configuredTarget?.host ?? assignment.rnboHost ?? config.rnbo.host,
+        port: configuredTarget?.port ?? assignment.rnboPort ?? config.rnbo.port,
+        address: configuredTarget?.address ?? assignment.rnboAddress,
         voiceId,
-        clientId: assignment.clientId ?? undefined,
+        clientId: assignment.clientId ?? configuredTarget?.clientId,
         id: assignment.rnboTargetId || undefined,
         capabilities: rnboPlaybackCapabilities(config, configuredTarget?.capabilities)
       };
     });
+}
+
+function liveTargetForAssignment(targets, assignment) {
+  return targets.find((target) => {
+    if (assignment.rnboTargetId && (target.id === assignment.rnboTargetId || target.localId === assignment.rnboTargetId)) {
+      return true;
+    }
+    return target.address === assignment.rnboAddress &&
+      String(target.host ?? "") === String(assignment.rnboHost || "") &&
+      Number(target.port) === Number(assignment.rnboPort);
+  });
 }
 
 function configuredTargetForAssignment(config, assignment) {

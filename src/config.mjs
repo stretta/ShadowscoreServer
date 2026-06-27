@@ -18,6 +18,15 @@ export const defaultConfig = Object.freeze({
     heartbeatIntervalMs: 10000,
     heartbeatTtlMs: 30000
   },
+  transport: {
+    tempoAuthority: "link",
+    jack: {
+      enabled: false,
+      host: "",
+      freshnessMs: 500,
+      pollIntervalMs: 75
+    }
+  },
   static: {
     enabled: true,
     root: "public/matrix-edit",

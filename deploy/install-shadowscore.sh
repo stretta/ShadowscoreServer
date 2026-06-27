@@ -10,6 +10,8 @@ SESSION_HOST_URL="${SHADOWSCORE_SESSION_HOST_URL:-}"
 HOST_IDENTITY="${SHADOWSCORE_HOST_IDENTITY:-$(hostname)}"
 ADVERTISED_NAME="${SHADOWSCORE_ADVERTISED_NAME:-$(hostname)}"
 RUN_SMOKE="${SHADOWSCORE_RUN_SMOKE:-1}"
+JACK_TRANSPORT="${SHADOWSCORE_JACK_TRANSPORT:-0}"
+JACK_TRANSPORT_INTERVAL_MS="${SHADOWSCORE_JACK_TRANSPORT_INTERVAL_MS:-75}"
 
 usage() {
   cat <<EOF
@@ -24,6 +26,8 @@ Options:
   --session-host-url URL        Required for peer role, for example http://pt5.local:8790
   --host-identity ID            Stable unit id. Default: hostname
   --advertised-name NAME        Display name. Default: hostname
+  --enable-jack-transport       Install and run the host JACK transport bridge
+  --jack-transport-interval MS  JACK bridge poll interval. Default: $JACK_TRANSPORT_INTERVAL_MS
   --no-smoke                    Skip final hardware smoke test
   -h, --help                    Show this help
 
@@ -41,6 +45,8 @@ while [[ $# -gt 0 ]]; do
     --session-host-url) SESSION_HOST_URL="$2"; shift 2 ;;
     --host-identity) HOST_IDENTITY="$2"; shift 2 ;;
     --advertised-name) ADVERTISED_NAME="$2"; shift 2 ;;
+    --enable-jack-transport) JACK_TRANSPORT=1; shift ;;
+    --jack-transport-interval) JACK_TRANSPORT_INTERVAL_MS="$2"; shift 2 ;;
     --no-smoke) RUN_SMOKE=0; shift ;;
     -h|--help) usage; exit 0 ;;
     *) echo "Unknown option: $1" >&2; usage >&2; exit 2 ;;
@@ -116,6 +122,8 @@ SHADOWSCORE_PUBLIC_URL_VALUE="$PUBLIC_URL" \
 SHADOWSCORE_SESSION_HOST_URL_VALUE="$SESSION_HOST_URL" \
 SHADOWSCORE_HOST_IDENTITY_VALUE="$HOST_IDENTITY" \
 SHADOWSCORE_ADVERTISED_NAME_VALUE="$ADVERTISED_NAME" \
+SHADOWSCORE_JACK_TRANSPORT_VALUE="$JACK_TRANSPORT" \
+SHADOWSCORE_JACK_TRANSPORT_INTERVAL_MS_VALUE="$JACK_TRANSPORT_INTERVAL_MS" \
 SHADOWSCORE_CONFIG_PATH="$CONFIG_PATH" \
 node --input-type=module <<'NODE'
 import fs from "node:fs";
@@ -126,6 +134,13 @@ config.server ??= {};
 config.server.role = process.env.SHADOWSCORE_ROLE_VALUE;
 config.server.hostIdentity = process.env.SHADOWSCORE_HOST_IDENTITY_VALUE;
 config.server.advertisedName = process.env.SHADOWSCORE_ADVERTISED_NAME_VALUE;
+config.transport ??= {};
+config.transport.tempoAuthority = config.transport.tempoAuthority === "server" ? "server" : "link";
+config.transport.jack ??= {};
+config.transport.jack.enabled = process.env.SHADOWSCORE_ROLE_VALUE === "host" && process.env.SHADOWSCORE_JACK_TRANSPORT_VALUE === "1";
+config.transport.jack.host = process.env.SHADOWSCORE_HOST_IDENTITY_VALUE;
+config.transport.jack.freshnessMs = Number(config.transport.jack.freshnessMs ?? 500);
+config.transport.jack.pollIntervalMs = Number(process.env.SHADOWSCORE_JACK_TRANSPORT_INTERVAL_MS_VALUE || config.transport.jack.pollIntervalMs || 75);
 config.http ??= {};
 config.static ??= {};
 config.static.enabled = true;
@@ -185,6 +200,30 @@ rm -f "$tmp_service"
 $SUDO systemctl daemon-reload
 $SUDO systemctl enable --now "$SERVICE_NAME"
 $SUDO systemctl restart "$SERVICE_NAME"
+
+BRIDGE_SERVICE_NAME="shadowscore-jack-transport-bridge.service"
+if [[ "$ROLE" == "host" && "$JACK_TRANSPORT" == "1" ]]; then
+  log "Installing JACK transport bridge service"
+  if ! ldconfig -p 2>/dev/null | grep -q 'libjack.so.0'; then
+    echo "JACK transport bridge requested, but libjack.so.0 was not found" >&2
+    exit 1
+  fi
+  interval_seconds="$(node -e 'const ms=Number(process.argv[1]); if (!Number.isFinite(ms) || ms <= 0) process.exit(2); console.log(ms / 1000)' "$JACK_TRANSPORT_INTERVAL_MS")"
+  tmp_bridge_service="$(mktemp)"
+  sed \
+    -e "s#/home/pi/ShadowscoreServer#$INSTALL_DIR#g" \
+    -e "s#--host shadowbox-host#--host $HOST_IDENTITY#g" \
+    -e "s#--interval 0.075#--interval $interval_seconds#g" \
+    "deploy/systemd/$BRIDGE_SERVICE_NAME" > "$tmp_bridge_service"
+  $SUDO cp "$tmp_bridge_service" "/etc/systemd/system/$BRIDGE_SERVICE_NAME"
+  rm -f "$tmp_bridge_service"
+  $SUDO systemctl daemon-reload
+  $SUDO systemctl enable --now "$BRIDGE_SERVICE_NAME"
+  $SUDO systemctl restart "$BRIDGE_SERVICE_NAME"
+elif [[ "$ROLE" == "host" ]]; then
+  log "Disabling JACK transport bridge service"
+  $SUDO systemctl disable --now "$BRIDGE_SERVICE_NAME" >/dev/null 2>&1 || true
+fi
 
 if [[ "$ROLE" == "host" ]]; then
   log "Waiting for host readiness"

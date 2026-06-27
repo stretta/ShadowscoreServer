@@ -90,11 +90,18 @@ async function readLiveRnboTargets(config, runtime = {}) {
 
 export function scoreTransportInportMessages(config, compiled) {
   const transport = config.rnbo?.transport ?? {};
-  return [
-    { name: "Tempo", value: finiteNumber(transport.Tempo, 120) },
+  const messages = [
     { name: "ClockInterval", value: finiteNumber(compiled.timing?.ticksPerStage, finiteNumber(transport.ClockInterval, 120)) },
     { name: "MaxSteps", value: compiled.patternLength }
   ];
+  if (tempoAuthority(config) === "server") {
+    messages.unshift({ name: "Tempo", value: finiteNumber(transport.Tempo, 120) });
+  }
+  return messages;
+}
+
+export function tempoAuthority(config) {
+  return config.transport?.tempoAuthority === "server" ? "server" : "link";
 }
 
 export function shouldSendScoreTransaction(event) {

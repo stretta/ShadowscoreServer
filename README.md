@@ -56,6 +56,17 @@ npm start -- --config config/shadowbox.hardware-host.json
 npm run smoke:hardware -- --config config/shadowbox.hardware-host.json
 ```
 
+Host installs that should follow local JACK/Link transport can enable the bridge
+service during install:
+
+```sh
+deploy/install-shadowscore.sh --role host --enable-jack-transport
+```
+
+The bridge posts JACK BBT snapshots to `/transport/jack/snapshot`; `/transport`
+and `/transport/status` expose freshness, tempo authority, and macro playback
+alignment state.
+
 For a peer Shadowbox hardware unit that should register with the selected host,
 set `registration.sessionHostUrl` in its config and run:
 
@@ -130,7 +141,11 @@ containing block duration; one-shot clips play once.
 - `POST /hardware/units/:unitId/heartbeat`: refresh a registered peer heartbeat.
 - `GET /rnbo/targets`: local and registered RNBO targets with availability state.
 - `GET /playback/timing-contracts`: target-specific compiled playback timing contracts for the active block, including selected stage resolution, `ClockInterval`/ticks-per-stage, `MaxSteps`/pattern length, target capacities, and quantization diagnostics when adaptive fidelity modes are enabled.
-- `POST /rnbo/targets/:targetId/params`: set playback transport RNBO controls for a target. `Clock` is written to the RNBO param path, while `Tempo`, `MaxSteps`, `ClockInterval`, `SetStage`, and `Stage` are written to message inports, for example `{ "params": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`. Editor transport start/stop uses this route with `{ "params": { "Clock": 1 } }` or `{ "params": { "Clock": 0 } }`; sending the off/on message to one target is sufficient for the linked transport. Score-data resends only reassert `Tempo`, `ClockInterval`, and score-derived `MaxSteps`; stage/step reset or direct advancement controls should be sent only by explicit sync/direct-drive operations.
+- `POST /transport/jack/snapshot`: accept a host-local JACK BBT snapshot from the bridge helper.
+- `GET /transport`: current JACK bridge freshness, latest BBT snapshot, and tempo authority.
+- `GET /transport/events`: SSE stream for transport updates.
+- `GET /transport/status`: host transport status and macro playback control page.
+- `POST /rnbo/targets/:targetId/params`: set playback transport RNBO controls for a target. `Clock` is written to the RNBO param path, while `Tempo`, `MaxSteps`, `ClockInterval`, `SetStage`, and `Stage` are written to message inports, for example `{ "params": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`. Editor transport start/stop uses this route with `{ "params": { "Clock": 1 } }` or `{ "params": { "Clock": 0 } }`; sending the off/on message to one target is sufficient for the linked transport. Routine score-data resends reassert `ClockInterval` and score-derived `MaxSteps`; they only send `Tempo` when `transport.tempoAuthority` is set to `"server"`. Stage/step reset or direct advancement controls should be sent only by explicit sync/direct-drive operations.
 - `GET /assignments`: current voice assignment map.
 - `GET /clips`: current reusable clip map.
 - `GET /structure`: current `{ clips, mesostructure, macrostructure, structureState }` structure document.

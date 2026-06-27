@@ -24,6 +24,7 @@ export async function runHardwareSmoke(config, options = {}) {
   checks.push(await checkHttpText("structure editor", `${baseUrl}/`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Structure Editor")));
   checks.push(await checkHttpText("matrix edit", `${baseUrl}/matrix-edit`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Matrix Edit")));
   checks.push(await checkHttpText("event list", `${baseUrl}/event-list`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Event List")));
+  checks.push(await checkJackTransport(config, baseUrl, fetchImpl, timeoutMs));
   checks.push(await checkTcpPort("http port", config.http?.host ?? "127.0.0.1", config.http?.port ?? 8790, timeoutMs, options.netConnect));
 
   if (config.rnbo?.oscQuery?.enabled) {
@@ -126,6 +127,27 @@ async function checkPeerRegistration(config, fetchImpl, timeoutMs) {
     return found ? passCheck("peer registration", `${unitId} visible on host`) : failCheck("peer registration", `${unitId} is not visible on host`);
   } catch (error) {
     return failCheck("peer registration", `${url} failed: ${messageForError(error)}`);
+  }
+}
+
+async function checkJackTransport(config, baseUrl, fetchImpl, timeoutMs) {
+  if (!config.transport?.jack?.enabled) {
+    return skipCheck("JACK transport", "disabled in config");
+  }
+  const url = `${baseUrl}/transport`;
+  try {
+    const response = await fetchWithTimeout(fetchImpl, url, timeoutMs);
+    if (!response.ok) {
+      return failCheck("JACK transport", `${url} returned HTTP ${response.status}`);
+    }
+    const payload = await response.json();
+    if (payload.fresh === true && payload.latest?.bbtValid === true) {
+      const state = payload.latest?.state ? `, state=${payload.latest.state}` : "";
+      return passCheck("JACK transport", `${url} fresh${state}`);
+    }
+    return failCheck("JACK transport", `${url} not fresh/valid: ${payload.status ?? "unknown"} ${payload.reason ?? ""}`.trim());
+  } catch (error) {
+    return failCheck("JACK transport", `${url} failed: ${messageForError(error)}`);
   }
 }
 

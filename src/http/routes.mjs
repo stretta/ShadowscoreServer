@@ -1,5 +1,6 @@
 import { adminPage } from "./admin-page.mjs";
 import { serveStaticAsset } from "./static-files.mjs";
+import { transportPage } from "./transport-page.mjs";
 import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
 import { configuredRnboTargets, discoverRnboTargets, writeRnboTransportParams } from "../adapters/rnbo-oscquery.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
@@ -51,6 +52,35 @@ export async function routeRequest(request, response, store, config, runtime = {
     writeJson(response, 200, {
       contracts: await readPlaybackTimingContracts(store.getScore(), config, runtime)
     });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/transport") {
+    writeJson(response, 200, transportSnapshot(config, runtime));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/transport/events") {
+    openTransportEventStream(request, response, config, runtime);
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/transport/status") {
+    writeHtml(response, 200, transportPage());
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/jack/snapshot") {
+    try {
+      const transport = requireJackTransport(runtime);
+      transport.update(await readJson(request));
+      writeJson(response, 200, {
+        ok: true,
+        transport: transportSnapshot(config, runtime)
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
     return;
   }
 
@@ -392,6 +422,7 @@ export async function routeRequest(request, response, store, config, runtime = {
         ok: true,
         clockWrites,
         playback: playback.start({
+          mode: optionalString(body.mode),
           reset: Boolean(body.reset),
           sourceClientId: "http"
         })
@@ -521,6 +552,32 @@ function openEventStream(request, response, store) {
   });
 }
 
+function openTransportEventStream(request, response, config, runtime) {
+  response.writeHead(200, {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Content-Type": "text/event-stream"
+  });
+
+  writeEvent(response, "snapshot", {
+    type: "snapshot",
+    transport: transportSnapshot(config, runtime)
+  });
+
+  const onSnapshot = (event) => writeEvent(response, event.type, {
+    ...event,
+    transport: {
+      ...(event.transport ?? {}),
+      tempoAuthority: config.transport?.tempoAuthority === "server" ? "server" : "link"
+    }
+  });
+  runtime.jackTransport?.events?.on?.("snapshot", onSnapshot);
+
+  request.on("close", () => {
+    runtime.jackTransport?.events?.off?.("snapshot", onSnapshot);
+  });
+}
+
 function writeEvent(response, eventName, payload) {
   response.write(`event: ${eventName}\n`);
   response.write(`data: ${JSON.stringify(payload)}\n\n`);
@@ -545,7 +602,8 @@ async function readSessionRuntime(config, runtime) {
   return {
     rnboTargets: [...localUnit.targets, ...peerTargets],
     hardwareUnits: [localUnit, ...peerUnits],
-    macroPlayback: runtime.macroPlayback
+    macroPlayback: runtime.macroPlayback,
+    jackTransport: runtime.jackTransport
   };
 }
 
@@ -592,7 +650,7 @@ async function writeTransportParamsToAvailableTargets(config, runtime, params) {
   return writes;
 }
 
-async function writeTransportParamsToPlaybackTargets(score, config, runtime, params, options = {}) {
+export async function writeTransportParamsToPlaybackTargets(score, config, runtime, params, options = {}) {
   const targetId = optionalString(options.targetId);
   if (!targetId) {
     return writeTransportParamsToAvailableTargets(config, runtime, params);
@@ -683,6 +741,34 @@ function requireMacroPlayback(runtime) {
   return runtime.macroPlayback;
 }
 
+function requireJackTransport(runtime) {
+  if (!runtime.jackTransport) {
+    throw new Error("JACK transport state is not available");
+  }
+  return runtime.jackTransport;
+}
+
+function jackTransportSnapshot(runtime) {
+  return runtime.jackTransport?.snapshot?.() ?? {
+    source: "jack",
+    latest: null,
+    ageMs: null,
+    freshnessThresholdMs: 0,
+    fresh: false,
+    stale: false,
+    unusable: true,
+    status: "unusable",
+    reason: "transport state is not available"
+  };
+}
+
+function transportSnapshot(config, runtime) {
+  return {
+    ...jackTransportSnapshot(runtime),
+    tempoAuthority: config.transport?.tempoAuthority === "server" ? "server" : "link"
+  };
+}
+
 function macroPlaybackSnapshot(runtime, store) {
   if (runtime.macroPlayback?.snapshot) {
     return runtime.macroPlayback.snapshot();
@@ -690,10 +776,24 @@ function macroPlaybackSnapshot(runtime, store) {
   const score = store.getScore();
   return {
     running: false,
+    mode: "stopped",
     activeBlockId: score.structureState?.activeBlockId ?? "",
     macroIndex: score.structureState?.macroIndex ?? 0,
     nextAdvanceAt: null,
-    currentBlockDurationMs: 0
+    currentBlockDurationMs: 0,
+    activeBlockStartBeat: null,
+    activeBlockEndBeat: null,
+    activeBlockDurationBeats: 0,
+    beatsRemaining: null,
+    jack: {
+      status: "unusable",
+      state: "",
+      absoluteBeat: null
+    },
+    phaseAlignment: {
+      pending: false,
+      last: null
+    }
   };
 }
 

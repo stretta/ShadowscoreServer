@@ -20,6 +20,73 @@ test("hardware smoke passes required host checks and skips host-only registratio
 
   assert.equal(result.ok, true);
   assert.equal(result.checks.find((check) => check.name === "peer registration").status, "skip");
+  assert.equal(result.checks.find((check) => check.name === "JACK transport").status, "skip");
+});
+
+test("hardware smoke requires fresh JACK transport when enabled", async () => {
+  const config = mergeConfig(defaultConfig, {
+    transport: {
+      jack: {
+        enabled: true
+      }
+    }
+  });
+  const result = await runHardwareSmoke(config, {
+    fetchImpl: createFetch({
+      "http://127.0.0.1:8790/healthz": { ok: true },
+      "http://127.0.0.1:8790/session": { voices: [{ id: "player-1" }] },
+      "http://127.0.0.1:8790/rnbo/targets": { targets: [] },
+      "http://127.0.0.1:8790/": "ShadowScore Structure Editor",
+      "http://127.0.0.1:8790/matrix-edit": "ShadowScore Matrix Edit",
+      "http://127.0.0.1:8790/event-list": "ShadowScore Event List",
+      "http://127.0.0.1:8790/transport": {
+        fresh: true,
+        latest: {
+          bbtValid: true,
+          state: "rolling"
+        }
+      }
+    }),
+    netConnect: createNetConnect(),
+    timeoutMs: 20
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.checks.find((check) => check.name === "JACK transport").status, "pass");
+});
+
+test("hardware smoke fails stale JACK transport when enabled", async () => {
+  const config = mergeConfig(defaultConfig, {
+    transport: {
+      jack: {
+        enabled: true
+      }
+    }
+  });
+  const result = await runHardwareSmoke(config, {
+    fetchImpl: createFetch({
+      "http://127.0.0.1:8790/healthz": { ok: true },
+      "http://127.0.0.1:8790/session": { voices: [{ id: "player-1" }] },
+      "http://127.0.0.1:8790/rnbo/targets": { targets: [] },
+      "http://127.0.0.1:8790/": "ShadowScore Structure Editor",
+      "http://127.0.0.1:8790/matrix-edit": "ShadowScore Matrix Edit",
+      "http://127.0.0.1:8790/event-list": "ShadowScore Event List",
+      "http://127.0.0.1:8790/transport": {
+        fresh: false,
+        status: "stale",
+        reason: "snapshot stale",
+        latest: {
+          bbtValid: true,
+          state: "rolling"
+        }
+      }
+    }),
+    netConnect: createNetConnect(),
+    timeoutMs: 20
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.checks.find((check) => check.name === "JACK transport").status, "fail");
 });
 
 test("hardware smoke fails when peer is not visible on the session host", async () => {

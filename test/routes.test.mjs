@@ -8,6 +8,7 @@ import { defaultConfig, mergeConfig } from "../src/config.mjs";
 import { routeRequest } from "../src/http/routes.mjs";
 import { createPeerRegistry } from "../src/registration/peer-registry.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
+import { createJackTransportState } from "../src/transport/jack-transport-state.mjs";
 
 test("assignment routes expose, replace, and clear voice assignments", async () => {
   const context = createRouteContext();
@@ -69,12 +70,133 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.endpoints.structurePlayhead, "http://127.0.0.1/structure/playhead");
   assert.equal(session.endpoints.macroPlayback, "http://127.0.0.1/macrostructure/playback");
   assert.equal(session.endpoints.playbackTimingContracts, "http://127.0.0.1/playback/timing-contracts");
+  assert.equal(session.endpoints.transport, "http://127.0.0.1/transport");
+  assert.equal(session.endpoints.transportEvents, "http://127.0.0.1/transport/events");
+  assert.equal(session.endpoints.transportStatus, "http://127.0.0.1/transport/status");
   assert.equal(session.macroPlayback.running, false);
+  assert.equal(session.transport.status, "unusable");
+  assert.equal(session.transport.tempoAuthority, "link");
   assert.equal(session.voices.length, 6);
   assert.equal(session.voices[0].assignment.label, "Player 1");
   assert.equal(session.assignmentPresets[0].id, "six-player-shadowbox");
   assert.equal(session.hardwareUnits.length, 1);
   assert.equal(session.hardwareUnits[0].local, true);
+});
+
+test("transport routes store JACK snapshots and report freshness", async () => {
+  let now = 1782580000100;
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      transport: {
+        jack: {
+          freshnessMs: 250
+        }
+      }
+    }),
+    runtime: {
+      jackTransport: createJackTransportState({
+        transport: {
+          jack: {
+            freshnessMs: 250
+          }
+        }
+      }, {
+        now: () => now
+      })
+    }
+  });
+
+  const initial = await requestJson(context, "GET", "/transport");
+  assert.equal(initial.status, "unusable");
+  assert.equal(initial.reason, "no snapshot");
+  assert.equal(initial.tempoAuthority, "link");
+
+  const posted = await requestJson(context, "POST", "/transport/jack/snapshot", jackSnapshot());
+  assert.equal(posted.ok, true);
+  assert.equal(posted.transport.status, "fresh");
+  assert.equal(posted.transport.fresh, true);
+  assert.equal(posted.transport.tempoAuthority, "link");
+  assert.equal(posted.transport.latest.host, "wren");
+  assert.equal(posted.transport.latest.receivedAt, 1782580000100);
+
+  now = 1782580000200;
+  const fresh = await requestJson(context, "GET", "/transport");
+  assert.equal(fresh.status, "fresh");
+  assert.equal(fresh.ageMs, 100);
+  assert.equal(fresh.tempoAuthority, "link");
+
+  now = 1782580000400;
+  const stale = await requestJson(context, "GET", "/transport");
+  assert.equal(stale.status, "stale");
+  assert.equal(stale.stale, true);
+  assert.equal(stale.unusable, false);
+});
+
+test("transport route rejects malformed JACK snapshots", async () => {
+  const context = createRouteContext({
+    runtime: {
+      jackTransport: createJackTransportState(defaultConfig)
+    }
+  });
+
+  const response = await request(context, "POST", "/transport/jack/snapshot", {
+    source: "rnbo",
+    host: "wren",
+    state: "rolling",
+    frame: 1,
+    frameRate: 48000,
+    bbtValid: false
+  });
+
+  assert.equal(response.status, 400);
+  assert.match(response.body, /JACK snapshot source must be 'jack'/);
+});
+
+test("transport events stream sends initial and update snapshots", async () => {
+  const context = createRouteContext({
+    runtime: {
+      jackTransport: createJackTransportState(defaultConfig, { now: () => 1782580000100 })
+    }
+  });
+  const request = createRequest("GET", "/transport/events");
+  const response = createResponse();
+
+  await routeRequest(request, response, context.store, context.config, context.runtime);
+  assert.equal(response.snapshot().status, 200);
+  assert.equal(response.snapshot().headers["Content-Type"], "text/event-stream");
+  assert.match(response.snapshot().body, /event: snapshot/);
+  assert.match(response.snapshot().body, /"status":"unusable"/);
+  assert.match(response.snapshot().body, /"tempoAuthority":"link"/);
+
+  context.runtime.jackTransport.update(jackSnapshot());
+  const streamed = response.snapshot().body;
+  assert.match(streamed, /"status":"fresh"/);
+  assert.match(streamed, /"absoluteBeat":31963\.380208333332/);
+  assert.match(streamed, /"tempoAuthority":"link"/);
+
+  request.emit("close");
+});
+
+test("transport status page exposes host transport controls", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/transport/status");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /Shadowscore Transport/);
+  assert.match(response.body, /id="start-jack"/);
+  assert.match(response.body, /id="start-timer"/);
+  assert.match(response.body, /id="reanchor"/);
+  assert.match(response.body, /id="advance"/);
+  assert.match(response.body, /id="reset"/);
+  assert.match(response.body, /id="stop"/);
+  assert.match(response.body, /id="phase-reset"/);
+  assert.match(response.body, /\/transport\/events/);
+  assert.match(response.body, /\/macrostructure\/playback\/start/);
+  assert.match(response.body, /\/macrostructure\/playback\/stop/);
+  assert.match(response.body, /\/macrostructure\/advance/);
+  assert.match(response.body, /\/macrostructure\/reset/);
+  assert.match(response.body, /\/playback\/timing-contracts/);
 });
 
 test("voice routes add and remove arbitrary voices", async () => {
@@ -154,6 +276,7 @@ test("structure playhead routes select, advance, and reset active blocks", async
 
 test("macro playback routes expose, start, and stop the chain runner", async () => {
   let running = false;
+  let startOptions = null;
   const writes = [];
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
@@ -180,7 +303,8 @@ test("macro playback routes expose, start, and stop the chain runner", async () 
           nextAdvanceAt: running ? 1000 : null,
           currentBlockDurationMs: running ? 16000 : 0
         }),
-        start: () => {
+        start: (options) => {
+          startOptions = options;
           running = true;
           return context.runtime.macroPlayback.snapshot();
         },
@@ -195,10 +319,11 @@ test("macro playback routes expose, start, and stop the chain runner", async () 
   const initial = await requestJson(context, "GET", "/macrostructure/playback");
   assert.equal(initial.running, false);
 
-  const started = await requestJson(context, "POST", "/macrostructure/playback/start", {});
+  const started = await requestJson(context, "POST", "/macrostructure/playback/start", { mode: "jack" });
   assert.equal(started.ok, true);
   assert.equal(started.playback.running, true);
   assert.equal(started.playback.currentBlockDurationMs, 16000);
+  assert.equal(startOptions.mode, "jack");
   assert.deepEqual(writes, [
     {
       host: "192.168.68.96",
@@ -1022,6 +1147,26 @@ test("voice note route rejects stale expected voice versions", async () => {
   assert.equal(response.status, 400);
   assert.match(response.body, /stale voice 'player-1' version 0; current version is 1/);
 });
+
+function jackSnapshot() {
+  return {
+    source: "jack",
+    host: "wren",
+    state: "rolling",
+    frame: 767223806,
+    frameRate: 48000,
+    bbtValid: true,
+    bar: 7991,
+    beat: 4,
+    tick: 730,
+    beatsPerBar: 4,
+    beatType: 4,
+    ticksPerBeat: 1920,
+    beatsPerMinute: 120,
+    absoluteBeat: 31963.380208333332,
+    observedAt: 1782580000000
+  };
+}
 
 function createRouteContext(options = {}) {
   const config = options.config ?? defaultConfig;

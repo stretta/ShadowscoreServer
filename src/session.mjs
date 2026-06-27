@@ -21,6 +21,9 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       structurePlayhead: `${baseUrl}/structure/playhead`,
       macroPlayback: `${baseUrl}/macrostructure/playback`,
       playbackTimingContracts: `${baseUrl}/playback/timing-contracts`,
+      transport: `${baseUrl}/transport`,
+      transportEvents: `${baseUrl}/transport/events`,
+      transportStatus: `${baseUrl}/transport/status`,
       admin: `${baseUrl}/admin`,
       structure: `${baseUrl}/structure`,
       score: `${baseUrl}/score`,
@@ -40,10 +43,38 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
     hardwareUnits,
     macroPlayback: runtime.macroPlayback?.snapshot?.() ?? {
       running: false,
+      mode: "stopped",
       activeBlockId: score.structureState?.activeBlockId ?? "",
       macroIndex: score.structureState?.macroIndex ?? 0,
       nextAdvanceAt: null,
-      currentBlockDurationMs: 0
+      currentBlockDurationMs: 0,
+      activeBlockStartBeat: null,
+      activeBlockEndBeat: null,
+      activeBlockDurationBeats: 0,
+      beatsRemaining: null,
+      jack: {
+        status: "unusable",
+        state: "",
+        absoluteBeat: null
+      },
+      phaseAlignment: {
+        pending: false,
+        last: null
+      }
+    },
+    transport: {
+      ...(runtime.jackTransport?.snapshot?.() ?? {
+        source: "jack",
+        latest: null,
+        ageMs: null,
+        freshnessThresholdMs: 0,
+        fresh: false,
+        stale: false,
+        unusable: true,
+        status: "unusable",
+        reason: "transport state is not available"
+      }),
+      tempoAuthority: config.transport?.tempoAuthority === "server" ? "server" : "link"
     },
     rnbo: {
       enabled: Boolean(config.rnbo?.enabled),

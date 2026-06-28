@@ -1108,6 +1108,10 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore Structure Editor/);
+  assert.match(response.body, /Block Assignments/);
+  assert.match(response.body, /Assigned Clip/);
+  assert.match(response.body, /Playback Chain/);
+  assert.match(response.body, /Set Playing/);
   assert.match(response.body, /id="block-list"/);
   assert.match(response.body, /id="players"/);
   assert.match(response.body, /id="chain"/);

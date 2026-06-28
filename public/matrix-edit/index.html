@@ -7,8 +7,8 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/matrix-edit/assets/index-tFJAf_lV.js"></script>
-    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-1IK8VDXA.css">
+    <script type="module" crossorigin src="/matrix-edit/assets/index-DsN_9KtP.js"></script>
+    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-DGORYY7S.css">
   </head>
   <body>
     <main>
@@ -43,6 +43,28 @@
         <button id="start-transport" type="button">Start</button>
         <button id="stop-transport" type="button">Stop</button>
         <span id="stage-status" class="stage-status"></span>
+      </div>
+      <div id="projection-header" class="projection-header" aria-live="polite">
+        <div>
+          <span>Playing</span>
+          <strong id="playing-block">Stopped</strong>
+        </div>
+        <div>
+          <span>Editing</span>
+          <strong id="editing-block">No section</strong>
+        </div>
+        <div>
+          <span>Player</span>
+          <strong id="editing-player">No player</strong>
+        </div>
+        <div>
+          <span>Clip</span>
+          <strong id="editing-clip">No clip</strong>
+        </div>
+        <div>
+          <span>Playback</span>
+          <strong id="projection-playback">Refresh required</strong>
+        </div>
       </div>
       <div class="toolbar compact">
         <label>

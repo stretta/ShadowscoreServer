@@ -14,6 +14,9 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
   assert.match(html, /id="start-transport"/);
   assert.match(html, /id="stop-transport"/);
   assert.match(html, /id="create-clip"/);
+  assert.match(html, /id="projection-header"/);
+  assert.match(html, /id="playing-block"/);
+  assert.match(html, /id="projection-playback"/);
   assert.match(html, /Create Clip/);
   assert.match(html, /id="duration"[^>]+value="0\.25"/);
   assert.match(html, /\/macrostructure\/playback\/\$\{running \? "start" : "stop"\}/);
@@ -51,7 +54,9 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(js, /dragWithinCell/);
   assert.match(js, /cellY/);
   assert.match(js, /Velocity \$\{[^}]+\} selected for new notes\./);
-  assert.match(js, /stage \$\{[^}]+\} velocity \$\{[^}]+\}\. Saving/);
+  assert.match(js, /clip stage \$\{[^}]+\}\$\{[^}]+\} velocity \$\{[^}]+\}\. Saving/);
+  assert.match(js, /via alias/);
+  assert.match(js, /aliases mapped/);
   assert.doesNotMatch(js, /rowIndicators:m\(\)\?\[\]:vo\(e\.size\.height\)/);
 });
 

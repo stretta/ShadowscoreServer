@@ -350,27 +350,27 @@
     </section>
 
     <div class="workspace">
-      <section class="panel" aria-label="Mesostructural blocks">
+      <section class="panel" aria-label="Blocks">
         <div class="panel-header">
-          <h2>Sections</h2>
-          <button id="add-block" type="button">Add</button>
+          <h2>Blocks</h2>
+          <button id="add-block" type="button">Add Block</button>
         </div>
         <div class="panel-body">
           <div class="list" id="block-list"></div>
         </div>
       </section>
 
-      <section class="panel" aria-label="Selected mesostructural block">
+      <section class="panel" aria-label="Selected block assignments">
         <div class="panel-header">
-          <h2>Meso Block</h2>
-          <button class="danger" id="delete-block" type="button">Remove</button>
+          <h2>Block Assignments</h2>
+          <button class="danger" id="delete-block" type="button">Remove Block</button>
         </div>
         <div class="panel-body">
           <div class="form-grid">
-            <label>Block id
+            <label>Block ID
               <input id="block-id" spellcheck="false">
             </label>
-            <label>Duration unit
+            <label>Duration Unit
               <select id="duration-unit">
                 <option value="bars">Bars</option>
                 <option value="beats">Beats</option>
@@ -393,23 +393,23 @@
               <thead>
                 <tr>
                   <th>Player</th>
-                  <th>Clip</th>
+                  <th>Assigned Clip</th>
                 </tr>
               </thead>
               <tbody id="players"></tbody>
             </table>
-            <div class="empty" id="players-empty">No voices in this score.</div>
+            <div class="empty" id="players-empty">No players in this score.</div>
           </div>
           <div class="actions">
             <button id="revert-block" type="button">Revert</button>
-            <button class="primary" id="save-block" type="button">Save block</button>
+            <button class="primary" id="save-block" type="button">Save Assignments</button>
           </div>
         </div>
       </section>
 
-      <section class="panel macro-panel" aria-label="Macrostructure">
+      <section class="panel macro-panel" aria-label="Playback chain">
         <div class="panel-header">
-          <h2>Macro Chain</h2>
+          <h2>Playback Chain</h2>
           <button id="add-chain" type="button">Add</button>
         </div>
         <div class="panel-body">
@@ -417,14 +417,14 @@
             <input id="tempo" type="number" min="20" max="400" step="0.01" value="120">
           </label>
           <div class="playhead" aria-label="Playback playhead">
-            <label>Active block
+            <label>Playing Block
               <select id="active-block"></select>
             </label>
-            <button id="set-active-block" type="button">Set Active</button>
+            <button id="set-active-block" type="button">Set Playing</button>
             <button id="advance-block" type="button">Advance</button>
             <button id="reset-block" type="button">Reset</button>
-            <button id="start-macro" type="button">Start Chain</button>
-            <button id="stop-macro" type="button">Stop Chain</button>
+            <button id="start-macro" type="button">Start Playback</button>
+            <button id="stop-macro" type="button">Stop Playback</button>
             <div class="playback-status" id="macro-playback-status">
               <strong id="macro-playback-state">Stopped</strong>
               <span id="macro-playback-detail">A · 1/6 · -- remaining</span>
@@ -433,7 +433,7 @@
           <div class="chain" id="chain"></div>
           <div class="actions">
             <button id="revert-macro" type="button">Revert</button>
-            <button class="primary" id="save-macro" type="button">Save chain</button>
+            <button class="primary" id="save-macro" type="button">Save Playback Chain</button>
           </div>
         </div>
       </section>
@@ -660,7 +660,7 @@
       if (!blocks.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No sections.";
+        empty.textContent = "No blocks.";
         els.blockList.append(empty);
         return;
       }
@@ -682,7 +682,7 @@
         if (blockId === state.score?.structureState?.activeBlockId) {
           const active = document.createElement("span");
           active.className = "block-active";
-          active.textContent = "Active";
+          active.textContent = "Playing";
           button.append(active);
         }
         els.blockList.append(button);
@@ -744,7 +744,7 @@
       if (!(macro.blocks ?? []).length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No macro chain entries.";
+        empty.textContent = "No playback chain entries.";
         els.chain.append(empty);
       }
       updateButtons();
@@ -891,7 +891,7 @@
     }
 
     async function deleteBlock() {
-      if (!state.score || !state.selectedBlockId || !window.confirm(`Remove section ${state.selectedBlockId}?`)) {
+      if (!state.score || !state.selectedBlockId || !window.confirm(`Remove block ${state.selectedBlockId}?`)) {
         return;
       }
       const blockId = state.selectedBlockId;
@@ -921,11 +921,11 @@
       const originalId = state.selectedBlockId;
       const nextId = normalizeId(els.blockId.value);
       if (!nextId) {
-        setStatus("Block id is required.");
+        setStatus("Block ID is required.");
         return;
       }
       const block = blockFromForm();
-      setStatus(`Saving ${nextId}...`);
+      setStatus(`Saving block ${nextId}...`);
       try {
         state.saving = true;
         let score = await fetchJson(`${state.serverUrl}/mesostructure/${encodeURIComponent(nextId)}`, undefined, {
@@ -949,7 +949,7 @@
         state.blockDirty = false;
         state.macroDirty = false;
         renderAll();
-        setStatus(`Saved ${nextId}.`);
+        setStatus(`Saved block ${nextId}.`);
       } catch (error) {
         setStatus(`Save failed: ${error.message}`);
       } finally {
@@ -979,7 +979,7 @@
         tempo: numberValue(els.tempo.value, 120),
         blocks: chainSelects().map((select) => select.value).filter(Boolean)
       };
-      setStatus("Saving macro chain...");
+      setStatus("Saving playback chain...");
       try {
         state.saving = true;
         state.score = await fetchJson(`${state.serverUrl}/macrostructure`, undefined, {
@@ -988,7 +988,7 @@
         });
         state.macroDirty = false;
         renderAll();
-        setStatus("Saved macro chain.");
+        setStatus("Saved playback chain.");
       } catch (error) {
         setStatus(`Macro save failed: ${error.message}`);
       } finally {
@@ -1017,7 +1017,7 @@
       if (!state.score) {
         return;
       }
-      setStatus("Starting macro chain...");
+      setStatus("Starting playback chain...");
       try {
         state.saving = true;
         const result = await fetchJson(`${state.serverUrl}/macrostructure/playback/start`, undefined, {
@@ -1026,9 +1026,9 @@
         });
         state.macroPlayback = result.playback;
         renderPlayheadControls();
-        setStatus("Macro chain running.");
+        setStatus("Playback chain running.");
       } catch (error) {
-        setStatus(`Macro chain start failed: ${error.message}`);
+        setStatus(`Playback chain start failed: ${error.message}`);
       } finally {
         state.saving = false;
         updateButtons();
@@ -1039,7 +1039,7 @@
       if (!state.score) {
         return;
       }
-      setStatus("Stopping macro chain...");
+      setStatus("Stopping playback chain...");
       try {
         state.saving = true;
         const result = await fetchJson(`${state.serverUrl}/macrostructure/playback/stop`, undefined, {
@@ -1048,9 +1048,9 @@
         });
         state.macroPlayback = result.playback;
         renderPlayheadControls();
-        setStatus("Macro chain stopped.");
+        setStatus("Playback chain stopped.");
       } catch (error) {
-        setStatus(`Macro chain stop failed: ${error.message}`);
+        setStatus(`Playback chain stop failed: ${error.message}`);
       } finally {
         state.saving = false;
         updateButtons();
@@ -1086,7 +1086,7 @@
         });
         state.selectedBlockId = state.score.structureState?.activeBlockId || state.selectedBlockId;
         renderAll();
-        setStatus(`Active block ${state.score.structureState?.activeBlockId ?? ""}.`);
+        setStatus(`Playing block ${state.score.structureState?.activeBlockId ?? ""}.`);
       } catch (error) {
         if (!options.retried && isStaleScoreError(error)) {
           state.score = await fetchJson(`${state.serverUrl}/score`);
@@ -1156,13 +1156,14 @@
     }
 
     async function createClipForSlot(select, voiceId) {
+      const playerLabel = playerLabelForVoice(voiceId);
       const suggestion = `${state.selectedBlockId.toLowerCase()}-${voiceId}`;
-      const clipId = normalizeId(window.prompt("New clip id", suggestion));
+      const clipId = normalizeId(window.prompt(`New clip for ${playerLabel} in block ${state.selectedBlockId}`, suggestion));
       if (!clipId) {
         select.value = currentBlock()?.players?.[voiceId]?.clipId ?? "";
         return;
       }
-      setStatus(`Creating ${clipId}...`);
+      setStatus(`Creating clip ${clipId} for ${playerLabel}...`);
       try {
         state.saving = true;
         state.score = await fetchJson(`${state.serverUrl}/clips/${encodeURIComponent(clipId)}`, undefined, {
@@ -1180,7 +1181,7 @@
         await saveBlock();
       } catch (error) {
         select.value = currentBlock()?.players?.[voiceId]?.clipId ?? "";
-        setStatus(`Clip create failed: ${error.message}`);
+        setStatus(`Clip creation failed: ${error.message}`);
       } finally {
         state.saving = false;
         updateButtons();
@@ -1227,10 +1228,16 @@
         }
       }
       let index = 1;
-      while (existing.has(`section-${index}`)) {
+      while (existing.has(`block-${index}`)) {
         index += 1;
       }
-      return `section-${index}`;
+      return `block-${index}`;
+    }
+
+    function playerLabelForVoice(voiceId) {
+      const voices = state.session?.voices ?? Object.keys(state.score?.voices ?? {}).map((id) => ({ id, label: id }));
+      const voice = voices.find((entry) => entry.id === voiceId);
+      return voice?.assignment?.label || voice?.label || voiceId;
     }
 
     function durationParts(block) {
@@ -1253,7 +1260,7 @@
       if (!chainSelects().length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No macro chain entries.";
+        empty.textContent = "No playback chain entries.";
         els.chain.append(empty);
       }
     }

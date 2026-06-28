@@ -75,6 +75,21 @@ If a peer should also serve its own local diagnostics page, install both service
 
 ## Update
 
+For installed units that use a source-copy deploy from the development machine,
+run:
+
+```sh
+npm run deploy:pi -- --host wren.local
+```
+
+The helper syncs the current checkout to `/home/pi/ShadowscoreServer`, excludes
+remote runtime state (`data/`) and local config files (`config/*.local.json`),
+runs `npm install --omit=dev`, restarts `shadowscore-server.service`, and then
+runs the hardware smoke test against the target. Use `--role peer` to restart
+and verify `shadowscore-registration-agent.service` instead.
+
+For Git checkouts on the unit, the manual update path remains:
+
 ```sh
 cd /home/pi/ShadowscoreServer
 git pull --ff-only

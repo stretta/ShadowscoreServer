@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/server.mjs",
     "agent": "node src/registration-agent.mjs",
+    "deploy:pi": "tools/deploy_pi.sh",
     "smoke:hardware": "node bin/hardware-smoke.mjs",
     "test": "node --test"
   },

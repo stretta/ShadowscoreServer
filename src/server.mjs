@@ -3,7 +3,7 @@ import http from "node:http";
 import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
-import { routeRequest, writeTransportParamsToPlaybackTargets } from "./http/routes.mjs";
+import { routeRequest, writeTransportControlsToPlaybackTargets } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { createPeerRegistry } from "./registration/peer-registry.mjs";
 import { createScorePersistence, loadPersistedScore } from "./state/persistence.mjs";
@@ -11,8 +11,9 @@ import { createInitialScore, createScoreStore } from "./state/score-store.mjs";
 import { createJackTransportState } from "./transport/jack-transport-state.mjs";
 
 const config = await loadConfig();
-const initialScore = await loadPersistedScore(config, createInitialScore(config));
-const store = createScoreStore(initialScore);
+const defaultScore = createInitialScore(config);
+const initialScore = await loadPersistedScore(config, defaultScore);
+const store = createScoreStore(initialScore, { defaultScore });
 const persistence = createScorePersistence(store, config);
 const peerRegistry = createPeerRegistry(config);
 const rnbo = createRnboOscAdapter(config, { peerRegistry });
@@ -22,7 +23,7 @@ const macroPlayback = createMacroPlayback(store, config, {
   afterAdvance: async () => ({
     action: "SetStage",
     value: 0,
-    writes: await writeTransportParamsToPlaybackTargets(store.getScore(), config, { peerRegistry }, { SetStage: 0 })
+    writes: await writeTransportControlsToPlaybackTargets(store.getScore(), config, { peerRegistry }, { SetStage: 0 })
   })
 });
 rnbo.attach(store);

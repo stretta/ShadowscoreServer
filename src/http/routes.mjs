@@ -2,7 +2,7 @@ import { adminPage } from "./admin-page.mjs";
 import { serveStaticAsset } from "./static-files.mjs";
 import { transportPage } from "./transport-page.mjs";
 import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
-import { configuredRnboTargets, discoverRnboTargets, writeRnboTransportParams } from "../adapters/rnbo-oscquery.mjs";
+import { configuredRnboTargets, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
@@ -84,21 +84,21 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
-  const rnboParamsMatch = url.pathname.match(/^\/rnbo\/targets\/([^/]+)\/params$/);
-  if (request.method === "POST" && rnboParamsMatch) {
+  const rnboTransportControlsMatch = url.pathname.match(/^\/rnbo\/targets\/([^/]+)\/(?:transport-controls|params)$/);
+  if (request.method === "POST" && rnboTransportControlsMatch) {
     try {
-      const targetId = decodeURIComponent(rnboParamsMatch[1]);
+      const targetId = decodeURIComponent(rnboTransportControlsMatch[1]);
       const target = await findRnboTarget(config, runtime, targetId);
       if (!target) {
         throw new Error(`unknown RNBO target '${targetId}'`);
       }
       const body = await readJson(request);
-      const params = body.params ?? body;
-      const preparedParams = prepareRnboTransportParams(store.getScore(), config, target, params);
-      const writes = await writeRnboTransportParams(config, target, preparedParams, {
+      const controls = body.controls ?? body.params ?? body;
+      const preparedControls = prepareRnboTransportControls(store.getScore(), config, target, controls);
+      const writes = await writeRnboTransportControls(config, target, preparedControls, {
         writer: runtime.rnboParamWriter
       });
-      rememberRnboTransportParams(config, preparedParams);
+      rememberRnboTransportControls(config, preparedControls);
       writeJson(response, 200, { ok: true, targetId, writes });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
@@ -236,6 +236,15 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const body = await readJson(request);
       writeJson(response, 200, { ok: true, score: await saveScoreToLibrary(config, store.getScore(), { name: body.name }) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/scores/new") {
+    try {
+      writeJson(response, 200, store.createNewScore());
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -415,7 +424,7 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const body = await readJson(request);
       const playback = requireMacroPlayback(runtime);
-      const clockWrites = await writeTransportParamsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 1 }, {
+      const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 1 }, {
         targetId: optionalString(body.targetId)
       });
       writeJson(response, 200, {
@@ -437,7 +446,7 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const body = await readJson(request);
       const playback = requireMacroPlayback(runtime);
-      const clockWrites = await writeTransportParamsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 0 }, {
+      const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 0 }, {
         targetId: optionalString(body.targetId)
       });
       writeJson(response, 200, {
@@ -635,11 +644,11 @@ async function findRnboTarget(config, runtime, targetId) {
   return targets.find((target) => target.id === targetId);
 }
 
-async function writeTransportParamsToAvailableTargets(config, runtime, params) {
+async function writeTransportControlsToAvailableTargets(config, runtime, controls) {
   const targets = (await readAllRnboTargets(config, runtime)).filter((target) => target.available !== false);
   const writes = [];
   for (const target of targets) {
-    const targetWrites = await writeRnboTransportParams(config, target, params, {
+    const targetWrites = await writeRnboTransportControls(config, target, controls, {
       writer: runtime.rnboParamWriter
     });
     writes.push(...targetWrites.map((write) => ({
@@ -650,17 +659,17 @@ async function writeTransportParamsToAvailableTargets(config, runtime, params) {
   return writes;
 }
 
-export async function writeTransportParamsToPlaybackTargets(score, config, runtime, params, options = {}) {
+export async function writeTransportControlsToPlaybackTargets(score, config, runtime, controls, options = {}) {
   const targetId = optionalString(options.targetId);
   if (!targetId) {
-    return writeTransportParamsToAvailableTargets(config, runtime, params);
+    return writeTransportControlsToAvailableTargets(config, runtime, controls);
   }
   const target = await findRnboTarget(config, runtime, targetId);
   if (!target || target.available === false) {
     throw new Error(`unknown RNBO target '${targetId}'`);
   }
-  const preparedParams = prepareRnboTransportParams(score, config, target, params);
-  const writes = await writeRnboTransportParams(config, target, preparedParams, {
+  const preparedParams = prepareRnboTransportControls(score, config, target, controls);
+  const writes = await writeRnboTransportControls(config, target, preparedParams, {
     writer: runtime.rnboParamWriter
   });
   return writes.map((write) => ({
@@ -669,8 +678,10 @@ export async function writeTransportParamsToPlaybackTargets(score, config, runti
   }));
 }
 
-function prepareRnboTransportParams(score, config, target, params) {
-  const entries = Object.entries(params ?? {});
+export const writeTransportParamsToPlaybackTargets = writeTransportControlsToPlaybackTargets;
+
+function prepareRnboTransportControls(score, config, target, controls) {
+  const entries = Object.entries(controls ?? {});
   const assignedVoiceId = assignedVoiceForTarget(score, target);
   const prepared = new Map(entries);
 
@@ -689,9 +700,9 @@ function prepareRnboTransportParams(score, config, target, params) {
   return Object.fromEntries(prepared);
 }
 
-function rememberRnboTransportParams(config, params) {
+function rememberRnboTransportControls(config, controls) {
   config.rnbo.transport ??= {};
-  for (const [name, value] of Object.entries(params ?? {})) {
+  for (const [name, value] of Object.entries(controls ?? {})) {
     if (name === "Clock") {
       continue;
     }

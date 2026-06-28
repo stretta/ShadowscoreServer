@@ -2,8 +2,8 @@ import dgram from "node:dgram";
 import { encodeOscMessage } from "./osc.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 
-const TRANSPORT_PARAMS = new Set(["Clock"]);
-const TRANSPORT_INPORTS = new Set(["MaxSteps", "ClockInterval", "Tempo", "SetStage", "Stage"]);
+const TRANSPORT_PARAM_CONTROLS = new Set(["Clock"]);
+const TRANSPORT_INPORT_CONTROLS = new Set(["MaxSteps", "ClockInterval", "Tempo", "SetStage", "Stage"]);
 
 export async function discoverRnboTargets(config, options = {}) {
   const rnbo = config.rnbo ?? {};
@@ -23,8 +23,8 @@ export async function discoverRnboTargets(config, options = {}) {
   }
 }
 
-export async function writeRnboTransportParams(config, target, params, options = {}) {
-  const writes = rnboTransportParamWrites(target, params);
+export async function writeRnboTransportControls(config, target, controls, options = {}) {
+  const writes = rnboTransportControlWrites(target, controls);
   const writer = options.writer ?? sendOscInportMessage;
 
   for (const write of writes) {
@@ -34,7 +34,9 @@ export async function writeRnboTransportParams(config, target, params, options =
   return writes;
 }
 
-export function rnboTransportParamWrites(target, params) {
+export const writeRnboTransportParams = writeRnboTransportControls;
+
+export function rnboTransportControlWrites(target, controls) {
   if (!target || typeof target !== "object") {
     throw new Error("RNBO target is required");
   }
@@ -50,14 +52,14 @@ export function rnboTransportParamWrites(target, params) {
     throw new Error(`RNBO target '${target.id ?? ""}' is missing host or port`);
   }
 
-  const entries = Object.entries(params ?? {});
+  const entries = Object.entries(controls ?? {});
   if (entries.length === 0) {
-    throw new Error("params must include at least one transport parameter");
+    throw new Error("controls must include at least one RNBO transport control");
   }
 
   return entries.map(([name, value]) => {
     const controlName = normalizeTransportControlName(name);
-    const controlRoot = TRANSPORT_PARAMS.has(controlName) ? "params" : "messages/in";
+    const controlRoot = TRANSPORT_PARAM_CONTROLS.has(controlName) ? "params" : "messages/in";
     return {
       host,
       port,
@@ -66,6 +68,8 @@ export function rnboTransportParamWrites(target, params) {
     };
   });
 }
+
+export const rnboTransportParamWrites = rnboTransportControlWrites;
 
 export function configuredRnboTargets(config) {
   const rnbo = config.rnbo ?? {};
@@ -225,7 +229,7 @@ async function sendOscInportMessage(write) {
 
 function normalizeTransportControlName(name) {
   const controlName = String(name ?? "");
-  if (!TRANSPORT_PARAMS.has(controlName) && !TRANSPORT_INPORTS.has(controlName)) {
+  if (!TRANSPORT_PARAM_CONTROLS.has(controlName) && !TRANSPORT_INPORT_CONTROLS.has(controlName)) {
     throw new Error(`unsupported RNBO transport control '${controlName}'`);
   }
   return controlName;

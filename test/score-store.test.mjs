@@ -145,6 +145,34 @@ test("clips can be added, replaced, renamed, and removed", () => {
   assert.equal(removed.clips["bass-main"], undefined);
 });
 
+test("new score restores configured defaults after persisted-state boot", () => {
+  const defaultScore = createInitialScore(defaultConfig);
+  const persistedScore = structuredClone(defaultScore);
+  persistedScore.version = 41;
+  persistedScore.clips["a-player-2"].notes.push({
+    note_id: 3,
+    pitch: 37,
+    start_time: 1.1875,
+    duration: 0.25,
+    velocity: 100
+  });
+  persistedScore.mesostructure.A.players["player-1"] = { clipId: "a-player-2" };
+  persistedScore.structureState = { activeBlockId: "E", macroIndex: 4 };
+  persistedScore.assignments["player-1"] = {
+    ...persistedScore.assignments["player-1"],
+    label: "Mutated"
+  };
+
+  const store = createScoreStore(persistedScore, { defaultScore });
+  const created = store.createNewScore();
+
+  assert.equal(created.version, 42);
+  assert.deepEqual(created.clips["a-player-2"].notes, defaultScore.clips["a-player-2"].notes);
+  assert.deepEqual(created.mesostructure.A.players["player-1"], { clipId: "a-player-1" });
+  assert.deepEqual(created.structureState, { activeBlockId: "A", macroIndex: 0 });
+  assert.equal(created.assignments["player-1"].label, "Player 1");
+});
+
 test("macrostructure rejects unknown mesostructural blocks", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
 

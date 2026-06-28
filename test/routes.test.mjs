@@ -52,6 +52,8 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /Download backup/);
   assert.match(response.body, /Saved scores/);
   assert.match(response.body, /\/admin\/scores/);
+  assert.match(response.body, /New score/);
+  assert.match(response.body, /\/admin\/scores\/new/);
   assert.match(response.body, /Import voice notes to clips/);
   assert.match(response.body, /\/admin\/import-legacy-voice-notes/);
 });
@@ -480,6 +482,44 @@ test("admin reset route can restore seeded structure", async () => {
   assert.deepEqual(reset.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
 });
 
+test("admin new score route restores configured score defaults", async () => {
+  const context = createRouteContext();
+
+  await requestJson(context, "POST", "/voices", {
+    voiceId: "guest",
+    assignment: { label: "Guest" }
+  });
+  await requestJson(context, "POST", "/voices/player-1/notes", [{ pitch: 60 }]);
+  await requestJson(context, "POST", "/mesostructure/G", { duration: { bars: 12 }, players: {} });
+  await requestJson(context, "POST", "/macrostructure", { blocks: ["G"] });
+
+  const created = await requestJson(context, "POST", "/admin/scores/new");
+
+  assert.equal(created.voices.guest, undefined);
+  assert.deepEqual(created.voices["player-1"].notes, []);
+  assert.deepEqual(Object.keys(created.mesostructure), ["A", "B", "C", "D", "E", "F"]);
+  assert.equal(Object.keys(created.clips).length, 36);
+  assert.equal(created.mesostructure.A.players["player-1"].clipId, "a-player-1");
+  assert.deepEqual(created.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
+});
+
+test("admin new score route ignores persisted boot mutations", async () => {
+  const defaultScore = createInitialScore(defaultConfig);
+  const persistedScore = structuredClone(defaultScore);
+  persistedScore.version = 8;
+  persistedScore.clips["a-player-2"].notes.push({ pitch: 37, start_time: 1.1875, duration: 0.25, velocity: 100 });
+  persistedScore.mesostructure.A.players["player-1"] = { clipId: "a-player-2" };
+  persistedScore.structureState = { activeBlockId: "E", macroIndex: 4 };
+  const context = createRouteContext({ initialScore: persistedScore, defaultScore });
+
+  const created = await requestJson(context, "POST", "/admin/scores/new");
+
+  assert.equal(created.version, 9);
+  assert.deepEqual(created.clips["a-player-2"].notes, defaultScore.clips["a-player-2"].notes);
+  assert.equal(created.mesostructure.A.players["player-1"].clipId, "a-player-1");
+  assert.deepEqual(created.structureState, { activeBlockId: "A", macroIndex: 0 });
+});
+
 test("admin assignment preset applies friendly shadowbox labels", async () => {
   const context = createRouteContext();
 
@@ -792,7 +832,7 @@ test("hardware heartbeat refreshes a registered unit", async () => {
   assert.match(heartbeat.unit.lastSeenAt, /1970-01-01T00:00:02.000Z/);
 });
 
-test("RNBO target param route writes playback transport controls", async () => {
+test("RNBO target transport controls route writes playback transport controls", async () => {
   const writes = [];
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
@@ -814,8 +854,8 @@ test("RNBO target param route writes playback transport controls", async () => {
     }
   });
 
-  const result = await requestJson(context, "POST", "/rnbo/targets/source-client/params", {
-    params: {
+  const result = await requestJson(context, "POST", "/rnbo/targets/source-client/transport-controls", {
+    controls: {
       Clock: 1,
       Tempo: 120,
       MaxSteps: 32,
@@ -868,7 +908,41 @@ test("RNBO target param route writes playback transport controls", async () => {
   assert.equal(context.config.rnbo.transport.Clock, undefined);
 });
 
-test("RNBO target param route derives MaxSteps for assigned targets and starts clock last", async () => {
+test("legacy RNBO target params route aliases transport controls", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/rnbo/targets/source-client/params", {
+    params: {
+      Clock: 0
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(writes.map((write) => write.path), [
+    "/rnbo/inst/2/params/Clock"
+  ]);
+});
+
+test("RNBO target transport controls route derives MaxSteps for assigned targets and starts clock last", async () => {
   const writes = [];
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
@@ -914,8 +988,8 @@ test("RNBO target param route derives MaxSteps for assigned targets and starts c
     }
   ]);
 
-  const result = await requestJson(context, "POST", "/rnbo/targets/source-client/params", {
-    params: {
+  const result = await requestJson(context, "POST", "/rnbo/targets/source-client/transport-controls", {
+    controls: {
       MaxSteps: 16,
       Clock: 1
     }
@@ -946,7 +1020,7 @@ test("RNBO target param route derives MaxSteps for assigned targets and starts c
   assert.equal(context.config.rnbo.transport.ClockInterval, 120);
 });
 
-test("RNBO target param route derives adaptive ClockInterval for assigned targets", async () => {
+test("RNBO target transport controls route derives adaptive ClockInterval for assigned targets", async () => {
   const writes = [];
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
@@ -988,8 +1062,8 @@ test("RNBO target param route derives adaptive ClockInterval for assigned target
     rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
   });
 
-  const result = await requestJson(context, "POST", "/rnbo/targets/source-client/params", {
-    params: {
+  const result = await requestJson(context, "POST", "/rnbo/targets/source-client/transport-controls", {
+    controls: {
       Clock: 1
     }
   });
@@ -1004,7 +1078,7 @@ test("RNBO target param route derives adaptive ClockInterval for assigned target
   assert.equal(context.config.rnbo.transport.ClockInterval, 2);
 });
 
-test("RNBO target param route rejects unsupported params", async () => {
+test("RNBO target transport controls route rejects unsupported controls", async () => {
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
       rnbo: {
@@ -1020,7 +1094,7 @@ test("RNBO target param route rejects unsupported params", async () => {
     })
   });
 
-  const response = await request(context, "POST", "/rnbo/targets/source-client/params", {
+  const response = await request(context, "POST", "/rnbo/targets/source-client/transport-controls", {
     Gain: 1
   });
 
@@ -1174,8 +1248,10 @@ function jackSnapshot() {
 
 function createRouteContext(options = {}) {
   const config = options.config ?? defaultConfig;
+  const defaultScore = options.defaultScore ?? createInitialScore(config);
+  const initialScore = options.initialScore ?? defaultScore;
   return {
-    store: createScoreStore(createInitialScore(config)),
+    store: createScoreStore(initialScore, { defaultScore }),
     config,
     runtime: options.runtime ?? {}
   };

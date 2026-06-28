@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { discoverRnboTargets, extractRnboTargets, rnboTransportParamWrites } from "../src/adapters/rnbo-oscquery.mjs";
+import { discoverRnboTargets, extractRnboTargets, rnboTransportControlWrites } from "../src/adapters/rnbo-oscquery.mjs";
 
 test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () => {
   const config = mergeConfig(defaultConfig, {
@@ -81,8 +81,8 @@ test("RNBOOSCQuery discovery returns an empty target list on fetch failure", asy
   assert.deepEqual(targets, []);
 });
 
-test("plans scoped RNBO transport writes", () => {
-  const writes = rnboTransportParamWrites({
+test("plans scoped RNBO transport control writes", () => {
+  const writes = rnboTransportControlWrites({
     id: "rnbo-inst-2:shadowscore",
     host: "192.168.68.96",
     port: 9000,
@@ -138,7 +138,7 @@ test("plans scoped RNBO transport writes", () => {
 
 test("rejects unsupported RNBO transport writes", () => {
   assert.throws(
-    () => rnboTransportParamWrites({
+    () => rnboTransportControlWrites({
       id: "rnbo-inst-2:shadowscore",
       host: "192.168.68.96",
       port: 9000,

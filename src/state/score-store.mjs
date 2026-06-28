@@ -25,10 +25,11 @@ export function createInitialScore(config) {
   };
 }
 
-export function createScoreStore(initialScore) {
+export function createScoreStore(initialScore, options = {}) {
   const events = new EventEmitter();
+  const defaultScore = structuredClone(options.defaultScore ?? initialScore);
   let score = structuredClone(initialScore);
-  const assignmentDefaults = structuredClone(initialScore.assignments ?? {});
+  const assignmentDefaults = structuredClone(defaultScore.assignments ?? initialScore.assignments ?? {});
 
   return {
     events,
@@ -428,6 +429,15 @@ export function createScoreStore(initialScore) {
         assignments: Boolean(options.assignments),
         structure: Boolean(options.structure)
       }, options);
+      return structuredClone(score);
+    },
+    createNewScore(options = {}) {
+      const previousVersion = score.version;
+      score = {
+        ...structuredClone(defaultScore),
+        version: previousVersion + 1
+      };
+      emitChange(events, "admin.score.created", score, { previousVersion }, options);
       return structuredClone(score);
     },
     restore(nextScore, options = {}) {

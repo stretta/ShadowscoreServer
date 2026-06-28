@@ -145,7 +145,7 @@ containing block duration; one-shot clips play once.
 - `GET /transport`: current JACK bridge freshness, latest BBT snapshot, and tempo authority.
 - `GET /transport/events`: SSE stream for transport updates.
 - `GET /transport/status`: host transport status and macro playback control page.
-- `POST /rnbo/targets/:targetId/params`: set playback transport RNBO controls for a target. `Clock` is written to the RNBO param path, while `Tempo`, `MaxSteps`, `ClockInterval`, `SetStage`, and `Stage` are written to message inports, for example `{ "params": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`. Editor transport start/stop uses this route with `{ "params": { "Clock": 1 } }` or `{ "params": { "Clock": 0 } }`; sending the off/on message to one target is sufficient for the linked transport. Routine score-data resends reassert `ClockInterval` and score-derived `MaxSteps`; they only send `Tempo` when `transport.tempoAuthority` is set to `"server"`. Stage/step reset or direct advancement controls should be sent only by explicit sync/direct-drive operations.
+- `POST /rnbo/targets/:targetId/transport-controls`: set playback transport RNBO controls for a target. `Clock` is written to the RNBO param path, while `Tempo`, `MaxSteps`, `ClockInterval`, `SetStage`, and `Stage` are written to message inports, for example `{ "controls": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`. Editor transport start/stop uses this route with `{ "controls": { "Clock": 1 } }` or `{ "controls": { "Clock": 0 } }`; sending the off/on message to one target is sufficient for the linked transport. Routine score-data resends reassert `ClockInterval` and score-derived `MaxSteps`; they only send `Tempo` when `transport.tempoAuthority` is set to `"server"`. Stage/step reset or direct advancement controls should be sent only by explicit sync/direct-drive operations. The older `/rnbo/targets/:targetId/params` route remains available as a compatibility alias.
 - `GET /assignments`: current voice assignment map.
 - `GET /clips`: current reusable clip map.
 - `GET /structure`: current `{ clips, mesostructure, macrostructure, structureState }` structure document.
@@ -176,6 +176,7 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /admin/reset`: clear selected score sections with a JSON body containing `context`, `voices`, `assignments`, and/or `structure` booleans.
 - `GET /admin/scores`: list named score JSON files saved on the host.
 - `POST /admin/scores`: save the current score to the host score library with an optional `{ "name": "..." }`.
+- `POST /admin/scores/new`: replace the current score with a fresh score from the configured ensemble defaults.
 - `POST /admin/scores/:scoreId/load`: restore a saved score from the host score library.
 - `DELETE /admin/scores/:scoreId`: delete a saved score JSON file from the host score library.
 - `POST /admin/import-legacy-voice-notes`: copy non-empty `voices[player].notes` into looped clips such as `player-1-main` and assign them to block `A` by default. This leaves voice notes intact and does not overwrite existing clips unless `overwriteClips` is true.
@@ -243,3 +244,15 @@ Phase 5 hardware deployment material lives in
 [`docs/deployment/shadowbox-hardware.md`](docs/deployment/shadowbox-hardware.md).
 It includes Pi install/update commands, systemd service templates, smoke-test
 commands, and the pre-session hardware checklist.
+
+For source-copy development deploys to a Pi that is already installed, use:
+
+```sh
+npm run deploy:pi -- --host wren.local
+```
+
+The deploy helper syncs this checkout to `/home/pi/ShadowscoreServer`, preserves
+remote `config/*.local.json` files and `data/`, restarts the matching systemd
+service, and runs the hardware smoke test. Use `--role peer` for registration
+agent units, `--sync-only` for a file-only update, or `--dry-run` to preview the
+rsync.

@@ -46,13 +46,14 @@ export function adminPage() {
       grid-template-columns: 1fr auto;
       margin-bottom: 12px;
     }
-    .preset-row, .backup-row, .score-save-row, .voice-tools {
+    .preset-row, .backup-row, .score-save-row, .score-new-row, .voice-tools {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       margin-top: 10px;
     }
-    .score-save-row { margin: 0 0 10px; }
+    .score-save-row { margin: 0 0 8px; }
+    .score-new-row { margin: 0 0 10px; }
     .score-save-row input { max-width: 360px; }
     .voice-tools { margin: 0 0 12px; }
     .voice-tools input { max-width: 240px; }
@@ -189,6 +190,9 @@ export function adminPage() {
         <button class="primary" id="save-score" type="button">Save score</button>
         <button id="refresh-scores" type="button">Refresh</button>
       </div>
+      <div class="score-new-row">
+        <button class="danger" id="new-score" type="button">New score</button>
+      </div>
       <div class="score-list" id="saved-scores"></div>
     </section>
     <section class="targets">
@@ -248,6 +252,7 @@ export function adminPage() {
     document.querySelector("#add-voice").addEventListener("click", addVoice);
     document.querySelector("#save-score").addEventListener("click", saveScoreToLibrary);
     document.querySelector("#refresh-scores").addEventListener("click", loadSavedScores);
+    document.querySelector("#new-score").addEventListener("click", createNewScore);
     restoreFileEl.addEventListener("change", restoreBackup);
 
     loadSession();
@@ -259,6 +264,7 @@ export function adminPage() {
     events.addEventListener("voice.added", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.removed", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.reset", (event) => render(JSON.parse(event.data).score));
+    events.addEventListener("admin.score.created", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.restore", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.legacyVoiceNotes.imported", (event) => render(JSON.parse(event.data).score));
     events.onerror = () => setStatus("Event stream reconnecting...");
@@ -593,6 +599,19 @@ export function adminPage() {
       }
       savedScoreNameEl.value = "";
       setStatus("Saved score " + body.score.name + ".");
+      await loadSavedScores();
+    }
+
+    async function createNewScore() {
+      if (!confirm("Create a new score from defaults? Current score state will be replaced.")) return;
+      const response = await fetch("/admin/scores/new", { method: "POST" });
+      const score = await response.json();
+      if (score.ok === false) {
+        setStatus(score.error);
+        return;
+      }
+      render(score);
+      setStatus("Created new score from defaults.");
       await loadSavedScores();
     }
 

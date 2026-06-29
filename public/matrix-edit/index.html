@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet" />
-    <script type="module" crossorigin src="/matrix-edit/assets/index-DsN_9KtP.js"></script>
+    <script type="module" crossorigin src="/matrix-edit/assets/index-Cnzu-xoj.js"></script>
     <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-DGORYY7S.css">
   </head>
   <body>
@@ -21,6 +21,10 @@
         <button id="discover" type="button">Scan</button>
         <input id="server" value="" aria-label="ShadowScore server" placeholder="Custom server" />
         <select id="block" aria-label="ShadowScore section"></select>
+        <label class="check-label">
+          <input id="chase" type="checkbox" />
+          Chase
+        </label>
         <select id="voice" aria-label="ShadowScore voice"></select>
         <select id="clip" aria-label="ShadowScore clip"></select>
         <button id="create-clip" type="button">Create Clip</button>
@@ -92,6 +96,16 @@
             <span class="stepper-buttons">
               <button type="button" class="stepper-button" data-step-target="pitch-rows" data-step-amount="1" aria-label="Increase rows">+</button>
               <button type="button" class="stepper-button" data-step-target="pitch-rows" data-step-amount="-1" aria-label="Decrease rows">-</button>
+            </span>
+          </span>
+        </label>
+        <label>
+          Resolution
+          <span class="stepper">
+            <input id="grid-subdivision" type="number" min="1" max="256" value="16" />
+            <span class="stepper-buttons">
+              <button type="button" class="stepper-button" data-step-target="grid-subdivision" data-step-amount="1" aria-label="Increase resolution">+</button>
+              <button type="button" class="stepper-button" data-step-target="grid-subdivision" data-step-amount="-1" aria-label="Decrease resolution">-</button>
             </span>
           </span>
         </label>

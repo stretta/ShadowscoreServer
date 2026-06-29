@@ -1007,7 +1007,7 @@ test("RNBO target transport controls route derives MaxSteps for assigned targets
       host: "192.168.68.96",
       port: 9000,
       path: "/rnbo/inst/2/messages/in/ClockInterval",
-      value: 120
+      value: 30
     },
     {
       host: "192.168.68.96",
@@ -1017,7 +1017,7 @@ test("RNBO target transport controls route derives MaxSteps for assigned targets
     }
   ]);
   assert.equal(context.config.rnbo.transport.MaxSteps, 64);
-  assert.equal(context.config.rnbo.transport.ClockInterval, 120);
+  assert.equal(context.config.rnbo.transport.ClockInterval, 30);
 });
 
 test("RNBO target transport controls route derives adaptive ClockInterval for assigned targets", async () => {

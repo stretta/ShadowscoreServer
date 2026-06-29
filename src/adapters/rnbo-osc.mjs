@@ -133,9 +133,7 @@ export function compileTimingContract(score, config, target = rnboTargets(config
   const selected = chooseTimingResolution(mode, resolution, config, blockBeats, maxStages, options.notes ?? [], selectionStart);
   const stagesPerBeat = selected.stagesPerBeat;
   const patternLength = clampInt((selectionEnd - selectionStart) * stagesPerBeat, 1, 2147483647);
-  const ticksPerStage = usesDerivedClock(mode)
-    ? 480 / stagesPerBeat
-    : finiteNumber(config.rnbo?.transport?.ClockInterval, 120);
+  const ticksPerStage = 480 / stagesPerBeat;
 
   return {
     blockId: stringField(options.blockId, ""),

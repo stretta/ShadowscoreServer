@@ -20,7 +20,7 @@ test("compiles ensemble score into RNBO ShadowScore transaction messages", () =>
   assert.deepEqual(compiled.timing, {
     blockId: "",
     stagesPerBeat: 16,
-    ticksPerStage: 120,
+    ticksPerStage: 30,
     patternLength: 32,
     maxStages: 4096,
     maxNoteRows: 819,
@@ -63,7 +63,7 @@ test("builds a fixed timing contract from config and target capabilities", () =>
   assert.deepEqual(timing, {
     blockId: "A",
     stagesPerBeat: 24,
-    ticksPerStage: 80,
+    ticksPerStage: 20,
     patternLength: 96,
     maxStages: 1024,
     maxNoteRows: 256,

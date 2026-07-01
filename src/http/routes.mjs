@@ -84,6 +84,37 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/transport/jack/start") {
+    try {
+      const controller = requireJackController(runtime);
+      writeJson(response, 200, await controller.start());
+    } catch (error) {
+      writeJson(response, jackControllerStatus(error), { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/jack/stop") {
+    try {
+      const controller = requireJackController(runtime);
+      writeJson(response, 200, await controller.stop());
+    } catch (error) {
+      writeJson(response, jackControllerStatus(error), { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/jack/locate") {
+    try {
+      const controller = requireJackController(runtime);
+      const body = await readJson(request);
+      writeJson(response, 200, await controller.locate(nonNegativeInteger(body.frame, "frame")));
+    } catch (error) {
+      writeJson(response, jackControllerStatus(error), { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   const rnboTransportControlsMatch = url.pathname.match(/^\/rnbo\/targets\/([^/]+)\/(?:transport-controls|params)$/);
   if (request.method === "POST" && rnboTransportControlsMatch) {
     try {
@@ -161,7 +192,7 @@ export async function routeRequest(request, response, store, config, runtime = {
   }
 
   if (request.method === "GET" && url.pathname === "/macrostructure/playback") {
-    writeJson(response, 200, macroPlaybackSnapshot(runtime, store));
+    writeJson(response, 200, await macroPlaybackSnapshot(runtime, store, config));
     return;
   }
 
@@ -465,15 +496,16 @@ export async function routeRequest(request, response, store, config, runtime = {
           targetId: optionalString(body.targetId)
         })
         : [];
+      playback.start({
+        mode: optionalString(body.mode),
+        reset: Boolean(body.reset),
+        sourceClientId: "http"
+      });
       writeJson(response, 200, {
         ok: true,
         clockWrites,
         phaseWrites,
-        playback: playback.start({
-          mode: optionalString(body.mode),
-          reset: Boolean(body.reset),
-          sourceClientId: "http"
-        })
+        playback: await macroPlaybackSnapshot(runtime, store, config)
       });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
@@ -488,10 +520,11 @@ export async function routeRequest(request, response, store, config, runtime = {
       const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 0 }, {
         targetId: optionalString(body.targetId)
       });
+      playback.stop();
       writeJson(response, 200, {
         ok: true,
         clockWrites,
-        playback: playback.stop()
+        playback: await macroPlaybackSnapshot(runtime, store, config)
       });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
@@ -662,20 +695,22 @@ async function readAllRnboTargets(config, runtime) {
 
 async function readPlaybackTimingContracts(score, config, runtime) {
   const targets = await readAllRnboTargets(config, runtime);
-  return targets.map((target) => {
-    const assignedVoiceId = assignedVoiceForTarget(score, target);
-    const compiled = compileScoreTransaction(score, config, 0, assignedVoiceId ? { ...target, voiceId: assignedVoiceId } : target);
-    return {
-      targetId: target.id ?? "",
-      targetType: "rnbo",
-      contractTransport: "rnbo-osc",
-      available: target.available !== false,
-      assignedVoiceId,
-      timing: compiled.timing,
-      noteCount: compiled.noteCount,
-      transmittedRowCount: compiled.transmittedRowCount
-    };
-  });
+  return targets.map((target) => playbackTimingContractForTarget(score, config, target));
+}
+
+function playbackTimingContractForTarget(score, config, target) {
+  const assignedVoiceId = assignedVoiceForTarget(score, target);
+  const compiled = compileScoreTransaction(score, config, 0, assignedVoiceId ? { ...target, voiceId: assignedVoiceId } : target);
+  return {
+    targetId: target.id ?? "",
+    targetType: "rnbo",
+    contractTransport: "rnbo-osc",
+    available: target.available !== false,
+    assignedVoiceId,
+    timing: compiled.timing,
+    noteCount: compiled.noteCount,
+    transmittedRowCount: compiled.transmittedRowCount
+  };
 }
 
 async function findRnboTarget(config, runtime, targetId) {
@@ -798,6 +833,15 @@ function requireJackTransport(runtime) {
   return runtime.jackTransport;
 }
 
+function requireJackController(runtime) {
+  if (!runtime.jackController) {
+    const error = new Error("JACK transport control is not available");
+    error.statusCode = 501;
+    throw error;
+  }
+  return runtime.jackController;
+}
+
 function jackTransportSnapshot(runtime) {
   return runtime.jackTransport?.snapshot?.() ?? {
     source: "jack",
@@ -819,9 +863,10 @@ function transportSnapshot(config, runtime) {
   };
 }
 
-function macroPlaybackSnapshot(runtime, store) {
+async function macroPlaybackSnapshot(runtime, store, config) {
   if (runtime.macroPlayback?.snapshot) {
-    return runtime.macroPlayback.snapshot();
+    const context = await readBeatWitnessContext(store.getScore(), config, runtime);
+    return runtime.macroPlayback.snapshot(context);
   }
   const score = store.getScore();
   return {
@@ -834,7 +879,20 @@ function macroPlaybackSnapshot(runtime, store) {
     activeBlockStartBeat: null,
     activeBlockEndBeat: null,
     activeBlockDurationBeats: 0,
+    macroStartBeat: null,
+    macroStartIndex: 0,
+    macroStartOffsetBeats: 0,
+    compositionBeat: null,
+    beatIntoBlock: null,
     beatsRemaining: null,
+    witness: {
+      source: "none",
+      usable: false,
+      absoluteBeat: null,
+      tempo: null,
+      fresh: false,
+      reason: "macro playback is not available"
+    },
     jack: {
       status: "unusable",
       state: "",
@@ -844,6 +902,15 @@ function macroPlaybackSnapshot(runtime, store) {
       pending: false,
       last: null
     }
+  };
+}
+
+async function readBeatWitnessContext(score, config, runtime) {
+  const rnboTargets = await readAllRnboTargets(config, runtime);
+  const timingContracts = rnboTargets.map((target) => playbackTimingContractForTarget(score, config, target));
+  return {
+    rnboTargets,
+    timingContracts
   };
 }
 
@@ -869,6 +936,18 @@ function summarizeCompiledTarget(target, compiled = {}) {
 
 function messageForError(error) {
   return error instanceof Error ? error.message : String(error);
+}
+
+function jackControllerStatus(error) {
+  return Number.isInteger(error?.statusCode) ? error.statusCode : 400;
+}
+
+function nonNegativeInteger(value, field) {
+  const number = Number(value);
+  if (!Number.isInteger(number) || number < 0) {
+    throw new Error(`${field} must be a non-negative integer`);
+  }
+  return number;
 }
 
 function optionalInteger(value, field) {

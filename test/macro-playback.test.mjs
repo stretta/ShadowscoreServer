@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig } from "../src/config.mjs";
-import { createMacroPlayback, macroBlockDurationMs } from "../src/playback/macro-playback.mjs";
+import { createMacroPlayback, deriveMacroPosition, macroBlockDurationMs } from "../src/playback/macro-playback.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
 import { createJackTransportState } from "../src/transport/jack-transport-state.mjs";
 
@@ -48,6 +48,14 @@ test("JACK macro playback advances at anchored beat boundaries", () => {
   const started = playback.start({ mode: "jack" });
   assert.equal(started.running, true);
   assert.equal(started.mode, "jack");
+  assert.deepEqual(started.witness, {
+    source: "jack",
+    usable: true,
+    absoluteBeat: 100,
+    tempo: 120,
+    fresh: true,
+    reason: ""
+  });
   assert.equal(started.activeBlockStartBeat, 100);
   assert.equal(started.activeBlockEndBeat, 104);
   assert.equal(started.activeBlockDurationBeats, 4);
@@ -99,7 +107,10 @@ test("JACK macro playback runs phase alignment after block advance", async () =>
       macroIndex: 1,
       anchorBeat: 104,
       boundaryBeat: 104,
-      absoluteBeat: 104
+      absoluteBeat: 104,
+      compositionBeat: 4,
+      beatIntoBlock: 0,
+      witnessSource: "jack"
     }
   ]);
   const lastAlignment = playback.snapshot().phaseAlignment.last;
@@ -114,6 +125,35 @@ test("JACK macro playback runs phase alignment after block advance", async () =>
   assert.equal(playback.snapshot().phaseAlignment.pending, false);
 
   playback.close();
+});
+
+test("beat-derived macro position preserves repeated block ids", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceMesoBlock("A", { duration: { beats: 2 }, players: {} });
+  store.replaceMesoBlock("B", { duration: { beats: 3 }, players: {} });
+  store.updateMacrostructure({ tempo: 120, blocks: ["A", "B", "A"] });
+  const score = store.getScore();
+
+  assert.deepEqual(deriveMacroPosition(score, 1.5), {
+    macroIndex: 0,
+    activeBlockId: "A",
+    compositionBeat: 1.5,
+    cycleBeat: 1.5,
+    blockStartBeat: 0,
+    blockEndBeat: 2,
+    beatIntoBlock: 1.5,
+    durationBeats: 2
+  });
+  assert.deepEqual(deriveMacroPosition(score, 5.5), {
+    macroIndex: 2,
+    activeBlockId: "A",
+    compositionBeat: 5.5,
+    cycleBeat: 5.5,
+    blockStartBeat: 5,
+    blockEndBeat: 7,
+    beatIntoBlock: 0.5,
+    durationBeats: 2
+  });
 });
 
 test("JACK macro playback catches up from the previous block end beat", () => {

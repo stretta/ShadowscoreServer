@@ -29,6 +29,7 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
     messagePath: "/rnbo/inst/2/messages/in/shadowscore",
     ackPath: "/rnbo/inst/2/messages/out/shadowscore_ack",
     currentStagePath: "/rnbo/inst/2/messages/out/current_stage",
+    currentStage: 40,
     clientId: "2202",
     source: "rnbooscquery",
     available: true
@@ -179,7 +180,8 @@ function createOscQueryTree() {
                           },
                           current_stage: {
                             FULL_PATH: "/rnbo/inst/2/messages/out/current_stage",
-                            TYPE: "m"
+                            TYPE: "m",
+                            VALUE: [40]
                           }
                         }
                       }

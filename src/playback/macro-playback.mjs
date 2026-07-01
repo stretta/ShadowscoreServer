@@ -1,3 +1,5 @@
+import { selectBeatWitness } from "./beat-witness.mjs";
+
 export function createMacroPlayback(store, config = {}, options = {}) {
   const timers = options.timers ?? globalThis;
   const jackTransport = options.jackTransport;
@@ -10,6 +12,11 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   let activeBlockStartBeat = null;
   let activeBlockEndBeat = null;
   let activeBlockDurationBeats = 0;
+  let macroStartBeat = null;
+  let macroStartIndex = 0;
+  let macroStartOffsetBeats = 0;
+  let compositionBeat = null;
+  let beatIntoBlock = null;
   let lastJackAbsoluteBeat = null;
   let lastJackState = "";
   let lastJackStatus = "unusable";
@@ -23,7 +30,8 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     if (shouldReschedule(event)) {
       if (mode === "jack") {
         if (event.sourceClientId !== "macro-playback") {
-          anchorJackFollower();
+          anchorBeatDerivedPlayback();
+          followSelectedWitness();
         }
       } else {
         scheduleNext();
@@ -32,7 +40,8 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   };
   const onJackSnapshot = (event) => {
     if (mode === "jack") {
-      followJackSnapshot(event.transport ?? jackTransport?.snapshot?.());
+      updateJackStatus(event.transport ?? jackTransport?.snapshot?.());
+      followSelectedWitness();
     }
   };
   store.events.on("change", onChange);
@@ -44,7 +53,8 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       if (running && mode === requestedMode) {
         clearTimer();
         if (mode === "jack") {
-          anchorJackFollower();
+          anchorBeatDerivedPlayback();
+          followSelectedWitness();
         } else {
           scheduleNext();
         }
@@ -57,8 +67,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
         store.resetStructurePlayhead({ sourceClientId: startOptions.sourceClientId });
       }
       if (mode === "jack") {
-        anchorJackFollower();
-        followJackSnapshot(jackTransport?.snapshot?.());
+        anchorBeatDerivedPlayback();
+        updateJackStatus(jackTransport?.snapshot?.());
+        followSelectedWitness();
       } else {
         scheduleNext();
       }
@@ -70,7 +81,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       clearTimer();
       nextAdvanceAt = null;
       currentBlockDurationMs = 0;
-      clearJackAnchor();
+      clearBeatAnchor();
       return snapshot();
     },
     snapshot,
@@ -85,7 +96,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
 
   function scheduleNext() {
     clearTimer();
-    clearJackAnchor();
+    clearBeatAnchor();
     const score = store.getScore();
     currentBlockDurationMs = macroBlockDurationMs(score, config);
     const delayMs = Math.max(1, currentBlockDurationMs);
@@ -113,87 +124,115 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     }
   }
 
-  function anchorJackFollower() {
+  function anchorBeatDerivedPlayback(snapshotOptions = {}) {
     clearTimer();
-    const transport = jackTransport?.snapshot?.();
-    const latest = usableJackSnapshot(transport);
-    lastJackState = transport?.latest?.state ?? "";
-    lastJackStatus = transport?.status ?? "unusable";
-    lastJackAbsoluteBeat = latest?.absoluteBeat ?? null;
-    activeBlockDurationBeats = macroBlockDurationBeats(store.getScore(), config);
-    currentBlockDurationMs = macroBlockDurationMs(store.getScore(), config);
-    if (!latest) {
+    const score = store.getScore();
+    const witness = selectedWitness(snapshotOptions);
+    const current = currentMacroPosition(score);
+    macroStartIndex = current.macroIndex;
+    macroStartOffsetBeats = cumulativeBeatsBeforeIndex(score, macroStartIndex);
+    activeBlockDurationBeats = macroBlockDurationBeats(score, config);
+    currentBlockDurationMs = macroBlockDurationMs(score, config);
+    compositionBeat = macroStartOffsetBeats;
+    beatIntoBlock = 0;
+    if (!witness.usable || !Number.isFinite(witness.absoluteBeat)) {
+      macroStartBeat = null;
       activeBlockStartBeat = null;
       activeBlockEndBeat = null;
       return;
     }
-    activeBlockStartBeat = latest.absoluteBeat;
+    macroStartBeat = witness.absoluteBeat;
+    activeBlockStartBeat = macroStartBeat;
     activeBlockEndBeat = activeBlockStartBeat + activeBlockDurationBeats;
   }
 
-  function followJackSnapshot(transport) {
+  function updateJackStatus(transport) {
     const latestRaw = transport?.latest;
     lastJackState = latestRaw?.state ?? "";
     lastJackStatus = transport?.status ?? "unusable";
     if (latestRaw?.absoluteBeat !== undefined) {
       lastJackAbsoluteBeat = latestRaw.absoluteBeat;
     }
-    const latest = usableJackSnapshot(transport);
-    if (!latest) {
-      return;
-    }
-    if (activeBlockStartBeat === null || activeBlockEndBeat === null) {
-      anchorJackFollower();
-      return;
-    }
-
-    let guard = 0;
-    while (running && mode === "jack" && latest.absoluteBeat >= activeBlockEndBeat) {
-      if (guard >= 16) {
-        console.error("[macro-playback] JACK follower catch-up guard stopped after 16 block advances");
-        break;
-      }
-      const previousEndBeat = activeBlockEndBeat;
-      try {
-        store.advanceStructurePlayhead({ sourceClientId: "macro-playback" });
-      } catch (error) {
-        running = false;
-        mode = "stopped";
-        clearJackAnchor();
-        console.error(`[macro-playback] JACK advance failed: ${messageForError(error)}`);
-        return;
-      }
-      activeBlockStartBeat = previousEndBeat;
-      activeBlockDurationBeats = macroBlockDurationBeats(store.getScore(), config);
-      currentBlockDurationMs = macroBlockDurationMs(store.getScore(), config);
-      runAfterJackAdvance({
-        anchorBeat: activeBlockStartBeat,
-        boundaryBeat: previousEndBeat,
-        absoluteBeat: latest.absoluteBeat
-      });
-      if (activeBlockDurationBeats <= 0) {
-        activeBlockEndBeat = activeBlockStartBeat;
-        console.error("[macro-playback] JACK follower cannot advance through a zero-duration block");
-        break;
-      }
-      activeBlockEndBeat = activeBlockStartBeat + activeBlockDurationBeats;
-      guard += 1;
-    }
   }
 
-  function clearJackAnchor() {
+  function followSelectedWitness(snapshotOptions = {}) {
+    if (!running || mode !== "jack") {
+      return;
+    }
+    const witness = selectedWitness(snapshotOptions);
+    if (!witness.usable || !Number.isFinite(witness.absoluteBeat)) {
+      return;
+    }
+    if (macroStartBeat === null) {
+      anchorBeatDerivedPlayback(snapshotOptions);
+      return;
+    }
+    deriveMacroLocation(witness);
+  }
+
+  function deriveMacroLocation(witness) {
+    const score = store.getScore();
+    const timeline = macroTimeline(score);
+    if (timeline.totalBeats <= 0 || !timeline.entries.length) {
+      return;
+    }
+    const derivedCompositionBeat = witness.absoluteBeat - macroStartBeat + macroStartOffsetBeats;
+    const derived = deriveMacroPosition(score, derivedCompositionBeat);
+    compositionBeat = derived.compositionBeat;
+    beatIntoBlock = derived.beatIntoBlock;
+    activeBlockStartBeat = macroStartBeat + derived.blockStartBeat - macroStartOffsetBeats;
+    activeBlockEndBeat = macroStartBeat + derived.blockEndBeat - macroStartOffsetBeats;
+    activeBlockDurationBeats = derived.durationBeats;
+    currentBlockDurationMs = durationMsFromBeats(derived.durationBeats, score, config);
+
+    const current = currentMacroPosition(score);
+    if (derived.macroIndex === current.macroIndex && derived.activeBlockId === current.activeBlockId) {
+      return;
+    }
+
+    try {
+      store.updateStructureState({
+        macroIndex: derived.macroIndex,
+        activeBlockId: derived.activeBlockId
+      }, { sourceClientId: "macro-playback" });
+    } catch (error) {
+      running = false;
+      mode = "stopped";
+      clearBeatAnchor();
+      console.error(`[macro-playback] beat-derived advance failed: ${messageForError(error)}`);
+      return;
+    }
+    runAfterBeatDerivedAdvance({
+      anchorBeat: activeBlockStartBeat,
+      boundaryBeat: activeBlockStartBeat,
+      absoluteBeat: witness.absoluteBeat,
+      compositionBeat,
+      beatIntoBlock,
+      witnessSource: witness.source
+    });
+  }
+
+  function clearBeatAnchor() {
     activeBlockStartBeat = null;
     activeBlockEndBeat = null;
     activeBlockDurationBeats = 0;
+    macroStartBeat = null;
+    macroStartIndex = 0;
+    macroStartOffsetBeats = 0;
+    compositionBeat = null;
+    beatIntoBlock = null;
     lastJackAbsoluteBeat = null;
     lastJackState = "";
     lastJackStatus = "unusable";
   }
 
-  function snapshot() {
+  function snapshot(snapshotOptions = {}) {
+    updateJackStatus(jackTransport?.snapshot?.());
+    followSelectedWitness(snapshotOptions);
     const score = store.getScore();
-    const beatsRemaining = mode === "jack" && activeBlockEndBeat !== null && lastJackAbsoluteBeat !== null
-      ? Math.max(0, activeBlockEndBeat - lastJackAbsoluteBeat)
+    const witness = selectedWitness(snapshotOptions);
+    const beatsRemaining = mode === "jack" && activeBlockEndBeat !== null && beatIntoBlock !== null
+      ? Math.max(0, activeBlockDurationBeats - beatIntoBlock)
       : null;
     return {
       running,
@@ -205,7 +244,13 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       activeBlockStartBeat,
       activeBlockEndBeat,
       activeBlockDurationBeats,
+      macroStartBeat,
+      macroStartIndex,
+      macroStartOffsetBeats,
+      compositionBeat,
+      beatIntoBlock,
       beatsRemaining,
+      witness,
       jack: {
         status: lastJackStatus,
         state: lastJackState,
@@ -218,14 +263,25 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     };
   }
 
-  function runAfterJackAdvance(detail) {
+  function selectedWitness(snapshotOptions = {}) {
+    return selectBeatWitness({
+      mode,
+      running,
+      jackTransport: jackTransport?.snapshot?.(),
+      rnboTargets: snapshotOptions.rnboTargets,
+      timingContracts: snapshotOptions.timingContracts,
+      rnboClient: config.transport?.rnboClient
+    });
+  }
+
+  function runAfterBeatDerivedAdvance(detail) {
     if (typeof afterAdvance !== "function") {
       return;
     }
     phaseAlignmentPending = true;
     Promise.resolve()
       .then(() => afterAdvance({
-        mode: "jack",
+        mode,
         activeBlockId: store.getScore().structureState?.activeBlockId ?? "",
         macroIndex: store.getScore().structureState?.macroIndex ?? 0,
         ...detail
@@ -262,11 +318,72 @@ export function macroBlockDurationBeats(score, config = {}) {
 
 export function macroBlockDurationMs(score, config = {}) {
   const beats = macroBlockDurationBeats(score, config);
+  return durationMsFromBeats(beats, score, config);
+}
+
+function durationMsFromBeats(beats, score, config = {}) {
   const tempo = finiteNumber(score.macrostructure?.tempo, finiteNumber(config.rnbo?.transport?.Tempo, 120));
   if (beats <= 0 || tempo <= 0) {
     return 0;
   }
   return Math.round(beats * 60000 / tempo);
+}
+
+export function deriveMacroPosition(score, compositionBeat) {
+  const timeline = macroTimeline(score);
+  if (!timeline.entries.length || timeline.totalBeats <= 0) {
+    const current = currentMacroPosition(score);
+    return {
+      macroIndex: current.macroIndex,
+      activeBlockId: current.activeBlockId,
+      compositionBeat: 0,
+      cycleBeat: 0,
+      blockStartBeat: 0,
+      blockEndBeat: 0,
+      beatIntoBlock: 0,
+      durationBeats: 0
+    };
+  }
+
+  const normalizedCompositionBeat = Math.max(0, Number.isFinite(compositionBeat) ? compositionBeat : 0);
+  const cycleBeat = positiveModulo(normalizedCompositionBeat, timeline.totalBeats);
+  const entry = timeline.entries.find((candidate) => cycleBeat >= candidate.startBeat && cycleBeat < candidate.endBeat)
+    ?? timeline.entries.at(-1);
+  return {
+    macroIndex: entry.index,
+    activeBlockId: entry.blockId,
+    compositionBeat: normalizedCompositionBeat,
+    cycleBeat,
+    blockStartBeat: normalizedCompositionBeat - cycleBeat + entry.startBeat,
+    blockEndBeat: normalizedCompositionBeat - cycleBeat + entry.endBeat,
+    beatIntoBlock: cycleBeat - entry.startBeat,
+    durationBeats: entry.durationBeats
+  };
+}
+
+export function macroTimeline(score) {
+  const blocks = score.macrostructure?.blocks ?? [];
+  const entries = [];
+  let cursor = 0;
+  for (const [index, blockId] of blocks.entries()) {
+    const block = score.mesostructure?.[blockId];
+    const duration = durationBeats(block?.duration, score.context);
+    if (duration <= 0) {
+      continue;
+    }
+    entries.push({
+      index,
+      blockId,
+      startBeat: cursor,
+      endBeat: cursor + duration,
+      durationBeats: duration
+    });
+    cursor += duration;
+  }
+  return {
+    entries,
+    totalBeats: cursor
+  };
 }
 
 function shouldReschedule(event) {
@@ -277,6 +394,32 @@ function shouldReschedule(event) {
     event.type === "mesostructure.block.removed" ||
     (event.type === "admin.reset" && event.detail?.structure)
   );
+}
+
+function currentMacroPosition(score) {
+  const blocks = score.macrostructure?.blocks ?? [];
+  if (!blocks.length) {
+    return {
+      macroIndex: 0,
+      activeBlockId: score.structureState?.activeBlockId ?? ""
+    };
+  }
+  const macroIndex = Number.isInteger(score.structureState?.macroIndex)
+    ? Math.min(blocks.length - 1, Math.max(0, score.structureState.macroIndex))
+    : 0;
+  return {
+    macroIndex,
+    activeBlockId: blocks[macroIndex] ?? score.structureState?.activeBlockId ?? ""
+  };
+}
+
+function cumulativeBeatsBeforeIndex(score, macroIndex) {
+  const timeline = macroTimeline(score);
+  const entry = timeline.entries.find((candidate) => candidate.index === macroIndex);
+  if (entry) {
+    return entry.startBeat;
+  }
+  return timeline.entries.reduce((total, entry) => entry.index < macroIndex ? total + entry.durationBeats : total, 0);
 }
 
 function durationBeats(duration, context) {
@@ -298,12 +441,8 @@ function finiteNumber(value, fallback) {
   return Number.isFinite(number) ? number : fallback;
 }
 
-function usableJackSnapshot(transport) {
-  const latest = transport?.latest;
-  if (!latest || transport.status !== "fresh" || latest.bbtValid !== true || latest.state !== "rolling") {
-    return null;
-  }
-  return Number.isFinite(latest.absoluteBeat) ? latest : null;
+function positiveModulo(value, divisor) {
+  return ((value % divisor) + divisor) % divisor;
 }
 
 function messageForError(error) {

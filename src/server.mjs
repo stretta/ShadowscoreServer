@@ -8,6 +8,7 @@ import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { createPeerRegistry } from "./registration/peer-registry.mjs";
 import { createScorePersistence, loadPersistedScore } from "./state/persistence.mjs";
 import { createInitialScore, createScoreStore } from "./state/score-store.mjs";
+import { createJackTransportController } from "./transport/jack-transport-control.mjs";
 import { createJackTransportState } from "./transport/jack-transport-state.mjs";
 
 const config = await loadConfig();
@@ -18,6 +19,9 @@ const persistence = createScorePersistence(store, config);
 const peerRegistry = createPeerRegistry(config);
 const rnbo = createRnboOscAdapter(config, { peerRegistry });
 const jackTransport = createJackTransportState(config);
+const jackController = config.transport?.jack?.enabled
+  ? createJackTransportController(config)
+  : null;
 const macroPlayback = createMacroPlayback(store, config, {
   jackTransport,
   afterAdvance: async () => ({
@@ -29,7 +33,7 @@ const macroPlayback = createMacroPlayback(store, config, {
 rnbo.attach(store);
 
 const server = http.createServer((request, response) => {
-  routeRequest(request, response, store, config, { jackTransport, macroPlayback, peerRegistry, rnboAdapter: rnbo }).catch((error) => {
+  routeRequest(request, response, store, config, { jackTransport, jackController, macroPlayback, peerRegistry, rnboAdapter: rnbo }).catch((error) => {
     response.writeHead(500, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ ok: false, error: error.message }));
   });

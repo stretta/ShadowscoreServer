@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
 import { routeRequest } from "../src/http/routes.mjs";
+import { createMacroPlayback } from "../src/playback/macro-playback.mjs";
 import { createPeerRegistry } from "../src/registration/peer-registry.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
 import { createJackTransportState } from "../src/transport/jack-transport-state.mjs";
@@ -111,6 +112,10 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.endpoints.transportEvents, "http://127.0.0.1/transport/events");
   assert.equal(session.endpoints.transportStatus, "http://127.0.0.1/transport/status");
   assert.equal(session.macroPlayback.running, false);
+  assert.equal(session.macroPlayback.compositionBeat, null);
+  assert.equal(session.macroPlayback.beatIntoBlock, null);
+  assert.equal(session.macroPlayback.macroStartBeat, null);
+  assert.equal(session.macroPlayback.witness.source, "none");
   assert.equal(session.transport.status, "unusable");
   assert.equal(session.transport.tempoAuthority, "link");
   assert.equal(session.voices.length, 6);
@@ -189,6 +194,55 @@ test("transport route rejects malformed JACK snapshots", async () => {
   assert.match(response.body, /JACK snapshot source must be 'jack'/);
 });
 
+test("JACK transport control routes call explicit controller actions", async () => {
+  const calls = [];
+  const context = createRouteContext({
+    runtime: {
+      jackController: {
+        async start() {
+          calls.push(["start"]);
+          return { ok: true, action: "start" };
+        },
+        async stop() {
+          calls.push(["stop"]);
+          return { ok: true, action: "stop" };
+        },
+        async locate(frame) {
+          calls.push(["locate", frame]);
+          return { ok: true, action: "locate", frame };
+        }
+      }
+    }
+  });
+
+  assert.deepEqual(await requestJson(context, "POST", "/transport/jack/start", {}), { ok: true, action: "start" });
+  assert.deepEqual(await requestJson(context, "POST", "/transport/jack/stop", {}), { ok: true, action: "stop" });
+  assert.deepEqual(await requestJson(context, "POST", "/transport/jack/locate", { frame: 48000 }), {
+    ok: true,
+    action: "locate",
+    frame: 48000
+  });
+  assert.deepEqual(calls, [["start"], ["stop"], ["locate", 48000]]);
+});
+
+test("JACK transport control routes report unavailable or invalid controls", async () => {
+  const unavailable = await request(createRouteContext(), "POST", "/transport/jack/start", {});
+  assert.equal(unavailable.status, 501);
+  assert.match(unavailable.body, /JACK transport control is not available/);
+
+  const invalidLocate = await request(createRouteContext({
+    runtime: {
+      jackController: {
+        async locate() {
+          return { ok: true };
+        }
+      }
+    }
+  }), "POST", "/transport/jack/locate", { frame: -1 });
+  assert.equal(invalidLocate.status, 400);
+  assert.match(invalidLocate.body, /frame must be a non-negative integer/);
+});
+
 test("transport events stream sends initial and update snapshots", async () => {
   const context = createRouteContext({
     runtime: {
@@ -227,6 +281,9 @@ test("transport status page exposes host transport controls", async () => {
   assert.match(response.body, /id="advance"/);
   assert.match(response.body, /id="reset"/);
   assert.match(response.body, /id="stop"/);
+  assert.match(response.body, /id="composition-beat"/);
+  assert.match(response.body, /id="beat-into-block"/);
+  assert.match(response.body, /id="macro-anchor"/);
   assert.match(response.body, /id="phase-reset"/);
   assert.match(response.body, /\/transport\/events/);
   assert.match(response.body, /\/macrostructure\/playback\/start/);
@@ -398,6 +455,182 @@ test("macro playback routes expose, start, and stop the chain runner", async () 
       value: 0
     }
   ]);
+});
+
+test("macro playback route reports RNBO client readback as beat witness", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore",
+            currentStage: 40
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      }
+    }
+  });
+  context.runtime.macroPlayback = createMacroPlayback(context.store, context.config);
+
+  const started = await requestJson(context, "POST", "/macrostructure/playback/start", { mode: "jack" });
+
+  assert.equal(started.playback.running, true);
+  assert.deepEqual(started.playback.witness, {
+    source: "rnbo-client",
+    usable: true,
+    absoluteBeat: 2.5,
+    tempo: null,
+    fresh: true,
+    targetId: "source-client",
+    currentStage: 40,
+    stagesPerBeat: 16,
+    skewBeats: 0,
+    targetCount: 1,
+    reason: "RNBO current_stage readback"
+  });
+});
+
+test("macro playback route derives macro index from updated JACK witness beat", async () => {
+  let now = 1000;
+  const jackTransport = createJackTransportState(defaultConfig, { now: () => now });
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore",
+            currentStage: 0
+          }
+        ]
+      }
+    }),
+    runtime: {
+      jackTransport,
+      rnboParamWriter: async () => {}
+    }
+  });
+  context.store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  context.store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  context.store.updateMacrostructure({ tempo: 120, blocks: ["A", "B"] });
+  context.runtime.macroPlayback = createMacroPlayback(context.store, context.config, { jackTransport });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  await requestJson(context, "POST", "/macrostructure/playback/start", { mode: "jack" });
+  now = 1100;
+  jackTransport.update(jackSnapshot({ absoluteBeat: 104 }));
+  const playback = await requestJson(context, "GET", "/macrostructure/playback");
+
+  assert.equal(playback.macroIndex, 1);
+  assert.equal(playback.activeBlockId, "B");
+  assert.equal(playback.macroStartBeat, 100);
+  assert.equal(playback.macroStartIndex, 0);
+  assert.equal(playback.macroStartOffsetBeats, 0);
+  assert.equal(playback.compositionBeat, 4);
+  assert.equal(playback.beatIntoBlock, 0);
+});
+
+test("RNBO current_stage witness treats stage 63 as just before a 64-stage boundary", async () => {
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore",
+            currentStage: 0
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async () => {}
+    }
+  });
+  context.store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  context.store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  context.store.updateMacrostructure({ tempo: 120, blocks: ["A", "B"] });
+  context.runtime.macroPlayback = createMacroPlayback(context.store, context.config);
+
+  await requestJson(context, "POST", "/macrostructure/playback/start", { mode: "jack" });
+  context.config.rnbo.targets[0].currentStage = 63;
+  const playback = await requestJson(context, "GET", "/macrostructure/playback");
+
+  assert.equal(playback.macroIndex, 0);
+  assert.equal(playback.activeBlockId, "A");
+  assert.equal(playback.witness.absoluteBeat, 63 / 16);
+  assert.equal(playback.compositionBeat, 63 / 16);
+  assert.equal(playback.beatIntoBlock, 63 / 16);
+});
+
+test("macro playback route rejects skewed RNBO client readback witness", async () => {
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "left-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore",
+            voiceId: "player-1",
+            currentStage: 32
+          },
+          {
+            id: "right-client",
+            host: "192.168.68.97",
+            port: 9000,
+            address: "/rnbo/inst/3/messages/in/shadowscore",
+            voiceId: "player-2",
+            currentStage: 40
+          }
+        ]
+      },
+      transport: {
+        rnboClient: {
+          maxSkewBeats: 0.25
+        }
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async () => {}
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "left-client",
+    rnboHost: "192.168.68.96",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "right-client",
+    rnboHost: "192.168.68.97",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/3/messages/in/shadowscore"
+  });
+  context.runtime.macroPlayback = createMacroPlayback(context.store, context.config);
+
+  const started = await requestJson(context, "POST", "/macrostructure/playback/start", { mode: "jack" });
+
+  assert.equal(started.playback.running, true);
+  assert.equal(started.playback.macroIndex, 0);
+  assert.equal(started.playback.witness.source, "rnbo-client");
+  assert.equal(started.playback.witness.usable, false);
+  assert.equal(started.playback.witness.reason, "RNBO current_stage skew 0.5 beats exceeds 0.25");
+  assert.equal(started.playback.witness.skewBeats, 0.5);
 });
 
 test("macro phase reset writes SetStage to available RNBO targets", async () => {
@@ -1364,6 +1597,7 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /id="macro-playback-detail"/);
   assert.match(response.body, /formatRemaining/);
   assert.match(response.body, /Create new clip/);
+  assert.match(response.body, /persistMacrostructure\("Updating playback chain/);
   assert.match(response.body, /\/mesostructure\/\$\{encodeURIComponent\(nextId\)\}/);
   assert.match(response.body, /\/clips\/\$\{encodeURIComponent\(clipId\)\}/);
   assert.match(response.body, /\/macrostructure/);
@@ -1390,22 +1624,23 @@ test("voice note route rejects stale expected voice versions", async () => {
   assert.match(response.body, /stale voice 'player-1' version 0; current version is 1/);
 });
 
-function jackSnapshot() {
+function jackSnapshot(options = {}) {
+  const absoluteBeat = options.absoluteBeat ?? 31963.380208333332;
   return {
     source: "jack",
     host: "wren",
-    state: "rolling",
+    state: options.state ?? "rolling",
     frame: 767223806,
     frameRate: 48000,
-    bbtValid: true,
-    bar: 7991,
-    beat: 4,
-    tick: 730,
+    bbtValid: options.bbtValid ?? true,
+    bar: Math.floor(absoluteBeat / 4) + 1,
+    beat: Math.floor(absoluteBeat % 4) + 1,
+    tick: (absoluteBeat % 1) * 1920,
     beatsPerBar: 4,
     beatType: 4,
     ticksPerBeat: 1920,
     beatsPerMinute: 120,
-    absoluteBeat: 31963.380208333332,
+    absoluteBeat,
     observedAt: 1782580000000
   };
 }

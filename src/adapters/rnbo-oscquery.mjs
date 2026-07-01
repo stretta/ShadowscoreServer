@@ -108,7 +108,7 @@ export function extractRnboTargets(tree, config) {
     const instanceId = readInstanceId(address);
     const instanceNode = findInstanceNode(tree, instanceId);
     const outports = readMessageOutports(instanceNode);
-    entries.push({
+    entries.push(withoutUndefined({
       id: instanceId ? `rnbo-inst-${instanceId}:shadowscore` : address,
       name: instanceId ? `ShadowScoreClient / shadowscore` : address,
       host: oscQuery.oscHost ?? rnbo.host,
@@ -118,11 +118,12 @@ export function extractRnboTargets(tree, config) {
       messagePath: address,
       ackPath: outports.shadowscore_ack,
       currentStagePath: outports.current_stage,
+      currentStage: outports.current_stage_value,
       clientId: readClientId(node, instanceNode),
       capabilities: rnboPlaybackCapabilities(config, node?.CONTENTS?.capabilities?.VALUE),
       source: "rnbooscquery",
       available: true
-    });
+    }));
   });
 
   return dedupeTargets(entries);
@@ -160,7 +161,8 @@ function readMessageOutports(instanceNode) {
   const contents = instanceNode?.CONTENTS?.messages?.CONTENTS?.out?.CONTENTS ?? {};
   return {
     shadowscore_ack: normalizeAddress(contents.shadowscore_ack?.FULL_PATH),
-    current_stage: normalizeAddress(contents.current_stage?.FULL_PATH)
+    current_stage: normalizeAddress(contents.current_stage?.FULL_PATH),
+    current_stage_value: firstListNumber(contents.current_stage?.VALUE)
   };
 }
 
@@ -259,7 +261,7 @@ function dedupeTargets(targets) {
 function normalizeConfiguredTarget(target, rnbo, index) {
   const address = target.address ?? rnbo.address;
   const instanceId = readInstanceId(address);
-  return {
+  return withoutUndefined({
     id: target.id ?? (instanceId ? `rnbo-inst-${instanceId}:shadowscore` : `configured-${index + 1}`),
     name: target.name ?? (instanceId ? `ShadowScoreClient / shadowscore` : address),
     host: target.host ?? rnbo.host,
@@ -269,12 +271,13 @@ function normalizeConfiguredTarget(target, rnbo, index) {
     messagePath: address,
     ackPath: target.ackPath,
     currentStagePath: target.currentStagePath,
+    currentStage: optionalFiniteNumber(target.currentStage),
     voiceId: target.voiceId,
     clientId: target.clientId,
     capabilities: rnboPlaybackCapabilities({ rnbo }, target.capabilities),
     source: "config",
     available: true
-  };
+  });
 }
 
 function clampTimeout(value) {
@@ -283,6 +286,18 @@ function clampTimeout(value) {
     return 1000;
   }
   return Math.min(10000, Math.max(100, Math.round(number)));
+}
+
+function optionalFiniteNumber(value) {
+  if (value === undefined || value === null || value === "") {
+    return undefined;
+  }
+  const number = Number(value);
+  return Number.isFinite(number) ? number : undefined;
+}
+
+function withoutUndefined(value) {
+  return Object.fromEntries(Object.entries(value).filter(([, entry]) => entry !== undefined));
 }
 
 function messageForError(error) {

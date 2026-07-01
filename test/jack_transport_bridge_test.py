@@ -69,6 +69,133 @@ class JackTransportBridgeTest(unittest.TestCase):
         self.assertNotIn("bar", snapshot)
         self.assertNotIn("absoluteBeat", snapshot)
 
+    def test_control_mode_calls_jack_transport_actions(self):
+        calls = []
+        original_client = bridge.JackTransportClient
+
+        class FakeClient:
+            def __init__(self, client_name, library_name):
+                calls.append(("open", client_name, library_name))
+
+            def start(self):
+                calls.append(("start",))
+
+            def stop(self):
+                calls.append(("stop",))
+
+            def locate(self, frame):
+                calls.append(("locate", frame))
+
+            def close(self):
+                calls.append(("close",))
+
+        try:
+            bridge.JackTransportClient = FakeClient
+            self.assertEqual(bridge.main(["--control", "start"]), 0)
+            self.assertEqual(bridge.main(["--control", "stop"]), 0)
+            self.assertEqual(bridge.main(["--control", "locate", "--frame", "48000"]), 0)
+        finally:
+            bridge.JackTransportClient = original_client
+
+        self.assertEqual(
+            calls,
+            [
+                ("open", "shadowscore-jack-bridge", bridge.JACK_DEFAULT_LIBRARY),
+                ("start",),
+                ("close",),
+                ("open", "shadowscore-jack-bridge", bridge.JACK_DEFAULT_LIBRARY),
+                ("stop",),
+                ("close",),
+                ("open", "shadowscore-jack-bridge", bridge.JACK_DEFAULT_LIBRARY),
+                ("locate", 48000),
+                ("close",),
+            ],
+        )
+
+    def test_poller_reconnects_stale_frame_zero_snapshot(self):
+        calls = []
+
+        stale = bridge.JackSnapshot(
+            source="jack",
+            host="wren",
+            state="stopped",
+            frame=0,
+            frameRate=48000,
+            bbtValid=True,
+            observedAt=1000,
+            bar=1,
+            beat=1,
+            tick=0,
+            beatsPerBar=4,
+            beatType=4,
+            ticksPerBeat=1920,
+            beatsPerMinute=100,
+            absoluteBeat=0,
+        )
+        rolling = bridge.JackSnapshot(
+            source="jack",
+            host="wren",
+            state="rolling",
+            frame=43707904,
+            frameRate=48000,
+            bbtValid=True,
+            observedAt=2000,
+            bar=349,
+            beat=4,
+            tick=1183,
+            beatsPerBar=4,
+            beatType=4,
+            ticksPerBeat=1920,
+            beatsPerMinute=92,
+            absoluteBeat=1395.6161458333333,
+        )
+
+        class FakeClient:
+            def __init__(self, label, snapshot):
+                self.label = label
+                self.snapshot = snapshot
+
+            def query(self, host):
+                calls.append(("query", self.label, host))
+                return self.snapshot
+
+            def close(self):
+                calls.append(("close", self.label))
+
+        clients = [FakeClient("rolling", rolling)]
+
+        def make_client(client_name, library_name):
+            calls.append(("open", client_name, library_name))
+            return clients.pop(0)
+
+        poller = bridge.JackTransportPoller(
+            "bridge",
+            "libjack.so.0",
+            reconnect_interval=2,
+            now=lambda: 10,
+            client_factory=make_client,
+        )
+        poller.client = FakeClient("stale", stale)
+        poller.last_reconnect = 0
+
+        try:
+            snapshot = poller.query("wren")
+        finally:
+            poller.close()
+
+        self.assertEqual(snapshot.state, "rolling")
+        self.assertEqual(snapshot.frame, 43707904)
+        self.assertEqual(
+            calls,
+            [
+                ("query", "stale", "wren"),
+                ("close", "stale"),
+                ("open", "bridge", "libjack.so.0"),
+                ("query", "rolling", "wren"),
+                ("close", "rolling"),
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

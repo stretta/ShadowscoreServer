@@ -509,12 +509,17 @@
         renderBlockEditor();
       });
       els.saveBlock.addEventListener("click", saveBlock);
-      els.addChain.addEventListener("click", addChainEntry);
+      els.addChain.addEventListener("click", () => {
+        void addChainEntry();
+      });
       els.revertMacro.addEventListener("click", () => {
         state.macroDirty = false;
         renderMacroEditor();
       });
       els.saveMacro.addEventListener("click", saveMacrostructure);
+      els.activeBlock.addEventListener("change", () => {
+        void setActiveBlock();
+      });
       els.setActiveBlock.addEventListener("click", setActiveBlock);
       els.advanceBlock.addEventListener("click", advanceBlock);
       els.resetBlock.addEventListener("click", resetBlock);
@@ -533,6 +538,9 @@
       els.tempo.addEventListener("input", () => {
         state.macroDirty = true;
         updateButtons();
+      });
+      els.tempo.addEventListener("change", () => {
+        void persistMacrostructure("Saving tempo...", "Saved tempo.");
       });
     }
 
@@ -836,8 +844,7 @@
       });
       select.value = blockId;
       select.addEventListener("change", () => {
-        state.macroDirty = true;
-        updateButtons();
+        void persistMacrostructure("Updating playback chain...", "Updated playback chain.");
       });
       const remove = document.createElement("button");
       remove.type = "button";
@@ -846,8 +853,7 @@
       remove.addEventListener("click", () => {
         row.remove();
         renumberChain();
-        state.macroDirty = true;
-        updateButtons();
+        void persistMacrostructure("Removing playback chain entry...", "Removed playback chain entry.");
       });
       row.append(number, select, remove);
       return row;
@@ -958,7 +964,7 @@
       }
     }
 
-    function addChainEntry() {
+    async function addChainEntry() {
       const blockIds = Object.keys(state.score?.mesostructure ?? {}).sort(naturalCompare);
       if (!blockIds.length) {
         return;
@@ -966,11 +972,16 @@
       const empty = els.chain.querySelector(".empty");
       empty?.remove();
       els.chain.append(chainRow(chainSelects().length, state.selectedBlockId || blockIds[0]));
-      state.macroDirty = true;
-      updateButtons();
+      await persistMacrostructure("Adding playback chain entry...", "Added playback chain entry.");
     }
 
-    async function saveMacrostructure() {
+    async function persistMacrostructure(savingMessage, savedMessage) {
+      state.macroDirty = true;
+      updateButtons();
+      await saveMacrostructure(savingMessage, savedMessage);
+    }
+
+    async function saveMacrostructure(savingMessage = "Saving playback chain...", savedMessage = "Saved playback chain.") {
       if (!state.score) {
         return;
       }
@@ -979,16 +990,17 @@
         tempo: numberValue(els.tempo.value, 120),
         blocks: chainSelects().map((select) => select.value).filter(Boolean)
       };
-      setStatus("Saving playback chain...");
+      setStatus(savingMessage);
       try {
         state.saving = true;
+        updateButtons();
         state.score = await fetchJson(`${state.serverUrl}/macrostructure`, undefined, {
           method: "POST",
           body: macrostructure
         });
         state.macroDirty = false;
         renderAll();
-        setStatus("Saved playback chain.");
+        setStatus(savedMessage);
       } catch (error) {
         setStatus(`Macro save failed: ${error.message}`);
       } finally {

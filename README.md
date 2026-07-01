@@ -142,6 +142,9 @@ containing block duration; one-shot clips play once.
 - `GET /rnbo/targets`: local and registered RNBO targets with availability state.
 - `GET /playback/timing-contracts`: target-specific compiled playback timing contracts for the active block, including selected stage resolution, `ClockInterval`/ticks-per-stage, `MaxSteps`/pattern length, target capacities, and quantization diagnostics when adaptive fidelity modes are enabled.
 - `POST /transport/jack/snapshot`: accept a host-local JACK BBT snapshot from the bridge helper.
+- `POST /transport/jack/start`: start JACK transport through a configured JACK controller.
+- `POST /transport/jack/stop`: stop JACK transport through a configured JACK controller.
+- `POST /transport/jack/locate`: locate JACK transport to a frame with `{ "frame": 0 }`; this does not write RNBO `Clock`.
 - `GET /transport`: current JACK bridge freshness, latest BBT snapshot, and tempo authority.
 - `GET /transport/events`: SSE stream for transport updates.
 - `GET /transport/status`: host transport status and macro playback control page.
@@ -150,7 +153,7 @@ containing block duration; one-shot clips play once.
 - `GET /clips`: current reusable clip map.
 - `GET /structure`: current `{ clips, mesostructure, macrostructure, structureState }` structure document.
 - `GET /structure/playhead`: current active mesostructural block and macro index.
-- `GET /macrostructure/playback`: current macro chain playback runner state.
+- `GET /macrostructure/playback`: current macro playback runner state, including mode, beat witness, composition beat, beat-in-block, macro anchor, active block, and remaining beats.
 - `POST /context`: replace or merge shared ShadowScore context.
 - `POST /clips`: add one reusable clip with `{ "clipId": "...", "clip": { ... } }`.
 - `POST /clips/:clipId`: add or replace one reusable clip.
@@ -166,8 +169,8 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /structure/playhead`: select the active mesostructural block.
 - `POST /macrostructure/advance`: advance the active block to the next macro chain entry.
 - `POST /macrostructure/reset`: reset the active block to the beginning of the macro chain.
-- `POST /macrostructure/playback/start`: start timed macro chain playback from the current active block and send `Clock: 1` to available RNBO targets.
-- `POST /macrostructure/playback/stop`: stop timed macro chain playback and send `Clock: 0` to available RNBO targets.
+- `POST /macrostructure/playback/start`: start macro playback from the current active block and send `Clock: 1` to available RNBO targets; beat-derived mode uses JACK or RNBO client readback when available, while timer mode remains a degraded fallback.
+- `POST /macrostructure/playback/stop`: stop macro playback and send `Clock: 0` to available RNBO targets.
 - `POST /voices`: add a voice with `{ "voiceId": "...", "assignment": { ... } }`.
 - `DELETE /voices/:voiceId`: remove a voice and its assignment.
 - `POST /voices/:voiceId/assignment`: assign a voice to a player, device, or client.

@@ -51,7 +51,20 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       activeBlockStartBeat: null,
       activeBlockEndBeat: null,
       activeBlockDurationBeats: 0,
+      macroStartBeat: null,
+      macroStartIndex: 0,
+      macroStartOffsetBeats: 0,
+      compositionBeat: null,
+      beatIntoBlock: null,
       beatsRemaining: null,
+      witness: {
+        source: "none",
+        usable: false,
+        absoluteBeat: null,
+        tempo: null,
+        fresh: false,
+        reason: "macro playback is not available"
+      },
       jack: {
         status: "unusable",
         state: "",

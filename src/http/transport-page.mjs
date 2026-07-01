@@ -108,11 +108,14 @@ export function transportPage() {
   </header>
   <main>
     <div class="toolbar">
-      <button class="primary" id="start-jack" type="button">Start JACK follower</button>
-      <button id="start-timer" type="button">Start timer</button>
-      <button id="reanchor" type="button">Re-anchor</button>
+      <button class="primary" id="start-jack" type="button">Start Macro Playback</button>
+      <button id="start-timer" type="button">Start Timer Fallback</button>
+      <button id="reanchor" type="button">Re-anchor Macro Playback</button>
       <button id="advance" type="button">Advance now</button>
       <button id="reset" type="button">Reset to A</button>
+      <button id="jack-start" type="button">Start JACK Transport</button>
+      <button id="jack-stop" type="button">Stop JACK Transport</button>
+      <button id="jack-locate" type="button">Locate JACK 0</button>
       <button class="danger" id="stop" type="button">Stop</button>
     </div>
     <section>
@@ -130,10 +133,14 @@ export function transportPage() {
       <h2>Macro Playback</h2>
       <div class="grid">
         <div class="metric"><div class="label">Mode</div><div class="value" id="macro-mode">-</div></div>
+        <div class="metric"><div class="label">Beat Witness</div><div class="value small" id="beat-witness">-</div><div class="detail" id="beat-witness-detail"></div></div>
         <div class="metric"><div class="label">Active Block</div><div class="value" id="active-block">-</div></div>
         <div class="metric"><div class="label">Macro Index</div><div class="value" id="macro-index">-</div></div>
+        <div class="metric"><div class="label">Composition Beat</div><div class="value" id="composition-beat">-</div></div>
+        <div class="metric"><div class="label">Beat In Block</div><div class="value" id="beat-into-block">-</div></div>
         <div class="metric"><div class="label">Block Start Beat</div><div class="value" id="block-start">-</div></div>
         <div class="metric"><div class="label">Next Block Beat</div><div class="value" id="block-end">-</div></div>
+        <div class="metric"><div class="label">Macro Anchor</div><div class="value small" id="macro-anchor">-</div></div>
         <div class="metric"><div class="label">Beats Remaining</div><div class="value" id="beats-remaining">-</div></div>
         <div class="metric"><div class="label">Phase Reset</div><div class="value small" id="phase-reset">-</div></div>
       </div>
@@ -162,6 +169,9 @@ export function transportPage() {
     fields.stop.addEventListener("click", stopPlayback);
     fields.advance.addEventListener("click", () => postJson("/macrostructure/advance", {}));
     fields.reset.addEventListener("click", resetToA);
+    fields["jack-start"].addEventListener("click", () => postJson("/transport/jack/start", {}));
+    fields["jack-stop"].addEventListener("click", () => postJson("/transport/jack/stop", {}));
+    fields["jack-locate"].addEventListener("click", () => postJson("/transport/jack/locate", { frame: 0 }));
 
     refreshAll();
     setInterval(refreshAll, 1000);
@@ -240,10 +250,16 @@ export function transportPage() {
 
     function renderPlayback(playback) {
       fields["macro-mode"].textContent = playback.running ? playback.mode : "stopped";
+      fields["beat-witness"].textContent = witnessLabel(playback.witness);
+      fields["beat-witness"].className = "value small " + (playback.witness?.usable ? "ok" : playback.witness?.degraded ? "warn" : "bad");
+      fields["beat-witness-detail"].textContent = witnessDetail(playback.witness);
       fields["active-block"].textContent = playback.activeBlockId || "-";
       fields["macro-index"].textContent = String(playback.macroIndex ?? "-");
+      fields["composition-beat"].textContent = formatNumber(playback.compositionBeat, 3);
+      fields["beat-into-block"].textContent = formatNumber(playback.beatIntoBlock, 3);
       fields["block-start"].textContent = formatNumber(playback.activeBlockStartBeat, 3);
       fields["block-end"].textContent = formatNumber(playback.activeBlockEndBeat, 3);
+      fields["macro-anchor"].textContent = macroAnchorLabel(playback);
       fields["beats-remaining"].textContent = formatNumber(playback.beatsRemaining, 3);
       fields["phase-reset"].textContent = playback.phaseAlignment?.pending ? "pending" : phaseAlignmentLabel(playback.phaseAlignment?.last);
     }
@@ -262,6 +278,26 @@ export function transportPage() {
     function phaseAlignmentLabel(last) {
       if (!last) return "-";
       return last.ok ? "SetStage " + last.value + " / " + last.writeCount + " writes" : "failed";
+    }
+
+    function witnessLabel(witness) {
+      if (!witness) return "-";
+      return witness.usable ? witness.source : witness.source + " unavailable";
+    }
+
+    function witnessDetail(witness) {
+      if (!witness) return "";
+      const parts = [];
+      if (Number.isFinite(witness.absoluteBeat)) parts.push("beat " + formatNumber(witness.absoluteBeat, 3));
+      if (witness.targetId) parts.push(witness.targetId);
+      if (Number.isFinite(witness.skewBeats)) parts.push("skew " + formatNumber(witness.skewBeats, 3));
+      if (witness.reason) parts.push(witness.reason);
+      return parts.join(" / ");
+    }
+
+    function macroAnchorLabel(playback) {
+      if (!Number.isFinite(playback.macroStartBeat)) return "-";
+      return "beat " + formatNumber(playback.macroStartBeat, 3) + " / index " + String(playback.macroStartIndex ?? 0);
     }
 
     function log(message) {

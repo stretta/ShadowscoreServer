@@ -24,7 +24,14 @@ export const defaultConfig = Object.freeze({
       enabled: false,
       host: "",
       freshnessMs: 500,
-      pollIntervalMs: 75
+      pollIntervalMs: 75,
+      python: "python3",
+      bridgeScript: "bin/jack-transport-bridge.py",
+      controlClientName: "shadowscore-jack-control",
+      library: ""
+    },
+    rnboClient: {
+      maxSkewBeats: 0.25
     }
   },
   static: {

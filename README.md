@@ -169,7 +169,7 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /structure/playhead`: select the active mesostructural block.
 - `POST /macrostructure/advance`: advance the active block to the next macro chain entry.
 - `POST /macrostructure/reset`: reset the active block to the beginning of the macro chain.
-- `POST /macrostructure/playback/start`: start macro playback from the current active block and send `Clock: 1` to available RNBO targets; beat-derived mode uses JACK or RNBO client readback when available, while timer mode remains a degraded fallback.
+- `POST /macrostructure/playback/start`: start playback from the current active block and send `Clock: 1` to available RNBO targets. The default/`auto` mode chooses beat-derived playback when JACK or RNBO client readback is usable, otherwise it falls back to the internal timer. Diagnostic callers can still pass `{ "mode": "jack" }` or `{ "mode": "timer" }` explicitly.
 - `POST /macrostructure/playback/stop`: stop macro playback and send `Clock: 0` to available RNBO targets.
 - `POST /voices`: add a voice with `{ "voiceId": "...", "assignment": { ... } }`.
 - `DELETE /voices/:voiceId`: remove a voice and its assignment.

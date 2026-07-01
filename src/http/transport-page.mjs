@@ -32,6 +32,13 @@ export function transportPage() {
       gap: 8px;
       margin-bottom: 18px;
     }
+    details.toolbar-details { margin-bottom: 18px; }
+    details.toolbar-details summary {
+      color: #41505a;
+      cursor: pointer;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
     button {
       align-items: center;
       background: #fff;
@@ -108,44 +115,57 @@ export function transportPage() {
   </header>
   <main>
     <div class="toolbar">
-      <button class="primary" id="start-jack" type="button">Start Macro Playback</button>
-      <button id="start-timer" type="button">Start Timer Fallback</button>
-      <button id="reanchor" type="button">Re-anchor Macro Playback</button>
-      <button id="advance" type="button">Advance now</button>
-      <button id="reset" type="button">Reset to A</button>
-      <button id="jack-start" type="button">Start JACK Transport</button>
-      <button id="jack-stop" type="button">Stop JACK Transport</button>
-      <button id="jack-locate" type="button">Locate JACK 0</button>
+      <button class="primary" id="play" type="button">Play</button>
       <button class="danger" id="stop" type="button">Stop</button>
+      <button id="reset" type="button">Return to A</button>
+      <button id="advance" type="button">Next Section</button>
+      <button id="reanchor" type="button">Re-sync</button>
     </div>
+    <details class="toolbar-details">
+      <summary>Diagnostics controls</summary>
+      <div class="toolbar">
+        <button id="start-jack" type="button">Start Beat-Derived Playback</button>
+        <button id="start-timer" type="button">Start Internal Clock</button>
+        <button id="jack-start" type="button">Start JACK Transport</button>
+        <button id="jack-stop" type="button">Stop JACK Transport</button>
+        <button id="jack-locate" type="button">Locate JACK 0</button>
+      </div>
+    </details>
     <section>
+      <h2>Transport</h2>
+      <div class="grid">
+        <div class="metric"><div class="label">State</div><div class="value" id="macro-mode">-</div></div>
+        <div class="metric"><div class="label">Section</div><div class="value" id="active-block">-</div></div>
+        <div class="metric"><div class="label">Next Section In</div><div class="value" id="beats-remaining">-</div></div>
+        <div class="metric"><div class="label">Bridge</div><div class="value" id="bridge-status">-</div><div class="detail" id="bridge-detail"></div></div>
+        <div class="metric"><div class="label">Sync Source</div><div class="value small" id="beat-witness">-</div><div class="detail" id="beat-witness-detail"></div></div>
+        <div class="metric"><div class="label">BPM</div><div class="value" id="bpm">-</div></div>
+      </div>
+    </section>
+    <details class="toolbar-details">
+      <summary>Transport diagnostics</summary>
+      <section>
       <h2>JACK</h2>
       <div class="grid">
-        <div class="metric"><div class="label">Bridge</div><div class="value" id="bridge-status">-</div><div class="detail" id="bridge-detail"></div></div>
-        <div class="metric"><div class="label">State</div><div class="value" id="jack-state">-</div></div>
-        <div class="metric"><div class="label">BPM</div><div class="value" id="bpm">-</div></div>
+        <div class="metric"><div class="label">JACK State</div><div class="value" id="jack-state">-</div></div>
         <div class="metric"><div class="label">Absolute Beat</div><div class="value" id="absolute-beat">-</div></div>
         <div class="metric"><div class="label">BBT</div><div class="value small" id="bbt">-</div></div>
         <div class="metric"><div class="label">Tempo Authority</div><div class="value" id="tempo-authority">-</div></div>
       </div>
-    </section>
-    <section>
-      <h2>Macro Playback</h2>
+      </section>
+      <section>
+      <h2>Song Form</h2>
       <div class="grid">
-        <div class="metric"><div class="label">Mode</div><div class="value" id="macro-mode">-</div></div>
-        <div class="metric"><div class="label">Beat Witness</div><div class="value small" id="beat-witness">-</div><div class="detail" id="beat-witness-detail"></div></div>
-        <div class="metric"><div class="label">Active Block</div><div class="value" id="active-block">-</div></div>
         <div class="metric"><div class="label">Macro Index</div><div class="value" id="macro-index">-</div></div>
         <div class="metric"><div class="label">Composition Beat</div><div class="value" id="composition-beat">-</div></div>
         <div class="metric"><div class="label">Beat In Block</div><div class="value" id="beat-into-block">-</div></div>
         <div class="metric"><div class="label">Block Start Beat</div><div class="value" id="block-start">-</div></div>
         <div class="metric"><div class="label">Next Block Beat</div><div class="value" id="block-end">-</div></div>
         <div class="metric"><div class="label">Macro Anchor</div><div class="value small" id="macro-anchor">-</div></div>
-        <div class="metric"><div class="label">Beats Remaining</div><div class="value" id="beats-remaining">-</div></div>
         <div class="metric"><div class="label">Phase Reset</div><div class="value small" id="phase-reset">-</div></div>
       </div>
-    </section>
-    <section>
+      </section>
+      <section>
       <h2>Timing Contract</h2>
       <div class="grid">
         <div class="metric"><div class="label">Target</div><div class="value small" id="contract-target">-</div></div>
@@ -153,7 +173,8 @@ export function transportPage() {
         <div class="metric"><div class="label">Stages / Beat</div><div class="value" id="stages-per-beat">-</div></div>
         <div class="metric"><div class="label">Ticks / Stage</div><div class="value" id="ticks-per-stage">-</div></div>
       </div>
-    </section>
+      </section>
+    </details>
     <section>
       <h2>Events</h2>
       <div class="log" id="log"></div>
@@ -163,6 +184,7 @@ export function transportPage() {
     const fields = Object.fromEntries(Array.from(document.querySelectorAll("[id]")).map((el) => [el.id, el]));
     let lastTransport = null;
 
+    fields.play.addEventListener("click", () => startPlayback("auto"));
     fields["start-jack"].addEventListener("click", () => startPlayback("jack"));
     fields["start-timer"].addEventListener("click", () => startPlayback("timer"));
     fields.reanchor.addEventListener("click", () => startPlayback("jack", { phaseReset: true }));
@@ -249,7 +271,7 @@ export function transportPage() {
     }
 
     function renderPlayback(playback) {
-      fields["macro-mode"].textContent = playback.running ? playback.mode : "stopped";
+      fields["macro-mode"].textContent = playback.running ? "playing" : "stopped";
       fields["beat-witness"].textContent = witnessLabel(playback.witness);
       fields["beat-witness"].className = "value small " + (playback.witness?.usable ? "ok" : playback.witness?.degraded ? "warn" : "bad");
       fields["beat-witness-detail"].textContent = witnessDetail(playback.witness);
@@ -260,7 +282,9 @@ export function transportPage() {
       fields["block-start"].textContent = formatNumber(playback.activeBlockStartBeat, 3);
       fields["block-end"].textContent = formatNumber(playback.activeBlockEndBeat, 3);
       fields["macro-anchor"].textContent = macroAnchorLabel(playback);
-      fields["beats-remaining"].textContent = formatNumber(playback.beatsRemaining, 3);
+      fields["beats-remaining"].textContent = playback.running && Number.isFinite(playback.beatsRemaining)
+        ? formatNumber(playback.beatsRemaining, 2) + " beats"
+        : "-";
       fields["phase-reset"].textContent = playback.phaseAlignment?.pending ? "pending" : phaseAlignmentLabel(playback.phaseAlignment?.last);
     }
 

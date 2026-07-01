@@ -457,6 +457,63 @@ test("macro playback routes expose, start, and stop the chain runner", async () 
   ]);
 });
 
+test("macro playback start auto mode uses internal clock without a beat witness", async () => {
+  let startOptions = null;
+  const context = createRouteContext({
+    runtime: {
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          mode: startOptions?.mode ?? "stopped",
+          activeBlockId: "A",
+          macroIndex: 0
+        }),
+        start: (options) => {
+          startOptions = options;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  const started = await requestJson(context, "POST", "/macrostructure/playback/start", {});
+
+  assert.equal(started.ok, true);
+  assert.equal(startOptions.mode, "timer");
+  assert.equal(started.playback.mode, "timer");
+});
+
+test("macro playback start auto mode uses beat-derived playback with a fresh JACK witness", async () => {
+  let now = 1000;
+  let startOptions = null;
+  const jackTransport = createJackTransportState(defaultConfig, { now: () => now });
+  const context = createRouteContext({
+    runtime: {
+      jackTransport,
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          mode: startOptions?.mode ?? "stopped",
+          activeBlockId: "A",
+          macroIndex: 0
+        }),
+        start: (options) => {
+          startOptions = options;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 8 }));
+  now = 1050;
+  const started = await requestJson(context, "POST", "/macrostructure/playback/start", { mode: "auto" });
+
+  assert.equal(started.ok, true);
+  assert.equal(startOptions.mode, "jack");
+  assert.equal(started.playback.mode, "jack");
+});
+
 test("macro playback route reports RNBO client readback as beat witness", async () => {
   const writes = [];
   const context = createRouteContext({
@@ -1581,8 +1638,8 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /ShadowScore Structure Editor/);
   assert.match(response.body, /Block Assignments/);
   assert.match(response.body, /Assigned Clip/);
-  assert.match(response.body, /Playback Chain/);
-  assert.match(response.body, /Set Playing/);
+  assert.match(response.body, /Song Form/);
+  assert.match(response.body, /Cue Section/);
   assert.match(response.body, /id="block-list"/);
   assert.match(response.body, /id="players"/);
   assert.match(response.body, /id="chain"/);

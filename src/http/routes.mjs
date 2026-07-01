@@ -3,6 +3,7 @@ import { serveStaticAsset } from "./static-files.mjs";
 import { transportPage } from "./transport-page.mjs";
 import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
 import { configuredRnboTargets, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
+import { selectBeatWitness } from "../playback/beat-witness.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
@@ -496,8 +497,9 @@ export async function routeRequest(request, response, store, config, runtime = {
           targetId: optionalString(body.targetId)
         })
         : [];
+      const mode = await playbackStartMode(store.getScore(), config, runtime, optionalString(body.mode));
       playback.start({
-        mode: optionalString(body.mode),
+        mode,
         reset: Boolean(body.reset),
         sourceClientId: "http"
       });
@@ -912,6 +914,22 @@ async function readBeatWitnessContext(score, config, runtime) {
     rnboTargets,
     timingContracts
   };
+}
+
+async function playbackStartMode(score, config, runtime, requestedMode) {
+  if (requestedMode === "jack" || requestedMode === "timer") {
+    return requestedMode;
+  }
+  const context = await readBeatWitnessContext(score, config, runtime);
+  const witness = selectBeatWitness({
+    mode: "jack",
+    running: true,
+    jackTransport: jackTransportSnapshot(runtime),
+    rnboTargets: context.rnboTargets,
+    timingContracts: context.timingContracts,
+    rnboClient: config.transport?.rnboClient
+  });
+  return witness.usable ? "jack" : "timer";
 }
 
 function summarizeRnboSendResult(result) {

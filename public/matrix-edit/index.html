@@ -44,7 +44,7 @@
         <input id="bridge" value="http://127.0.0.1:8790" aria-label="RNBO OSC bridge" />
         <button id="refresh" type="button">Refresh</button>
         <button id="sync" type="button">Sync</button>
-        <button id="start-transport" type="button">Start</button>
+        <button id="start-transport" type="button">Play</button>
         <button id="stop-transport" type="button">Stop</button>
         <span id="stage-status" class="stage-status"></span>
       </div>
@@ -66,7 +66,7 @@
           <strong id="editing-clip">No clip</strong>
         </div>
         <div>
-          <span>Playback</span>
+          <span>Transport</span>
           <strong id="projection-playback">Refresh required</strong>
         </div>
       </div>
@@ -160,11 +160,11 @@
             const playback = result.playback || {};
             if (status) {
               const block = playback.activeBlockId ? ` at block ${playback.activeBlockId}` : "";
-              status.textContent = `${running ? "Started" : "Stopped"} macro playback${block}.`;
+              status.textContent = `${running ? "Started" : "Stopped"} playback${block}.`;
             }
           } catch (error) {
             if (status) {
-              status.textContent = `Macro playback ${running ? "start" : "stop"} failed: ${error.message}`;
+              status.textContent = `Playback ${running ? "start" : "stop"} failed: ${error.message}`;
             }
           } finally {
             start.disabled = false;

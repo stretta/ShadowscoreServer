@@ -176,6 +176,7 @@ export function adminPage() {
             <button id="download-backup" type="button">Download backup</button>
             <button id="restore-backup" type="button">Restore backup</button>
             <button id="import-legacy-notes" type="button">Import voice notes to clips</button>
+            <button id="resend-rnbo" type="button">Resend RNBO score</button>
             <input id="restore-file" type="file" accept="application/json,.json" hidden>
           </div>
           <div class="hint" id="session-hint"></div>
@@ -242,13 +243,14 @@ export function adminPage() {
     let hardwareUnits = [];
 
     document.querySelector("#refresh").addEventListener("click", loadSession);
-    document.querySelector("#clear-notes").addEventListener("click", () => resetScore({ voices: true }, "Clear all notes?"));
+    document.querySelector("#clear-notes").addEventListener("click", () => resetScore({ notes: true }, "Clear all notes?"));
     document.querySelector("#clear-assignments").addEventListener("click", () => resetScore({ assignments: true }, "Clear all voice assignments?"));
     document.querySelector("#copy-url").addEventListener("click", copyShareUrl);
     document.querySelector("#apply-preset").addEventListener("click", applyAssignmentPreset);
     document.querySelector("#download-backup").addEventListener("click", () => { window.location.href = "/admin/backup"; });
     document.querySelector("#restore-backup").addEventListener("click", () => restoreFileEl.click());
     document.querySelector("#import-legacy-notes").addEventListener("click", importLegacyVoiceNotes);
+    document.querySelector("#resend-rnbo").addEventListener("click", resendRnboScore);
     document.querySelector("#add-voice").addEventListener("click", addVoice);
     document.querySelector("#save-score").addEventListener("click", saveScoreToLibrary);
     document.querySelector("#refresh-scores").addEventListener("click", loadSavedScores);
@@ -676,6 +678,16 @@ export function adminPage() {
         return;
       }
       render(score);
+    }
+
+    async function resendRnboScore() {
+      const response = await fetch("/admin/rnbo/resend", { method: "POST" });
+      const body = await response.json();
+      if (body.ok === false) {
+        setStatus(body.error);
+        return;
+      }
+      setStatus("Resent current score to RNBO clients.");
     }
 
     function displayTargetLabel(target) {

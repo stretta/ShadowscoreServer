@@ -20,20 +20,36 @@ export function createRnboOscAdapter(config, runtime = {}) {
 
   const socket = dgram.createSocket("udp4");
   let transactionId = Number(config.rnbo.transactionStart) || 1000;
+  let store;
+  let discoveryTimer;
+  let lastTargetSignature = "";
+  let discoveryCheckPending = false;
 
-  return {
+  const adapter = {
     enabled: true,
-    attach(store) {
+    attach(nextStore) {
+      store = nextStore;
       store.events.on("change", (event) => {
         if (!shouldSendScoreTransaction(event)) {
           return;
         }
-        void sendScoreTransaction(socket, config, event.score, nextTransactionId(), { runtime }).catch((error) => {
+        void resendScore(event.score).catch((error) => {
           console.error(`[rnbo] send failed: ${messageForError(error)}`);
         });
       });
+      startTargetDiscoveryMonitor();
+    },
+    resendCurrentScore(reason = "manual") {
+      if (!store) {
+        return Promise.reject(new Error("RNBO adapter is not attached to a score store"));
+      }
+      return resendScore(store.getScore(), reason);
     },
     close() {
+      if (discoveryTimer) {
+        clearInterval(discoveryTimer);
+        discoveryTimer = undefined;
+      }
       try {
         socket.close();
       } catch {
@@ -41,10 +57,52 @@ export function createRnboOscAdapter(config, runtime = {}) {
       }
     }
   };
+  return adapter;
 
   function nextTransactionId() {
     transactionId += 1;
     return transactionId;
+  }
+
+  async function resendScore(score, reason = "") {
+    const result = await sendScoreTransaction(socket, config, score, nextTransactionId(), { runtime });
+    if (reason && config.rnbo.log !== false) {
+      console.log(`[rnbo] resend reason=${reason}`);
+    }
+    return result;
+  }
+
+  function startTargetDiscoveryMonitor() {
+    const intervalMs = Number(config.rnbo.discoveryResendIntervalMs ?? 5000);
+    if (!Number.isFinite(intervalMs) || intervalMs <= 0 || discoveryTimer) {
+      return;
+    }
+    void checkTargetDiscovery();
+    discoveryTimer = setInterval(() => {
+      void checkTargetDiscovery();
+    }, intervalMs);
+    discoveryTimer.unref?.();
+  }
+
+  async function checkTargetDiscovery() {
+    if (!store || discoveryCheckPending) {
+      return;
+    }
+    discoveryCheckPending = true;
+    try {
+      const liveTargets = await readLiveRnboTargets(config, runtime);
+      const signature = rnboTargetSignature(liveTargets);
+      if (signature && signature !== lastTargetSignature) {
+        lastTargetSignature = signature;
+        await resendScore(store.getScore(), "target-discovery");
+      } else {
+        lastTargetSignature = signature;
+      }
+    } catch (error) {
+      console.error(`[rnbo] target discovery resend check failed: ${messageForError(error)}`);
+    } finally {
+      discoveryCheckPending = false;
+    }
   }
 }
 
@@ -88,6 +146,25 @@ async function readLiveRnboTargets(config, runtime = {}) {
   return [...localTargets, ...peerTargets];
 }
 
+export function rnboTargetSignature(targets = []) {
+  return targets
+    .map((target) => [
+      target.id ?? "",
+      target.localId ?? "",
+      target.instanceId ?? "",
+      target.host ?? "",
+      target.port ?? "",
+      target.address ?? "",
+      target.messagePath ?? "",
+      target.available === false ? "offline" : "online",
+      target.capabilities?.maxStages ?? "",
+      target.capabilities?.maxNoteRows ?? "",
+      target.capabilities?.noteDataFloatCount ?? ""
+    ].join("\u001f"))
+    .sort()
+    .join("\u001e");
+}
+
 export function scoreTransportInportMessages(config, compiled) {
   const transport = config.rnbo?.transport ?? {};
   const messages = [
@@ -118,7 +195,7 @@ export function shouldSendScoreTransaction(event) {
     event.type === "voice.notes.replaced" ||
     event.type === "voice.assignment.replaced" ||
     event.type === "admin.legacyVoiceNotes.imported" ||
-    (event.type === "admin.reset" && (event.detail?.context || event.detail?.voices || event.detail?.assignments || event.detail?.structure))
+    (event.type === "admin.reset" && (event.detail?.context || event.detail?.voices || event.detail?.assignments || event.detail?.structure || event.detail?.notes))
   );
 }
 

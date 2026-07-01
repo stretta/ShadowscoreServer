@@ -29,7 +29,7 @@ const macroPlayback = createMacroPlayback(store, config, {
 rnbo.attach(store);
 
 const server = http.createServer((request, response) => {
-  routeRequest(request, response, store, config, { jackTransport, macroPlayback, peerRegistry }).catch((error) => {
+  routeRequest(request, response, store, config, { jackTransport, macroPlayback, peerRegistry, rnboAdapter: rnbo }).catch((error) => {
     response.writeHead(500, { "Content-Type": "application/json" });
     response.end(JSON.stringify({ ok: false, error: error.message }));
   });

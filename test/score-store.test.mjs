@@ -336,11 +336,13 @@ test("admin reset can clear notes and assignments without changing context", () 
   store.updateContext({ scale: { scale_name: "Aeolian" } });
   store.replaceVoiceAssignment("player-1", { assignee: "Ari" });
   store.replaceVoiceNotes("player-1", [{ pitch: 60 }]);
+  store.replaceClip("a-player-1", { notes: [{ pitch: 67 }] });
 
-  const reset = store.reset({ voices: true, assignments: true });
+  const reset = store.reset({ notes: true, assignments: true });
 
   assert.equal(reset.context.scale.scale_name, "Aeolian");
   assert.deepEqual(reset.voices["player-1"].notes, []);
+  assert.deepEqual(reset.clips["a-player-1"].notes, []);
   assert.equal(reset.voices["player-1"].version, 2);
   assert.equal(reset.assignments["player-1"].assignee, "");
   assert.equal(reset.assignments["player-1"].label, "Player 1");

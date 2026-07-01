@@ -205,7 +205,8 @@ export async function routeRequest(request, response, store, config, runtime = {
         context: Boolean(body.context),
         voices: Boolean(body.voices),
         assignments: Boolean(body.assignments),
-        structure: Boolean(body.structure)
+        structure: Boolean(body.structure),
+        notes: Boolean(body.notes)
       }));
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
@@ -245,6 +246,20 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/admin/scores/new") {
     try {
       writeJson(response, 200, store.createNewScore());
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/rnbo/resend") {
+    try {
+      const rnboAdapter = runtime.rnboAdapter;
+      if (!rnboAdapter?.enabled || typeof rnboAdapter.resendCurrentScore !== "function") {
+        throw new Error("RNBO adapter is not available");
+      }
+      const result = await rnboAdapter.resendCurrentScore("admin");
+      writeJson(response, 200, { ok: true, result: summarizeRnboSendResult(result) });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -420,6 +435,24 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/macrostructure/phase-reset") {
+    try {
+      const body = await readJson(request);
+      const phaseWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 }, {
+        targetId: optionalString(body.targetId)
+      });
+      writeJson(response, 200, {
+        ok: true,
+        action: "SetStage",
+        value: 0,
+        phaseWrites
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/macrostructure/playback/start") {
     try {
       const body = await readJson(request);
@@ -427,9 +460,15 @@ export async function routeRequest(request, response, store, config, runtime = {
       const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 1 }, {
         targetId: optionalString(body.targetId)
       });
+      const phaseWrites = body.phaseReset
+        ? await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 }, {
+          targetId: optionalString(body.targetId)
+        })
+        : [];
       writeJson(response, 200, {
         ok: true,
         clockWrites,
+        phaseWrites,
         playback: playback.start({
           mode: optionalString(body.mode),
           reset: Boolean(body.reset),
@@ -805,6 +844,26 @@ function macroPlaybackSnapshot(runtime, store) {
       pending: false,
       last: null
     }
+  };
+}
+
+function summarizeRnboSendResult(result) {
+  if (Array.isArray(result?.targets)) {
+    return {
+      targets: result.targets.map(({ target, compiled }) => summarizeCompiledTarget(target, compiled))
+    };
+  }
+  return summarizeCompiledTarget(undefined, result);
+}
+
+function summarizeCompiledTarget(target, compiled = {}) {
+  return {
+    targetId: target?.id ?? "",
+    voiceId: target?.voiceId ?? "",
+    noteCount: compiled.noteCount ?? 0,
+    transmittedRowCount: compiled.transmittedRowCount ?? 0,
+    patternLength: compiled.patternLength ?? 0,
+    stagesPerBeat: compiled.stagesPerBeat ?? compiled.timing?.stagesPerBeat ?? 0
   };
 }
 

@@ -173,7 +173,7 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /voices/:voiceId/assignment`: assign a voice to a player, device, or client.
 - `DELETE /voices/:voiceId/assignment`: clear one voice assignment.
 - `POST /voices/:voiceId/notes`: replace a voice's ShadowScore notes document.
-- `POST /admin/reset`: clear selected score sections with a JSON body containing `context`, `voices`, `assignments`, and/or `structure` booleans.
+- `POST /admin/reset`: clear selected score sections with a JSON body containing `context`, `notes`, `voices`, `assignments`, and/or `structure` booleans.
 - `GET /admin/scores`: list named score JSON files saved on the host.
 - `POST /admin/scores`: save the current score to the host score library with an optional `{ "name": "..." }`.
 - `POST /admin/scores/new`: replace the current score with a fresh score from the configured ensemble defaults.
@@ -213,7 +213,7 @@ Client command messages are JSON objects:
 - `voice.notes.replace`: replace one voice with `voiceId`, `notes` or `document`, and optional `expectedVoiceVersion`.
 - `voice.assignment.replace`: replace assignment metadata with `voiceId` and `assignment`.
 - `voice.assignment.clear`: clear one assignment with `voiceId`.
-- `admin.reset`: clear selected sections with `context`, `voices`, `assignments`, and/or `structure`.
+- `admin.reset`: clear selected sections with `context`, `notes`, `voices`, `assignments`, and/or `structure`.
 - `admin.importLegacyVoiceNotes`: copy legacy voice notes into clips and assign them into a mesostructural block.
 
 Successful write commands receive an `ack` with the updated score. Stale guarded

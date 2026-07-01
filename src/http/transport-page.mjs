@@ -158,10 +158,10 @@ export function transportPage() {
 
     fields["start-jack"].addEventListener("click", () => startPlayback("jack"));
     fields["start-timer"].addEventListener("click", () => startPlayback("timer"));
-    fields.reanchor.addEventListener("click", () => startPlayback("jack"));
+    fields.reanchor.addEventListener("click", () => startPlayback("jack", { phaseReset: true }));
     fields.stop.addEventListener("click", stopPlayback);
     fields.advance.addEventListener("click", () => postJson("/macrostructure/advance", {}));
-    fields.reset.addEventListener("click", () => postJson("/macrostructure/reset", {}));
+    fields.reset.addEventListener("click", resetToA);
 
     refreshAll();
     setInterval(refreshAll, 1000);
@@ -192,13 +192,19 @@ export function transportPage() {
       }
     }
 
-    async function startPlayback(mode) {
-      await postJson("/macrostructure/playback/start", { mode });
+    async function startPlayback(mode, options = {}) {
+      await postJson("/macrostructure/playback/start", { mode, ...options });
       await refreshAll();
     }
 
     async function stopPlayback() {
       await postJson("/macrostructure/playback/stop", {});
+      await refreshAll();
+    }
+
+    async function resetToA() {
+      await postJson("/macrostructure/reset", {});
+      await postJson("/macrostructure/phase-reset", {});
       await refreshAll();
     }
 

@@ -30,14 +30,16 @@ test("admin reset route clears requested score sections", async () => {
   const context = createRouteContext();
 
   await requestJson(context, "POST", "/voices/player-1/notes", [{ pitch: 60 }]);
+  await requestJson(context, "POST", "/clips/a-player-1", { notes: [{ pitch: 67 }] });
   await requestJson(context, "POST", "/voices/player-1/assignment", { assignee: "Ari" });
 
   const reset = await requestJson(context, "POST", "/admin/reset", {
-    voices: true,
+    notes: true,
     assignments: true
   });
 
   assert.deepEqual(reset.voices["player-1"].notes, []);
+  assert.deepEqual(reset.clips["a-player-1"].notes, []);
   assert.equal(reset.assignments["player-1"].assignee, "");
 });
 
@@ -56,6 +58,39 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /\/admin\/scores\/new/);
   assert.match(response.body, /Import voice notes to clips/);
   assert.match(response.body, /\/admin\/import-legacy-voice-notes/);
+  assert.match(response.body, /Resend RNBO score/);
+  assert.match(response.body, /\/admin\/rnbo\/resend/);
+});
+
+test("admin RNBO resend route asks the adapter to resend the current score", async () => {
+  let reason = "";
+  let version = 0;
+  const context = createRouteContext({
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async resendCurrentScore(nextReason) {
+          reason = nextReason;
+          version = context.store.getScore().version;
+          return { noteCount: 2, patternLength: 64 };
+        }
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/admin/rnbo/resend");
+
+  assert.equal(result.ok, true);
+  assert.equal(reason, "admin");
+  assert.equal(version, context.store.getScore().version);
+  assert.deepEqual(result.result, {
+    targetId: "",
+    voiceId: "",
+    noteCount: 2,
+    transmittedRowCount: 0,
+    patternLength: 64,
+    stagesPerBeat: 0
+  });
 });
 
 test("session route exposes host metadata and voice assignments", async () => {
@@ -343,6 +378,7 @@ test("macro playback routes expose, start, and stop the chain runner", async () 
       value: 1
     }
   ]);
+  assert.deepEqual(started.phaseWrites, []);
 
   const stopped = await requestJson(context, "POST", "/macrostructure/playback/stop", {});
   assert.equal(stopped.ok, true);
@@ -358,6 +394,134 @@ test("macro playback routes expose, start, and stop the chain runner", async () 
       host: "192.168.68.96",
       port: 9000,
       path: "/rnbo/inst/2/params/Clock",
+      targetId: "source-client",
+      value: 0
+    }
+  ]);
+});
+
+test("macro phase reset writes SetStage to available RNBO targets", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          },
+          {
+            id: "other-client",
+            host: "192.168.68.97",
+            port: 9001,
+            address: "/rnbo/inst/3/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/macrostructure/phase-reset", {});
+
+  assert.equal(result.ok, true);
+  assert.equal(result.action, "SetStage");
+  assert.equal(result.value, 0);
+  assert.deepEqual(writes, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/messages/in/SetStage",
+      value: 0
+    },
+    {
+      host: "192.168.68.97",
+      port: 9001,
+      path: "/rnbo/inst/3/messages/in/SetStage",
+      value: 0
+    }
+  ]);
+  assert.deepEqual(result.phaseWrites, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/messages/in/SetStage",
+      targetId: "source-client",
+      value: 0
+    },
+    {
+      host: "192.168.68.97",
+      port: 9001,
+      path: "/rnbo/inst/3/messages/in/SetStage",
+      targetId: "other-client",
+      value: 0
+    }
+  ]);
+});
+
+test("macro playback start can include an immediate phase reset", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          activeBlockId: "A",
+          macroIndex: 0,
+          nextAdvanceAt: 1000,
+          currentBlockDurationMs: 16000
+        }),
+        start: () => context.runtime.macroPlayback.snapshot()
+      }
+    }
+  });
+
+  const started = await requestJson(context, "POST", "/macrostructure/playback/start", {
+    mode: "jack",
+    phaseReset: true
+  });
+
+  assert.equal(started.ok, true);
+  assert.deepEqual(writes, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Clock",
+      value: 1
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/messages/in/SetStage",
+      value: 0
+    }
+  ]);
+  assert.deepEqual(started.phaseWrites, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/messages/in/SetStage",
       targetId: "source-client",
       value: 0
     }

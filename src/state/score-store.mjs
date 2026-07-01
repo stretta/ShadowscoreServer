@@ -407,16 +407,17 @@ export function createScoreStore(initialScore, options = {}) {
       return structuredClone(score);
     },
     reset(options = {}) {
-      if (!options.context && !options.voices && !options.assignments && !options.structure) {
-        throw new Error("reset must include at least one of context, voices, assignments, or structure");
+      if (!options.context && !options.voices && !options.assignments && !options.structure && !options.notes) {
+        throw new Error("reset must include at least one of context, voices, assignments, structure, or notes");
       }
-      const voices = options.voices ? resetVoices(score.voices) : score.voices;
+      const voices = options.voices || options.notes ? resetVoices(score.voices) : score.voices;
       const assignments = options.assignments ? resetAssignments(score.voices, assignmentDefaults) : ensureAssignments(score, assignmentDefaults);
+      const seededClips = options.structure ? createDefaultClips(Object.keys(voices)) : score.clips;
       score = {
         ...score,
         version: score.version + 1,
         context: options.context ? createDefaultContext() : score.context,
-        clips: options.structure ? createDefaultClips(Object.keys(voices)) : score.clips,
+        clips: options.notes ? resetClipNotes(seededClips) : seededClips,
         mesostructure: options.structure ? createDefaultMesostructure(Object.keys(voices)) : score.mesostructure,
         macrostructure: options.structure ? createDefaultMacrostructure() : score.macrostructure,
         structureState: options.structure ? createDefaultStructureState() : score.structureState,
@@ -427,7 +428,8 @@ export function createScoreStore(initialScore, options = {}) {
         context: Boolean(options.context),
         voices: Boolean(options.voices),
         assignments: Boolean(options.assignments),
-        structure: Boolean(options.structure)
+        structure: Boolean(options.structure),
+        notes: Boolean(options.notes)
       }, options);
       return structuredClone(score);
     },
@@ -838,6 +840,18 @@ function resetVoices(voices) {
       voiceId,
       {
         version: voice.version + 1,
+        notes: []
+      }
+    ])
+  );
+}
+
+function resetClipNotes(clips) {
+  return Object.fromEntries(
+    Object.entries(clips).map(([clipId, clip]) => [
+      clipId,
+      {
+        ...clip,
         notes: []
       }
     ])

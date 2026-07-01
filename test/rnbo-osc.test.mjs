@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { compileScoreTransaction, compileTimingContract, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority } from "../src/adapters/rnbo-osc.mjs";
+import { compileScoreTransaction, compileTimingContract, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority } from "../src/adapters/rnbo-osc.mjs";
 
 test("compiles ensemble score into RNBO ShadowScore transaction messages", () => {
   const config = mergeConfig(defaultConfig, {
@@ -31,6 +31,33 @@ test("compiles ensemble score into RNBO ShadowScore transaction messages", () =>
   assert.deepEqual(compiled.messages[1].values, [20, 123, 0, 10, 60, 0, 4, 100, 0, 10000, 0, 64]);
   assert.deepEqual(compiled.messages[2].values, [20, 123, 1, 20, 64, 8, 8, 90, 0, 7500, 2, 50]);
   assert.deepEqual(compiled.messages[3].values, [90, 123, 2, 0]);
+});
+
+test("RNBO target signature is stable across ordering and changes on reload-sensitive fields", () => {
+  const a = {
+    id: "rnbo-inst-5:shadowscore",
+    instanceId: "5",
+    host: "127.0.0.1",
+    port: 1234,
+    address: "/rnbo/inst/5/messages/in/shadowscore",
+    capabilities: {
+      maxStages: 4096,
+      maxNoteRows: 819,
+      noteDataFloatCount: 8192
+    }
+  };
+  const b = {
+    id: "peer:rnbo-inst-2:shadowscore",
+    localId: "rnbo-inst-2:shadowscore",
+    instanceId: "2",
+    host: "192.168.68.88",
+    port: 1234,
+    address: "/rnbo/inst/2/messages/in/shadowscore"
+  };
+
+  assert.equal(rnboTargetSignature([a, b]), rnboTargetSignature([b, a]));
+  assert.notEqual(rnboTargetSignature([a]), rnboTargetSignature([{ ...a, instanceId: "6", address: "/rnbo/inst/6/messages/in/shadowscore" }]));
+  assert.notEqual(rnboTargetSignature([a]), rnboTargetSignature([{ ...a, available: false }]));
 });
 
 test("builds a fixed timing contract from config and target capabilities", () => {
@@ -737,6 +764,7 @@ test("RNBO adapter resends score transactions when assignments change", () => {
   assert.equal(shouldSendScoreTransaction({ type: "admin.legacyVoiceNotes.imported", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { assignments: true } }), true);
   assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { voices: true } }), true);
+  assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { notes: true } }), true);
   assert.equal(shouldSendScoreTransaction({ type: "voice.notes.replaced", detail: {} }), true);
 });
 

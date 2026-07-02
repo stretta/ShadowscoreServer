@@ -1148,7 +1148,7 @@ test("playback timing contract route exposes target-specific compiled contracts"
       quantizationError: null
     },
     noteCount: 4,
-    transmittedRowCount: 64
+    transmittedRowCount: 819
   });
 });
 

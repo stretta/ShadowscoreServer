@@ -449,7 +449,7 @@ test("clip bar duration uses the clip time signature when looped in a block", ()
   assert.deepEqual(compiled.messages.slice(1, 3).map((message) => message.values[5]), [0, 48]);
 });
 
-test("pads clear rows so RNBO playback lookup overwrites stale note rows", () => {
+test("pads clear rows to the target row capacity so RNBO playback lookup overwrites stale note rows", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
       stagesPerBeat: 16,
@@ -460,15 +460,19 @@ test("pads clear rows so RNBO playback lookup overwrites stale note rows", () =>
   score.voices["player-1"].notes = [];
   score.voices["player-2"].notes = [];
 
-  const compiled = compileScoreTransaction(score, config, 901);
+  const compiled = compileScoreTransaction(score, config, 901, {
+    capabilities: {
+      maxNoteRows: 819
+    }
+  });
 
   assert.equal(compiled.noteCount, 0);
-  assert.equal(compiled.transmittedRowCount, 64);
-  assert.equal(compiled.messages.length, 66);
-  assert.deepEqual(compiled.messages[0].values, [1, 901, 1, 64, 32, 16, 0]);
+  assert.equal(compiled.transmittedRowCount, 819);
+  assert.equal(compiled.messages.length, 821);
+  assert.deepEqual(compiled.messages[0].values, [1, 901, 1, 819, 32, 16, 0]);
   assert.deepEqual(compiled.messages[1].values, [20, 901, 0, 0, 0, 0, 1, 0, 1, 0, 0, 64]);
-  assert.deepEqual(compiled.messages[64].values, [20, 901, 63, 0, 0, 0, 1, 0, 1, 0, 0, 64]);
-  assert.deepEqual(compiled.messages[65].values, [90, 901, 64, 0]);
+  assert.deepEqual(compiled.messages[819].values, [20, 901, 818, 0, 0, 0, 1, 0, 1, 0, 0, 64]);
+  assert.deepEqual(compiled.messages[820].values, [90, 901, 819, 0]);
 });
 
 test("sends one OSC packet per compiled transaction message", async () => {

@@ -241,7 +241,10 @@ export function compileScoreTransaction(score, config, transactionId, target = r
   const { patternLength, stagesPerBeat } = timing;
   const prefix = target.clientId === undefined ? [] : [clampInt(target.clientId, 0, 2147483647)];
 
-  const clearRowCount = clampInt(config.rnbo.clearRowCount ?? 0, 0, 1024);
+  const configuredClearRowCount = clampInt(config.rnbo.clearRowCount ?? 0, 0, 1024);
+  const clearRowCount = configuredClearRowCount > 0
+    ? Math.max(configuredClearRowCount, timing.maxNoteRows)
+    : 0;
   const transmittedRowCount = Math.max(notes.length, clearRowCount);
   const messages = [
     {

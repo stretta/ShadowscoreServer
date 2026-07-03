@@ -172,6 +172,8 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
   return {
     ensembleId: config.ensemble.id,
     version: persistedScore.version,
+    scoreRevision: Number.isFinite(persistedScore.scoreRevision) ? persistedScore.scoreRevision : persistedScore.version,
+    structureRevision: Number.isFinite(persistedScore.structureRevision) ? persistedScore.structureRevision : 0,
     context: structuredClone(persistedScore.context),
     clips: normalizePersistedClips(persistedScore.clips ?? fallbackScore.clips ?? {}),
     mesostructure: structuredClone(persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}),
@@ -191,6 +193,12 @@ export function assertScoreShape(score) {
   }
   if (!Number.isFinite(score.version)) {
     throw new Error("score.version must be numeric");
+  }
+  if (score.scoreRevision !== undefined && !Number.isFinite(score.scoreRevision)) {
+    throw new Error("score.scoreRevision must be numeric");
+  }
+  if (score.structureRevision !== undefined && !Number.isFinite(score.structureRevision)) {
+    throw new Error("score.structureRevision must be numeric");
   }
   if (!isPlainObject(score.context)) {
     throw new Error("score.context must be an object");

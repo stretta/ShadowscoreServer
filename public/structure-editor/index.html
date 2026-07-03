@@ -452,6 +452,7 @@
       macroPlayback: undefined,
       macroPlaybackTimer: undefined,
       blockDirty: false,
+      blockDraft: undefined,
       macroDirty: false,
       saving: false
     };
@@ -506,6 +507,7 @@
       els.deleteBlock.addEventListener("click", deleteBlock);
       els.revertBlock.addEventListener("click", () => {
         state.blockDirty = false;
+        state.blockDraft = undefined;
         renderBlockEditor();
       });
       els.saveBlock.addEventListener("click", saveBlock);
@@ -527,12 +529,10 @@
       els.stopMacro.addEventListener("click", stopMacroPlayback);
       [els.blockId, els.durationUnit, els.durationValue, els.scaleRoot, els.scaleName].forEach((el) => {
         el.addEventListener("input", () => {
-          state.blockDirty = true;
-          updateButtons();
+          markBlockDirty();
         });
         el.addEventListener("change", () => {
-          state.blockDirty = true;
-          updateButtons();
+          markBlockDirty();
         });
       });
       els.tempo.addEventListener("input", () => {
@@ -624,7 +624,7 @@
       if (!payload.score) {
         return;
       }
-      state.score = payload.score;
+      state.score = scoreWithLocalDrafts(payload.score);
       if (state.macroPlayback?.running) {
         state.macroPlayback = {
           ...state.macroPlayback,
@@ -636,6 +636,7 @@
       if (!state.score.mesostructure?.[state.selectedBlockId]) {
         state.selectedBlockId = firstBlockId();
         state.blockDirty = false;
+        state.blockDraft = undefined;
       }
       if (!state.blockDirty && !state.macroDirty && !state.saving) {
         renderAll();
@@ -731,8 +732,7 @@
             await createClipForSlot(input, voice.id);
             return;
           }
-          state.blockDirty = true;
-          updateButtons();
+          markBlockDirty();
         });
         clip.append(input);
         row.append(label, clip);
@@ -868,6 +868,7 @@
       }
       state.selectedBlockId = blockId;
       state.blockDirty = false;
+      state.blockDraft = undefined;
       renderBlockList();
       renderBlockEditor();
     }
@@ -893,6 +894,7 @@
       };
       state.selectedBlockId = id;
       state.blockDirty = true;
+      state.blockDraft = state.score.mesostructure[id];
       renderAll();
     }
 
@@ -909,6 +911,7 @@
         });
         state.selectedBlockId = firstBlockId();
         state.blockDirty = false;
+        state.blockDraft = undefined;
         state.macroDirty = false;
         renderAll();
         setStatus(`Removed ${blockId}.`);
@@ -953,6 +956,7 @@
         state.score = score;
         state.selectedBlockId = nextId;
         state.blockDirty = false;
+        state.blockDraft = undefined;
         state.macroDirty = false;
         renderAll();
         setStatus(`Saved block ${nextId}.`);
@@ -1136,6 +1140,30 @@
       };
     }
 
+    function markBlockDirty() {
+      if (!state.score || !state.selectedBlockId) {
+        return;
+      }
+      state.blockDirty = true;
+      state.blockDraft = blockFromForm();
+      state.score = scoreWithLocalDrafts(state.score);
+      renderBlockList();
+      updateButtons();
+    }
+
+    function scoreWithLocalDrafts(score) {
+      if (!score || !state.blockDirty || !state.selectedBlockId || !state.blockDraft) {
+        return score;
+      }
+      return {
+        ...score,
+        mesostructure: {
+          ...(score.mesostructure ?? {}),
+          [state.selectedBlockId]: state.blockDraft
+        }
+      };
+    }
+
     function clipSelectForVoice(voiceId, selectedClipId) {
       const select = document.createElement("select");
       select.dataset.voiceId = voiceId;
@@ -1183,6 +1211,7 @@
           body: defaultClipDocument()
         });
         state.blockDirty = true;
+        state.score = scoreWithLocalDrafts(state.score);
         renderBlockList();
         renderMacroEditor();
         renderBlockEditor();
@@ -1190,6 +1219,8 @@
         if (refreshed) {
           refreshed.value = clipId;
         }
+        state.blockDraft = blockFromForm();
+        state.score = scoreWithLocalDrafts(state.score);
         await saveBlock();
       } catch (error) {
         select.value = currentBlock()?.players?.[voiceId]?.clipId ?? "";

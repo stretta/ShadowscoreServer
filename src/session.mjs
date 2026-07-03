@@ -7,6 +7,8 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
   return {
     ensembleId: score.ensembleId,
     scoreVersion: score.version,
+    scoreRevision: score.scoreRevision ?? score.version ?? 0,
+    structureRevision: score.structureRevision ?? 0,
     server: {
       role: config.server?.role ?? "host",
       advertisedName: config.server?.advertisedName ?? "",

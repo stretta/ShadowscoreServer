@@ -99,6 +99,8 @@ test("session route exposes host metadata and voice assignments", async () => {
   const session = await requestJson(context, "GET", "/session");
 
   assert.equal(session.ensembleId, "berklee-b51");
+  assert.equal(session.scoreRevision, 0);
+  assert.equal(session.structureRevision, 0);
   assert.equal(session.server.role, "host");
   assert.equal(session.endpoints.app, "http://127.0.0.1/");
   assert.equal(session.endpoints.collab, "ws://127.0.0.1/collab");
@@ -314,6 +316,8 @@ test("structure routes expose and mutate meso and macro organization", async () 
   const context = createRouteContext();
 
   const initial = await requestJson(context, "GET", "/structure");
+  assert.equal(initial.scoreRevision, 0);
+  assert.equal(initial.structureRevision, 0);
   assert.deepEqual(Object.keys(initial.mesostructure), ["A", "B", "C", "D", "E", "F"]);
   assert.deepEqual(initial.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
   assert.deepEqual(initial.structureState, { activeBlockId: "A", macroIndex: 0 });
@@ -325,17 +329,20 @@ test("structure routes expose and mutate meso and macro organization", async () 
     }
   });
   assert.equal(added.mesostructure.G.duration.bars, 12);
+  assert.equal(added.structureRevision, 1);
 
   const chained = await requestJson(context, "POST", "/macrostructure", {
     expectedVersion: added.version,
     blocks: ["A", "G", "B"]
   });
   assert.deepEqual(chained.macrostructure.blocks, ["A", "G", "B"]);
+  assert.equal(chained.structureRevision, 2);
   assert.equal(chained.macrostructure.expectedVersion, undefined);
 
   const removed = await requestJson(context, "DELETE", "/mesostructure/G");
   assert.equal(removed.mesostructure.G, undefined);
   assert.deepEqual(removed.macrostructure.blocks, ["A", "B"]);
+  assert.equal(removed.structureRevision, 3);
 });
 
 test("structure playhead routes select, advance, and reset active blocks", async () => {

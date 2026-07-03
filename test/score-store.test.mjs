@@ -6,6 +6,8 @@ import { createInitialScore, createScoreStore } from "../src/state/score-store.m
 test("initial score creates configured voices", () => {
   const score = createInitialScore(defaultConfig);
   assert.equal(score.ensembleId, "berklee-b51");
+  assert.equal(score.scoreRevision, 0);
+  assert.equal(score.structureRevision, 0);
   assert.deepEqual(Object.keys(score.voices), defaultConfig.ensemble.voices);
   assert.deepEqual(Object.keys(score.assignments), defaultConfig.ensemble.voices);
   assert.deepEqual(Object.keys(score.mesostructure), ["A", "B", "C", "D", "E", "F"]);
@@ -95,14 +97,20 @@ test("mesostructural blocks can be added, replaced, and removed at runtime", () 
     }
   });
   assert.equal(added.version, 1);
+  assert.equal(added.scoreRevision, 1);
+  assert.equal(added.structureRevision, 1);
   assert.equal(added.mesostructure.G.duration.beats, 24);
   assert.equal(added.mesostructure.G.players["player-1"].clipId, "clip-a");
   assert.equal(added.mesostructure.G.players["player-2"].clipId, "clip-b");
 
   const chained = store.updateMacrostructure({ blocks: ["A", "G", "B"] });
+  assert.equal(chained.scoreRevision, 2);
+  assert.equal(chained.structureRevision, 2);
   assert.deepEqual(chained.macrostructure.blocks, ["A", "G", "B"]);
 
   const removed = store.removeMesoBlock("G");
+  assert.equal(removed.scoreRevision, 3);
+  assert.equal(removed.structureRevision, 3);
   assert.equal(removed.mesostructure.G, undefined);
   assert.deepEqual(removed.macrostructure.blocks, ["A", "B"]);
 });
@@ -115,6 +123,8 @@ test("clips can be added, replaced, renamed, and removed", () => {
     duration: { bars: 1 },
     behavior: { transposeMode: "chromatic" }
   });
+  assert.equal(added.scoreRevision, 1);
+  assert.equal(added.structureRevision, 0);
   assert.equal(added.clips["bass-a"].notes[0].pitch, 48);
   assert.deepEqual(added.clips["bass-a"].duration, { bars: 1 });
   assert.equal(added.clips["bass-a"].playbackType, "looped");
@@ -125,6 +135,8 @@ test("clips can be added, replaced, renamed, and removed", () => {
     duration: { beats: 2 },
     playbackType: "one-shot"
   });
+  assert.equal(replaced.scoreRevision, 2);
+  assert.equal(replaced.structureRevision, 0);
   assert.equal(replaced.clips["bass-a"].notes[0].pitch, 50);
   assert.deepEqual(replaced.clips["bass-a"].duration, { beats: 2 });
   assert.equal(replaced.clips["bass-a"].playbackType, "one-shot");
@@ -136,12 +148,15 @@ test("clips can be added, replaced, renamed, and removed", () => {
   assert.throws(() => store.removeClip("bass-a"), /clip 'bass-a' is assigned in A\/player-1/);
 
   const renamed = store.renameClip("bass-a", "bass-main");
+  assert.equal(renamed.structureRevision, 2);
   assert.equal(renamed.clips["bass-a"], undefined);
   assert.equal(renamed.clips["bass-main"].notes[0].pitch, 50);
   assert.equal(renamed.mesostructure.A.players["player-1"].clipId, "bass-main");
 
   store.replaceMesoBlock("A", { duration: { bars: 8 }, players: {} });
   const removed = store.removeClip("bass-main");
+  assert.equal(removed.scoreRevision, 6);
+  assert.equal(removed.structureRevision, 3);
   assert.equal(removed.clips["bass-main"], undefined);
 });
 
@@ -346,6 +361,18 @@ test("admin reset can clear notes and assignments without changing context", () 
   assert.equal(reset.voices["player-1"].version, 2);
   assert.equal(reset.assignments["player-1"].assignee, "");
   assert.equal(reset.assignments["player-1"].label, "Player 1");
+  assert.equal(reset.structureRevision, 0);
+});
+
+test("admin reset bumps structure revision when structure is reset", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceMesoBlock("G", { duration: { bars: 2 }, players: {} });
+
+  const reset = store.reset({ structure: true });
+
+  assert.equal(reset.scoreRevision, 2);
+  assert.equal(reset.structureRevision, 2);
+  assert.equal(reset.mesostructure.G, undefined);
 });
 
 test("unknown voices are rejected", () => {

@@ -15,6 +15,8 @@ export function createInitialScore(config) {
   return {
     ensembleId: config.ensemble.id,
     version: 0,
+    scoreRevision: 0,
+    structureRevision: 0,
     context: createDefaultContext(),
     clips: createDefaultClips(voiceIds),
     mesostructure: createDefaultMesostructure(voiceIds),
@@ -27,8 +29,8 @@ export function createInitialScore(config) {
 
 export function createScoreStore(initialScore, options = {}) {
   const events = new EventEmitter();
-  const defaultScore = structuredClone(options.defaultScore ?? initialScore);
-  let score = structuredClone(initialScore);
+  const defaultScore = withRevisionDefaults(structuredClone(options.defaultScore ?? initialScore));
+  let score = withRevisionDefaults(structuredClone(initialScore));
   const assignmentDefaults = structuredClone(defaultScore.assignments ?? initialScore.assignments ?? {});
 
   return {
@@ -48,7 +50,7 @@ export function createScoreStore(initialScore, options = {}) {
       });
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score, { structure: true }),
         assignments: {
           ...ensureAssignments(score, assignmentDefaults),
           [id]: assignment
@@ -73,7 +75,7 @@ export function createScoreStore(initialScore, options = {}) {
       delete nextAssignments[voiceId];
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score, { structure: true }),
         assignments: nextAssignments,
         voices: nextVoices
       };
@@ -84,7 +86,7 @@ export function createScoreStore(initialScore, options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         context: options.replace ? structuredClone(nextContext) : deepMerge(score.context, nextContext)
       };
       emitChange(events, "context.updated", score, { context: score.context }, options);
@@ -96,7 +98,7 @@ export function createScoreStore(initialScore, options = {}) {
       const block = normalizeMesoBlock(blockDocument);
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score, { structure: true }),
         mesostructure: {
           ...score.mesostructure,
           [id]: block
@@ -115,7 +117,7 @@ export function createScoreStore(initialScore, options = {}) {
       delete nextMesostructure[id];
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score, { structure: true }),
         mesostructure: nextMesostructure,
         macrostructure: {
           ...score.macrostructure,
@@ -141,7 +143,7 @@ export function createScoreStore(initialScore, options = {}) {
       }
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score, { structure: true }),
         macrostructure,
         structureState: normalizeStructureState(score.structureState, score.mesostructure, macrostructure)
       };
@@ -163,7 +165,7 @@ export function createScoreStore(initialScore, options = {}) {
       );
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         structureState
       };
       emitChange(events, "structure.playhead.updated", score, { structureState }, options);
@@ -180,7 +182,7 @@ export function createScoreStore(initialScore, options = {}) {
       }, score.mesostructure, score.macrostructure);
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         structureState
       };
       emitChange(events, "structure.playhead.updated", score, { structureState }, options);
@@ -191,7 +193,7 @@ export function createScoreStore(initialScore, options = {}) {
       const structureState = normalizeStructureState(createDefaultStructureState(), score.mesostructure, score.macrostructure);
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         structureState
       };
       emitChange(events, "structure.playhead.updated", score, { structureState }, options);
@@ -246,7 +248,7 @@ export function createScoreStore(initialScore, options = {}) {
 
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score, { structure: true }),
         clips: nextClips,
         mesostructure: {
           ...score.mesostructure,
@@ -268,7 +270,7 @@ export function createScoreStore(initialScore, options = {}) {
       const clip = normalizeClipDocument(clipDocument);
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         clips: {
           ...score.clips,
           [id]: clip
@@ -283,7 +285,7 @@ export function createScoreStore(initialScore, options = {}) {
       const clip = normalizeClipDocument(clipDocument);
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         clips: {
           ...score.clips,
           [id]: clip
@@ -309,7 +311,7 @@ export function createScoreStore(initialScore, options = {}) {
       }
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score, { structure: oldId !== newId }),
         clips: nextClips,
         mesostructure: renameClipReferences(score.mesostructure, oldId, newId)
       };
@@ -330,7 +332,7 @@ export function createScoreStore(initialScore, options = {}) {
       delete nextClips[id];
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         clips: nextClips
       };
       emitChange(events, "clip.removed", score, { clipId: id }, options);
@@ -342,7 +344,7 @@ export function createScoreStore(initialScore, options = {}) {
       const assignment = normalizeAssignment(assignmentDocument);
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         assignments: {
           ...ensureAssignments(score),
           [voiceId]: assignment
@@ -357,7 +359,7 @@ export function createScoreStore(initialScore, options = {}) {
       const assignment = createEmptyAssignment(assignmentDefaults[voiceId]);
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         assignments: {
           ...ensureAssignments(score),
           [voiceId]: assignment
@@ -381,7 +383,7 @@ export function createScoreStore(initialScore, options = {}) {
       }
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         assignments: nextAssignments
       };
       emitChange(events, "voice.assignment.preset.applied", score, { presetId: options.presetId ?? "" }, options);
@@ -394,7 +396,7 @@ export function createScoreStore(initialScore, options = {}) {
       const notes = normalizeNotesDocument(notesDocument);
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score),
         voices: {
           ...score.voices,
           [voiceId]: {
@@ -415,7 +417,7 @@ export function createScoreStore(initialScore, options = {}) {
       const seededClips = options.structure ? createDefaultClips(Object.keys(voices)) : score.clips;
       score = {
         ...score,
-        version: score.version + 1,
+        ...nextRevisionFields(score, { structure: Boolean(options.structure || options.voices) }),
         context: options.context ? createDefaultContext() : score.context,
         clips: options.notes ? resetClipNotes(seededClips) : seededClips,
         mesostructure: options.structure ? createDefaultMesostructure(Object.keys(voices)) : score.mesostructure,
@@ -437,7 +439,9 @@ export function createScoreStore(initialScore, options = {}) {
       const previousVersion = score.version;
       score = {
         ...structuredClone(defaultScore),
-        version: previousVersion + 1
+        version: previousVersion + 1,
+        scoreRevision: scoreRevisionFor(score) + 1,
+        structureRevision: structureRevisionFor(score) + 1
       };
       emitChange(events, "admin.score.created", score, { previousVersion }, options);
       return structuredClone(score);
@@ -448,7 +452,9 @@ export function createScoreStore(initialScore, options = {}) {
       score = {
         ...restored,
         ensembleId: score.ensembleId,
-        version: Math.max(previousVersion + 1, restored.version + 1)
+        version: Math.max(previousVersion + 1, restored.version + 1),
+        scoreRevision: scoreRevisionFor(score) + 1,
+        structureRevision: structureRevisionFor(score) + 1
       };
       emitChange(events, "admin.restore", score, { previousVersion }, options);
       return structuredClone(score);
@@ -463,6 +469,30 @@ function createDefaultContext() {
     grid: {},
     seed: 0
   };
+}
+
+function nextRevisionFields(score, options = {}) {
+  return {
+    version: Number.isFinite(score.version) ? score.version + 1 : 1,
+    scoreRevision: scoreRevisionFor(score) + 1,
+    structureRevision: structureRevisionFor(score) + (options.structure ? 1 : 0)
+  };
+}
+
+function withRevisionDefaults(score) {
+  return {
+    ...score,
+    scoreRevision: scoreRevisionFor(score),
+    structureRevision: structureRevisionFor(score)
+  };
+}
+
+function scoreRevisionFor(score) {
+  return Number.isFinite(score?.scoreRevision) ? score.scoreRevision : Number.isFinite(score?.version) ? score.version : 0;
+}
+
+function structureRevisionFor(score) {
+  return Number.isFinite(score?.structureRevision) ? score.structureRevision : 0;
 }
 
 const DEFAULT_BLOCK_IDS = ["A", "B", "C", "D", "E", "F"];
@@ -629,6 +659,8 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
   return {
     ensembleId: stringField(scoreDocument.ensembleId),
     version: Number.isFinite(scoreDocument.version) ? scoreDocument.version : 0,
+    scoreRevision: scoreRevisionFor(scoreDocument),
+    structureRevision: structureRevisionFor(scoreDocument),
     context: structuredClone(scoreDocument.context),
     clips: normalizeClips(scoreDocument.clips ?? fallbackScore?.clips ?? {}),
     mesostructure,

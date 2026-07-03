@@ -20,10 +20,13 @@ export async function routeRequest(request, response, store, config, runtime = {
   const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
 
   if (request.method === "GET" && url.pathname === "/healthz") {
+    const score = store.getScore();
     writeJson(response, 200, {
       ok: true,
       ensembleId: config.ensemble.id,
-      version: store.getScore().version,
+      version: score.version,
+      scoreRevision: score.scoreRevision ?? score.version ?? 0,
+      structureRevision: score.structureRevision ?? 0,
       rnbo: {
         enabled: config.rnbo.enabled,
         host: config.rnbo.host,
@@ -50,8 +53,11 @@ export async function routeRequest(request, response, store, config, runtime = {
   }
 
   if (request.method === "GET" && url.pathname === "/playback/timing-contracts") {
+    const score = store.getScore();
     writeJson(response, 200, {
-      contracts: await readPlaybackTimingContracts(store.getScore(), config, runtime)
+      scoreRevision: score.scoreRevision ?? score.version ?? 0,
+      structureRevision: score.structureRevision ?? 0,
+      contracts: await readPlaybackTimingContracts(score, config, runtime)
     });
     return;
   }
@@ -197,7 +203,9 @@ export async function routeRequest(request, response, store, config, runtime = {
       clips: score.clips ?? {},
       mesostructure: score.mesostructure ?? {},
       macrostructure: score.macrostructure ?? {},
-      structureState: score.structureState ?? {}
+      structureState: score.structureState ?? {},
+      scoreRevision: score.scoreRevision ?? score.version ?? 0,
+      structureRevision: score.structureRevision ?? 0
     });
     return;
   }

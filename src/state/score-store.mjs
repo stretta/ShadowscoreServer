@@ -84,6 +84,7 @@ export function createScoreStore(initialScore, options = {}) {
     },
     updateContext(nextContext, options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       score = {
         ...score,
         ...nextRevisionFields(score),
@@ -95,6 +96,7 @@ export function createScoreStore(initialScore, options = {}) {
     replaceMesoBlock(blockId, blockDocument, options = {}) {
       const id = normalizeBlockId(blockId);
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       const block = normalizeMesoBlock(blockDocument);
       score = {
         ...score,
@@ -113,6 +115,7 @@ export function createScoreStore(initialScore, options = {}) {
         throw new Error(`unknown mesostructural block '${id}'`);
       }
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       const nextMesostructure = { ...score.mesostructure };
       delete nextMesostructure[id];
       score = {
@@ -133,6 +136,7 @@ export function createScoreStore(initialScore, options = {}) {
     },
     updateMacrostructure(macrostructureDocument, options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       const macrostructure = normalizeMacrostructure(
         options.replace ? macrostructureDocument : deepMerge(score.macrostructure, macrostructureDocument)
       );
@@ -152,6 +156,7 @@ export function createScoreStore(initialScore, options = {}) {
     },
     updateStructureState(structureStateDocument = {}, options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       if (structureStateDocument.activeBlockId !== undefined && !score.mesostructure[stringField(structureStateDocument.activeBlockId)]) {
         throw new Error(`unknown mesostructural block '${structureStateDocument.activeBlockId}'`);
       }
@@ -173,6 +178,7 @@ export function createScoreStore(initialScore, options = {}) {
     },
     advanceStructurePlayhead(options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       const blocks = score.macrostructure?.blocks ?? [];
       const current = normalizeStructureState(score.structureState, score.mesostructure, score.macrostructure);
       const nextIndex = blocks.length ? (current.macroIndex + 1) % blocks.length : 0;
@@ -190,6 +196,7 @@ export function createScoreStore(initialScore, options = {}) {
     },
     resetStructurePlayhead(options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       const structureState = normalizeStructureState(createDefaultStructureState(), score.mesostructure, score.macrostructure);
       score = {
         ...score,
@@ -267,6 +274,7 @@ export function createScoreStore(initialScore, options = {}) {
         throw new Error(`clip '${id}' already exists`);
       }
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       const clip = normalizeClipDocument(clipDocument);
       score = {
         ...score,
@@ -282,6 +290,7 @@ export function createScoreStore(initialScore, options = {}) {
     replaceClip(clipId, clipDocument = {}, options = {}) {
       const id = normalizeClipId(clipId);
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       const clip = normalizeClipDocument(clipDocument);
       score = {
         ...score,
@@ -304,6 +313,7 @@ export function createScoreStore(initialScore, options = {}) {
         throw new Error(`clip '${newId}' already exists`);
       }
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       const nextClips = { ...score.clips };
       nextClips[newId] = nextClips[oldId];
       if (oldId !== newId) {
@@ -328,6 +338,7 @@ export function createScoreStore(initialScore, options = {}) {
         throw new Error(`clip '${id}' is assigned in ${references.join(", ")}`);
       }
       assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       const nextClips = { ...score.clips };
       delete nextClips[id];
       score = {
@@ -447,6 +458,7 @@ export function createScoreStore(initialScore, options = {}) {
       return structuredClone(score);
     },
     restore(nextScore, options = {}) {
+      assertExpectedRevisions(score, options);
       const restored = normalizeScoreDocument(nextScore, assignmentDefaults, score);
       const previousVersion = score.version;
       score = {
@@ -940,6 +952,34 @@ function assertExpectedScoreVersion(score, expectedVersion) {
   if (score.version !== expectedVersion) {
     throw new Error(`stale score version ${expectedVersion}; current version is ${score.version}`);
   }
+}
+
+function assertExpectedRevisions(score, options = {}) {
+  assertExpectedRevision(score, scoreRevisionFor(score), options.expectedScoreRevision, "score");
+  assertExpectedRevision(score, structureRevisionFor(score), options.expectedStructureRevision, "structure");
+}
+
+function assertExpectedRevision(score, currentRevision, expectedRevision, label) {
+  if (expectedRevision === undefined || expectedRevision === null) {
+    return;
+  }
+  if (!Number.isInteger(expectedRevision)) {
+    const error = new Error(`expected${capitalize(label)}Revision must be an integer`);
+    error.code = "invalid_revision";
+    throw error;
+  }
+  if (currentRevision !== expectedRevision) {
+    const error = new Error(`stale ${label} revision ${expectedRevision}; current ${label} revision is ${currentRevision}`);
+    error.code = `stale_${label}_revision`;
+    error.currentScoreRevision = scoreRevisionFor(score);
+    error.currentStructureRevision = structureRevisionFor(score);
+    error.currentVersion = score.version;
+    throw error;
+  }
+}
+
+function capitalize(value) {
+  return `${value.slice(0, 1).toUpperCase()}${value.slice(1)}`;
 }
 
 function assertExpectedVoiceVersion(score, voiceId, expectedVoiceVersion) {

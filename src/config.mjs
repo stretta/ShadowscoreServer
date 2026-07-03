@@ -53,6 +53,11 @@ export const defaultConfig = Object.freeze({
         root: "public/structure-editor",
         index: "index.html",
         routes: ["/structure-editor", "/"]
+      },
+      shared: {
+        root: "public/shared",
+        index: "index.html",
+        routes: ["/shared"]
       }
     }
   },

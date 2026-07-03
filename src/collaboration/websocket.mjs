@@ -91,69 +91,69 @@ export function createCollaborationHub(store, config = {}) {
           break;
         case "context.update":
           ack(client, requestId, store.updateContext(payload.context ?? {}, {
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             replace: Boolean(payload.replace),
             sourceClientId: client.id
           }));
           break;
         case "mesostructure.block.replace":
           ack(client, requestId, store.replaceMesoBlock(requireString(payload.blockId ?? payload.id, "blockId"), payload.block ?? payload.document ?? {}, {
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             sourceClientId: client.id
           }));
           break;
         case "mesostructure.block.remove":
           ack(client, requestId, store.removeMesoBlock(requireString(payload.blockId ?? payload.id, "blockId"), {
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             sourceClientId: client.id
           }));
           break;
         case "macrostructure.update":
           ack(client, requestId, store.updateMacrostructure(payload.macrostructure ?? {}, {
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             replace: Boolean(payload.replace),
             sourceClientId: client.id
           }));
           break;
         case "structure.playhead.update":
           ack(client, requestId, store.updateStructureState(payload.structureState ?? payload.playhead ?? {}, {
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             sourceClientId: client.id
           }));
           break;
         case "macrostructure.advance":
           ack(client, requestId, store.advanceStructurePlayhead({
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             sourceClientId: client.id
           }));
           break;
         case "macrostructure.reset":
           ack(client, requestId, store.resetStructurePlayhead({
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             sourceClientId: client.id
           }));
           break;
         case "clip.add":
           ack(client, requestId, store.addClip(requireString(payload.clipId ?? payload.id, "clipId"), payload.clip ?? payload.document ?? {}, {
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             sourceClientId: client.id
           }));
           break;
         case "clip.replace":
           ack(client, requestId, store.replaceClip(requireString(payload.clipId ?? payload.id, "clipId"), payload.clip ?? payload.document ?? {}, {
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             sourceClientId: client.id
           }));
           break;
         case "clip.rename":
           ack(client, requestId, store.renameClip(requireString(payload.clipId ?? payload.oldClipId, "clipId"), requireString(payload.newClipId ?? payload.id, "newClipId"), {
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             sourceClientId: client.id
           }));
           break;
         case "clip.remove":
           ack(client, requestId, store.removeClip(requireString(payload.clipId ?? payload.id, "clipId"), {
-            expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+            ...revisionOptions(payload),
             sourceClientId: client.id
           }));
           break;
@@ -458,6 +458,14 @@ function optionalInteger(value, field) {
     throw new Error(`${field} must be an integer`);
   }
   return value;
+}
+
+function revisionOptions(payload) {
+  return {
+    expectedVersion: optionalInteger(payload.expectedVersion, "expectedVersion"),
+    expectedScoreRevision: optionalInteger(payload.expectedScoreRevision, "expectedScoreRevision"),
+    expectedStructureRevision: optionalInteger(payload.expectedStructureRevision, "expectedStructureRevision")
+  };
 }
 
 function messageForError(error) {

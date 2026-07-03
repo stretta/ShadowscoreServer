@@ -441,18 +441,21 @@
   </main>
 
   <script type="module">
+    import { createShadowScoreClientState } from "../shared/shadowscore-client-state.js";
+
     const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     const state = {
       score: undefined,
       session: undefined,
       serverUrl: "",
       servers: [],
+      client: undefined,
+      unsubscribeClient: undefined,
       eventSource: undefined,
       selectedBlockId: "",
       macroPlayback: undefined,
       macroPlaybackTimer: undefined,
       blockDirty: false,
-      blockDraft: undefined,
       macroDirty: false,
       saving: false
     };
@@ -506,8 +509,11 @@
       els.addBlock.addEventListener("click", addBlock);
       els.deleteBlock.addEventListener("click", deleteBlock);
       els.revertBlock.addEventListener("click", () => {
+        if (state.selectedBlockId) {
+          state.client?.revertDraft(blockDraftKey(state.selectedBlockId));
+        }
         state.blockDirty = false;
-        state.blockDraft = undefined;
+        state.score = state.client?.effectiveScore() ?? state.score;
         renderBlockEditor();
       });
       els.saveBlock.addEventListener("click", saveBlock);
@@ -586,8 +592,23 @@
       els.server.value = serverUrl;
       setStatus(`Loading ${serverUrl}...`);
       try {
-        state.session = session ?? await fetchJson(`${serverUrl}/session`);
-        state.score = await fetchJson(`${serverUrl}/score`);
+        state.unsubscribeClient?.();
+        state.client = createShadowScoreClientState({ serverUrl });
+        state.unsubscribeClient = state.client.subscribe((snapshot, reason) => {
+          state.session = snapshot.session ?? state.session;
+          state.score = state.client.effectiveScore();
+          if (reason === "draft") {
+            return;
+          }
+          handleClientScoreUpdate();
+        });
+        const snapshot = await state.client.load(serverUrl);
+        if (session) {
+          state.session = session;
+        } else {
+          state.session = snapshot.session;
+        }
+        state.score = state.client.effectiveScore();
         state.macroPlayback = state.session.macroPlayback;
         state.blockDirty = false;
         state.macroDirty = false;
@@ -598,33 +619,22 @@
         renderServerOptions();
         els.serverSelect.value = serverUrl;
         renderAll();
-        connectEvents(`${serverUrl}/events`);
+        connectEvents();
         setStatus(`Connected to ${serverLabel(serverUrl, state.session)}.`);
       } catch (error) {
         setStatus(`Load failed: ${error.message}`);
       }
     }
 
-    function connectEvents(url) {
-      const events = new EventSource(url);
-      events.addEventListener("snapshot", handleScoreEvent);
-      events.addEventListener("mesostructure.block.replaced", handleScoreEvent);
-      events.addEventListener("mesostructure.block.removed", handleScoreEvent);
-      events.addEventListener("macrostructure.updated", handleScoreEvent);
-      events.addEventListener("structure.playhead.updated", handleScoreEvent);
-      events.addEventListener("admin.reset", handleScoreEvent);
+    function connectEvents() {
+      const events = state.client.connectEvents();
       events.onerror = () => {
         setStatus("Structure updates disconnected.");
       };
       state.eventSource = events;
     }
 
-    function handleScoreEvent(event) {
-      const payload = JSON.parse(event.data);
-      if (!payload.score) {
-        return;
-      }
-      state.score = scoreWithLocalDrafts(payload.score);
+    function handleClientScoreUpdate() {
       if (state.macroPlayback?.running) {
         state.macroPlayback = {
           ...state.macroPlayback,
@@ -636,7 +646,6 @@
       if (!state.score.mesostructure?.[state.selectedBlockId]) {
         state.selectedBlockId = firstBlockId();
         state.blockDirty = false;
-        state.blockDraft = undefined;
       }
       if (!state.blockDirty && !state.macroDirty && !state.saving) {
         renderAll();
@@ -868,7 +877,7 @@
       }
       state.selectedBlockId = blockId;
       state.blockDirty = false;
-      state.blockDraft = undefined;
+      state.client?.revertDraft(blockDraftKey(blockId));
       renderBlockList();
       renderBlockEditor();
     }
@@ -894,7 +903,8 @@
       };
       state.selectedBlockId = id;
       state.blockDirty = true;
-      state.blockDraft = state.score.mesostructure[id];
+      state.client?.beginDraft(blockDraftKey(id), state.score.mesostructure[id]);
+      state.score = state.client?.effectiveScore() ?? state.score;
       renderAll();
     }
 
@@ -911,8 +921,9 @@
         });
         state.selectedBlockId = firstBlockId();
         state.blockDirty = false;
-        state.blockDraft = undefined;
+        state.client?.revertDraft(blockDraftKey(blockId));
         state.macroDirty = false;
+        state.client?.adoptServerScore(state.score);
         renderAll();
         setStatus(`Removed ${blockId}.`);
       } catch (error) {
@@ -937,26 +948,31 @@
       setStatus(`Saving block ${nextId}...`);
       try {
         state.saving = true;
+        const draft = state.client?.draft(blockDraftKey(originalId));
         let score = await fetchJson(`${state.serverUrl}/mesostructure/${encodeURIComponent(nextId)}`, undefined, {
           method: "POST",
-          body: block
+          body: withExpectedStructureRevision(block, draft)
         });
+        state.client?.adoptServerScore(score);
         if (originalId !== nextId && score.mesostructure?.[originalId]) {
           score = await fetchJson(`${state.serverUrl}/macrostructure`, undefined, {
             method: "POST",
-            body: {
+            body: withExpectedStructureRevision({
               ...score.macrostructure,
               blocks: (score.macrostructure?.blocks ?? []).map((blockId) => blockId === originalId ? nextId : blockId)
-            }
+            })
           });
+          state.client?.adoptServerScore(score);
           score = await fetchJson(`${state.serverUrl}/mesostructure/${encodeURIComponent(originalId)}`, undefined, {
             method: "DELETE"
           });
+          state.client?.adoptServerScore(score);
         }
         state.score = score;
         state.selectedBlockId = nextId;
         state.blockDirty = false;
-        state.blockDraft = undefined;
+        state.client?.revertDraft(blockDraftKey(originalId));
+        state.client?.revertDraft(blockDraftKey(nextId));
         state.macroDirty = false;
         renderAll();
         setStatus(`Saved block ${nextId}.`);
@@ -1000,8 +1016,9 @@
         updateButtons();
         state.score = await fetchJson(`${state.serverUrl}/macrostructure`, undefined, {
           method: "POST",
-          body: macrostructure
+          body: withExpectedStructureRevision(macrostructure)
         });
+        state.client?.adoptServerScore(state.score);
         state.macroDirty = false;
         renderAll();
         setStatus(savedMessage);
@@ -1097,9 +1114,10 @@
           method: "POST",
           body: {
             ...body,
-            expectedVersion: state.score.version
+            ...expectedRevisionFields()
           }
         });
+        state.client?.adoptServerScore(state.score);
         state.selectedBlockId = state.score.structureState?.activeBlockId || state.selectedBlockId;
         renderAll();
         setStatus(`Playing block ${state.score.structureState?.activeBlockId ?? ""}.`);
@@ -1145,22 +1163,41 @@
         return;
       }
       state.blockDirty = true;
-      state.blockDraft = blockFromForm();
-      state.score = scoreWithLocalDrafts(state.score);
+      state.client?.updateDraft(blockDraftKey(state.selectedBlockId), blockFromForm());
+      state.score = state.client?.effectiveScore() ?? state.score;
       renderBlockList();
       updateButtons();
     }
 
-    function scoreWithLocalDrafts(score) {
-      if (!score || !state.blockDirty || !state.selectedBlockId || !state.blockDraft) {
-        return score;
-      }
+    function blockDraftKey(blockId) {
+      return `mesostructure:${blockId}`;
+    }
+
+    function expectedRevisionFields(draft) {
       return {
-        ...score,
-        mesostructure: {
-          ...(score.mesostructure ?? {}),
-          [state.selectedBlockId]: state.blockDraft
-        }
+        expectedVersion: draft?.baseScoreRevision ?? state.score?.version,
+        expectedScoreRevision: draft?.baseScoreRevision ?? state.score?.scoreRevision ?? state.score?.version,
+        expectedStructureRevision: draft?.baseStructureRevision ?? state.score?.structureRevision
+      };
+    }
+
+    function withExpectedRevisions(body, draft) {
+      return {
+        ...body,
+        ...expectedRevisionFields(draft)
+      };
+    }
+
+    function expectedStructureRevisionFields(draft) {
+      return {
+        expectedStructureRevision: draft?.baseStructureRevision ?? state.score?.structureRevision
+      };
+    }
+
+    function withExpectedStructureRevision(body, draft) {
+      return {
+        ...body,
+        ...expectedStructureRevisionFields(draft)
       };
     }
 
@@ -1208,10 +1245,12 @@
         state.saving = true;
         state.score = await fetchJson(`${state.serverUrl}/clips/${encodeURIComponent(clipId)}`, undefined, {
           method: "POST",
-          body: defaultClipDocument()
+          body: withExpectedRevisions(defaultClipDocument())
         });
+        state.client?.adoptServerScore(state.score);
         state.blockDirty = true;
-        state.score = scoreWithLocalDrafts(state.score);
+        state.client?.updateDraft(blockDraftKey(state.selectedBlockId), blockFromForm());
+        state.score = state.client?.effectiveScore() ?? state.score;
         renderBlockList();
         renderMacroEditor();
         renderBlockEditor();
@@ -1219,8 +1258,8 @@
         if (refreshed) {
           refreshed.value = clipId;
         }
-        state.blockDraft = blockFromForm();
-        state.score = scoreWithLocalDrafts(state.score);
+        state.client?.updateDraft(blockDraftKey(state.selectedBlockId), blockFromForm());
+        state.score = state.client?.effectiveScore() ?? state.score;
         await saveBlock();
       } catch (error) {
         select.value = currentBlock()?.players?.[voiceId]?.clipId ?? "";
@@ -1337,6 +1376,7 @@
     function closeEvents() {
       state.eventSource?.close();
       state.eventSource = undefined;
+      state.client?.close();
       stopMacroPlaybackTimer();
     }
 

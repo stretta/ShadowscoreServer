@@ -8,6 +8,8 @@ import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
 
+const REVISION_CONTROL_FIELDS = ["expectedVersion", "expectedScoreRevision", "expectedStructureRevision"];
+
 export async function routeRequest(request, response, store, config, runtime = {}) {
   setCors(response);
 
@@ -234,9 +236,12 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const body = await readJson(request);
       const replace = url.searchParams.get("replace") === "1";
-      writeJson(response, 200, store.updateContext(body.context ?? body, { replace }));
+      writeJson(response, 200, store.updateContext(body.context ?? withoutControlFields(body, REVISION_CONTROL_FIELDS), {
+        replace,
+        ...revisionOptions(body)
+      }));
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -345,9 +350,10 @@ export async function routeRequest(request, response, store, config, runtime = {
 
   if (request.method === "POST" && url.pathname === "/admin/restore") {
     try {
-      writeJson(response, 200, store.restore(await readJson(request)));
+      const body = await readJson(request);
+      writeJson(response, 200, store.restore(withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body)));
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -401,11 +407,9 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/clips") {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.addClip(body.clipId ?? body.id, body.clip ?? body.document ?? withoutControlFields(body, ["clipId", "id", "expectedVersion"]), {
-        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
-      }));
+      writeJson(response, 200, store.addClip(body.clipId ?? body.id, body.clip ?? body.document ?? withoutControlFields(body, ["clipId", "id", ...REVISION_CONTROL_FIELDS]), revisionOptions(body)));
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -414,11 +418,9 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && clipRenameMatch) {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.renameClip(decodeURIComponent(clipRenameMatch[1]), body.clipId ?? body.id, {
-        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
-      }));
+      writeJson(response, 200, store.renameClip(decodeURIComponent(clipRenameMatch[1]), body.clipId ?? body.id, revisionOptions(body)));
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -430,13 +432,11 @@ export async function routeRequest(request, response, store, config, runtime = {
       const body = request.method === "DELETE" ? undefined : await readJson(request);
       const score =
         request.method === "DELETE"
-          ? store.removeClip(clipId)
-          : store.replaceClip(clipId, body.clip ?? body.document ?? withoutControlFields(body, ["expectedVersion"]), {
-            expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
-          });
+          ? store.removeClip(clipId, revisionOptions(url.searchParams))
+          : store.replaceClip(clipId, body.clip ?? body.document ?? withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body));
       writeJson(response, 200, score);
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -444,12 +444,12 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/macrostructure") {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.updateMacrostructure(body.macrostructure ?? withoutControlFields(body, ["expectedVersion", "replace"]), {
-        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion"),
+      writeJson(response, 200, store.updateMacrostructure(body.macrostructure ?? withoutControlFields(body, ["replace", ...REVISION_CONTROL_FIELDS]), {
+        ...revisionOptions(body),
         replace: url.searchParams.get("replace") === "1" || Boolean(body.replace)
       }));
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -457,11 +457,9 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/structure/playhead") {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.updateStructureState(body.structureState ?? withoutControlFields(body, ["expectedVersion"]), {
-        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
-      }));
+      writeJson(response, 200, store.updateStructureState(body.structureState ?? withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body)));
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -469,11 +467,9 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/macrostructure/advance") {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.advanceStructurePlayhead({
-        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
-      }));
+      writeJson(response, 200, store.advanceStructurePlayhead(revisionOptions(body)));
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -481,11 +477,9 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/macrostructure/reset") {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.resetStructurePlayhead({
-        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
-      }));
+      writeJson(response, 200, store.resetStructurePlayhead(revisionOptions(body)));
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -560,11 +554,9 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/mesostructure") {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.replaceMesoBlock(body.blockId ?? body.id, body.block ?? body.document ?? withoutControlFields(body, ["blockId", "id", "expectedVersion"]), {
-        expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
-      }));
+      writeJson(response, 200, store.replaceMesoBlock(body.blockId ?? body.id, body.block ?? body.document ?? withoutControlFields(body, ["blockId", "id", ...REVISION_CONTROL_FIELDS]), revisionOptions(body)));
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -576,13 +568,11 @@ export async function routeRequest(request, response, store, config, runtime = {
       const body = request.method === "DELETE" ? undefined : await readJson(request);
       const score =
         request.method === "DELETE"
-          ? store.removeMesoBlock(blockId)
-          : store.replaceMesoBlock(blockId, body.block ?? body.document ?? withoutControlFields(body, ["expectedVersion"]), {
-            expectedVersion: optionalInteger(body.expectedVersion, "expectedVersion")
-          });
+          ? store.removeMesoBlock(blockId, revisionOptions(url.searchParams))
+          : store.replaceMesoBlock(blockId, body.block ?? body.document ?? withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body));
       writeJson(response, 200, score);
     } catch (error) {
-      writeJson(response, 400, { ok: false, error: messageForError(error) });
+      writeError(response, error);
     }
     return;
   }
@@ -979,6 +969,16 @@ function messageForError(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function writeError(response, error, status = 400) {
+  writeJson(response, status, {
+    ok: false,
+    error: messageForError(error),
+    ...(error?.currentVersion !== undefined ? { currentVersion: error.currentVersion } : {}),
+    ...(error?.currentScoreRevision !== undefined ? { currentScoreRevision: error.currentScoreRevision } : {}),
+    ...(error?.currentStructureRevision !== undefined ? { currentStructureRevision: error.currentStructureRevision } : {})
+  });
+}
+
 function jackControllerStatus(error) {
   return Number.isInteger(error?.statusCode) ? error.statusCode : 400;
 }
@@ -1004,6 +1004,21 @@ function optionalInteger(value, field) {
 
 function optionalString(value) {
   return value === undefined || value === null ? "" : String(value).trim();
+}
+
+function revisionOptions(body) {
+  return {
+    expectedVersion: optionalInteger(readControlField(body, "expectedVersion"), "expectedVersion"),
+    expectedScoreRevision: optionalInteger(readControlField(body, "expectedScoreRevision"), "expectedScoreRevision"),
+    expectedStructureRevision: optionalInteger(readControlField(body, "expectedStructureRevision"), "expectedStructureRevision")
+  };
+}
+
+function readControlField(body, field) {
+  if (typeof body?.get === "function") {
+    return body.get(field);
+  }
+  return body?.[field];
 }
 
 function withoutControlFields(document, fields) {

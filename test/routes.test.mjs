@@ -345,6 +345,28 @@ test("structure routes expose and mutate meso and macro organization", async () 
   assert.equal(removed.structureRevision, 3);
 });
 
+test("structure routes reject stale expected structure revisions", async () => {
+  const context = createRouteContext();
+
+  const updated = await requestJson(context, "POST", "/mesostructure/A", {
+    expectedScoreRevision: 0,
+    expectedStructureRevision: 0,
+    duration: { bars: 8 },
+    players: {}
+  });
+  assert.equal(updated.structureRevision, 1);
+
+  const rejected = await request(context, "POST", "/macrostructure", {
+    expectedScoreRevision: 1,
+    expectedStructureRevision: 0,
+    blocks: ["A", "B"]
+  });
+  assert.equal(rejected.status, 400);
+  assert.match(rejected.body, /stale structure revision 0; current structure revision is 1/);
+  assert.match(rejected.body, /"currentScoreRevision":1/);
+  assert.match(rejected.body, /"currentStructureRevision":1/);
+});
+
 test("structure playhead routes select, advance, and reset active blocks", async () => {
   const context = createRouteContext();
 
@@ -1683,6 +1705,9 @@ test("event list route serves server-bundled editor html", async () => {
   assert.match(response.body, /id="add-array"/);
   assert.match(response.body, /POST/);
   assert.match(response.body, /\/clips\/\$\{encodeURIComponent\(clipId\)\}/);
+  assert.match(response.body, /createShadowScoreClientState/);
+  assert.match(response.body, /clipDraftKey/);
+  assert.match(response.body, /expectedScoreRevision/);
 });
 
 test("structure editor route serves server-bundled editor html", async () => {
@@ -1719,6 +1744,41 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /\/macrostructure\/reset/);
   assert.match(response.body, /\/macrostructure\/playback\/start/);
   assert.match(response.body, /\/macrostructure\/playback\/stop/);
+  assert.match(response.body, /createShadowScoreClientState/);
+  assert.match(response.body, /blockDraftKey/);
+  assert.match(response.body, /withExpectedStructureRevision/);
+  assert.match(response.body, /expectedStructureRevision/);
+  assert.doesNotMatch(response.body, /scoreWithLocalDrafts/);
+});
+
+test("shared client state module is served as a static asset", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/shared/shadowscore-client-state.js");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/javascript/);
+  assert.match(response.body, /createShadowScoreClientState/);
+  assert.match(response.body, /effectiveScore/);
+});
+
+test("clip routes reject stale expected score revisions", async () => {
+  const context = createRouteContext();
+
+  const score = await requestJson(context, "POST", "/clips/a-player-1", {
+    expectedScoreRevision: 0,
+    expectedStructureRevision: 0,
+    notes: [{ pitch: 67 }]
+  });
+  assert.equal(score.scoreRevision, 1);
+
+  const rejected = await request(context, "POST", "/clips/a-player-1", {
+    expectedScoreRevision: 0,
+    expectedStructureRevision: 0,
+    notes: [{ pitch: 68 }]
+  });
+  assert.equal(rejected.status, 400);
+  assert.match(rejected.body, /stale score revision 0; current score revision is 1/);
+  assert.match(rejected.body, /"currentVersion":1/);
 });
 
 test("voice note route rejects stale expected voice versions", async () => {

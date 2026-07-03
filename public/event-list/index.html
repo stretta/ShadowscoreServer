@@ -423,12 +423,16 @@
     </section>
   </main>
   <script type="module">
+    import { createShadowScoreClientState } from "../shared/shadowscore-client-state.js";
+
     const fields = ["note_id", "start_time", "duration", "pitch", "velocity", "probability", "velocity_deviation", "release_velocity"];
     const state = {
       score: undefined,
       session: undefined,
       serverUrl: "",
       servers: [],
+      client: undefined,
+      unsubscribeClient: undefined,
       eventSource: undefined,
       clipId: "",
       notes: [],
@@ -484,6 +488,7 @@
         els.clip.value = state.clipId;
         return;
       }
+      state.client?.revertDraft(clipDraftKey(state.clipId));
       state.clipId = els.clip.value;
       loadClip();
     });
@@ -557,8 +562,24 @@
       els.server.value = serverUrl;
       setStatus(`Loading ${serverUrl}...`);
       try {
-        state.session = session ?? await fetchJson(`${serverUrl}/session`);
-        state.score = await fetchJson(endpointUrl("score", "/score"));
+        state.unsubscribeClient?.();
+        state.client = createShadowScoreClientState({ serverUrl });
+        state.unsubscribeClient = state.client.subscribe((snapshot, reason) => {
+          state.session = snapshot.session ?? state.session;
+          state.score = state.client.effectiveScore();
+          if (reason === "draft") {
+            return;
+          }
+          renderClipPicker();
+          if (!state.dirty && !state.attributesDirty && !state.saving) {
+            loadClip();
+          } else {
+            renderSummary();
+          }
+        });
+        const snapshot = await state.client.load(serverUrl);
+        state.session = session ?? snapshot.session;
+        state.score = state.client.effectiveScore();
         state.clipId = Object.keys(state.score.clips ?? {}).sort(naturalCompare)[0] ?? "";
         if (!state.servers.some((server) => server.url === serverUrl)) {
           state.servers = [{ url: serverUrl, session: state.session }, ...state.servers];
@@ -567,40 +588,15 @@
         els.serverSelect.value = serverUrl;
         renderClipPicker();
         loadClip();
-        connectEvents(endpointUrl("events", "/events"));
+        connectEvents();
         setStatus(`Connected to ${serverLabel(serverUrl, state.session)}.`);
       } catch (error) {
         setStatus(`Load failed: ${error.message}`);
       }
     }
 
-    function connectEvents(url) {
-      const events = new EventSource(url);
-      const refresh = (event) => {
-        const payload = JSON.parse(event.data);
-        if (!payload.score) {
-          return;
-        }
-        state.score = payload.score;
-        renderClipPicker();
-        if (!state.dirty && !state.attributesDirty && !state.saving) {
-          loadClip();
-        } else {
-          renderSummary();
-        }
-      };
-      events.addEventListener("snapshot", refresh);
-      events.addEventListener("context.updated", refresh);
-      events.addEventListener("voice.notes.replaced", refresh);
-      events.addEventListener("voice.assignment.replaced", refresh);
-      events.addEventListener("voice.assignment.cleared", refresh);
-      events.addEventListener("voice.assignment.preset.applied", refresh);
-      events.addEventListener("clip.added", refresh);
-      events.addEventListener("clip.replaced", refresh);
-      events.addEventListener("clip.renamed", refresh);
-      events.addEventListener("clip.removed", refresh);
-      events.addEventListener("admin.reset", refresh);
-      events.addEventListener("admin.restore", refresh);
+    function connectEvents() {
+      const events = state.client.connectEvents();
       events.onerror = () => setStatus("Event stream reconnecting...");
       state.eventSource = events;
     }
@@ -608,6 +604,7 @@
     function closeEvents() {
       state.eventSource?.close();
       state.eventSource = undefined;
+      state.client?.close();
     }
 
     function renderClipPicker() {
@@ -629,6 +626,7 @@
       state.notes = normalizeNotes(clip?.notes ?? []);
       state.dirty = false;
       state.attributesDirty = false;
+      state.client?.revertDraft(clipDraftKey(state.clipId));
       renderClipAttributes();
       render();
     }
@@ -865,14 +863,12 @@
         const clipId = requireSelectedClipId();
         const clip = selectedClip();
         const score = await postJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), {
-          ...defaultClipDocument(),
-          ...clip,
-          context: clipContextWithTimeSignature(clip?.context),
-          notes: state.notes.map(cleanNote),
-          playbackType: clip?.playbackType ?? "looped",
-          behavior: clip?.behavior ?? defaultClipDocument().behavior
+          ...clipDocumentFromEditor(clip),
+          ...expectedRevisionFields(state.client?.draft(clipDraftKey(clipId)))
         });
         state.score = score;
+        state.client?.adoptServerScore(score);
+        state.client?.revertDraft(clipDraftKey(clipId));
         state.dirty = false;
         loadClip();
         setStatus(`Saved ${state.notes.length} notes for ${clipId}.`);
@@ -891,19 +887,11 @@
         const clipId = requireSelectedClipId();
         const clip = selectedClip();
         state.score = await postJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), {
-          ...defaultClipDocument(),
-          ...clip,
-          context: clipContextWithTimeSignature(clip?.context),
-          notes: state.notes.map(cleanNote),
-          playbackType: els.clipPlaybackType.value,
-          duration: durationDocument(els.clipDurationUnit.value, els.clipDurationValue.value),
-          behavior: {
-            ...(clip?.behavior ?? {}),
-            followsPitch: els.clipFollowsPitch.checked,
-            followsScale: els.clipFollowsScale.checked,
-            transposeMode: els.clipTransposeMode.value.trim() || "scale-degree"
-          }
+          ...clipDocumentFromEditor(clip),
+          ...expectedRevisionFields(state.client?.draft(clipDraftKey(clipId)))
         });
+        state.client?.adoptServerScore(state.score);
+        state.client?.revertDraft(clipDraftKey(clipId));
         state.attributesDirty = false;
         loadClip();
         setStatus(`Saved clip attributes for ${clipId}.`);
@@ -923,7 +911,11 @@
       state.saving = true;
       updateButtons();
       try {
-        state.score = await postJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), defaultClipDocument());
+        state.score = await postJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), {
+          ...defaultClipDocument(),
+          ...expectedRevisionFields()
+        });
+        state.client?.adoptServerScore(state.score);
         state.clipId = clipId;
         renderClipPicker();
         loadClip();
@@ -945,7 +937,11 @@
       state.saving = true;
       updateButtons();
       try {
-        state.score = await postJson(apiUrl(`/clips/${encodeURIComponent(current)}/rename`), { clipId: next });
+        state.score = await postJson(apiUrl(`/clips/${encodeURIComponent(current)}/rename`), {
+          clipId: next,
+          ...expectedRevisionFields()
+        });
+        state.client?.adoptServerScore(state.score);
         state.clipId = next;
         renderClipPicker();
         loadClip();
@@ -967,6 +963,7 @@
       updateButtons();
       try {
         state.score = await fetchJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), undefined, { method: "DELETE" });
+        state.client?.adoptServerScore(state.score);
         state.clipId = Object.keys(state.score.clips ?? {}).sort(naturalCompare)[0] ?? "";
         renderClipPicker();
         loadClip();
@@ -981,14 +978,53 @@
 
     function markDirty() {
       state.dirty = true;
+      updateClipDraft();
       setStatus("Unsaved edits.");
       updateButtons();
     }
 
     function markAttributesDirty() {
       state.attributesDirty = true;
+      updateClipDraft();
       setStatus("Unsaved clip attributes.");
       updateButtons();
+    }
+
+    function updateClipDraft() {
+      if (!state.clipId || !selectedClip()) {
+        return;
+      }
+      state.client?.updateDraft(clipDraftKey(state.clipId), clipDocumentFromEditor(selectedClip()));
+      state.score = state.client?.effectiveScore() ?? state.score;
+    }
+
+    function clipDocumentFromEditor(clip = selectedClip()) {
+      return {
+        ...defaultClipDocument(),
+        ...clip,
+        context: clipContextWithTimeSignature(clip?.context),
+        notes: state.notes.map(cleanNote),
+        playbackType: els.clipPlaybackType.value || clip?.playbackType || "looped",
+        duration: durationDocument(els.clipDurationUnit.value, els.clipDurationValue.value),
+        behavior: {
+          ...(clip?.behavior ?? defaultClipDocument().behavior),
+          followsPitch: els.clipFollowsPitch.checked,
+          followsScale: els.clipFollowsScale.checked,
+          transposeMode: els.clipTransposeMode.value.trim() || "scale-degree"
+        }
+      };
+    }
+
+    function clipDraftKey(clipId) {
+      return `clip:${clipId}`;
+    }
+
+    function expectedRevisionFields(draft) {
+      return {
+        expectedVersion: draft?.baseScoreRevision ?? state.score?.version,
+        expectedScoreRevision: draft?.baseScoreRevision ?? state.score?.scoreRevision ?? state.score?.version,
+        expectedStructureRevision: draft?.baseStructureRevision ?? state.score?.structureRevision
+      };
     }
 
     function normalizeNotes(notes) {

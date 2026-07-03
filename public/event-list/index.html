@@ -862,10 +862,7 @@
       try {
         const clipId = requireSelectedClipId();
         const clip = selectedClip();
-        const score = await postJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), {
-          ...clipDocumentFromEditor(clip),
-          ...expectedRevisionFields(state.client?.draft(clipDraftKey(clipId)))
-        });
+        const score = await saveClipDocument(clipId, clipDocumentFromEditor(clip));
         state.score = score;
         state.client?.adoptServerScore(score);
         state.client?.revertDraft(clipDraftKey(clipId));
@@ -886,10 +883,7 @@
       try {
         const clipId = requireSelectedClipId();
         const clip = selectedClip();
-        state.score = await postJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), {
-          ...clipDocumentFromEditor(clip),
-          ...expectedRevisionFields(state.client?.draft(clipDraftKey(clipId)))
-        });
+        state.score = await saveClipDocument(clipId, clipDocumentFromEditor(clip));
         state.client?.adoptServerScore(state.score);
         state.client?.revertDraft(clipDraftKey(clipId));
         state.attributesDirty = false;
@@ -901,6 +895,34 @@
         state.saving = false;
         updateButtons();
       }
+    }
+
+    async function saveClipDocument(clipId, document) {
+      const key = clipDraftKey(clipId);
+      const serverClipBefore = state.client?.snapshot().score?.clips?.[clipId];
+      try {
+        return await postClipDocument(clipId, document, state.client?.draft(key));
+      } catch (error) {
+        if (!isStaleScoreError(error)) {
+          throw error;
+        }
+        const currentScore = await fetchJson(apiUrl("/score"));
+        const currentClip = currentScore?.clips?.[clipId];
+        state.client?.adoptServerScore(currentScore, { type: "stale-save", detail: { key } });
+        state.client?.updateDraft(key, document);
+        state.score = state.client?.effectiveScore() ?? currentScore;
+        if (JSON.stringify(serverClipBefore) !== JSON.stringify(currentClip)) {
+          throw new Error("Server clip changed while you were editing. Review the refreshed clip before saving again.");
+        }
+        return await postClipDocument(clipId, document, state.client?.draft(key), true);
+      }
+    }
+
+    async function postClipDocument(clipId, document, draft, useCurrentRevision = false) {
+      return await postJson(apiUrl(`/clips/${encodeURIComponent(clipId)}`), {
+        ...document,
+        ...expectedRevisionFields(useCurrentRevision ? undefined : draft)
+      });
     }
 
     async function createClip() {
@@ -1182,6 +1204,10 @@
         throw new Error(await response.text());
       }
       return response.json();
+    }
+
+    function isStaleScoreError(error) {
+      return /stale score version \d+; current version is \d+/.test(error?.message ?? "");
     }
 
     function renderServerOptions(servers = state.servers) {

@@ -1286,6 +1286,55 @@ test("hardware heartbeat refreshes a registered unit", async () => {
   assert.match(heartbeat.unit.lastSeenAt, /1970-01-01T00:00:02.000Z/);
 });
 
+test("hardware session flags numeric RNBO target host mismatches", async () => {
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig)
+    }
+  });
+
+  await requestJson(context, "POST", "/hardware/register", {
+    id: "finch",
+    advertisedName: "finch",
+    targets: [{ id: "rnbo-inst-7:shadowscore", host: "192.168.68.88", port: 1234, address: "/rnbo/inst/7/messages/in/shadowscore" }]
+  });
+
+  const session = await requestJson(context, "GET", "/session");
+  const unit = session.hardwareUnits.find((entry) => entry.id === "finch");
+  const target = session.rnbo.targets.find((entry) => entry.id === "finch:rnbo-inst-7:shadowscore");
+
+  assert.equal(unit.remoteAddress, "192.168.68.92");
+  assert.equal(target.host, "192.168.68.88");
+  assert.equal(target.diagnostics[0].type, "target-host-mismatch");
+  assert.equal(target.diagnostics[0].advertisedHost, "192.168.68.88");
+  assert.equal(target.diagnostics[0].observedHost, "192.168.68.92");
+  assert.equal(unit.diagnostics[0].targetId, "finch:rnbo-inst-7:shadowscore");
+});
+
+test("hardware target repair uses observed peer address for registered RNBO target", async () => {
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig)
+    }
+  });
+
+  await requestJson(context, "POST", "/hardware/register", {
+    id: "finch",
+    advertisedName: "finch",
+    targets: [{ id: "rnbo-inst-7:shadowscore", host: "192.168.68.88", port: 1234, address: "/rnbo/inst/7/messages/in/shadowscore" }]
+  });
+  const repair = await requestJson(context, "POST", "/hardware/units/finch/targets/finch%3Arnbo-inst-7%3Ashadowscore/use-observed-host");
+  const session = await requestJson(context, "GET", "/session");
+  const target = session.rnbo.targets.find((entry) => entry.id === "finch:rnbo-inst-7:shadowscore");
+
+  assert.equal(repair.unit.targets[0].host, "192.168.68.92");
+  assert.equal(repair.unit.targets[0].advertisedHost, "192.168.68.88");
+  assert.equal(target.host, "192.168.68.92");
+  assert.equal(target.advertisedHost, "192.168.68.88");
+  assert.equal(target.hostOverride.source, "observed-remote-address");
+  assert.equal(target.diagnostics, undefined);
+});
+
 test("RNBO target transport controls route writes playback transport controls", async () => {
   const writes = [];
   const context = createRouteContext({
@@ -1733,6 +1782,7 @@ function createRequest(method, url, body) {
   request.method = method;
   request.url = url;
   request.headers = { host: "127.0.0.1" };
+  request.socket = { remoteAddress: "192.168.68.92" };
   return request;
 }
 

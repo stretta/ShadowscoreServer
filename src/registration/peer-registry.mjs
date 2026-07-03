@@ -1,8 +1,10 @@
 import os from "node:os";
+import net from "node:net";
 import { legacyRnboPlaybackCapabilities, rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 
 export function createPeerRegistry(config, options = {}) {
   const units = new Map();
+  const targetHostOverrides = new Set();
   const now = options.now ?? (() => Date.now());
   const heartbeatTtlMs = clampMs(config.registration?.heartbeatTtlMs, 30000, 5000, 3600000);
 
@@ -33,7 +35,7 @@ export function createPeerRegistry(config, options = {}) {
     },
     snapshot() {
       expireOffline(now());
-      return Array.from(units.values()).map((unit) => structuredClone(unit));
+      return Array.from(units.values()).map((unit) => structuredClone(annotateUnit(unit)));
     },
     targets() {
       return this.snapshot().flatMap((unit) =>
@@ -46,9 +48,26 @@ export function createPeerRegistry(config, options = {}) {
         }))
       );
     },
+    useObservedHost(unitId, targetId) {
+      const id = stringField(unitId);
+      const existing = units.get(id);
+      if (!existing) {
+        throw new Error(`unknown hardware unit '${id}'`);
+      }
+      if (!existing.remoteAddress) {
+        throw new Error(`hardware unit '${id}' has no observed remote address`);
+      }
+      const target = existing.targets.find((entry) => targetMatches(entry, targetId));
+      if (!target) {
+        throw new Error(`unknown RNBO target '${targetId}' for hardware unit '${id}'`);
+      }
+      targetHostOverrides.add(targetOverrideKey(id, target));
+      return structuredClone(annotateUnit(existing));
+    },
     expireOffline,
     clear() {
       units.clear();
+      targetHostOverrides.clear();
     }
   };
 
@@ -65,6 +84,33 @@ export function createPeerRegistry(config, options = {}) {
       }
     }
     return Array.from(units.values()).map((unit) => structuredClone(unit));
+  }
+
+  function annotateUnit(unit) {
+    const targets = unit.targets.map((target) => annotateTarget(unit, target));
+    const diagnostics = targets.flatMap((target) => target.diagnostics ?? []);
+    return {
+      ...unit,
+      targets,
+      diagnostics
+    };
+  }
+
+  function annotateTarget(unit, target) {
+    const override = targetHostOverrides.has(targetOverrideKey(unit.id, target));
+    const effectiveTarget = override
+      ? {
+          ...target,
+          host: unit.remoteAddress,
+          advertisedHost: target.host,
+          hostOverride: {
+            source: "observed-remote-address",
+            host: unit.remoteAddress
+          }
+        }
+      : target;
+    const diagnostics = targetDiagnostics(unit, effectiveTarget);
+    return diagnostics.length > 0 ? { ...effectiveTarget, diagnostics } : effectiveTarget;
   }
 }
 
@@ -153,6 +199,42 @@ function normalizeTargets(targets, hardwareUnitId, hardwareUnitName, config) {
       available: target.available !== false
     };
   });
+}
+
+function targetDiagnostics(unit, target) {
+  if (target.hostOverride) {
+    return [];
+  }
+  const advertisedHost = stringField(target.advertisedHost ?? target.host);
+  const observedHost = stringField(unit.remoteAddress);
+  if (!observedHost || !advertisedHost || advertisedHost === observedHost || !isIpAddress(advertisedHost)) {
+    return [];
+  }
+  return [
+    {
+      type: "target-host-mismatch",
+      severity: "warning",
+      unitId: unit.id,
+      targetId: target.id,
+      advertisedHost,
+      observedHost,
+      repairable: true,
+      message: `${unit.advertisedName || unit.id} registered from ${observedHost} but advertises RNBO at ${advertisedHost}.`
+    }
+  ];
+}
+
+function targetMatches(target, targetId) {
+  const id = stringField(targetId);
+  return target.id === id || target.localId === id;
+}
+
+function targetOverrideKey(unitId, target) {
+  return `${unitId}:${target.localId || target.id}`;
+}
+
+function isIpAddress(value) {
+  return net.isIP(value) !== 0;
 }
 
 function stringField(value) {

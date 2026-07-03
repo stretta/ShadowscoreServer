@@ -166,6 +166,21 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  const observedHostRepairMatch = url.pathname.match(/^\/hardware\/units\/([^/]+)\/targets\/([^/]+)\/use-observed-host$/);
+  if (request.method === "POST" && observedHostRepairMatch) {
+    try {
+      const registry = requirePeerRegistry(runtime);
+      const unit = registry.useObservedHost(
+        decodeURIComponent(observedHostRepairMatch[1]),
+        decodeURIComponent(observedHostRepairMatch[2])
+      );
+      writeJson(response, 200, { ok: true, unit });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/assignments") {
     writeJson(response, 200, store.getScore().assignments ?? {});
     return;

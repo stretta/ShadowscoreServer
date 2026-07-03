@@ -77,8 +77,25 @@ export function adminPage() {
       justify-content: space-between;
       padding: 9px;
     }
+    .target, .unit { align-items: flex-start; }
+    .item-main { display: grid; gap: 4px; min-width: 0; }
     .score-detail { color: #66717d; font-size: 12px; margin-top: 3px; }
     .target code { color: #38414a; font-size: 12px; }
+    .diagnostic {
+      background: #fff8df;
+      border: 1px solid #e0bd54;
+      color: #684b05;
+      display: grid;
+      font-size: 12px;
+      gap: 6px;
+      margin-top: 6px;
+      padding: 7px;
+    }
+    .diagnostic button {
+      min-height: 30px;
+      padding: 5px 8px;
+      width: fit-content;
+    }
     .badge {
       border: 1px solid #bac2ca;
       border-radius: 999px;
@@ -317,11 +334,15 @@ export function adminPage() {
       for (const target of targets) {
         const row = document.createElement("div");
         row.className = "target";
+        const main = document.createElement("div");
+        main.className = "item-main";
         const label = document.createElement("div");
         label.textContent = displayTargetLabel(target);
         const code = document.createElement("code");
         code.textContent = target.host + ":" + target.port + target.address;
-        row.append(label, code, statusBadge(target.available === false ? "offline" : "online"));
+        main.append(label, code);
+        appendDiagnostics(main, target);
+        row.append(main, statusBadge(target.available === false ? "offline" : "online"));
         targetsEl.append(row);
       }
     }
@@ -338,12 +359,36 @@ export function adminPage() {
       for (const unit of units) {
         const row = document.createElement("div");
         row.className = "unit";
+        const main = document.createElement("div");
+        main.className = "item-main";
         const label = document.createElement("div");
         label.textContent = (unit.advertisedName ?? unit.id) + (unit.local ? " · local host" : "");
         const detail = document.createElement("code");
-        detail.textContent = unit.id + " · targets " + (unit.targets?.length ?? 0);
-        row.append(label, detail, statusBadge(unit.status ?? "offline"));
+        const remote = unit.remoteAddress ? " · seen at " + unit.remoteAddress : "";
+        detail.textContent = unit.id + " · targets " + (unit.targets?.length ?? 0) + remote;
+        main.append(label, detail);
+        appendDiagnostics(main, unit);
+        row.append(main, statusBadge(unit.status ?? "offline"));
         hardwareUnitsEl.append(row);
+      }
+    }
+
+    function appendDiagnostics(parent, item) {
+      for (const diagnostic of item.diagnostics ?? []) {
+        if (diagnostic.type !== "target-host-mismatch") continue;
+        const warning = document.createElement("div");
+        warning.className = "diagnostic";
+        const message = document.createElement("div");
+        message.textContent = diagnostic.message;
+        warning.append(message);
+        if (diagnostic.repairable) {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.textContent = "Use observed IP";
+          button.addEventListener("click", () => useObservedHost(diagnostic.unitId, diagnostic.targetId));
+          warning.append(button);
+        }
+        parent.append(warning);
       }
     }
 
@@ -688,6 +733,20 @@ export function adminPage() {
         return;
       }
       setStatus("Resent current score to RNBO clients.");
+    }
+
+    async function useObservedHost(unitId, targetId) {
+      const response = await fetch(
+        "/hardware/units/" + encodeURIComponent(unitId) + "/targets/" + encodeURIComponent(targetId) + "/use-observed-host",
+        { method: "POST" }
+      );
+      const body = await response.json();
+      if (body.ok === false) {
+        setStatus(body.error);
+        return;
+      }
+      setStatus("Using observed IP for " + unitId + " until the peer registers a new target.");
+      await loadSession();
     }
 
     function displayTargetLabel(target) {

@@ -26,7 +26,7 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
 });
 
 test("Matrix Edit static app includes ShadowScore client wiring", async () => {
-  const { html, js } = await readBuiltApp();
+  const { html, js, css } = await readBuiltApp();
 
   assert.match(html, /<select id="voice" aria-label="ShadowScore voice"><\/select>/);
   assert.match(html, /<select id="clip" aria-label="ShadowScore clip"><\/select>/);
@@ -58,6 +58,8 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(js, /via alias/);
   assert.match(js, /aliases mapped/);
   assert.doesNotMatch(js, /rowIndicators:m\(\)\?\[\]:vo\(e\.size\.height\)/);
+  assert.match(css, /input\[type=number\].*appearance:textfield/);
+  assert.match(css, /webkit-inner-spin-button/);
 });
 
 test("Matrix Edit static app includes build provenance", async () => {

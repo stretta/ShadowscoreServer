@@ -99,6 +99,19 @@ Implemented endpoint groups include:
 - `GET /healthz`
 - `GET /score`
 - `GET /session`
+- `GET /hardware/units`
+- `POST /hardware/register`
+- `POST /hardware/units/:unitId/heartbeat`
+- `POST /hardware/units/:unitId/targets/:targetId/use-observed-host`
+- `GET /rnbo/targets`
+- `GET /playback/timing-contracts`
+- `GET /transport`
+- `GET /transport/events`
+- `GET /transport/status`
+- `POST /transport/jack/snapshot`
+- `POST /transport/jack/start`
+- `POST /transport/jack/stop`
+- `POST /transport/jack/locate`
 - `GET /assignments`
 - `GET /clips`
 - `GET /structure`
@@ -117,18 +130,27 @@ Implemented endpoint groups include:
 - `POST /structure/playhead`
 - `POST /macrostructure/advance`
 - `POST /macrostructure/reset`
+- `POST /macrostructure/phase-reset`
 - `POST /macrostructure/playback/start`
 - `POST /macrostructure/playback/stop`
 - `POST /voices/:voiceId/assignment`
 - `DELETE /voices/:voiceId/assignment`
 - `POST /voices/:voiceId/notes`
 - `POST /admin/reset`
+- `GET /admin/backup`
+- `POST /admin/restore`
 - `GET /admin/scores`
 - `POST /admin/scores`
 - `POST /admin/scores/:scoreId/load`
 - `DELETE /admin/scores/:scoreId`
+- `POST /admin/assignment-preset`
 - `POST /admin/import-legacy-voice-notes`
+- `POST /admin/rnbo/resend`
 - `GET /admin`
+- `GET /`
+- `GET /event-list`
+- `GET /matrix-edit`
+- `GET /structure-editor`
 - `GET /events`
 - `GET /collab` WebSocket upgrade for realtime collaboration commands.
 

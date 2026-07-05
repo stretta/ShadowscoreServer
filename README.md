@@ -43,13 +43,20 @@ Use a config file to override defaults:
 npm start -- --config config/example.json
 ```
 
-For the first Shadowbox local-host prototype, use:
+For a Shadowbox host with a machine-local config, create a local copy first:
+
+```sh
+cp config/shadowbox.hardware-host.json config/shadowbox.local.json
+```
+
+Then edit `config/shadowbox.local.json` for the hardware unit's hostname,
+public URL, RNBO ports, and RNBOOSCQuery URL. Start the server with:
 
 ```sh
 npm start -- --config config/shadowbox.local.json
 ```
 
-For the hardware deployment path, start from:
+For a checked-in hardware host template, start from:
 
 ```sh
 npm start -- --config config/shadowbox.hardware-host.json
@@ -131,7 +138,10 @@ containing block duration; one-shot clips play once.
 - **Admin** owns lab operations: assignments, saved scores, backup/restore,
   migration from legacy voice notes, and reset tools.
 
-## API Draft
+For the session-day operator flow, see
+[`docs/operator-guide.md`](docs/operator-guide.md).
+
+## HTTP API
 
 - `GET /healthz`: service status.
 - `GET /score`: current ensemble score snapshot.
@@ -139,6 +149,7 @@ containing block duration; one-shot clips play once.
 - `GET /hardware/units`: local and registered hardware units with online/offline state.
 - `POST /hardware/register`: register a peer hardware unit and its RNBO targets. Targets may include `capabilities` such as `maxStages`, `maxNoteRows`, `noteDataFloatCount`, `noteRowWidth`, `contextDataFloatCount`, and `supportedClockIntervals`; registered peer targets that omit `capabilities` are treated as legacy `1024` stage / `512` note-row clients until their agent advertises expanded support.
 - `POST /hardware/units/:unitId/heartbeat`: refresh a registered peer heartbeat.
+- `POST /hardware/units/:unitId/targets/:targetId/use-observed-host`: replace a peer target's advertised host with the remote address observed by the session host. This is an admin repair path for peers that register with an unreachable address.
 - `GET /rnbo/targets`: local and registered RNBO targets with availability state.
 - `GET /playback/timing-contracts`: target-specific compiled playback timing contracts for the active block, including selected stage resolution, `ClockInterval`/ticks-per-stage, `MaxSteps`/pattern length, target capacities, and quantization diagnostics when adaptive fidelity modes are enabled.
 - `POST /transport/jack/snapshot`: accept a host-local JACK BBT snapshot from the bridge helper.
@@ -169,6 +180,7 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /structure/playhead`: select the active mesostructural block.
 - `POST /macrostructure/advance`: advance the active block to the next macro chain entry.
 - `POST /macrostructure/reset`: reset the active block to the beginning of the macro chain.
+- `POST /macrostructure/phase-reset`: write `SetStage: 0` to assignment-bound RNBO targets, optionally scoped with `{ "targetId": "..." }`.
 - `POST /macrostructure/playback/start`: start playback from the current active block and send `Clock: 1` to available RNBO targets. The default/`auto` mode chooses beat-derived playback when JACK or RNBO client readback is usable, otherwise it falls back to the internal timer. Diagnostic callers can still pass `{ "mode": "jack" }` or `{ "mode": "timer" }` explicitly.
 - `POST /macrostructure/playback/stop`: stop macro playback and send `Clock: 0` to available RNBO targets.
 - `POST /voices`: add a voice with `{ "voiceId": "...", "assignment": { ... } }`.
@@ -177,12 +189,16 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `DELETE /voices/:voiceId/assignment`: clear one voice assignment.
 - `POST /voices/:voiceId/notes`: replace a voice's ShadowScore notes document.
 - `POST /admin/reset`: clear selected score sections with a JSON body containing `context`, `notes`, `voices`, `assignments`, and/or `structure` booleans.
+- `GET /admin/backup`: download the current score snapshot as JSON.
+- `POST /admin/restore`: restore a score snapshot JSON body through the normal score normalization path.
 - `GET /admin/scores`: list named score JSON files saved on the host.
 - `POST /admin/scores`: save the current score to the host score library with an optional `{ "name": "..." }`.
 - `POST /admin/scores/new`: replace the current score with a fresh score from the configured ensemble defaults.
 - `POST /admin/scores/:scoreId/load`: restore a saved score from the host score library.
 - `DELETE /admin/scores/:scoreId`: delete a saved score JSON file from the host score library.
+- `POST /admin/assignment-preset`: apply a configured assignment preset by `{ "presetId": "..." }`.
 - `POST /admin/import-legacy-voice-notes`: copy non-empty `voices[player].notes` into looped clips such as `player-1-main` and assign them to block `A` by default. This leaves voice notes intact and does not overwrite existing clips unless `overwriteClips` is true.
+- `POST /admin/rnbo/resend`: resend the current active-block score transaction to available RNBO targets.
 - `GET /admin`: simple lab admin page for voice assignments and basic resets.
 - `GET /`: default structure editor.
 - `GET /event-list`: canonical clip attribute and note-event editor.
@@ -243,7 +259,7 @@ and syncs the generated artifact into this server repo.
 
 ## Hardware Deployment
 
-Phase 5 hardware deployment material lives in
+Hardware deployment material lives in
 [`docs/deployment/shadowbox-hardware.md`](docs/deployment/shadowbox-hardware.md).
 It includes Pi install/update commands, systemd service templates, smoke-test
 commands, and the pre-session hardware checklist.

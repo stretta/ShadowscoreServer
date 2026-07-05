@@ -1,6 +1,9 @@
 # Structure, Clip, and Matrix Edit Work Plan
 
-This plan describes the remaining work to separate composition structure, reusable clips, and block-oriented Matrix Edit workflows.
+This plan tracks the separation of composition structure, reusable clips, and
+block-oriented Matrix Edit workflows. Many sections are now implemented; use
+the status notes in each section to distinguish current behavior from remaining
+refinements.
 
 ## 1. Route Ownership
 

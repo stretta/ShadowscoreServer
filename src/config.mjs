@@ -96,7 +96,7 @@ export const defaultConfig = Object.freeze({
   rnbo: {
     enabled: false,
     host: "127.0.0.1",
-    port: 9000,
+    port: 1234,
     address: "/rnbo/inst/2/messages/in/shadowscore",
     oscQuery: {
       enabled: false,

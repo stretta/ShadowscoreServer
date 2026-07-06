@@ -107,6 +107,10 @@ export function adminPage() {
     }
     .badge.online { background: #e4f4ea; border-color: #9ad2ad; color: #22653b; }
     .badge.offline { background: #f7e6e4; border-color: #d9a29a; color: #96382e; }
+    .badge.unassigned { background: #f1f3f4; border-color: #c6ccd2; color: #5f6872; }
+    .badge.ambiguous { background: #fff2d6; border-color: #dfb35d; color: #76500c; }
+    .routing-state { display: grid; gap: 4px; min-width: 120px; }
+    .routing-detail { color: #66717d; font-size: 12px; line-height: 1.25; }
     button {
       align-items: center;
       background: #ffffff;
@@ -174,6 +178,7 @@ export function adminPage() {
   <main>
     <div class="toolbar">
       <button class="primary" id="refresh" type="button">Refresh</button>
+      <button id="reconcile-assignments" type="button">Refresh routing</button>
       <button class="danger" id="clear-notes" type="button">Clear all notes</button>
       <button class="danger" id="clear-assignments" type="button">Clear assignments</button>
     </div>
@@ -228,8 +233,9 @@ export function adminPage() {
     <table>
       <thead>
         <tr>
-          <th>Voice</th>
-          <th>RNBO Target</th>
+          <th>Player</th>
+          <th>Live Client</th>
+          <th>Routing</th>
           <th>Assignee</th>
           <th>Device</th>
           <th>Client</th>
@@ -260,6 +266,7 @@ export function adminPage() {
     let hardwareUnits = [];
 
     document.querySelector("#refresh").addEventListener("click", loadSession);
+    document.querySelector("#reconcile-assignments").addEventListener("click", reconcileAssignments);
     document.querySelector("#clear-notes").addEventListener("click", () => resetScore({ notes: true }, "Clear all notes?"));
     document.querySelector("#clear-assignments").addEventListener("click", () => resetScore({ assignments: true }, "Clear all voice assignments?"));
     document.querySelector("#copy-url").addEventListener("click", copyShareUrl);
@@ -309,8 +316,9 @@ export function adminPage() {
         const assignment = score.assignments?.[voiceId] ?? {};
         const row = document.createElement("tr");
         row.dataset.voice = voiceId;
-        row.append(cell("Voice", voiceId, "voice"));
-        row.append(targetCell("RNBO Target", voiceId, assignment));
+        row.append(cell("Player", voiceId, "voice"));
+        row.append(targetCell("Live Client", voiceId, assignment));
+        row.append(routingCell("Routing", assignment));
         row.append(inputCell("Assignee", voiceId, "assignee", assignment.assignee ?? ""));
         row.append(inputCell("Device", voiceId, "deviceId", assignment.deviceId ?? ""));
         row.append(inputCell("Client", voiceId, "clientId", assignment.clientId ?? ""));
@@ -470,19 +478,50 @@ export function adminPage() {
       select.dataset.field = "rnboTargetId";
       const current = assignment.rnboTargetId ?? "";
       select.append(new Option("Unassigned", ""));
-      for (const target of discoveredTargets) {
-        const prefix = target.hardwareUnitName ? target.hardwareUnitName + " / " : "";
-        const suffix = target.available === false ? " · offline" : "";
-        const option = new Option(prefix + friendlyTargetName(target) + suffix, target.id);
-        option.disabled = target.available === false;
-        option.dataset.target = JSON.stringify(target);
-        select.append(option);
+      for (const [unitName, targets] of groupedTargets(discoveredTargets)) {
+        const group = document.createElement("optgroup");
+        group.label = unitName;
+        for (const target of targets) {
+          const suffix = target.available === false ? " · offline" : "";
+          const option = new Option(friendlyTargetName(target) + suffix, target.id);
+          option.disabled = target.available === false;
+          option.dataset.target = JSON.stringify(target);
+          group.append(option);
+        }
+        select.append(group);
+      }
+      if (current && !discoveredTargets.some((target) => target.id === current)) {
+        const stale = new Option("Assigned target offline · " + current, current);
+        stale.disabled = true;
+        stale.dataset.target = JSON.stringify({
+          id: current,
+          host: assignment.rnboHost ?? "",
+          port: assignment.rnboPort ?? null,
+          address: assignment.rnboAddress ?? "",
+          available: false
+        });
+        select.append(stale);
       }
       select.value = current;
       rememberInput(voiceId, "rnboTargetId", select);
       const td = document.createElement("td");
       td.dataset.label = label;
       td.append(select);
+      return td;
+    }
+
+    function routingCell(label, assignment) {
+      const state = routingState(assignment);
+      const wrapper = document.createElement("div");
+      wrapper.className = "routing-state";
+      wrapper.append(statusBadge(state.status));
+      const detail = document.createElement("div");
+      detail.className = "routing-detail";
+      detail.textContent = state.detail;
+      wrapper.append(detail);
+      const td = document.createElement("td");
+      td.dataset.label = label;
+      td.append(wrapper);
       return td;
     }
 
@@ -555,6 +594,18 @@ export function adminPage() {
         body: JSON.stringify(body)
       });
       render(await response.json());
+    }
+
+    async function reconcileAssignments() {
+      const response = await fetch("/assignments/reconcile", { method: "POST" });
+      const body = await response.json();
+      if (body.ok === false) {
+        setStatus(body.error);
+        return;
+      }
+      await loadSession();
+      const count = (body.reconciled?.length ?? 0) + (body.ambiguous?.length ?? 0);
+      setStatus(count === 0 ? "Routing already current." : "Refreshed routing for " + count + " assignment(s).");
     }
 
     function targetFields(select) {
@@ -762,6 +813,32 @@ export function adminPage() {
         return "Source";
       }
       return name;
+    }
+
+    function groupedTargets(targets) {
+      const groups = new Map();
+      for (const target of targets) {
+        const unit = target.hardwareUnitName || target.hardwareUnitId || "Local targets";
+        if (!groups.has(unit)) groups.set(unit, []);
+        groups.get(unit).push(target);
+      }
+      return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+    }
+
+    function routingState(assignment) {
+      if (assignment.routingStatus === "ambiguous") {
+        return { status: "ambiguous", detail: assignment.routingMessage || "Choose a live target manually." };
+      }
+      if (!assignment.rnboTargetId) {
+        return assignment.deviceId
+          ? { status: "unassigned", detail: "Waiting for " + assignment.deviceId + " target." }
+          : { status: "unassigned", detail: "No client identity set." };
+      }
+      const target = discoveredTargets.find((entry) => entry.id === assignment.rnboTargetId);
+      if (!target || target.available === false) {
+        return { status: "offline", detail: assignment.deviceId ? assignment.deviceId + " target unavailable." : "Target unavailable." };
+      }
+      return { status: "online", detail: displayTargetLabel(target) };
     }
 
     async function clearAssignment(voiceId) {

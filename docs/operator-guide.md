@@ -80,6 +80,11 @@ RNBO target. Locked assignments, assignments without `deviceId`, and peers
 with multiple ShadowScore targets are left for manual selection; multiple
 targets are marked `ambiguous` in the assignment metadata.
 
+In Admin, use **Refresh routing** after peers reconnect if saved player
+assignments still point at stale RNBO endpoints. The action keeps player
+identity intact and only refreshes output routing for assignments with a
+matching stable `deviceId`.
+
 ## Prepare The Score
 
 Use Structure Editor for:

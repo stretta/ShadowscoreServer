@@ -57,6 +57,10 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /\/admin\/scores/);
   assert.match(response.body, /New score/);
   assert.match(response.body, /\/admin\/scores\/new/);
+  assert.match(response.body, /Refresh routing/);
+  assert.match(response.body, /\/assignments\/reconcile/);
+  assert.match(response.body, /Live Client/);
+  assert.match(response.body, /Routing/);
   assert.match(response.body, /Import voice notes to clips/);
   assert.match(response.body, /\/admin\/import-legacy-voice-notes/);
   assert.match(response.body, /Resend RNBO score/);
@@ -1267,6 +1271,54 @@ test("hardware registration is a no-op when assignment endpoint already matches"
 
   assert.equal(registered.assignmentReconciliation.changed, false);
   assert.equal(context.store.getScore().version, beforeVersion);
+});
+
+test("assignment reconcile route refreshes stale endpoints from registered hardware", async () => {
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig)
+    }
+  });
+
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    deviceId: "heron",
+    rnboTargetId: "heron:old",
+    rnboHost: "192.168.68.90",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/9/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/hardware/register", {
+    id: "heron",
+    targets: [
+      {
+        id: "rnbo-inst-7:shadowscore",
+        host: "192.168.68.101",
+        port: 1234,
+        address: "/rnbo/inst/7/messages/in/shadowscore"
+      }
+    ]
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    deviceId: "heron",
+    rnboTargetId: "heron:old",
+    rnboHost: "192.168.68.90",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/9/messages/in/shadowscore"
+  });
+
+  const reconciled = await requestJson(context, "POST", "/assignments/reconcile");
+  const assignment = reconciled.score.assignments["player-1"];
+
+  assert.equal(reconciled.ok, true);
+  assert.equal(reconciled.changed, true);
+  assert.deepEqual(reconciled.reconciled, [
+    { voiceId: "player-1", deviceId: "heron", rnboTargetId: "heron:rnbo-inst-7:shadowscore" }
+  ]);
+  assert.deepEqual(reconciled.ambiguous, []);
+  assert.equal(assignment.rnboTargetId, "heron:rnbo-inst-7:shadowscore");
+  assert.equal(assignment.rnboHost, "192.168.68.101");
+  assert.equal(assignment.rnboPort, 1234);
+  assert.equal(assignment.rnboAddress, "/rnbo/inst/7/messages/in/shadowscore");
 });
 
 test("playback timing contract route exposes target-specific compiled contracts", async () => {

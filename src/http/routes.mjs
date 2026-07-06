@@ -204,6 +204,25 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/assignments/reconcile") {
+    try {
+      const hardwareUnits = await readHardwareUnits(config, runtime);
+      const results = hardwareUnits.map((unit) => store.reconcileRegisteredHardwareUnit(unit));
+      const reconciled = results.flatMap((result) => result.reconciled);
+      const ambiguous = results.flatMap((result) => result.ambiguous);
+      writeJson(response, 200, {
+        ok: true,
+        changed: results.some((result) => result.changed),
+        reconciled,
+        ambiguous,
+        score: store.getScore()
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/clips") {
     writeJson(response, 200, store.getScore().clips ?? {});
     return;

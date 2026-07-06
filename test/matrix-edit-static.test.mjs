@@ -28,8 +28,10 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
 test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   const { html, js, css } = await readBuiltApp();
 
-  assert.match(html, /<select id="voice" aria-label="ShadowScore voice"><\/select>/);
+  assert.match(html, /<select id="voice" aria-label="ShadowScore player"><\/select>/);
   assert.match(html, /<select id="clip" aria-label="ShadowScore clip"><\/select>/);
+  assert.match(html, /<select id="rnbo-target" aria-label="Live client"><\/select>/);
+  assert.match(html, /id="routing-status"/);
   assert.doesNotMatch(html, /voice-picker/);
   assert.match(js, /\/session/);
   assert.match(js, /\/score/);
@@ -57,9 +59,14 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(js, /clip stage \$\{[^}]+\}\$\{[^}]+\} velocity \$\{[^}]+\}\. Saving/);
   assert.match(js, /via alias/);
   assert.match(js, /aliases mapped/);
+  assert.match(js, /No live client/);
+  assert.match(js, /Assigned target offline/);
+  assert.match(js, /Choose a live client/);
   assert.doesNotMatch(js, /rowIndicators:m\(\)\?\[\]:vo\(e\.size\.height\)/);
   assert.match(css, /input\[type=number\].*appearance:textfield/);
   assert.match(css, /webkit-inner-spin-button/);
+  assert.match(css, /routing-status/);
+  assert.match(css, /routing-status\.ambiguous/);
 });
 
 test("Matrix Edit static app includes build provenance", async () => {

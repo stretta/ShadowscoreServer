@@ -161,6 +161,7 @@ For the session-day operator flow, see
 - `GET /transport/status`: host transport status and macro playback control page.
 - `POST /rnbo/targets/:targetId/transport-controls`: set playback transport RNBO controls for a target. `Clock` is written to the RNBO param path, while `Tempo`, `MaxSteps`, `ClockInterval`, `SetStage`, and `Stage` are written to message inports, for example `{ "controls": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`. Editor transport start/stop uses this route with `{ "controls": { "Clock": 1 } }` or `{ "controls": { "Clock": 0 } }`; sending the off/on message to one target is sufficient for the linked transport. Routine score-data resends reassert `ClockInterval` and score-derived `MaxSteps`; they only send `Tempo` when `transport.tempoAuthority` is set to `"server"`. Stage/step reset or direct advancement controls should be sent only by explicit sync/direct-drive operations. The older `/rnbo/targets/:targetId/params` route remains available as a compatibility alias.
 - `GET /assignments`: current voice assignment map.
+- `POST /assignments/reconcile`: refresh assignment endpoint fields from currently registered hardware units by stable `deviceId`; this is the manual version of the safe registration reconciliation path.
 - `GET /clips`: current reusable clip map.
 - `GET /structure`: current `{ clips, mesostructure, macrostructure, structureState }` structure document.
 - `GET /structure/playhead`: current active mesostructural block and macro index.

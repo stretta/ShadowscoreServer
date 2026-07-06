@@ -131,6 +131,11 @@ can provision or update this config and restart
 
 ### 4. Improve Admin And Matrix Edit Assignment UX
 
+Status: implemented. Admin and Matrix Edit now separate player lanes from live
+client targets, show routing status, group targets by hardware identity,
+preserve stale offline selections visibly, and expose a manual Admin routing
+refresh action through `POST /assignments/reconcile`.
+
 Admin and Matrix Edit should make the model obvious:
 
 - show stable players as score lanes

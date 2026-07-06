@@ -79,6 +79,76 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/transport/play") {
+    try {
+      const body = await readJson(request);
+      const playback = requireMacroPlayback(runtime);
+      const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 1 }, {
+        targetId: optionalString(body.targetId)
+      });
+      const phaseWrites = body.phaseReset === false
+        ? []
+        : await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 }, {
+          targetId: optionalString(body.targetId)
+        });
+      const mode = await playbackStartMode(store.getScore(), config, runtime, optionalString(body.mode));
+      playback.start({
+        mode,
+        reset: Boolean(body.reset),
+        sourceClientId: "transport"
+      });
+      writeJson(response, 200, {
+        ok: true,
+        action: "play",
+        clockWrites,
+        phaseWrites,
+        transport: await transportFacadeStatus(store, config, runtime)
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/stop") {
+    try {
+      const body = await readJson(request);
+      const playback = requireMacroPlayback(runtime);
+      const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 0 }, {
+        targetId: optionalString(body.targetId)
+      });
+      playback.stop();
+      writeJson(response, 200, {
+        ok: true,
+        action: "stop",
+        clockWrites,
+        transport: await transportFacadeStatus(store, config, runtime)
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/return-to-start") {
+    try {
+      const body = await readJson(request);
+      store.resetStructurePlayhead(revisionOptions(body));
+      const phaseWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 }, {
+        targetId: optionalString(body.targetId)
+      });
+      writeJson(response, 200, {
+        ok: true,
+        action: "return-to-start",
+        phaseWrites,
+        transport: await transportFacadeStatus(store, config, runtime)
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/transport/jack/snapshot") {
     try {
       const transport = requireJackTransport(runtime);
@@ -947,6 +1017,64 @@ async function macroPlaybackSnapshot(runtime, store, config) {
       last: null
     }
   };
+}
+
+async function transportFacadeStatus(store, config, runtime) {
+  const score = store.getScore();
+  const playback = await macroPlaybackSnapshot(runtime, store, config);
+  const targets = await readAllRnboTargets(config, runtime);
+  const assignedTargets = targets.filter((target) => assignedVoiceForTarget(score, target));
+  const onlineTargets = assignedTargets.filter((target) => target.available !== false);
+  const witness = playback.witness ?? selectBeatWitness({
+    mode: playback.mode === "jack" ? "jack" : "timer",
+    running: Boolean(playback.running),
+    jackTransport: jackTransportSnapshot(runtime),
+    rnboTargets: targets,
+    timingContracts: targets.map((target) => playbackTimingContractForTarget(score, config, target)),
+    rnboClient: config.transport?.rnboClient
+  });
+  const syncSource = witness.source === "rnbo-client" ? "rnbo" : witness.source === "jack" ? "jack" : playback.mode === "timer" ? "timer" : "none";
+  const warnings = [];
+  if (assignedTargets.length === 0) {
+    warnings.push("No assigned playback clients.");
+  } else if (onlineTargets.length < assignedTargets.length) {
+    warnings.push(`${assignedTargets.length - onlineTargets.length} assigned playback client${assignedTargets.length - onlineTargets.length === 1 ? "" : "s"} offline.`);
+  }
+  if (playback.running && witness.usable === false && witness.reason) {
+    warnings.push(witness.reason);
+  }
+  return {
+    playing: Boolean(playback.running),
+    activeBlockId: playback.activeBlockId ?? score.structureState?.activeBlockId ?? "",
+    macroIndex: playback.macroIndex ?? score.structureState?.macroIndex ?? 0,
+    beatIntoBlock: playback.beatIntoBlock ?? null,
+    sync: {
+      source: syncSource,
+      fresh: Boolean(witness.fresh ?? witness.usable),
+      label: syncLabel(syncSource),
+      reason: witness.reason ?? ""
+    },
+    clients: {
+      assigned: assignedTargets.length,
+      online: onlineTargets.length,
+      ready: assignedTargets.length > 0 && onlineTargets.length === assignedTargets.length
+    },
+    warnings,
+    playback
+  };
+}
+
+function syncLabel(source) {
+  switch (source) {
+    case "jack":
+      return "JACK";
+    case "rnbo":
+      return "RNBO";
+    case "timer":
+      return "Timer";
+    default:
+      return "No sync";
+  }
 }
 
 async function readBeatWitnessContext(score, config, runtime) {

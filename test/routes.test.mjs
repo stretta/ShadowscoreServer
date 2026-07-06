@@ -491,6 +491,145 @@ test("macro playback routes expose, start, and stop the chain runner", async () 
   ]);
 });
 
+test("transport facade play and stop wrap macro playback with aggregate status", async () => {
+  const writes = [];
+  let running = false;
+  let startOptions = null;
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          mode: startOptions?.mode ?? "stopped",
+          activeBlockId: "A",
+          macroIndex: 0,
+          beatIntoBlock: running ? 0 : null,
+          witness: {
+            source: startOptions?.mode === "jack" ? "jack" : "timer",
+            usable: true,
+            fresh: true
+          }
+        }),
+        start: (options) => {
+          startOptions = options;
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => {
+          running = false;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "source-client",
+    rnboHost: "192.168.68.96",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  const started = await requestJson(context, "POST", "/transport/play", { mode: "timer" });
+  assert.equal(started.ok, true);
+  assert.equal(started.action, "play");
+  assert.equal(started.transport.playing, true);
+  assert.equal(started.transport.activeBlockId, "A");
+  assert.equal(started.transport.sync.label, "Timer");
+  assert.deepEqual(started.transport.clients, { assigned: 1, online: 1, ready: true });
+  assert.equal(startOptions.sourceClientId, "transport");
+  assert.deepEqual(writes, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Clock",
+      value: 1
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/messages/in/SetStage",
+      value: 0
+    }
+  ]);
+  assert.equal(started.clockWrites.length, 1);
+  assert.equal(started.phaseWrites.length, 1);
+
+  const stopped = await requestJson(context, "POST", "/transport/stop", {});
+  assert.equal(stopped.ok, true);
+  assert.equal(stopped.action, "stop");
+  assert.equal(stopped.transport.playing, false);
+  assert.equal(stopped.clockWrites.length, 1);
+  assert.deepEqual(writes.at(-1), {
+    host: "192.168.68.96",
+    port: 9000,
+    path: "/rnbo/inst/2/params/Clock",
+    value: 0
+  });
+});
+
+test("transport return-to-start resets the macro playhead and phase", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: false,
+          mode: "stopped",
+          activeBlockId: context.store.getScore().structureState.activeBlockId,
+          macroIndex: context.store.getScore().structureState.macroIndex
+        })
+      }
+    }
+  });
+
+  await requestJson(context, "POST", "/macrostructure/advance", {});
+  assert.equal(context.store.getScore().structureState.activeBlockId, "B");
+
+  const returned = await requestJson(context, "POST", "/transport/return-to-start", {});
+  assert.equal(returned.ok, true);
+  assert.equal(returned.action, "return-to-start");
+  assert.equal(returned.transport.activeBlockId, "A");
+  assert.equal(returned.transport.macroIndex, 0);
+  assert.deepEqual(writes, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/messages/in/SetStage",
+      value: 0
+    }
+  ]);
+});
+
 test("macro playback start auto mode uses internal clock without a beat witness", async () => {
   let startOptions = null;
   const context = createRouteContext({
@@ -1851,7 +1990,10 @@ test("matrix edit route serves static app html", async () => {
   assert.match(response.body, /ShadowScore Matrix Edit/);
   assert.match(response.body, /id="start-transport"/);
   assert.match(response.body, /id="stop-transport"/);
-  assert.match(response.body, /\/macrostructure\/playback\/\$\{running \? "start" : "stop"\}/);
+  assert.match(response.body, /id="return-start"/);
+  assert.match(response.body, /performance-toolbar/);
+  assert.match(response.body, /advanced-panel/);
+  assert.doesNotMatch(response.body, /\/macrostructure\/playback\/\$\{running \? "start" : "stop"\}/);
   assert.doesNotMatch(response.body, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
 });
 

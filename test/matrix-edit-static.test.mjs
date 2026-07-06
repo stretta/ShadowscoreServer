@@ -13,15 +13,19 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
   assert.match(html, /<link rel="stylesheet" crossorigin href="\/matrix-edit\/assets\/[^"]+\.css">/);
   assert.match(html, /id="start-transport"/);
   assert.match(html, /id="stop-transport"/);
+  assert.match(html, /id="return-start"/);
   assert.match(html, /id="create-clip"/);
   assert.match(html, /id="projection-header"/);
   assert.match(html, /id="playing-block"/);
   assert.match(html, /id="projection-playback"/);
+  assert.match(html, /performance-toolbar/);
+  assert.match(html, /advanced-panel/);
+  assert.match(html, /Play/);
+  assert.match(html, /Return to A/);
   assert.match(html, /Create Clip/);
   assert.match(html, /id="duration"[^>]+value="0\.25"/);
-  assert.match(html, /\/macrostructure\/playback\/\$\{running \? "start" : "stop"\}/);
-  assert.match(html, /targetId: targetSelect\.value/);
-  assert.match(html, /Started"\s*:\s*"Stopped"\s*\}\s*macro playback/);
+  assert.doesNotMatch(html, /\/macrostructure\/playback\/\$\{running \? "start" : "stop"\}/);
+  assert.doesNotMatch(html, /targetId: targetSelect\.value/);
   assert.doesNotMatch(html, /\/rnbo\/targets\/\$\{encodeURIComponent\(targetId\)\}\/params/);
 });
 
@@ -51,6 +55,9 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(js, /needs a clip in section/);
   assert.match(js, /Switch the whole score to/);
   assert.match(js, /\/admin\/restore/);
+  assert.match(js, /\/transport\//);
+  assert.match(js, /return-to-start/);
+  assert.match(js, /Transport/);
   assert.match(js, /cellFillFractions/);
   assert.match(js, /setCellFillFractions/);
   assert.match(js, /dragWithinCell/);
@@ -65,6 +72,8 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.doesNotMatch(js, /rowIndicators:m\(\)\?\[\]:vo\(e\.size\.height\)/);
   assert.match(css, /input\[type=number\].*appearance:textfield/);
   assert.match(css, /webkit-inner-spin-button/);
+  assert.match(css, /performance-toolbar/);
+  assert.match(css, /advanced-panel/);
   assert.match(css, /routing-status/);
   assert.match(css, /routing-status\.ambiguous/);
 });

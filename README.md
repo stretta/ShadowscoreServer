@@ -156,6 +156,9 @@ For the session-day operator flow, see
 - `POST /transport/jack/start`: start JACK transport through a configured JACK controller.
 - `POST /transport/jack/stop`: stop JACK transport through a configured JACK controller.
 - `POST /transport/jack/locate`: locate JACK transport to a frame with `{ "frame": 0 }`; this does not write RNBO `Clock`.
+- `POST /transport/play`: user-facing Play facade. Starts macrostructure playback, writes assigned-client playback transport controls, applies a phase reset by default, and returns aggregate transport readiness.
+- `POST /transport/stop`: user-facing Stop facade. Stops macrostructure playback, writes assigned-client playback stop controls, and returns aggregate transport readiness.
+- `POST /transport/return-to-start`: reset the macro playhead to the first section, write `SetStage: 0` to playback targets, and return aggregate transport readiness.
 - `GET /transport`: current JACK bridge freshness, latest BBT snapshot, and tempo authority.
 - `GET /transport/events`: SSE stream for transport updates.
 - `GET /transport/status`: host transport status and macro playback control page.

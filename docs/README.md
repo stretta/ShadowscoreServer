@@ -17,6 +17,9 @@ Design and implementation notes:
   APIs, saved scores, and migration.
 - [`matrix-edit-meso-block-projection-plan.md`](matrix-edit-meso-block-projection-plan.md):
   Matrix Edit projection framing and verification scenarios.
+- [`transport-and-matrix-ui-ux-plan.md`](transport-and-matrix-ui-ux-plan.md):
+  DAW-like transport facade, Matrix Edit simplification, and ownership
+  boundaries for setup versus performance.
 - [`adaptive-rnbo-stage-resolution-plan.md`](adaptive-rnbo-stage-resolution-plan.md):
   timing-contract and target-capability design for RNBO playback.
 - [`beat-derived-macro-playback-plan.md`](beat-derived-macro-playback-plan.md):
@@ -33,4 +36,3 @@ Design and implementation notes:
 The plan documents are useful context, but they are not the front-door operator
 manual. Prefer the README, operator guide, and deployment guide when setting up
 or running a session.
-

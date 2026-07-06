@@ -54,6 +54,9 @@ the same logical client is online again.
 
 ### 1. Reconcile Assignments On Peer Registration
 
+Status: implemented. `POST /hardware/register` now reconciles score
+assignments whose stable `deviceId` matches the registered unit.
+
 When `POST /hardware/register` receives a peer unit:
 
 1. Normalize and store the registered hardware unit as it does today.
@@ -81,6 +84,9 @@ RNBO endpoint changed from, for example, `heron:rnbo-inst-9:shadowscore` to
 
 ### 2. Add Safe Reconciliation Rules
 
+Status: implemented for registration-time rebinding. Ambiguous multi-target
+clients are marked on the assignment and exact endpoint matches are no-ops.
+
 Automatic reconciliation should be conservative:
 
 - Do not auto-rebind if `assignment.locked === true`.
@@ -93,6 +99,8 @@ Automatic reconciliation should be conservative:
   as a no-op.
 
 ### 3. Make Peer Provisioning Repeatable
+
+Status: implemented as `npm run configure-peer`.
 
 Add a command or deploy helper path that writes a peer-local config without
 manual editing:
@@ -117,8 +125,9 @@ It should be usable for arbitrary client names, not only bird names:
 npm run configure-peer -- --id bob --ip 192.168.68.111 --host 192.168.68.102
 ```
 
-Optionally extend `tools/deploy_pi.sh --role peer` so deployment can provision
-or update this config and restart `shadowscore-registration-agent.service`.
+Future work: optionally extend `tools/deploy_pi.sh --role peer` so deployment
+can provision or update this config and restart
+`shadowscore-registration-agent.service`.
 
 ### 4. Improve Admin And Matrix Edit Assignment UX
 

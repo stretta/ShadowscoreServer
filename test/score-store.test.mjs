@@ -342,7 +342,9 @@ test("voice assignments can be replaced and cleared", () => {
     rnboAddress: "",
     label: "Player 1",
     color: "#d1453b",
-    locked: false
+    locked: false,
+    routingStatus: "",
+    routingMessage: ""
   });
 });
 

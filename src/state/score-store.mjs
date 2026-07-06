@@ -400,6 +400,81 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "voice.assignment.preset.applied", score, { presetId: options.presetId ?? "" }, options);
       return structuredClone(score);
     },
+    reconcileRegisteredHardwareUnit(unitDocument, options = {}) {
+      if (!unitDocument || typeof unitDocument !== "object" || Array.isArray(unitDocument)) {
+        throw new Error("hardware unit must be an object");
+      }
+      const unitId = stringField(unitDocument.id);
+      if (!unitId) {
+        throw new Error("hardware unit must include id");
+      }
+
+      const shadowScoreTargets = Array.isArray(unitDocument.targets)
+        ? unitDocument.targets.filter(isShadowScoreRnboTarget)
+        : [];
+      const assignments = ensureAssignments(score, assignmentDefaults);
+      const nextAssignments = { ...assignments };
+      const reconciled = [];
+      const ambiguous = [];
+
+      for (const [voiceId, assignment] of Object.entries(assignments)) {
+        if (!assignment?.deviceId || assignment.deviceId !== unitId || assignment.locked) {
+          continue;
+        }
+        if (shadowScoreTargets.length === 0) {
+          continue;
+        }
+        if (shadowScoreTargets.length > 1) {
+          const nextAssignment = normalizeAssignment({
+            ...assignment,
+            routingStatus: "ambiguous",
+            routingMessage: `Hardware unit '${unitId}' advertised ${shadowScoreTargets.length} ShadowScore RNBO targets.`
+          });
+          if (!sameAssignment(assignment, nextAssignment)) {
+            nextAssignments[voiceId] = nextAssignment;
+            ambiguous.push({ voiceId, deviceId: unitId, targetCount: shadowScoreTargets.length });
+          }
+          continue;
+        }
+
+        const target = shadowScoreTargets[0];
+        const nextAssignment = normalizeAssignment({
+          ...assignment,
+          rnboTargetId: target.id,
+          rnboHost: target.host,
+          rnboPort: target.port,
+          rnboAddress: target.address ?? target.messagePath,
+          routingStatus: "",
+          routingMessage: ""
+        });
+        if (!sameAssignment(assignment, nextAssignment)) {
+          nextAssignments[voiceId] = nextAssignment;
+          reconciled.push({ voiceId, deviceId: unitId, rnboTargetId: nextAssignment.rnboTargetId });
+        }
+      }
+
+      if (reconciled.length === 0 && ambiguous.length === 0) {
+        return {
+          changed: false,
+          score: structuredClone(score),
+          reconciled,
+          ambiguous
+        };
+      }
+
+      score = {
+        ...score,
+        ...nextRevisionFields(score),
+        assignments: nextAssignments
+      };
+      emitChange(events, "voice.assignment.reconciled", score, { unitId, reconciled, ambiguous }, options);
+      return {
+        changed: true,
+        score: structuredClone(score),
+        reconciled,
+        ambiguous
+      };
+    },
     replaceVoiceNotes(voiceId, notesDocument, options = {}) {
       assertKnownVoice(score, voiceId);
       assertExpectedScoreVersion(score, options.expectedVersion);
@@ -611,7 +686,9 @@ function normalizeAssignment(assignmentDocument) {
     rnboAddress: stringField(assignmentDocument.rnboAddress),
     label: stringField(assignmentDocument.label),
     color: stringField(assignmentDocument.color),
-    locked: Boolean(assignmentDocument.locked)
+    locked: Boolean(assignmentDocument.locked),
+    routingStatus: stringField(assignmentDocument.routingStatus),
+    routingMessage: stringField(assignmentDocument.routingMessage)
   };
 }
 
@@ -863,7 +940,9 @@ function createEmptyAssignment(defaults = {}) {
     rnboAddress: stringField(defaults.rnboAddress),
     label: stringField(defaults.label),
     color: stringField(defaults.color),
-    locked: Boolean(defaults.locked)
+    locked: Boolean(defaults.locked),
+    routingStatus: stringField(defaults.routingStatus),
+    routingMessage: stringField(defaults.routingMessage)
   };
 }
 
@@ -876,6 +955,24 @@ function ensureAssignments(score, defaults = {}) {
 
 function resetAssignments(voices, defaults = {}) {
   return Object.fromEntries(Object.keys(voices).map((voiceId) => [voiceId, createEmptyAssignment(defaults[voiceId])]));
+}
+
+function sameAssignment(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function isShadowScoreRnboTarget(target) {
+  if (!target || typeof target !== "object" || Array.isArray(target)) {
+    return false;
+  }
+  const haystack = [
+    target.id,
+    target.localId,
+    target.name,
+    target.address,
+    target.messagePath
+  ].map((value) => stringField(value).toLowerCase());
+  return haystack.some((value) => value.includes("shadowscore"));
 }
 
 function resetVoices(voices) {

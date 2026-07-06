@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import test from "node:test";
+import { buildPeerConfig, parseArgs, run as runConfigurePeer } from "../bin/configure-peer.mjs";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
 import { readLocalTargets, refreshRegistration } from "../src/registration-agent.mjs";
 
@@ -116,6 +120,43 @@ test("registration refresh heartbeats instead of replacing targets with an empty
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, "http://wren.local:8790/hardware/units/finch/heartbeat");
   assert.deepEqual(requests[0].body, {});
+});
+
+test("peer config generator writes repeatable local peer config", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-peer-config-"));
+  const output = path.join(tmp, "config", "shadowscore.peer.local.json");
+
+  const result = await runConfigurePeer([
+    "--id", "bob",
+    "--ip", "192.168.68.111",
+    "--host", "192.168.68.102",
+    "--output", output
+  ]);
+  const written = JSON.parse(await fs.readFile(output, "utf8"));
+
+  assert.equal(result.output, output);
+  assert.equal(written.server.role, "peer");
+  assert.equal(written.server.hostIdentity, "bob");
+  assert.equal(written.server.advertisedName, "bob");
+  assert.equal(written.registration.sessionHostUrl, "http://192.168.68.102:8790");
+  assert.equal(written.rnbo.port, 1234);
+  assert.equal(written.rnbo.registrationHost, "192.168.68.111");
+  assert.equal(written.rnbo.oscQuery.oscHost, "192.168.68.111");
+});
+
+test("peer config generator accepts urls, names, and explicit RNBO ports", () => {
+  const config = buildPeerConfig(parseArgs([
+    "--id=heron",
+    "--name", "Heron",
+    "--ip", "192.168.68.101",
+    "--host", "http://wren.local:8790/",
+    "--rnbo-port", "9000"
+  ]));
+
+  assert.equal(config.server.advertisedName, "Heron");
+  assert.equal(config.registration.sessionHostUrl, "http://wren.local:8790");
+  assert.equal(config.rnbo.port, 9000);
+  assert.equal(config.rnbo.registrationHost, "192.168.68.101");
 });
 
 function okResponse() {

@@ -61,6 +61,7 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /\/admin\/import-legacy-voice-notes/);
   assert.match(response.body, /Resend RNBO score/);
   assert.match(response.body, /\/admin\/rnbo\/resend/);
+  assert.match(response.body, /voice\.assignment\.reconciled/);
 });
 
 test("admin RNBO resend route asks the adapter to resend the current score", async () => {
@@ -1111,6 +1112,161 @@ test("hardware registration appears in session and RNBO targets", async () => {
   assert.equal(Boolean(target), true);
   assert.equal(target.capabilities.maxStages, 1024);
   assert.equal(target.capabilities.maxNoteRows, 512);
+});
+
+test("hardware registration reconciles stale assignment endpoints by device identity", async () => {
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig)
+    }
+  });
+
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    assignee: "Ari",
+    deviceId: "heron",
+    clientId: "stable-client",
+    label: "Lead",
+    color: "#256f86",
+    rnboTargetId: "heron:rnbo-inst-9:shadowscore",
+    rnboHost: "192.168.68.90",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/9/messages/in/shadowscore"
+  });
+
+  const registered = await requestJson(context, "POST", "/hardware/register", {
+    id: "heron",
+    advertisedName: "Heron",
+    targets: [
+      {
+        id: "rnbo-inst-7:shadowscore",
+        host: "192.168.68.101",
+        port: 1234,
+        address: "/rnbo/inst/7/messages/in/shadowscore"
+      }
+    ]
+  });
+
+  const assignment = context.store.getScore().assignments["player-1"];
+  assert.equal(registered.assignmentReconciliation.changed, true);
+  assert.deepEqual(registered.assignmentReconciliation.reconciled, [
+    { voiceId: "player-1", deviceId: "heron", rnboTargetId: "heron:rnbo-inst-7:shadowscore" }
+  ]);
+  assert.equal(assignment.rnboTargetId, "heron:rnbo-inst-7:shadowscore");
+  assert.equal(assignment.rnboHost, "192.168.68.101");
+  assert.equal(assignment.rnboPort, 1234);
+  assert.equal(assignment.rnboAddress, "/rnbo/inst/7/messages/in/shadowscore");
+  assert.equal(assignment.assignee, "Ari");
+  assert.equal(assignment.deviceId, "heron");
+  assert.equal(assignment.clientId, "stable-client");
+  assert.equal(assignment.label, "Lead");
+  assert.equal(assignment.color, "#256f86");
+  assert.equal(assignment.locked, false);
+  assert.equal(assignment.routingStatus, "");
+});
+
+test("hardware registration does not reconcile locked or device-less assignments", async () => {
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig)
+    }
+  });
+
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    deviceId: "heron",
+    locked: true,
+    rnboTargetId: "heron:old",
+    rnboHost: "192.168.68.90",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/9/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "heron:old-device-less",
+    rnboHost: "192.168.68.91",
+    rnboPort: 9001,
+    rnboAddress: "/rnbo/inst/8/messages/in/shadowscore"
+  });
+
+  const registered = await requestJson(context, "POST", "/hardware/register", {
+    id: "heron",
+    targets: [
+      {
+        id: "rnbo-inst-7:shadowscore",
+        host: "192.168.68.101",
+        port: 1234,
+        address: "/rnbo/inst/7/messages/in/shadowscore"
+      }
+    ]
+  });
+
+  const assignments = context.store.getScore().assignments;
+  assert.equal(registered.assignmentReconciliation.changed, false);
+  assert.equal(assignments["player-1"].rnboTargetId, "heron:old");
+  assert.equal(assignments["player-2"].rnboTargetId, "heron:old-device-less");
+});
+
+test("hardware registration marks matching assignments ambiguous when a client advertises multiple ShadowScore targets", async () => {
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig)
+    }
+  });
+
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    deviceId: "heron",
+    rnboTargetId: "heron:old",
+    rnboHost: "192.168.68.90",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/9/messages/in/shadowscore"
+  });
+
+  const registered = await requestJson(context, "POST", "/hardware/register", {
+    id: "heron",
+    targets: [
+      { id: "a:shadowscore", host: "192.168.68.101", port: 1234, address: "/rnbo/inst/1/messages/in/shadowscore" },
+      { id: "b:shadowscore", host: "192.168.68.101", port: 1234, address: "/rnbo/inst/2/messages/in/shadowscore" }
+    ]
+  });
+
+  const assignment = context.store.getScore().assignments["player-1"];
+  assert.equal(registered.assignmentReconciliation.changed, true);
+  assert.deepEqual(registered.assignmentReconciliation.ambiguous, [
+    { voiceId: "player-1", deviceId: "heron", targetCount: 2 }
+  ]);
+  assert.equal(assignment.rnboTargetId, "heron:old");
+  assert.equal(assignment.routingStatus, "ambiguous");
+  assert.match(assignment.routingMessage, /advertised 2 ShadowScore RNBO targets/);
+});
+
+test("hardware registration is a no-op when assignment endpoint already matches", async () => {
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig)
+    }
+  });
+
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    deviceId: "heron",
+    rnboTargetId: "heron:rnbo-inst-7:shadowscore",
+    rnboHost: "192.168.68.101",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/7/messages/in/shadowscore"
+  });
+  const beforeVersion = context.store.getScore().version;
+
+  const registered = await requestJson(context, "POST", "/hardware/register", {
+    id: "heron",
+    targets: [
+      {
+        id: "rnbo-inst-7:shadowscore",
+        host: "192.168.68.101",
+        port: 1234,
+        address: "/rnbo/inst/7/messages/in/shadowscore"
+      }
+    ]
+  });
+
+  assert.equal(registered.assignmentReconciliation.changed, false);
+  assert.equal(context.store.getScore().version, beforeVersion);
 });
 
 test("playback timing contract route exposes target-specific compiled contracts", async () => {

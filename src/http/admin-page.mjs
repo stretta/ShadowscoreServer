@@ -280,6 +280,7 @@ export function adminPage() {
     events.addEventListener("voice.assignment.replaced", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.assignment.cleared", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.assignment.preset.applied", (event) => render(JSON.parse(event.data).score));
+    events.addEventListener("voice.assignment.reconciled", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.added", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.removed", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.reset", (event) => render(JSON.parse(event.data).score));

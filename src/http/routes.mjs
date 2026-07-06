@@ -155,7 +155,17 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const registry = requirePeerRegistry(runtime);
       const unit = registry.register(await readJson(request), { remoteAddress: request.socket?.remoteAddress ?? "" });
-      writeJson(response, 200, { ok: true, unit, heartbeatTtlMs: registry.heartbeatTtlMs });
+      const reconciliation = store.reconcileRegisteredHardwareUnit(unit);
+      writeJson(response, 200, {
+        ok: true,
+        unit,
+        heartbeatTtlMs: registry.heartbeatTtlMs,
+        assignmentReconciliation: {
+          changed: reconciliation.changed,
+          reconciled: reconciliation.reconciled,
+          ambiguous: reconciliation.ambiguous
+        }
+      });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }

@@ -233,7 +233,7 @@ export function assertScoreShape(score) {
     if (!isPlainObject(assignment)) {
       throw new Error(`assignment ${voiceId} must be an object`);
     }
-    for (const field of ["assignee", "deviceId", "rnboTargetId", "rnboHost", "rnboAddress", "label", "color"]) {
+    for (const field of ["assignee", "deviceId", "rnboTargetId", "rnboHost", "rnboAddress", "label", "color", "routingStatus", "routingMessage"]) {
       if (assignment[field] !== undefined && typeof assignment[field] !== "string") {
         throw new Error(`assignment ${voiceId}.${field} must be a string`);
       }
@@ -378,9 +378,15 @@ function createEmptyAssignment() {
     assignee: "",
     deviceId: "",
     clientId: null,
+    rnboTargetId: "",
+    rnboHost: "",
+    rnboPort: null,
+    rnboAddress: "",
     label: "",
     color: "",
-    locked: false
+    locked: false,
+    routingStatus: "",
+    routingMessage: ""
   };
 }
 

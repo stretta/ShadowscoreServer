@@ -7,6 +7,8 @@ ShadowscoreServer host.
 
 - The host unit runs ShadowscoreServer and owns the active score.
 - Peer units register their local RNBO targets with the host.
+- Players are stable score lanes. Clients are runtime output devices or
+  processes, and assignments route a player to a live client target.
 - Structure Editor is the main form and assignment surface.
 - Event List is the canonical clip editor.
 - Matrix Edit is the live block-context performance workspace.
@@ -60,6 +62,23 @@ control. The API form is:
 ```sh
 curl -X POST http://<host>.local:8790/hardware/units/<unitId>/targets/<targetId>/use-observed-host
 ```
+
+To provision or refresh a peer-local config without manual editing:
+
+```sh
+npm run configure-peer -- --id heron --ip 192.168.68.101 --host 192.168.68.102
+npm run configure-peer -- --id bob --ip 192.168.68.111 --host http://wren.local:8790
+```
+
+This writes `config/shadowscore.peer.local.json` with peer role metadata,
+continuous registration settings, local RNBO port `1234`, and the RNBO host
+identity used when the peer advertises loopback RNBO targets.
+
+When a peer returns with the same `deviceId`, the host reattaches assignment
+endpoint fields automatically if the peer advertises exactly one ShadowScore
+RNBO target. Locked assignments, assignments without `deviceId`, and peers
+with multiple ShadowScore targets are left for manual selection; multiple
+targets are marked `ambiguous` in the assignment metadata.
 
 ## Prepare The Score
 
@@ -174,4 +193,3 @@ journalctl -u shadowscore-jack-transport-bridge.service -n 80 --no-pager
 When diagnosing, keep these boundaries separate: server score state, peer
 registration, RNBO target visibility, transport beat evidence, and actual audio
 output.
-

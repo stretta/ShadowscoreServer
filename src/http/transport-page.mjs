@@ -31,6 +31,8 @@ export function transportPage() {
       flex-wrap: wrap;
       gap: 8px;
       margin-bottom: 18px;
+      max-width: 100%;
+      min-width: 0;
     }
     details.toolbar-details { margin-bottom: 18px; }
     details.toolbar-details summary {
@@ -49,8 +51,11 @@ export function transportPage() {
       display: inline-flex;
       font: inherit;
       font-weight: 650;
+      justify-content: center;
+      max-width: 100%;
       min-height: 38px;
       padding: 8px 12px;
+      white-space: normal;
     }
     button.primary { background: #226f63; border-color: #226f63; color: #fff; }
     button.danger { border-color: #b64c40; color: #96382e; }
@@ -101,6 +106,9 @@ export function transportPage() {
       overflow-wrap: anywhere;
       padding: 10px;
       white-space: pre-wrap;
+    }
+    @media (max-width: 900px) {
+      .toolbar button { flex: 1 1 150px; }
     }
     @media (max-width: 700px) {
       header { align-items: flex-start; flex-direction: column; }

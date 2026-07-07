@@ -48,6 +48,9 @@ export function createPeerRegistry(config, options = {}) {
         }))
       );
     },
+    rnboDevices() {
+      return this.snapshot().flatMap((unit) => unit.rnboDevices ?? []);
+    },
     useObservedHost(unitId, targetId) {
       const id = stringField(unitId);
       const existing = units.get(id);
@@ -114,8 +117,9 @@ export function createPeerRegistry(config, options = {}) {
   }
 }
 
-export function createLocalHardwareUnit(config, targets = []) {
+export function createLocalHardwareUnit(config, targets = [], rnboDevices = []) {
   const id = config.server?.hostIdentity || os.hostname();
+  const normalizedRnboDevices = normalizeRnboDevices(rnboDevices, id, config.server?.advertisedName || id);
   return {
     id,
     role: config.server?.role ?? "host",
@@ -133,6 +137,13 @@ export function createLocalHardwareUnit(config, targets = []) {
       hardwareUnitId: id,
       hardwareUnitName: config.server?.advertisedName || id,
       available: target.available !== false,
+      unitStatus: "online"
+    })),
+    rnboDevices: normalizedRnboDevices.map((device) => ({
+      ...device,
+      hardwareUnitId: id,
+      hardwareUnitName: config.server?.advertisedName || id,
+      available: device.available !== false,
       unitStatus: "online"
     }))
   };
@@ -167,8 +178,33 @@ function normalizeUnit(document, config, metadata, timestamp) {
     lastSeenAt: registeredAt,
     expiresAt: new Date(timestamp + ttlMs).toISOString(),
     heartbeatTtlMs: ttlMs,
+    rnboDevices: normalizeRnboDevices(document.rnboDevices, id, advertisedName),
     targets: normalizeTargets(document.targets, id, advertisedName, config)
   };
+}
+
+function normalizeRnboDevices(devices, hardwareUnitId, hardwareUnitName) {
+  if (!Array.isArray(devices)) {
+    return [];
+  }
+  return devices.map((device, index) => {
+    const rawId = stringField(device.id) || `rnbo-device-${index + 1}`;
+    const id = rawId.startsWith(`${hardwareUnitId}:`) ? rawId : `${hardwareUnitId}:${rawId}`;
+    return {
+      id,
+      localId: rawId,
+      name: stringField(device.name) || hardwareUnitName || rawId,
+      host: stringField(device.host),
+      oscQueryUrl: stringField(device.oscQueryUrl),
+      graphEditorUrl: stringField(device.graphEditorUrl),
+      rnboVersion: stringField(device.rnboVersion) || undefined,
+      runnerVersion: stringField(device.runnerVersion) || undefined,
+      source: stringField(device.source) || "registration",
+      hardwareUnitId,
+      hardwareUnitName,
+      available: device.available !== false
+    };
+  });
 }
 
 function normalizeTargets(targets, hardwareUnitId, hardwareUnitName, config) {

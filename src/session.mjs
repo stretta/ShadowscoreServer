@@ -2,6 +2,7 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
   const baseUrl = publicBaseUrl(config, request);
   const assignments = score.assignments ?? {};
   const targets = runtime.rnboTargets ?? config.rnbo?.targets ?? [];
+  const rnboDevices = runtime.rnboDevices ?? [];
   const hardwareUnits = runtime.hardwareUnits ?? [];
 
   return {
@@ -19,7 +20,7 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       app: `${baseUrl}/`,
       matrixEdit: `${baseUrl}/matrix-edit`,
       eventList: `${baseUrl}/event-list`,
-      structureEditor: `${baseUrl}/`,
+      structureEditor: `${baseUrl}/structure-editor`,
       structurePlayhead: `${baseUrl}/structure/playhead`,
       macroPlayback: `${baseUrl}/macrostructure/playback`,
       playbackTimingContracts: `${baseUrl}/playback/timing-contracts`,
@@ -100,7 +101,8 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
         enabled: Boolean(config.rnbo?.oscQuery?.enabled),
         url: config.rnbo?.oscQuery?.url ?? ""
       },
-      targets
+      targets,
+      devices: rnboDevices
     }
   };
 }

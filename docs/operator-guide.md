@@ -34,8 +34,9 @@ http://<host>.local:8790/admin
 http://<host>.local:8790/transport/status
 ```
 
-The root page is Structure Editor. Use `/structure-editor` if an explicit route
-is clearer for the situation.
+The root page is the ShadowScore view index. Use `/structure-editor` for
+Structure Editor directly, or the root index for links to all bundled editing
+views and discovered RNBO graph editors.
 
 ## Verify Hardware
 
@@ -44,6 +45,7 @@ Check the session and target maps:
 ```sh
 curl http://<host>.local:8790/session
 curl http://<host>.local:8790/hardware/units
+curl http://<host>.local:8790/rnbo/devices
 curl http://<host>.local:8790/rnbo/targets
 curl http://<host>.local:8790/playback/timing-contracts
 ```
@@ -51,7 +53,9 @@ curl http://<host>.local:8790/playback/timing-contracts
 The useful reading is:
 
 - `/hardware/units` shows which peer boxes are online.
-- `/rnbo/targets` shows the actual OSC targets the host can write to.
+- `/rnbo/devices` shows RNBO graph editors, including boxes that do not yet
+  have a ShadowScoreClient instance loaded.
+- `/rnbo/targets` shows the actual ShadowScore OSC targets the host can write to.
 - `/playback/timing-contracts` shows per-target stage capacity, note-row
   capacity, selected `ClockInterval`, `MaxSteps`, and active-block compilation
   diagnostics.

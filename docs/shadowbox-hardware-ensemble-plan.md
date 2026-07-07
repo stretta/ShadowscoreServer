@@ -255,7 +255,7 @@ The smallest useful slice is:
 
 Phase 1 server-side status:
 
-- Static Matrix Edit hosting is implemented for `/matrix-edit`, backed by `public/matrix-edit`. The root `/` route now serves Structure Editor, with `/structure-editor` retained as an explicit alias.
+- Static Matrix Edit hosting is implemented for `/matrix-edit`, backed by `public/matrix-edit`. The root `/` route now serves the ShadowScore view index, and Structure Editor lives at `/structure-editor`.
 - `GET /session` reports host role, advertised name, app/API endpoints, voices, assignments, local and registered RNBO targets, hardware units, and macro playback state.
 - `config/shadowbox.local.json` defines a starter voice set with fixed contrasting assignment colors and keeps RNBO output pointed at `127.0.0.1:9000`.
 - `public/matrix-edit` contains the exported ShadowScore Matrix Edit build. Matrix Edit selects a mesostructural block, edits the selected player's assigned clip, and shows other assigned clips as contextual reference layers.

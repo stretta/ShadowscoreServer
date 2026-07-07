@@ -23,6 +23,24 @@ export async function discoverRnboTargets(config, options = {}) {
   }
 }
 
+export async function discoverRnboDevices(config, options = {}) {
+  const rnbo = config.rnbo ?? {};
+  const oscQuery = rnbo.oscQuery ?? {};
+  if (!oscQuery.enabled) {
+    return [];
+  }
+
+  try {
+    const tree = await fetchOscQueryTree(oscQuery, options.fetchImpl ?? globalThis.fetch);
+    return extractRnboDevices(tree, config);
+  } catch (error) {
+    if (rnbo.log !== false) {
+      console.error(`[rnbo-oscquery] device discovery failed: ${messageForError(error)}`);
+    }
+    return [];
+  }
+}
+
 export async function writeRnboTransportControls(config, target, controls, options = {}) {
   const writes = rnboTransportControlWrites(target, controls);
   const writer = options.writer ?? sendOscInportMessage;
@@ -127,6 +145,32 @@ export function extractRnboTargets(tree, config) {
   });
 
   return dedupeTargets(entries);
+}
+
+export function extractRnboDevices(tree, config) {
+  if (!tree?.CONTENTS?.rnbo) {
+    return [];
+  }
+
+  const rnbo = config.rnbo ?? {};
+  const oscQuery = rnbo.oscQuery ?? {};
+  const host = rnboDeviceHost(config);
+  const oscQueryPort = urlPort(oscQuery.url, 5678);
+  const graphEditorPort = Number(oscQuery.graphEditorPort ?? rnbo.graphEditorPort ?? 3000);
+  const name = config.server?.advertisedName || config.server?.hostIdentity || host || "RNBO";
+  const id = config.server?.hostIdentity || name;
+
+  return [withoutUndefined({
+    id,
+    name,
+    host,
+    oscQueryUrl: host ? `http://${host}:${oscQueryPort}` : stripTrailingSlash(oscQuery.url),
+    graphEditorUrl: host && Number.isFinite(graphEditorPort) ? `http://${host}:${graphEditorPort}` : undefined,
+    source: "rnbooscquery",
+    available: true,
+    rnboVersion: tree.CONTENTS.rnbo.CONTENTS?.info?.CONTENTS?.version?.VALUE,
+    runnerVersion: tree.CONTENTS.rnbo.CONTENTS?.info?.CONTENTS?.runner_version?.VALUE
+  })];
 }
 
 function walkOscQueryTree(node, path, visit) {
@@ -278,6 +322,36 @@ function normalizeConfiguredTarget(target, rnbo, index) {
     source: "config",
     available: true
   });
+}
+
+function rnboDeviceHost(config) {
+  const rnbo = config.rnbo ?? {};
+  const oscQuery = rnbo.oscQuery ?? {};
+  const configured = stringField(oscQuery.oscHost)
+    || stringField(rnbo.registrationHost)
+    || stringField(rnbo.host);
+  if (!configured || configured === "127.0.0.1" || configured === "localhost" || configured === "::1") {
+    const identity = stringField(config.server?.hostIdentity || config.server?.advertisedName);
+    return identity ? `${identity}.local` : configured;
+  }
+  return configured;
+}
+
+function urlPort(value, fallback) {
+  try {
+    const url = new URL(value);
+    return Number(url.port || fallback);
+  } catch {
+    return fallback;
+  }
+}
+
+function stripTrailingSlash(value) {
+  return stringField(value).replace(/\/+$/, "");
+}
+
+function stringField(value) {
+  return value === undefined || value === null ? "" : String(value).trim();
 }
 
 function clampTimeout(value) {

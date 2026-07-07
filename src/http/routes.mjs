@@ -2,7 +2,7 @@ import { adminPage } from "./admin-page.mjs";
 import { serveStaticAsset } from "./static-files.mjs";
 import { transportPage } from "./transport-page.mjs";
 import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
-import { configuredRnboTargets, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
+import { configuredRnboTargets, discoverRnboDevices, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
 import { selectBeatWitness } from "../playback/beat-witness.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
@@ -51,6 +51,11 @@ export async function routeRequest(request, response, store, config, runtime = {
 
   if (request.method === "GET" && url.pathname === "/rnbo/targets") {
     writeJson(response, 200, { targets: await readAllRnboTargets(config, runtime) });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/rnbo/devices") {
+    writeJson(response, 200, { devices: await readAllRnboDevices(config, runtime) });
     return;
   }
 
@@ -771,20 +776,31 @@ async function readRnboTargets(config) {
 
 async function readSessionRuntime(config, runtime) {
   const localTargets = await readRnboTargets(config);
-  const localUnit = createLocalHardwareUnit(config, localTargets);
+  const localRnboDevices = await readRnboDevices(config);
+  const localUnit = createLocalHardwareUnit(config, localTargets, localRnboDevices);
   const peerUnits = runtime.peerRegistry?.snapshot?.() ?? [];
   const peerTargets = runtime.peerRegistry?.targets?.() ?? [];
   return {
     rnboTargets: [...localUnit.targets, ...peerTargets],
+    rnboDevices: [...localUnit.rnboDevices, ...(runtime.peerRegistry?.rnboDevices?.() ?? [])],
     hardwareUnits: [localUnit, ...peerUnits],
     macroPlayback: runtime.macroPlayback,
     jackTransport: runtime.jackTransport
   };
 }
 
+async function readRnboDevices(config) {
+  return discoverRnboDevices(config);
+}
+
 async function readAllRnboTargets(config, runtime) {
   const sessionRuntime = await readSessionRuntime(config, runtime);
   return sessionRuntime.rnboTargets;
+}
+
+async function readAllRnboDevices(config, runtime) {
+  const sessionRuntime = await readSessionRuntime(config, runtime);
+  return sessionRuntime.rnboDevices;
 }
 
 async function readPlaybackTimingContracts(score, config, runtime) {

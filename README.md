@@ -91,8 +91,10 @@ Use `--once` for a single registration without the heartbeat loop:
 npm run agent -- --config config/shadowbox.peer.json --once
 ```
 
-The root `/` route serves the dedicated Structure Editor by default. `/structure-editor`
-is kept as an explicit alias for the same app.
+The root `/` route serves a ShadowScore view index with links to the bundled
+editor pages and live RNBO graph editors discovered through `/rnbo/devices`.
+RNBO devices are separate from ShadowScore playback targets: a unit can appear
+as a graph-editor link before a ShadowScoreClient instance is loaded there.
 
 The `/matrix-edit` route serves static Matrix Edit assets from `public/matrix-edit`.
 The bundled Matrix Edit build loads `/session`, `/score`, and `/structure`,
@@ -204,8 +206,10 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /admin/import-legacy-voice-notes`: copy non-empty `voices[player].notes` into looped clips such as `player-1-main` and assign them to block `A` by default. This leaves voice notes intact and does not overwrite existing clips unless `overwriteClips` is true.
 - `POST /admin/rnbo/resend`: resend the current active-block score transaction to available RNBO targets.
 - `GET /admin`: simple lab admin page for voice assignments and basic resets.
-- `GET /`: default structure editor.
+- `GET /`: ShadowScore view index with editor and RNBO graph-editor links.
 - `GET /event-list`: canonical clip attribute and note-event editor.
+- `GET /rnbo/devices`: RNBO runner/graph-editor devices, including units that do not currently expose ShadowScore targets.
+- `GET /rnbo/targets`: ShadowScore RNBO OSC targets the host can write score data to.
 - `GET /structure-editor`: meso/macro structure editor.
 - `GET /events`: server-sent event stream of score changes.
 - `GET /collab`: WebSocket collaboration endpoint for realtime JSON commands.

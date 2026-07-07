@@ -131,7 +131,7 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.endpoints.app, "http://127.0.0.1/");
   assert.equal(session.endpoints.collab, "ws://127.0.0.1/collab");
   assert.equal(session.endpoints.eventList, "http://127.0.0.1/event-list");
-  assert.equal(session.endpoints.structureEditor, "http://127.0.0.1/");
+  assert.equal(session.endpoints.structureEditor, "http://127.0.0.1/structure-editor");
   assert.equal(session.endpoints.structure, "http://127.0.0.1/structure");
   assert.equal(session.endpoints.structurePlayhead, "http://127.0.0.1/structure/playhead");
   assert.equal(session.endpoints.macroPlayback, "http://127.0.0.1/macrostructure/playback");
@@ -1328,6 +1328,42 @@ test("hardware registration appears in session and RNBO targets", async () => {
   assert.equal(target.capabilities.maxNoteRows, 512);
 });
 
+test("hardware registration exposes RNBO devices separately from ShadowScore targets", async () => {
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig)
+    }
+  });
+
+  await requestJson(context, "POST", "/hardware/register", {
+    id: "wren",
+    advertisedName: "wren",
+    rnboDevices: [
+      {
+        id: "runner",
+        name: "wren",
+        host: "wren.local",
+        oscQueryUrl: "http://wren.local:5678",
+        graphEditorUrl: "http://wren.local:3000",
+        runnerVersion: "1.4.4-9"
+      }
+    ],
+    targets: []
+  });
+
+  const devices = await requestJson(context, "GET", "/rnbo/devices");
+  assert.equal(devices.devices.length, 1);
+  assert.equal(devices.devices[0].id, "wren:runner");
+  assert.equal(devices.devices[0].graphEditorUrl, "http://wren.local:3000");
+
+  const targets = await requestJson(context, "GET", "/rnbo/targets");
+  assert.deepEqual(targets.targets, []);
+
+  const session = await requestJson(context, "GET", "/session");
+  assert.equal(session.rnbo.devices[0].hardwareUnitId, "wren");
+  assert.equal(session.rnbo.targets.length, 0);
+});
+
 test("hardware registration reconciles stale assignment endpoints by device identity", async () => {
   const context = createRouteContext({
     runtime: {
@@ -2089,13 +2125,20 @@ test("matrix edit route works with legacy generated static config", async () => 
   assert.match(response.body, /ShadowScore Matrix Edit/);
 });
 
-test("root route serves structure editor", async () => {
+test("root route serves view index", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/");
 
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
-  assert.match(response.body, /ShadowScore Structure Editor/);
+  assert.match(response.body, /ShadowScore Views/);
+  assert.match(response.body, /\/structure-editor/);
+  assert.match(response.body, /\/matrix-edit/);
+  assert.match(response.body, /\/event-list/);
+  assert.match(response.body, /\/admin/);
+  assert.match(response.body, /\/transport\/status/);
+  assert.match(response.body, /\/rnbo\/devices/);
+  assert.match(response.body, /:3000/);
 });
 
 test("event list route serves server-bundled editor html", async () => {

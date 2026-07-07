@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import os from "node:os";
-import { configuredRnboTargets, discoverRnboTargets } from "./adapters/rnbo-oscquery.mjs";
+import { configuredRnboTargets, discoverRnboDevices, discoverRnboTargets } from "./adapters/rnbo-oscquery.mjs";
 import { loadConfig } from "./config.mjs";
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -38,15 +38,17 @@ export async function runRegistrationAgent(config, options = {}) {
 }
 
 export async function refreshRegistration(config, sessionHostUrl, unitId, options = {}) {
-  const targets = await readLocalTargets(config, unitId);
-  if (targets.length > 0) {
-    return register(config, sessionHostUrl, unitId, { ...options, targets });
+  const targets = await readLocalTargets(config, unitId, options);
+  const rnboDevices = await readLocalRnboDevices(config, unitId, options);
+  if (targets.length > 0 || rnboDevices.length > 0) {
+    return register(config, sessionHostUrl, unitId, { ...options, targets, rnboDevices });
   }
   return heartbeat(sessionHostUrl, unitId, options);
 }
 
 async function register(config, sessionHostUrl, unitId, options = {}) {
-  const targets = options.targets ?? await readLocalTargets(config, unitId);
+  const targets = options.targets ?? await readLocalTargets(config, unitId, options);
+  const rnboDevices = options.rnboDevices ?? await readLocalRnboDevices(config, unitId, options);
   const body = {
     id: unitId,
     role: "peer",
@@ -54,6 +56,7 @@ async function register(config, sessionHostUrl, unitId, options = {}) {
     hostIdentity: config.server?.hostIdentity || unitId,
     sessionHostUrl,
     heartbeatTtlMs: config.registration?.heartbeatTtlMs,
+    rnboDevices,
     targets
   };
   const response = await postJson(`${sessionHostUrl}/hardware/register`, body, options.fetchImpl);
@@ -66,8 +69,8 @@ async function heartbeat(sessionHostUrl, unitId, options = {}) {
   console.log(`[registration-agent] heartbeat ${unitId}`);
 }
 
-export async function readLocalTargets(config, unitId = config.server?.hostIdentity || os.hostname()) {
-  const discovered = await discoverRnboTargets(config);
+export async function readLocalTargets(config, unitId = config.server?.hostIdentity || os.hostname(), options = {}) {
+  const discovered = await discoverRnboTargets(config, { fetchImpl: options.fetchImpl });
   const targets = discovered.length > 0 ? discovered : configuredRnboTargets(config);
   const registrationHost = registrationTargetHost(config, unitId);
   return targets.map((target) => {
@@ -75,6 +78,23 @@ export async function readLocalTargets(config, unitId = config.server?.hostIdent
     return {
       ...target,
       host,
+      hardwareUnitId: unitId,
+      hardwareUnitName: config.server?.advertisedName || unitId
+    };
+  });
+}
+
+export async function readLocalRnboDevices(config, unitId = config.server?.hostIdentity || os.hostname(), options = {}) {
+  const devices = await discoverRnboDevices(config, { fetchImpl: options.fetchImpl });
+  const registrationHost = registrationTargetHost(config, unitId);
+  return devices.map((device) => {
+    const host = isLoopbackHost(device.host) ? registrationHost : device.host;
+    return {
+      ...device,
+      id: device.id || unitId,
+      host,
+      graphEditorUrl: device.graphEditorUrl || (host ? `http://${host}:3000` : ""),
+      oscQueryUrl: device.oscQueryUrl || (host ? `http://${host}:5678` : ""),
       hardwareUnitId: unitId,
       hardwareUnitName: config.server?.advertisedName || unitId
     };

@@ -9,13 +9,15 @@ refinements.
 
 Status: implemented.
 
-Make Structure Editor the default/root experience.
+Serve the ShadowScore view index as the default/root experience, with Structure
+Editor on its explicit route.
 
-- Move `/` from Matrix Edit to Structure Editor.
+- Keep the view index at `/`.
+- Keep Structure Editor at `/structure-editor`.
 - Keep Matrix Edit at `/matrix-edit`.
 - Keep Event List at `/event-list`.
 - Update session metadata:
-  - `endpoints.app` points to the root Structure Editor experience.
+  - `endpoints.app` points to the root view index.
   - `endpoints.structureEditor` points to the Structure Editor route.
   - `endpoints.matrixEdit` remains `/matrix-edit`.
 - Update smoke tests and README references.

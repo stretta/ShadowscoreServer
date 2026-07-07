@@ -148,10 +148,12 @@ Before students connect:
 - `curl http://127.0.0.1:8790/healthz` returns `"ok":true`.
 - A laptop can open Matrix Edit at `http://<host>.local:8790/matrix-edit`.
 - A laptop can open the Event List editor at `http://<host>.local:8790/event-list`.
-- A laptop can open Structure Editor at `http://<host>.local:8790/`.
+- A laptop can open the ShadowScore view index at `http://<host>.local:8790/`.
+- A laptop can open Structure Editor at `http://<host>.local:8790/structure-editor`.
 - A laptop can open Admin at `http://<host>.local:8790/admin`.
 - A laptop can open Transport Status at `http://<host>.local:8790/transport/status`.
 - `curl http://127.0.0.1:5678/` returns RNBOOSCQuery JSON on each unit.
+- `curl http://<host>.local:8790/rnbo/devices` lists RNBO graph-editor devices.
 - `curl http://<host>.local:8790/rnbo/targets` lists the expected ShadowScoreClient targets.
 - `curl http://<host>.local:8790/hardware/units` shows peer units as `online`.
 - `data/score.json` exists after a score edit and survives service restart.

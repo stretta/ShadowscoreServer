@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { discoverRnboTargets, extractRnboTargets, rnboTransportControlWrites } from "../src/adapters/rnbo-oscquery.mjs";
+import { discoverRnboTargets, extractRnboDevices, extractRnboTargets, rnboTransportControlWrites } from "../src/adapters/rnbo-oscquery.mjs";
 
 test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () => {
   const config = mergeConfig(defaultConfig, {
@@ -60,6 +60,41 @@ test("ignores nested ShadowScore metadata message paths", () => {
 
   assert.equal(targets.length, 1);
   assert.equal(targets[0].address, "/rnbo/inst/2/messages/in/shadowscore");
+});
+
+test("extracts RNBO devices even when no ShadowScore target is loaded", () => {
+  const config = mergeConfig(defaultConfig, {
+    server: {
+      advertisedName: "wren",
+      hostIdentity: "wren"
+    },
+    rnbo: {
+      host: "127.0.0.1",
+      oscQuery: {
+        enabled: true,
+        url: "http://127.0.0.1:5678/"
+      }
+    }
+  });
+  const tree = createOscQueryTree();
+  delete tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"];
+
+  const targets = extractRnboTargets(tree, config);
+  const devices = extractRnboDevices(tree, config);
+
+  assert.deepEqual(targets, []);
+  assert.equal(devices.length, 1);
+  assert.deepEqual(devices[0], {
+    id: "wren",
+    name: "wren",
+    host: "wren.local",
+    oscQueryUrl: "http://wren.local:5678",
+    graphEditorUrl: "http://wren.local:3000",
+    source: "rnbooscquery",
+    available: true,
+    rnboVersion: "1.4.4",
+    runnerVersion: "1.4.4-9"
+  });
 });
 
 test("RNBOOSCQuery discovery returns an empty target list on fetch failure", async () => {
@@ -157,6 +192,16 @@ function createOscQueryTree() {
     CONTENTS: {
       rnbo: {
         CONTENTS: {
+          info: {
+            CONTENTS: {
+              version: {
+                VALUE: "1.4.4"
+              },
+              runner_version: {
+                VALUE: "1.4.4-9"
+              }
+            }
+          },
           inst: {
             CONTENTS: {
               "2": {

@@ -39,6 +39,11 @@ export const defaultConfig = Object.freeze({
     root: "public/matrix-edit",
     index: "index.html",
     apps: {
+      home: {
+        root: "public",
+        index: "index.html",
+        routes: ["/"]
+      },
       matrixEdit: {
         root: "public/matrix-edit",
         index: "index.html",
@@ -52,7 +57,7 @@ export const defaultConfig = Object.freeze({
       structureEditor: {
         root: "public/structure-editor",
         index: "index.html",
-        routes: ["/structure-editor", "/"]
+        routes: ["/structure-editor"]
       },
       shared: {
         root: "public/shared",

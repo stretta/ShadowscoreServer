@@ -122,6 +122,40 @@ test("registration refresh heartbeats instead of replacing targets with an empty
   assert.deepEqual(requests[0].body, {});
 });
 
+test("registration refresh re-registers RNBO devices without ShadowScore targets", async () => {
+  const config = mergeConfig(defaultConfig, {
+    server: {
+      advertisedName: "Wren",
+      hostIdentity: "wren"
+    },
+    rnbo: {
+      host: "127.0.0.1",
+      oscQuery: {
+        enabled: true,
+        url: "http://127.0.0.1:5678/"
+      },
+      targets: []
+    }
+  });
+  const requests = [];
+
+  await refreshRegistration(config, "http://wren.local:8790", "wren", {
+    fetchImpl: async (url, options = {}) => {
+      if (!options.method || options.method === "GET") {
+        return jsonResponse(oscQueryTreeWithoutShadowscore());
+      }
+      requests.push({ url, body: JSON.parse(options.body) });
+      return okResponse();
+    }
+  });
+
+  assert.equal(requests.length, 1);
+  assert.equal(requests[0].url, "http://wren.local:8790/hardware/register");
+  assert.deepEqual(requests[0].body.targets, []);
+  assert.equal(requests[0].body.rnboDevices.length, 1);
+  assert.equal(requests[0].body.rnboDevices[0].graphEditorUrl, "http://wren.local:3000");
+});
+
 test("peer config generator writes repeatable local peer config", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-peer-config-"));
   const output = path.join(tmp, "config", "shadowscore.peer.local.json");
@@ -164,6 +198,48 @@ function okResponse() {
     ok: true,
     async json() {
       return { ok: true };
+    }
+  };
+}
+
+function jsonResponse(body) {
+  return {
+    ok: true,
+    async json() {
+      return body;
+    }
+  };
+}
+
+function oscQueryTreeWithoutShadowscore() {
+  return {
+    FULL_PATH: "/",
+    CONTENTS: {
+      rnbo: {
+        CONTENTS: {
+          info: {
+            CONTENTS: {
+              version: {
+                VALUE: "1.4.4"
+              },
+              runner_version: {
+                VALUE: "1.4.4-9"
+              }
+            }
+          },
+          inst: {
+            CONTENTS: {
+              "0": {
+                CONTENTS: {
+                  name: {
+                    VALUE: "TimeDomainScope"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
     }
   };
 }

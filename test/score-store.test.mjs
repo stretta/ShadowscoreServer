@@ -348,6 +348,26 @@ test("voice assignments can be replaced and cleared", () => {
   });
 });
 
+test("voice assignments reject duplicate RNBO targets", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceVoiceAssignment("player-1", {
+    rnboTargetId: "rnbo-inst-5:shadowscore",
+    rnboHost: "192.168.68.96",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/5/messages/in/shadowscore"
+  });
+
+  assert.throws(
+    () => store.replaceVoiceAssignment("player-2", {
+      rnboTargetId: "rnbo-inst-5:shadowscore",
+      rnboHost: "192.168.68.96",
+      rnboPort: 1234,
+      rnboAddress: "/rnbo/inst/5/messages/in/shadowscore"
+    }),
+    /RNBO target 'rnbo-inst-5:shadowscore' is already assigned to player-1/
+  );
+});
+
 test("admin reset can clear notes and assignments without changing context", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.updateContext({ scale: { scale_name: "Aeolian" } });

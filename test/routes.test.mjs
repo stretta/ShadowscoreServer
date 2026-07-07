@@ -27,6 +27,27 @@ test("assignment routes expose, replace, and clear voice assignments", async () 
   assert.equal(cleared.assignments["player-1"].assignee, "");
 });
 
+test("assignment route rejects duplicate RNBO targets", async () => {
+  const context = createRouteContext();
+
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "rnbo-inst-5:shadowscore",
+    rnboHost: "192.168.68.96",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/5/messages/in/shadowscore"
+  });
+
+  const response = await request(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "rnbo-inst-5:shadowscore",
+    rnboHost: "192.168.68.96",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/5/messages/in/shadowscore"
+  });
+
+  assert.equal(response.status, 400);
+  assert.match(response.body, /RNBO target 'rnbo-inst-5:shadowscore' is already assigned to player-1/);
+});
+
 test("admin reset route clears requested score sections", async () => {
   const context = createRouteContext();
 
@@ -217,6 +238,10 @@ test("JACK transport control routes call explicit controller actions", async () 
         async locate(frame) {
           calls.push(["locate", frame]);
           return { ok: true, action: "locate", frame };
+        },
+        async tempo(bpm) {
+          calls.push(["tempo", bpm]);
+          return { ok: true, action: "tempo", bpm };
         }
       }
     }
@@ -229,7 +254,12 @@ test("JACK transport control routes call explicit controller actions", async () 
     action: "locate",
     frame: 48000
   });
-  assert.deepEqual(calls, [["start"], ["stop"], ["locate", 48000]]);
+  assert.deepEqual(await requestJson(context, "POST", "/transport/jack/tempo", { bpm: 132.5 }), {
+    ok: true,
+    action: "tempo",
+    bpm: 132.5
+  });
+  assert.deepEqual(calls, [["start"], ["stop"], ["locate", 48000], ["tempo", 132.5]]);
 });
 
 test("JACK transport control routes report unavailable or invalid controls", async () => {
@@ -293,8 +323,8 @@ test("transport status page exposes host transport controls", async () => {
   assert.match(response.body, /id="macro-anchor"/);
   assert.match(response.body, /id="phase-reset"/);
   assert.match(response.body, /\/transport\/events/);
-  assert.match(response.body, /\/macrostructure\/playback\/start/);
-  assert.match(response.body, /\/macrostructure\/playback\/stop/);
+  assert.match(response.body, /\/transport\/play/);
+  assert.match(response.body, /\/transport\/stop/);
   assert.match(response.body, /\/macrostructure\/advance/);
   assert.match(response.body, /\/macrostructure\/reset/);
   assert.match(response.body, /\/playback\/timing-contracts/);
@@ -495,6 +525,7 @@ test("transport facade play and stop wrap macro playback with aggregate status",
   const writes = [];
   let running = false;
   let startOptions = null;
+  const jackCalls = [];
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
       rnbo: {
@@ -511,6 +542,20 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     runtime: {
       rnboParamWriter: async (write) => {
         writes.push(write);
+      },
+      jackController: {
+        async start() {
+          jackCalls.push(["start"]);
+          return { ok: true, action: "start" };
+        },
+        async stop() {
+          jackCalls.push(["stop"]);
+          return { ok: true, action: "stop" };
+        },
+        async tempo(bpm) {
+          jackCalls.push(["tempo", bpm]);
+          return { ok: true, action: "tempo", bpm };
+        }
       },
       macroPlayback: {
         snapshot: () => ({
@@ -547,6 +592,8 @@ test("transport facade play and stop wrap macro playback with aggregate status",
   const started = await requestJson(context, "POST", "/transport/play", { mode: "timer" });
   assert.equal(started.ok, true);
   assert.equal(started.action, "play");
+  assert.deepEqual(started.jackStart, { ok: true, action: "start" });
+  assert.deepEqual(started.jackTempo, { ok: true, action: "tempo", bpm: 120 });
   assert.equal(started.transport.playing, true);
   assert.equal(started.transport.activeBlockId, "A");
   assert.equal(started.transport.sync.label, "Timer");
@@ -572,6 +619,7 @@ test("transport facade play and stop wrap macro playback with aggregate status",
   const stopped = await requestJson(context, "POST", "/transport/stop", {});
   assert.equal(stopped.ok, true);
   assert.equal(stopped.action, "stop");
+  assert.deepEqual(stopped.jackStop, { ok: true, action: "stop" });
   assert.equal(stopped.transport.playing, false);
   assert.equal(stopped.clockWrites.length, 1);
   assert.deepEqual(writes.at(-1), {
@@ -580,6 +628,29 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     path: "/rnbo/inst/2/params/Clock",
     value: 0
   });
+  assert.deepEqual(jackCalls, [["start"], ["tempo", 120], ["stop"]]);
+});
+
+test("macrostructure tempo save sends JACK tempo when control is available", async () => {
+  const jackCalls = [];
+  const context = createRouteContext({
+    runtime: {
+      jackController: {
+        async tempo(bpm) {
+          jackCalls.push(["tempo", bpm]);
+          return { ok: true, action: "tempo", bpm };
+        }
+      }
+    }
+  });
+
+  const score = await requestJson(context, "POST", "/macrostructure", {
+    tempo: 137.25,
+    blocks: ["A"]
+  });
+
+  assert.equal(score.macrostructure.tempo, 137.25);
+  assert.deepEqual(jackCalls, [["tempo", 137.25]]);
 });
 
 test("transport return-to-start resets the macro playhead and phase", async () => {

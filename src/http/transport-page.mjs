@@ -233,12 +233,12 @@ export function transportPage() {
     }
 
     async function startPlayback(mode, options = {}) {
-      await postJson("/macrostructure/playback/start", { mode, ...options });
+      await postJson("/transport/play", { mode, ...options });
       await refreshAll();
     }
 
     async function stopPlayback() {
-      await postJson("/macrostructure/playback/stop", {});
+      await postJson("/transport/stop", {});
       await refreshAll();
     }
 

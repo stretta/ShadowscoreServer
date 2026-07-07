@@ -82,26 +82,11 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/transport/play") {
     try {
       const body = await readJson(request);
-      const playback = requireMacroPlayback(runtime);
-      const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 1 }, {
-        targetId: optionalString(body.targetId)
-      });
-      const phaseWrites = body.phaseReset === false
-        ? []
-        : await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 }, {
-          targetId: optionalString(body.targetId)
-        });
-      const mode = await playbackStartMode(store.getScore(), config, runtime, optionalString(body.mode));
-      playback.start({
-        mode,
-        reset: Boolean(body.reset),
-        sourceClientId: "transport"
-      });
+      const result = await startUnifiedTransport(store, config, runtime, body, "transport");
       writeJson(response, 200, {
         ok: true,
         action: "play",
-        clockWrites,
-        phaseWrites,
+        ...result,
         transport: await transportFacadeStatus(store, config, runtime)
       });
     } catch (error) {
@@ -113,15 +98,11 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/transport/stop") {
     try {
       const body = await readJson(request);
-      const playback = requireMacroPlayback(runtime);
-      const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 0 }, {
-        targetId: optionalString(body.targetId)
-      });
-      playback.stop();
+      const result = await stopUnifiedTransport(store, config, runtime, body);
       writeJson(response, 200, {
         ok: true,
         action: "stop",
-        clockWrites,
+        ...result,
         transport: await transportFacadeStatus(store, config, runtime)
       });
     } catch (error) {
@@ -188,6 +169,17 @@ export async function routeRequest(request, response, store, config, runtime = {
       const controller = requireJackController(runtime);
       const body = await readJson(request);
       writeJson(response, 200, await controller.locate(nonNegativeInteger(body.frame, "frame")));
+    } catch (error) {
+      writeJson(response, jackControllerStatus(error), { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/jack/tempo") {
+    try {
+      const controller = requireJackController(runtime);
+      const body = await readJson(request);
+      writeJson(response, 200, await controller.tempo(positiveNumber(body.bpm ?? body.tempo, "bpm")));
     } catch (error) {
       writeJson(response, jackControllerStatus(error), { ok: false, error: messageForError(error) });
     }
@@ -543,10 +535,14 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/macrostructure") {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.updateMacrostructure(body.macrostructure ?? withoutControlFields(body, ["replace", ...REVISION_CONTROL_FIELDS]), {
+      const previousTempo = store.getScore().macrostructure?.tempo;
+      const macrostructure = body.macrostructure ?? withoutControlFields(body, ["replace", ...REVISION_CONTROL_FIELDS]);
+      const score = store.updateMacrostructure(macrostructure, {
         ...revisionOptions(body),
         replace: url.searchParams.get("replace") === "1" || Boolean(body.replace)
-      }));
+      });
+      await maybeSendJackTempo(runtime, score.macrostructure?.tempo, previousTempo);
+      writeJson(response, 200, score);
     } catch (error) {
       writeError(response, error);
     }
@@ -604,25 +600,13 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/macrostructure/playback/start") {
     try {
       const body = await readJson(request);
-      const playback = requireMacroPlayback(runtime);
-      const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 1 }, {
-        targetId: optionalString(body.targetId)
-      });
-      const phaseWrites = body.phaseReset
-        ? await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 }, {
-          targetId: optionalString(body.targetId)
-        })
-        : [];
-      const mode = await playbackStartMode(store.getScore(), config, runtime, optionalString(body.mode));
-      playback.start({
-        mode,
-        reset: Boolean(body.reset),
-        sourceClientId: "http"
-      });
+      const result = await startUnifiedTransport(store, config, runtime, {
+        phaseReset: false,
+        ...body
+      }, "http");
       writeJson(response, 200, {
         ok: true,
-        clockWrites,
-        phaseWrites,
+        ...result,
         playback: await macroPlaybackSnapshot(runtime, store, config)
       });
     } catch (error) {
@@ -634,14 +618,10 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/macrostructure/playback/stop") {
     try {
       const body = await readJson(request);
-      const playback = requireMacroPlayback(runtime);
-      const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 0 }, {
-        targetId: optionalString(body.targetId)
-      });
-      playback.stop();
+      const result = await stopUnifiedTransport(store, config, runtime, body);
       writeJson(response, 200, {
         ok: true,
-        clockWrites,
+        ...result,
         playback: await macroPlaybackSnapshot(runtime, store, config)
       });
     } catch (error) {
@@ -1064,6 +1044,69 @@ async function transportFacadeStatus(store, config, runtime) {
   };
 }
 
+async function startUnifiedTransport(store, config, runtime, body = {}, sourceClientId = "transport") {
+  const playback = requireMacroPlayback(runtime);
+  const score = store.getScore();
+  const targetId = optionalString(body.targetId);
+  const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
+  const jackStart = await maybeStartJack(runtime);
+  const jackTempo = await maybeSendJackTempo(runtime, score.macrostructure?.tempo);
+  const clockWrites = await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId });
+  const phaseWrites = body.phaseReset === false
+    ? []
+    : await writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: 0 }, { targetId });
+  playback.start({
+    mode,
+    reset: Boolean(body.reset),
+    sourceClientId
+  });
+  return {
+    mode,
+    jackStart,
+    jackTempo,
+    clockWrites,
+    phaseWrites
+  };
+}
+
+async function stopUnifiedTransport(store, config, runtime, body = {}) {
+  const playback = requireMacroPlayback(runtime);
+  const targetId = optionalString(body.targetId);
+  const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 0 }, { targetId });
+  playback.stop();
+  const jackStop = await maybeStopJack(runtime);
+  return {
+    jackStop,
+    clockWrites
+  };
+}
+
+async function maybeStartJack(runtime) {
+  if (!runtime.jackController?.start) {
+    return null;
+  }
+  return runtime.jackController.start();
+}
+
+async function maybeStopJack(runtime) {
+  if (!runtime.jackController?.stop) {
+    return null;
+  }
+  return runtime.jackController.stop();
+}
+
+async function maybeSendJackTempo(runtime, tempo, previousTempo) {
+  const bpm = Number(tempo);
+  if (!Number.isFinite(bpm) || bpm <= 0 || !runtime.jackController?.tempo) {
+    return null;
+  }
+  const previous = Number(previousTempo);
+  if (Number.isFinite(previous) && Math.abs(previous - bpm) < 0.000001) {
+    return null;
+  }
+  return runtime.jackController.tempo(bpm);
+}
+
 function syncLabel(source) {
   switch (source) {
     case "jack":
@@ -1144,6 +1187,14 @@ function nonNegativeInteger(value, field) {
   const number = Number(value);
   if (!Number.isInteger(number) || number < 0) {
     throw new Error(`${field} must be a non-negative integer`);
+  }
+  return number;
+}
+
+function positiveNumber(value, field) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    throw new Error(`${field} must be a positive number`);
   }
   return number;
 }

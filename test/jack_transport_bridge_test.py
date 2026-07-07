@@ -86,6 +86,9 @@ class JackTransportBridgeTest(unittest.TestCase):
             def locate(self, frame):
                 calls.append(("locate", frame))
 
+            def tempo(self, bpm):
+                calls.append(("tempo", bpm))
+
             def close(self):
                 calls.append(("close",))
 
@@ -94,6 +97,7 @@ class JackTransportBridgeTest(unittest.TestCase):
             self.assertEqual(bridge.main(["--control", "start"]), 0)
             self.assertEqual(bridge.main(["--control", "stop"]), 0)
             self.assertEqual(bridge.main(["--control", "locate", "--frame", "48000"]), 0)
+            self.assertEqual(bridge.main(["--control", "tempo", "--bpm", "132.5"]), 0)
         finally:
             bridge.JackTransportClient = original_client
 
@@ -108,6 +112,9 @@ class JackTransportBridgeTest(unittest.TestCase):
                 ("close",),
                 ("open", "shadowscore-jack-bridge", bridge.JACK_DEFAULT_LIBRARY),
                 ("locate", 48000),
+                ("close",),
+                ("open", "shadowscore-jack-bridge", bridge.JACK_DEFAULT_LIBRARY),
+                ("tempo", 132.5),
                 ("close",),
             ],
         )

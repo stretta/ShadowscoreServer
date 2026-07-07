@@ -18,10 +18,13 @@ export function createJackTransportController(config = {}, options = {}) {
     },
     locate(frame) {
       return runControl({ action: "locate", frame });
+    },
+    tempo(bpm) {
+      return runControl({ action: "tempo", bpm });
     }
   };
 
-  async function runControl({ action, frame }) {
+  async function runControl({ action, frame, bpm }) {
     const args = [
       script,
       "--client-name",
@@ -35,11 +38,15 @@ export function createJackTransportController(config = {}, options = {}) {
     if (action === "locate") {
       args.push("--frame", String(nonNegativeInteger(frame, "frame")));
     }
+    if (action === "tempo") {
+      args.push("--bpm", String(positiveNumber(bpm, "bpm")));
+    }
     await spawnFile(python, args, { cwd });
     return {
       ok: true,
       action,
-      ...(action === "locate" ? { frame: nonNegativeInteger(frame, "frame") } : {})
+      ...(action === "locate" ? { frame: nonNegativeInteger(frame, "frame") } : {}),
+      ...(action === "tempo" ? { bpm: positiveNumber(bpm, "bpm") } : {})
     };
   }
 }
@@ -73,6 +80,14 @@ function nonNegativeInteger(value, field) {
   const number = Number(value);
   if (!Number.isInteger(number) || number < 0) {
     throw new Error(`${field} must be a non-negative integer`);
+  }
+  return number;
+}
+
+function positiveNumber(value, field) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number <= 0) {
+    throw new Error(`${field} must be a positive number`);
   }
   return number;
 }

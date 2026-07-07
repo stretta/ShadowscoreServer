@@ -312,12 +312,13 @@ export function adminPage() {
     function render(score) {
       inputs.clear();
       voicesEl.textContent = "";
+      const assignments = score.assignments ?? {};
       for (const voiceId of Object.keys(score.voices)) {
-        const assignment = score.assignments?.[voiceId] ?? {};
+        const assignment = assignments[voiceId] ?? {};
         const row = document.createElement("tr");
         row.dataset.voice = voiceId;
         row.append(cell("Player", voiceId, "voice"));
-        row.append(targetCell("Live Client", voiceId, assignment));
+        row.append(targetCell("Live Client", voiceId, assignment, assignments));
         row.append(routingCell("Routing", assignment));
         row.append(inputCell("Assignee", voiceId, "assignee", assignment.assignee ?? ""));
         row.append(inputCell("Device", voiceId, "deviceId", assignment.deviceId ?? ""));
@@ -472,7 +473,7 @@ export function adminPage() {
       return td;
     }
 
-    function targetCell(label, voiceId, assignment) {
+    function targetCell(label, voiceId, assignment, assignments) {
       const select = document.createElement("select");
       select.dataset.voice = voiceId;
       select.dataset.field = "rnboTargetId";
@@ -482,9 +483,13 @@ export function adminPage() {
         const group = document.createElement("optgroup");
         group.label = unitName;
         for (const target of targets) {
-          const suffix = target.available === false ? " · offline" : "";
-          const option = new Option(friendlyTargetName(target) + suffix, target.id);
-          option.disabled = target.available === false;
+          const assignedVoiceId = assignedVoiceForTarget(target.id, assignments, voiceId);
+          const suffix = [
+            target.available === false ? "offline" : "",
+            assignedVoiceId ? "assigned to " + assignmentLabel(assignedVoiceId, assignments[assignedVoiceId]) : ""
+          ].filter(Boolean).join(" · ");
+          const option = new Option(displayTargetLabel(target) + (suffix ? " · " + suffix : ""), target.id);
+          option.disabled = target.available === false || Boolean(assignedVoiceId);
           option.dataset.target = JSON.stringify(target);
           group.append(option);
         }
@@ -593,7 +598,12 @@ export function adminPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
       });
-      render(await response.json());
+      const result = await response.json();
+      if (!response.ok || result.ok === false) {
+        setStatus(result.error ?? "Assignment save failed.");
+        return;
+      }
+      render(result);
     }
 
     async function reconcileAssignments() {
@@ -839,6 +849,20 @@ export function adminPage() {
         return { status: "offline", detail: assignment.deviceId ? assignment.deviceId + " target unavailable." : "Target unavailable." };
       }
       return { status: "online", detail: displayTargetLabel(target) };
+    }
+
+    function assignedVoiceForTarget(targetId, assignments, currentVoiceId) {
+      if (!targetId) return "";
+      for (const [voiceId, assignment] of Object.entries(assignments ?? {})) {
+        if (voiceId !== currentVoiceId && assignment?.rnboTargetId === targetId) {
+          return voiceId;
+        }
+      }
+      return "";
+    }
+
+    function assignmentLabel(voiceId, assignment) {
+      return assignment?.label || assignment?.assignee || assignment?.deviceId || voiceId;
     }
 
     async function clearAssignment(voiceId) {

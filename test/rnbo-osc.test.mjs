@@ -449,6 +449,44 @@ test("clip bar duration uses the clip time signature when looped in a block", ()
   assert.deepEqual(compiled.messages.slice(1, 3).map((message) => message.values[5]), [0, 48]);
 });
 
+test("mesostructural block scale transposes assigned clips during playback compilation", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 0
+    }
+  });
+  const score = createScore();
+  delete score.context.clip.time_selection_end;
+  score.clips = {
+    melody: {
+      notes: [
+        { note_id: 1, pitch: 60, start_time: 0, duration: 1, velocity: 96 },
+        { note_id: 2, pitch: 64, start_time: 1, duration: 1, velocity: 96 }
+      ],
+      context: { clip: {}, scale: { root_note: 0, scale_name: "major" }, grid: {}, seed: 0 },
+      duration: { beats: 2 },
+      playbackType: "one-shot",
+      behavior: { followsPitch: true, followsScale: true, transposeMode: "scale-degree" }
+    }
+  };
+  score.mesostructure = {
+    A: {
+      duration: { beats: 4 },
+      scale: { root_note: 2, scale_name: "major" },
+      players: {
+        "player-1": { clipId: "melody" }
+      }
+    }
+  };
+  score.macrostructure = { tempo: 120, blocks: ["A"] };
+
+  const compiled = compileScoreTransaction(score, config, 555);
+
+  assert.equal(compiled.noteCount, 2);
+  assert.deepEqual(compiled.messages.slice(1, 3).map((message) => message.values[4]), [62, 66]);
+});
+
 test("pads clear rows to the target row capacity so RNBO playback lookup overwrites stale note rows", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

@@ -103,6 +103,11 @@ class JackTransportClient:
         self._jack.jack_transport_stop.restype = None
         self._jack.jack_transport_locate.argtypes = [ctypes.c_void_p, ctypes.c_uint32]
         self._jack.jack_transport_locate.restype = ctypes.c_int
+        self._jack.jack_transport_reposition.argtypes = [
+            ctypes.c_void_p,
+            ctypes.POINTER(JackPosition),
+        ]
+        self._jack.jack_transport_reposition.restype = ctypes.c_int
         try:
             callback_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
             self._shutdown_callback = callback_type(self._handle_shutdown)
@@ -156,6 +161,24 @@ class JackTransportClient:
         result = self._jack.jack_transport_locate(self._client, ctypes.c_uint32(frame))
         if result != 0:
             raise RuntimeError(f"jack_transport_locate failed with code {result}")
+
+    def tempo(self, bpm: float) -> None:
+        if bpm <= 0:
+            raise ValueError("bpm must be positive")
+        position = JackPosition()
+        self._jack.jack_transport_query(self._client, ctypes.byref(position))
+        if not bool(position.valid & JACK_POSITION_BBT):
+            position.valid |= JACK_POSITION_BBT
+            position.bar = 1
+            position.beat = 1
+            position.tick = 0
+            position.beats_per_bar = 4
+            position.beat_type = 4
+            position.ticks_per_beat = 1920
+        position.beats_per_minute = float(bpm)
+        result = self._jack.jack_transport_reposition(self._client, ctypes.byref(position))
+        if result != 0:
+            raise RuntimeError(f"jack_transport_reposition failed with code {result}")
 
 
 class JackTransportPoller:
@@ -290,10 +313,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--print", action="store_true", help="print JSON snapshots to stdout")
     parser.add_argument(
         "--control",
-        choices=("start", "stop", "locate"),
+        choices=("start", "stop", "locate", "tempo"),
         help="perform one JACK transport control action and exit",
     )
     parser.add_argument("--frame", type=int, default=0, help="frame for --control locate")
+    parser.add_argument("--bpm", type=float, default=120.0, help="tempo for --control tempo")
     parser.add_argument(
         "--no-post",
         action="store_true",
@@ -326,8 +350,12 @@ def run(args: argparse.Namespace) -> int:
                 if args.frame < 0:
                     raise ValueError("--frame must be non-negative")
                 client.locate(args.frame)
+            elif args.control == "tempo":
+                if args.bpm <= 0:
+                    raise ValueError("--bpm must be positive")
+                client.tempo(args.bpm)
             if args.print:
-                print(json.dumps({"ok": True, "action": args.control, "frame": args.frame}, sort_keys=True), flush=True)
+                print(json.dumps({"ok": True, "action": args.control, "frame": args.frame, "bpm": args.bpm}, sort_keys=True), flush=True)
             return 0
         finally:
             client.close()

@@ -1,0 +1,374 @@
+# OSC Editor And Macro Control Plan
+
+## Goal
+
+Build a family of browser-based OSC instrument editors and performance
+utilities on top of ShadowscoreServer's existing live hardware and RNBO target
+model.
+
+The first concrete instrument editor is Poland. Poland already has the desired
+musical UI and should not be redesigned for this effort. The work is to let
+that existing UI edit live Poland instances running on local Raspberry Pi
+clients through ShadowscoreServer-managed discovery, routing, and OSC send
+paths.
+
+The first concrete performance utility is all-local volume control. It should
+send a shared volume gesture to every selected local OSC/RNBO-capable instance
+without requiring the user to manually track hostnames, IP addresses, instance
+ids, or stale endpoint details.
+
+## Product Shape
+
+There are two related tool families that share the same backend substrate.
+
+### Instrument Editors
+
+Instrument editors are bespoke, archetype-aware browser apps. They are musical
+interfaces, not generic RNBO parameter dumps.
+
+Examples:
+
+- **Poland**: PPG Wave-style wavetable instrument editor.
+- **Element**: Roland Juno-style single-oscillator subtractive synth editor.
+- Future instruments: each owns its own visual and musical editing model.
+
+Each editor should keep its own UI language and parameter semantics. For
+Poland, this means preserving the existing Poland UI and adding only the target
+selection and transport adapter needed to talk to live local instances.
+
+### OSC Utility Tools
+
+OSC utilities are cross-instrument performance and operations tools.
+
+Examples:
+
+- all-local volume
+- mute, solo, or trim groups
+- panic or all-notes-off
+- preset recall across multiple boxes
+- calibration/setup commands
+- named macros that send different OSC messages to different clients
+
+These tools are not owned by Poland or any other single instrument. They should
+live as ShadowscoreServer-hosted utilities that use the same live target
+registry as the instrument editors.
+
+## Ownership Boundaries
+
+- **ShadowscoreServer** owns live unit discovery, health, stale endpoint
+  reconciliation, target listing, browser hosting, OSC send/broadcast, and macro
+  execution.
+- **Shadowbox** remains a runtime and physical-control surface for local RNBO
+  instances. It may eventually expose selected presets or runtime controls, but
+  it is not the primary authoring UI for this plan.
+- **Smol/Poland** owns the Poland editor UI, Poland parameter semantics, and
+  Poland preset source artifacts.
+- **Future instrument repos or packages** own their own editor bundles and
+  instrument-specific UI schemas.
+
+The laptop browser is the primary authoring surface. A user should be able to
+open a ShadowscoreServer-hosted Poland page from a laptop, choose one or more
+live Poland instances on the LAN, edit through the existing Poland UI, and save
+or export useful states into Poland-owned preset files for later bundling.
+
+## Target Model
+
+ShadowscoreServer already has the difficult substrate:
+
+- peer registration
+- `/hardware/units`
+- `/rnbo/targets`
+- live target health
+- stale endpoint handling through stable hardware identity
+
+This plan adds a more general OSC-control target layer over that substrate.
+
+Conceptual target shape:
+
+```json
+{
+  "id": "finch:poland:main",
+  "unitId": "finch",
+  "deviceId": "finch",
+  "label": "Finch Poland",
+  "app": "poland",
+  "instance": "main",
+  "kind": "rnbo",
+  "status": "online",
+  "host": "192.168.68.101",
+  "port": 1234,
+  "baseAddress": "/rnbo/inst/1",
+  "capabilities": ["volume", "preset", "poland-edit"]
+}
+```
+
+Rules:
+
+- UI clients select stable target ids, not raw IP/port/path tuples.
+- Endpoint fields are current routing details and may change.
+- Stable hardware identity is used to recover when clients disappear and return.
+- A target can be visible but unavailable, stale, ambiguous, or offline.
+- Instrument editors can filter by `app`, such as `poland` or `element`.
+- Utility tools can filter by capability, such as `volume`.
+
+## HTTP API Draft
+
+Add focused routes rather than expanding score-owned assignment routes.
+
+### List OSC Targets
+
+```http
+GET /osc/targets
+GET /osc/targets?app=poland
+GET /osc/targets?capability=volume
+```
+
+Returns normalized live and recently known OSC-controllable targets.
+
+The response should include enough status for browser clients to distinguish:
+
+- online and sendable
+- offline but known
+- stale endpoint
+- ambiguous multi-instance target
+- not capable of the requested command
+
+### Send One OSC Message
+
+```http
+POST /osc/send
+```
+
+Request:
+
+```json
+{
+  "targets": ["finch:poland:main", "heron:poland:main"],
+  "address": "/poland/volume",
+  "args": [0.7]
+}
+```
+
+The server resolves each stable target id to the current endpoint and sends the
+message. The response reports per-target success or failure.
+
+### Broadcast By Query
+
+```http
+POST /osc/broadcast
+```
+
+Request:
+
+```json
+{
+  "where": {
+    "capability": "volume",
+    "status": "online"
+  },
+  "address": "/volume",
+  "args": [0.5]
+}
+```
+
+This is the core path for all-local volume and other shared gestures.
+
+### Macro Routes
+
+```http
+GET /osc/macros
+POST /osc/macros
+POST /osc/macros/:macroId/run
+```
+
+Macro shape:
+
+```json
+{
+  "id": "soft-start-room",
+  "label": "Soft Start Room",
+  "steps": [
+    {
+      "target": "finch:poland:main",
+      "address": "/poland/volume",
+      "args": [0.4]
+    },
+    {
+      "target": "heron:element:main",
+      "address": "/element/filter/cutoff",
+      "args": [900]
+    }
+  ]
+}
+```
+
+The first implementation can execute steps immediately in order. Later versions
+can add delays, dry-run validation, per-step conditions, and group expansion.
+
+## Editor Hosting Model
+
+Host editor bundles from ShadowscoreServer under stable routes.
+
+Examples:
+
+- `/editors/poland`
+- `/editors/element`
+- `/tools/osc-volume`
+- `/tools/osc-macros`
+
+Each editor bundle should be allowed to keep its own build system and source
+repo. The server-hosted copy is a distribution artifact, similar in spirit to
+the Matrix Edit bundle.
+
+For Poland:
+
+1. Keep the existing Poland UI intact.
+2. Add or wrap a transport adapter that can send edits through
+   ShadowscoreServer.
+3. Add a target chooser fed by `/osc/targets?app=poland`.
+4. Preserve Poland-owned preset export and bundle workflows.
+
+The target chooser should be surrounding application chrome or a small
+integration layer. It should not force changes to the Poland editing surface
+unless Poland itself needs them.
+
+## Preset Workflow
+
+The desired authoring loop is:
+
+1. A laptop browser opens the Poland editor from ShadowscoreServer.
+2. The editor lists live Poland instances discovered through the server.
+3. The user selects one or more instances.
+4. Existing Poland controls send OSC to the selected live targets.
+5. The user saves an interesting state as a Poland preset.
+6. The preset is written or exported into Poland/Smol-owned source artifacts.
+7. A later Poland build bundles those presets.
+8. Shadowbox can eventually expose the bundled presets as runtime choices.
+
+This keeps authoring and runtime roles separate:
+
+- laptop browser: rich editing and preset design
+- ShadowscoreServer: routing brain and OSC broker
+- Shadowbox: runtime control surface and local performance access
+
+## Implementation Phases
+
+### Phase 1: Target Inventory
+
+- Add an internal `osc-targets` service that derives normalized targets from
+  existing hardware units and RNBO target state.
+- Expose `GET /osc/targets`.
+- Include status, app, instance, label, endpoint, and capability fields.
+- Start with explicit or convention-based app detection for Poland rather than
+  solving every future instrument shape.
+- Add tests for online, offline, stale, and filtered target responses.
+
+### Phase 2: OSC Send Path
+
+- Add `POST /osc/send`.
+- Reuse the existing OSC adapter where possible.
+- Resolve stable target ids at send time.
+- Return per-target delivery results.
+- Reject sends to stale or offline targets unless the request explicitly allows
+  best-effort behavior.
+- Add tests for single target, multi-target, missing target, and offline target
+  behavior.
+
+### Phase 3: Poland Integration
+
+- Export or copy the existing Poland editor bundle into ShadowscoreServer.
+- Serve it under `/editors/poland`.
+- Add a minimal integration layer:
+  - fetch `/osc/targets?app=poland`
+  - select one or more targets
+  - route Poland's existing OSC edits through `/osc/send`
+- Preserve Poland UI behavior and visual design.
+- Verify against one live Poland instance, then multiple live instances.
+
+### Phase 4: All-Local Volume Tool
+
+- Add a simple `/tools/osc-volume` browser page.
+- List all online targets with `volume` capability.
+- Provide:
+  - master volume
+  - per-target enable/disable
+  - optional per-target trim
+- Send via `/osc/broadcast` or `/osc/send`.
+- Verify that the same gesture can address all current local instances without
+  manual endpoint editing.
+
+### Phase 5: Macro Tool
+
+- Add macro persistence in a small server-owned JSON file or existing local
+  data directory.
+- Add macro list/create/run routes.
+- Add a browser macro launcher.
+- Support simple ordered steps first.
+- Add dry-run validation before execution so stale targets are visible.
+
+### Phase 6: Generalize Editor Registration
+
+- Add an editor manifest convention:
+
+```json
+{
+  "id": "poland",
+  "label": "Poland",
+  "route": "/editors/poland",
+  "targetFilter": {
+    "app": "poland"
+  }
+}
+```
+
+- Use this to list available editors on an index page.
+- Add Element as the second instrument editor once Poland proves the shape.
+
+## Test And Verification Plan
+
+Automated tests:
+
+- target normalization from registered units and RNBO targets
+- target filtering by app and capability
+- stale/offline target status
+- `/osc/send` request validation
+- per-target send result reporting
+- macro validation and run ordering
+
+Live verification:
+
+- Start ShadowscoreServer on the host unit.
+- Confirm `/healthz`.
+- Confirm `/hardware/units` sees local peers.
+- Confirm `/rnbo/targets` sees live RNBO instances.
+- Confirm `/osc/targets?app=poland` lists the expected Poland instances.
+- Use the Poland editor from a laptop browser to edit one live target.
+- Select multiple Poland targets and confirm a shared edit reaches both.
+- Use the volume tool to change all local capable instances.
+- Power-cycle or restart a peer and confirm stale endpoint behavior is visible
+  and then repaired through normal registration.
+
+## Open Questions
+
+- How should a Poland RNBO instance advertise that it is Poland: target label,
+  metadata, patcher name convention, explicit registration payload, or OSCQuery
+  metadata?
+- Should preset export write directly into the Smol/Poland source tree, download
+  a file in the browser, or stage the preset in ShadowscoreServer for later
+  import?
+- Should `/osc/broadcast` expand target groups at request time only, or can a
+  group be saved as a durable object?
+- Which volume address should be canonical across instruments, and do some
+  instruments need address mapping?
+- Should macro execution be fire-and-forget, return only transport success, or
+  support acknowledgement/readback when the target exposes it?
+
+## Non-Goals
+
+- Do not redesign the Poland UI.
+- Do not make Shadowbox the primary authoring UI for instrument editors.
+- Do not replace OSCQuery or RNBO Runner discovery with a parallel manual
+  inventory.
+- Do not store raw IP/port/path tuples as the primary user-facing selection.
+- Do not make generic slider walls the main editor experience for archetypal
+  instruments.

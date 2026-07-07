@@ -30,6 +30,8 @@ Design and implementation notes:
   original hardware ensemble architecture and phase tracking.
 - [`editor-revision-draft-framework-plan.md`](editor-revision-draft-framework-plan.md):
   proposed shared revision/draft framework for editor clients.
+- [`osc-editor-and-macro-control-plan.md`](osc-editor-and-macro-control-plan.md):
+  OSC instrument editor, live target, broadcast volume, and macro-control plan.
 - [`implementation-plan.md`](implementation-plan.md): implementation milestone
   history and model notes.
 

@@ -9,6 +9,24 @@ const OPCODES = Object.freeze({
   COMMIT: 90
 });
 
+const SCALE_INTERVALS = Object.freeze({
+  ionian: [0, 2, 4, 5, 7, 9, 11],
+  major: [0, 2, 4, 5, 7, 9, 11],
+  dorian: [0, 2, 3, 5, 7, 9, 10],
+  phrygian: [0, 1, 3, 5, 7, 8, 10],
+  lydian: [0, 2, 4, 6, 7, 9, 11],
+  mixolydian: [0, 2, 4, 5, 7, 9, 10],
+  aeolian: [0, 2, 3, 5, 7, 8, 10],
+  minor: [0, 2, 3, 5, 7, 8, 10],
+  chromatic: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  "harmonic-minor": [0, 2, 3, 5, 7, 8, 11],
+  "melodic-minor": [0, 2, 3, 5, 7, 9, 11],
+  "major-pentatonic": [0, 2, 4, 7, 9],
+  "minor-pentatonic": [0, 2, 3, 7, 10],
+  blues: [0, 3, 5, 6, 7, 10],
+  "whole-tone": [0, 2, 4, 6, 8, 10]
+});
+
 export function createRnboOscAdapter(config, runtime = {}) {
   if (!config.rnbo.enabled) {
     return {
@@ -443,13 +461,14 @@ function flattenBlockNotes(score, block, voiceFilter, blockBeats = 0) {
         voiceId,
         clipId,
         blockBeats,
+        blockScale: block.scale,
         context: score.context
       });
     })
     .sort((a, b) => readNumber(a.start_time, 0) - readNumber(b.start_time, 0) || readNumber(a.pitch, 0) - readNumber(b.pitch, 0));
 }
 
-function expandClipNotes(clip, { voiceId, clipId, blockBeats, context }) {
+function expandClipNotes(clip, { voiceId, clipId, blockBeats, blockScale, context }) {
   if (!clip) {
     return [];
   }
@@ -458,7 +477,7 @@ function expandClipNotes(clip, { voiceId, clipId, blockBeats, context }) {
   const playbackType = clip.playbackType === "one-shot" ? "one-shot" : "looped";
   if (playbackType === "one-shot" || blockBeats <= 0 || clipBeats <= 0) {
     return clipNotes.map((note, voiceIndex) => ({
-      ...note,
+      ...noteWithBlockScale(note, clip, blockScale),
       voiceId,
       clipId,
       voiceIndex
@@ -478,7 +497,7 @@ function expandClipNotes(clip, { voiceId, clipId, blockBeats, context }) {
         continue;
       }
       notes.push({
-        ...note,
+        ...noteWithBlockScale(note, clip, blockScale),
         note_id: note.note_id === undefined ? undefined : readNumber(note.note_id, voiceIndex + 1) + iteration * clipNotes.length,
         start_time: start,
         duration,
@@ -489,6 +508,73 @@ function expandClipNotes(clip, { voiceId, clipId, blockBeats, context }) {
     }
   }
   return notes;
+}
+
+function noteWithBlockScale(note, clip, blockScale) {
+  if (clip?.behavior?.followsScale === false || !isPlainObject(blockScale) || !Object.keys(blockScale).length) {
+    return note;
+  }
+  const sourceScale = clip?.context?.scale ?? {};
+  const pitch = transposePitchBetweenScales(note.pitch, sourceScale, blockScale);
+  return pitch === note.pitch ? note : { ...note, pitch };
+}
+
+function transposePitchBetweenScales(pitch, sourceScale, targetScale) {
+  if (!Number.isFinite(pitch)) {
+    return pitch;
+  }
+  const sourceIntervals = scaleIntervals(sourceScale);
+  const targetIntervals = scaleIntervals(targetScale);
+  const sourceRoot = clampInt(sourceScale?.root_note ?? 0, 0, 11);
+  const targetRoot = clampInt(targetScale?.root_note ?? sourceRoot, 0, 11);
+  if (!sourceIntervals.length || !targetIntervals.length) {
+    return pitch + targetRoot - sourceRoot;
+  }
+  const sourceDegrees = scalePitches(sourceIntervals, sourceRoot);
+  const targetDegrees = scalePitches(targetIntervals, targetRoot);
+  const sourceIndex = nearestPitchIndex(sourceDegrees, pitch);
+  const referenceIndex = nearestPitchIndex(sourceDegrees, referencePitchForRoot(sourceRoot));
+  const targetIndex = nearestPitchIndex(targetDegrees, referencePitchForRoot(targetRoot)) + (sourceIndex - referenceIndex);
+  return clampInt(targetDegrees[Math.max(0, Math.min(targetDegrees.length - 1, targetIndex))] ?? pitch, 0, 127);
+}
+
+function scaleIntervals(scale) {
+  if (Array.isArray(scale?.scale_intervals)) {
+    return scale.scale_intervals.map((value) => clampInt(value, 0, 11));
+  }
+  const name = String(scale?.scale_name ?? "").trim().toLowerCase().replace(/\s+/g, "-");
+  return SCALE_INTERVALS[name] ?? SCALE_INTERVALS.chromatic;
+}
+
+function scalePitches(intervals, root) {
+  const pitchClasses = new Set(intervals.map((interval) => (interval + root) % 12));
+  const pitches = [];
+  for (let pitch = 0; pitch <= 127; pitch += 1) {
+    if (pitchClasses.has(pitch % 12)) {
+      pitches.push(pitch);
+    }
+  }
+  return pitches.length ? pitches : [root];
+}
+
+function nearestPitchIndex(pitches, pitch) {
+  let bestIndex = 0;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  pitches.forEach((candidate, index) => {
+    const distance = Math.abs(candidate - pitch);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  });
+  return bestIndex;
+}
+
+function referencePitchForRoot(root) {
+  const base = 60;
+  const pitchClass = ((root % 12) + 12) % 12;
+  const upward = base + ((pitchClass - (base % 12) + 12) % 12);
+  return upward > base + 6 ? upward - 12 : upward;
 }
 
 function activeMesoBlock(score) {
@@ -672,6 +758,10 @@ function finiteNumber(value, fallback) {
 
 function stringField(value, fallback) {
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function isPlainObject(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function readInstanceId(address) {

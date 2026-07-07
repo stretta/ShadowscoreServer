@@ -87,7 +87,7 @@
       border: 1px solid var(--line);
       border-radius: 8px;
       min-width: 0;
-      overflow: hidden;
+      overflow: visible;
     }
 
     .panel-header {
@@ -267,7 +267,7 @@
       align-items: end;
       display: grid;
       gap: 8px;
-      grid-template-columns: minmax(140px, 1fr) auto auto auto auto auto;
+      grid-template-columns: minmax(140px, 1fr) repeat(5, minmax(88px, auto));
     }
 
     .playback-status {
@@ -278,6 +278,10 @@
       font-size: 0.85rem;
       line-height: 1.2;
       white-space: nowrap;
+    }
+
+    .macro-panel .actions {
+      padding-bottom: 2px;
     }
 
     .playback-status strong {
@@ -1055,7 +1059,7 @@
         state.saving = true;
         const result = await fetchJson(`${state.serverUrl}/macrostructure/playback/start`, undefined, {
           method: "POST",
-          body: {}
+          body: { mode: "auto" }
         });
         state.macroPlayback = result.playback;
         renderPlayheadControls();

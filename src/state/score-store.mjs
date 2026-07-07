@@ -353,13 +353,15 @@ export function createScoreStore(initialScore, options = {}) {
       assertKnownVoice(score, voiceId);
       assertExpectedScoreVersion(score, options.expectedVersion);
       const assignment = normalizeAssignment(assignmentDocument);
+      const assignments = {
+        ...ensureAssignments(score),
+        [voiceId]: assignment
+      };
+      assertUniqueRnboTargetAssignments(assignments);
       score = {
         ...score,
         ...nextRevisionFields(score),
-        assignments: {
-          ...ensureAssignments(score),
-          [voiceId]: assignment
-        }
+        assignments
       };
       emitChange(events, "voice.assignment.replaced", score, { voiceId, assignment }, options);
       return structuredClone(score);
@@ -392,6 +394,7 @@ export function createScoreStore(initialScore, options = {}) {
           ...assignmentDocument
         });
       }
+      assertUniqueRnboTargetAssignments(nextAssignments);
       score = {
         ...score,
         ...nextRevisionFields(score),
@@ -690,6 +693,21 @@ function normalizeAssignment(assignmentDocument) {
     routingStatus: stringField(assignmentDocument.routingStatus),
     routingMessage: stringField(assignmentDocument.routingMessage)
   };
+}
+
+function assertUniqueRnboTargetAssignments(assignments) {
+  const seen = new Map();
+  for (const [voiceId, assignment] of Object.entries(assignments ?? {})) {
+    const targetId = assignment?.rnboTargetId;
+    if (!targetId) {
+      continue;
+    }
+    const existingVoiceId = seen.get(targetId);
+    if (existingVoiceId) {
+      throw new Error(`RNBO target '${targetId}' is already assigned to ${existingVoiceId}`);
+    }
+    seen.set(targetId, voiceId);
+  }
 }
 
 function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallbackScore) {

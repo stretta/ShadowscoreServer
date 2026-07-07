@@ -4,24 +4,20 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ShadowScore Structure Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f4f6f2;
-      --band: #ffffff;
-      --ink: #171a1f;
-      --muted: #66717d;
-      --line: #d6dacf;
-      --field: #fbfcf8;
-      --accent: #226c5f;
-      --accent-ink: #ffffff;
-      --danger: #aa2e25;
-      --focus: #c78a12;
-      --soft: #e8efe9;
-    }
-
-    * {
-      box-sizing: border-box;
+      --bg: var(--ss-bg);
+      --band: var(--ss-panel);
+      --ink: var(--ss-text);
+      --muted: var(--ss-muted);
+      --line: var(--ss-border);
+      --field: #0f1720;
+      --accent: var(--ss-accent-strong);
+      --accent-ink: #07110a;
+      --danger: var(--ss-danger);
+      --focus: var(--ss-warn);
+      --soft: var(--ss-surface);
     }
 
     body {
@@ -33,13 +29,7 @@
     }
 
     header {
-      align-items: center;
-      background: #20242a;
-      color: white;
-      display: flex;
-      gap: 16px;
-      min-height: 56px;
-      padding: 10px 18px;
+      justify-content: space-between;
     }
 
     h1 {
@@ -50,9 +40,7 @@
     }
 
     .status {
-      color: #d9dee5;
       flex: 1;
-      font-size: 13px;
       overflow: hidden;
       text-align: right;
       text-overflow: ellipsis;
@@ -142,11 +130,8 @@
     }
 
     button {
-      background: #ffffff;
       color: var(--ink);
-      cursor: pointer;
       font-weight: 750;
-      padding: 6px 10px;
       white-space: nowrap;
     }
 
@@ -189,8 +174,8 @@
     }
 
     .block-button[aria-selected="true"] {
-      background: #dcece6;
-      border-color: #8fb9aa;
+      background: rgba(143, 236, 121, 0.12);
+      border-color: rgba(143, 236, 121, 0.48);
     }
 
     .block-button[data-active="true"] {
@@ -247,7 +232,6 @@
     }
 
     th {
-      color: #3d4650;
       font-size: 12px;
       font-weight: 800;
     }
@@ -285,7 +269,7 @@
     }
 
     .playback-status strong {
-      color: var(--text);
+      color: var(--ink);
       font-size: 0.9rem;
     }
 
@@ -342,6 +326,14 @@
     <h1>ShadowScore Structure Editor</h1>
     <div class="status" id="status">Loading session...</div>
   </header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
+    <a href="/">Dashboard</a>
+    <a href="/structure-editor" aria-current="page">Structure</a>
+    <a href="/matrix-edit">Matrix</a>
+    <a href="/event-list">Event List</a>
+    <a href="/admin">Admin</a>
+    <a href="/transport/status">Transport</a>
+  </nav>
   <main>
     <section class="server" aria-label="Server">
       <label>Server

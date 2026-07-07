@@ -2225,6 +2225,16 @@ test("shared client state module is served as a static asset", async () => {
   assert.match(response.body, /effectiveScore/);
 });
 
+test("shared ShadowScore stylesheet is served as a static asset", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/shared/shadowscore-style.css");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/css/);
+  assert.match(response.body, /--ss-bg/);
+  assert.match(response.body, /ss-route-tabs/);
+});
+
 test("clip routes reject stale expected score revisions", async () => {
   const context = createRouteContext();
 

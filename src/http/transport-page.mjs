@@ -5,27 +5,17 @@ export function transportPage() {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shadowscore Transport</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
   <style>
     :root {
-      color-scheme: light;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f4f6f5;
-      color: #1f2528;
+      background: var(--ss-bg);
+      color: var(--ss-text);
     }
-    * { box-sizing: border-box; }
     body { margin: 0; }
     header {
-      align-items: center;
-      background: #24313a;
-      color: #fff;
-      display: flex;
-      gap: 16px;
       justify-content: space-between;
-      padding: 18px clamp(16px, 4vw, 40px);
     }
-    h1 { font-size: 20px; letter-spacing: 0; margin: 0; }
     main { margin: 0 auto; max-width: 1120px; padding: 22px clamp(16px, 4vw, 40px) 40px; }
-    .status { color: #cfdbdf; font-size: 14px; }
     .toolbar {
       display: flex;
       flex-wrap: wrap;
@@ -36,32 +26,17 @@ export function transportPage() {
     }
     details.toolbar-details { margin-bottom: 18px; }
     details.toolbar-details summary {
-      color: #41505a;
+      color: var(--ss-muted);
       cursor: pointer;
       font-weight: 700;
       margin-bottom: 10px;
     }
     button {
-      align-items: center;
-      background: #fff;
-      border: 1px solid #aab4b9;
-      border-radius: 6px;
-      color: #1f2528;
-      cursor: pointer;
-      display: inline-flex;
-      font: inherit;
-      font-weight: 650;
-      justify-content: center;
       max-width: 100%;
       min-height: 38px;
-      padding: 8px 12px;
       white-space: normal;
     }
-    button.primary { background: #226f63; border-color: #226f63; color: #fff; }
-    button.danger { border-color: #b64c40; color: #96382e; }
     section {
-      background: #fff;
-      border: 1px solid #d5dbde;
       margin-bottom: 16px;
       padding: 14px;
     }
@@ -72,14 +47,13 @@ export function transportPage() {
       grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
     }
     .metric {
-      border: 1px solid #e0e5e7;
+      background: rgba(38, 51, 65, 0.54);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-control);
       min-height: 72px;
       padding: 10px;
     }
     .label {
-      color: #66737a;
-      font-size: 12px;
-      font-weight: 700;
       margin-bottom: 6px;
       text-transform: uppercase;
     }
@@ -89,17 +63,15 @@ export function transportPage() {
       overflow-wrap: anywhere;
     }
     .value.small { font-size: 15px; font-weight: 650; }
-    .ok { color: #22653b; }
-    .warn { color: #8a5a16; }
-    .bad { color: #96382e; }
     .detail {
-      color: #66737a;
       font-size: 13px;
       margin-top: 6px;
     }
     .log {
-      background: #1f2528;
-      color: #d8e1e4;
+      background: #0c1218;
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-control);
+      color: #d8e8ef;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 12px;
       min-height: 72px;
@@ -121,6 +93,14 @@ export function transportPage() {
     <h1>Shadowscore Transport</h1>
     <div class="status" id="status">Loading...</div>
   </header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
+    <a href="/">Dashboard</a>
+    <a href="/structure-editor">Structure</a>
+    <a href="/matrix-edit">Matrix</a>
+    <a href="/event-list">Event List</a>
+    <a href="/admin">Admin</a>
+    <a href="/transport/status" aria-current="page">Transport</a>
+  </nav>
   <main>
     <div class="toolbar">
       <button class="primary" id="play" type="button">Play</button>

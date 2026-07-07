@@ -4,23 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>ShadowScore Event List</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
   <style>
     :root {
-      color-scheme: light;
-      --bg: #f6f5ef;
-      --panel: #ffffff;
-      --ink: #191b1f;
-      --muted: #646b75;
-      --line: #d7d4ca;
-      --accent: #0f766e;
-      --accent-ink: #ffffff;
-      --danger: #b42318;
-      --field: #fbfaf6;
-      --focus: #d99f24;
-    }
-
-    * {
-      box-sizing: border-box;
+      --bg: var(--ss-bg);
+      --panel: var(--ss-panel);
+      --ink: var(--ss-text);
+      --muted: var(--ss-muted);
+      --line: var(--ss-border);
+      --accent: var(--ss-accent-strong);
+      --accent-ink: #07110a;
+      --danger: var(--ss-danger);
+      --field: #0f1720;
+      --focus: var(--ss-warn);
     }
 
     body {
@@ -32,13 +28,7 @@
     }
 
     header {
-      align-items: center;
-      background: #20232a;
-      color: white;
-      display: flex;
-      gap: 18px;
-      min-height: 56px;
-      padding: 10px 18px;
+      justify-content: space-between;
     }
 
     h1 {
@@ -152,11 +142,7 @@
     }
 
     button {
-      background: var(--panel);
       color: var(--ink);
-      cursor: pointer;
-      font-weight: 700;
-      padding: 6px 10px;
     }
 
     button.primary {
@@ -176,9 +162,7 @@
     }
 
     .status {
-      color: #d8dde7;
       flex: 1;
-      font-size: 13px;
       overflow: hidden;
       text-align: right;
       text-overflow: ellipsis;
@@ -230,8 +214,6 @@
     }
 
     th {
-      background: #e9e6dc;
-      color: #3e454f;
       font-size: 12px;
       font-weight: 750;
       position: sticky;
@@ -256,12 +238,12 @@
     }
 
     tbody tr[data-muted="true"] {
-      background: #faf2f0;
-      color: #6d747d;
+      background: rgba(248, 113, 113, 0.08);
+      color: #b4c1ca;
     }
 
     tbody tr:hover {
-      background: #f2f7f5;
+      background: rgba(105, 199, 223, 0.08);
     }
 
     td input {
@@ -319,6 +301,14 @@
     <h1>ShadowScore Event List</h1>
     <div class="status" id="status">Loading session...</div>
   </header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
+    <a href="/">Dashboard</a>
+    <a href="/structure-editor">Structure</a>
+    <a href="/matrix-edit">Matrix</a>
+    <a href="/event-list" aria-current="page">Event List</a>
+    <a href="/admin">Admin</a>
+    <a href="/transport/status">Transport</a>
+  </nav>
   <main>
     <section class="toolbar server-toolbar" aria-label="Event list controls">
       <label>Server

@@ -5,31 +5,19 @@ export function adminPage() {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shadowscore Lab Admin</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
   <style>
     :root {
-      color-scheme: light;
-      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: #f5f5f2;
-      color: #202124;
+      background: var(--ss-bg);
+      color: var(--ss-text);
     }
-    * { box-sizing: border-box; }
     body { margin: 0; }
     header {
-      align-items: center;
-      background: #1f2933;
-      color: #fff;
-      display: flex;
-      gap: 16px;
       justify-content: space-between;
-      padding: 18px clamp(16px, 4vw, 40px);
     }
-    h1 { font-size: 20px; font-weight: 700; letter-spacing: 0; margin: 0; }
     main { margin: 0 auto; max-width: 1120px; padding: 24px clamp(16px, 4vw, 40px) 40px; }
-    .status { color: #c8d1da; font-size: 14px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
     .session-tools, .scores, .targets, .hardware {
-      background: #fff;
-      border: 1px solid #d5d8dc;
       margin-bottom: 18px;
       padding: 14px;
     }
@@ -58,20 +46,22 @@ export function adminPage() {
     .voice-tools { margin: 0 0 12px; }
     .voice-tools input { max-width: 240px; }
     .qr {
-      border: 1px solid #d5d8dc;
+      background: #fff;
+      border: 1px solid var(--ss-border-strong);
       display: block;
       height: 180px;
       width: 180px;
     }
     .hint {
-      color: #66717d;
       font-size: 13px;
       margin-top: 6px;
     }
     .target-list, .unit-list, .score-list { display: grid; gap: 8px; }
     .target, .unit, .score-item {
       align-items: center;
-      border: 1px solid #e1e4e8;
+      background: rgba(38, 51, 65, 0.46);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-control);
       display: flex;
       gap: 10px;
       justify-content: space-between;
@@ -79,12 +69,12 @@ export function adminPage() {
     }
     .target, .unit { align-items: flex-start; }
     .item-main { display: grid; gap: 4px; min-width: 0; }
-    .score-detail { color: #66717d; font-size: 12px; margin-top: 3px; }
-    .target code { color: #38414a; font-size: 12px; }
+    .score-detail { font-size: 12px; margin-top: 3px; }
+    .target code, .unit code { color: var(--ss-muted); font-size: 12px; }
     .diagnostic {
-      background: #fff8df;
-      border: 1px solid #e0bd54;
-      color: #684b05;
+      background: rgba(251, 191, 36, 0.1);
+      border: 1px solid rgba(251, 191, 36, 0.56);
+      color: #f9d77e;
       display: grid;
       font-size: 12px;
       gap: 6px;
@@ -97,53 +87,38 @@ export function adminPage() {
       width: fit-content;
     }
     .badge {
-      border: 1px solid #bac2ca;
+      border: 1px solid var(--ss-border-strong);
       border-radius: 999px;
-      color: #38414a;
       font-size: 12px;
       font-weight: 700;
       padding: 3px 8px;
       text-transform: uppercase;
     }
-    .badge.online { background: #e4f4ea; border-color: #9ad2ad; color: #22653b; }
-    .badge.offline { background: #f7e6e4; border-color: #d9a29a; color: #96382e; }
-    .badge.unassigned { background: #f1f3f4; border-color: #c6ccd2; color: #5f6872; }
-    .badge.ambiguous { background: #fff2d6; border-color: #dfb35d; color: #76500c; }
+    .badge.online { background: rgba(143, 236, 121, 0.12); border-color: rgba(143, 236, 121, 0.42); color: var(--ss-accent); }
+    .badge.offline { background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.48); color: var(--ss-danger); }
+    .badge.unassigned { background: rgba(145, 164, 178, 0.12); border-color: var(--ss-border-strong); color: var(--ss-muted); }
+    .badge.ambiguous { background: rgba(251, 191, 36, 0.12); border-color: rgba(251, 191, 36, 0.5); color: var(--ss-warn); }
     .routing-state { display: grid; gap: 4px; min-width: 120px; }
-    .routing-detail { color: #66717d; font-size: 12px; line-height: 1.25; }
+    .routing-detail { font-size: 12px; line-height: 1.25; }
     button {
-      align-items: center;
-      background: #ffffff;
-      border: 1px solid #b7bec7;
-      border-radius: 6px;
-      color: #202124;
-      cursor: pointer;
-      display: inline-flex;
-      font: inherit;
-      font-weight: 650;
       min-height: 38px;
-      padding: 8px 12px;
     }
-    button.primary { background: #256f86; border-color: #256f86; color: #fff; }
-    button.danger { border-color: #b64c40; color: #9b2f24; }
     table {
-      background: #fff;
-      border: 1px solid #d5d8dc;
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
       border-collapse: collapse;
+      overflow: hidden;
       width: 100%;
     }
     th, td {
-      border-bottom: 1px solid #e1e4e8;
       font-size: 14px;
       padding: 10px;
       text-align: left;
       vertical-align: middle;
     }
-    th { background: #eef0f1; color: #38414a; font-size: 12px; text-transform: uppercase; }
+    th { font-size: 12px; text-transform: uppercase; }
     input {
-      border: 1px solid #bac2ca;
-      border-radius: 4px;
-      font: inherit;
       min-height: 36px;
       padding: 7px 8px;
       width: 100%;
@@ -152,9 +127,6 @@ export function adminPage() {
     .voice { font-weight: 700; white-space: nowrap; }
     .actions { display: flex; gap: 8px; }
     select {
-      border: 1px solid #bac2ca;
-      border-radius: 4px;
-      font: inherit;
       min-height: 36px;
       padding: 7px 8px;
       width: 100%;
@@ -175,6 +147,14 @@ export function adminPage() {
     <h1>Shadowscore Lab Admin</h1>
     <div class="status" id="status">Loading score...</div>
   </header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
+    <a href="/">Dashboard</a>
+    <a href="/structure-editor">Structure</a>
+    <a href="/matrix-edit">Matrix</a>
+    <a href="/event-list">Event List</a>
+    <a href="/admin" aria-current="page">Admin</a>
+    <a href="/transport/status">Transport</a>
+  </nav>
   <main>
     <div class="toolbar">
       <button class="primary" id="refresh" type="button">Refresh</button>

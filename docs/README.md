@@ -20,6 +20,9 @@ Design and implementation notes:
 - [`transport-and-matrix-ui-ux-plan.md`](transport-and-matrix-ui-ux-plan.md):
   DAW-like transport facade, Matrix Edit simplification, and ownership
   boundaries for setup versus performance.
+- [`shadowscore-user-facing-style-plan.md`](shadowscore-user-facing-style-plan.md):
+  Smol-derived visual direction, shared UI tokens, page-by-page application
+  notes, and styling rollout plan for server-hosted user-facing pages.
 - [`adaptive-rnbo-stage-resolution-plan.md`](adaptive-rnbo-stage-resolution-plan.md):
   timing-contract and target-capability design for RNBO playback.
 - [`beat-derived-macro-playback-plan.md`](beat-derived-macro-playback-plan.md):

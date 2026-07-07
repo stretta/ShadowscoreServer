@@ -11,6 +11,10 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
 
   assert.match(html, /<script type="module" crossorigin src="\/matrix-edit\/assets\/[^"]+\.js"><\/script>/);
   assert.match(html, /<link rel="stylesheet" crossorigin href="\/matrix-edit\/assets\/[^"]+\.css">/);
+  assert.match(html, /<link rel="stylesheet" href="\/shared\/shadowscore-style\.css"\s*\/?>/);
+  assert.match(html, /<nav class="ss-route-tabs" aria-label="ShadowScore routes">/);
+  assert.match(html, /<a href="\/matrix-edit" aria-current="page">Matrix<\/a>/);
+  assert.doesNotMatch(html, /fonts\.googleapis\.com/);
   assert.match(html, /id="start-transport"/);
   assert.match(html, /id="stop-transport"/);
   assert.match(html, /id="return-start"/);
@@ -74,6 +78,8 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(css, /webkit-inner-spin-button/);
   assert.match(css, /performance-toolbar/);
   assert.match(css, /advanced-panel/);
+  assert.match(css, /--ss-bg:\s*#111821/);
+  assert.match(css, /ss-route-tabs/);
   assert.match(css, /routing-status/);
   assert.match(css, /routing-status\.ambiguous/);
 });

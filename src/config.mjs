@@ -59,6 +59,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/structure-editor"]
       },
+      editorsIndex: {
+        root: "public/editors",
+        index: "index.html",
+        routes: ["/editors"]
+      },
       polandEditor: {
         root: "public/editors/poland",
         index: "index.html",
@@ -81,6 +86,16 @@ export const defaultConfig = Object.freeze({
       }
     }
   },
+  editors: [
+    {
+      id: "poland",
+      label: "Poland",
+      route: "/editors/poland",
+      targetFilter: {
+        app: "poland"
+      }
+    }
+  ],
   ensemble: {
     id: "berklee-b51",
     voices: ["player-1", "player-2", "player-3", "player-4", "player-5", "player-6"],

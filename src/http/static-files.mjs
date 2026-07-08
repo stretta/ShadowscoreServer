@@ -60,7 +60,7 @@ function staticAppForPath(staticConfig, pathname) {
 function staticApps(staticConfig) {
   const configuredApps = Object.values(staticConfig.apps ?? {});
   if (configuredApps.length) {
-    return configuredApps.map(normalizeStaticApp).filter(Boolean);
+    return configuredApps.map(normalizeStaticApp).filter(Boolean).sort(compareStaticAppSpecificity);
   }
   return [
     normalizeStaticApp({
@@ -69,6 +69,12 @@ function staticApps(staticConfig) {
       routes: ["/matrix-edit", "/"]
     })
   ].filter(Boolean);
+}
+
+function compareStaticAppSpecificity(a, b) {
+  const longestA = Math.max(...a.routes.map((route) => route.length));
+  const longestB = Math.max(...b.routes.map((route) => route.length));
+  return longestB - longestA;
 }
 
 function normalizeStaticApp(app) {

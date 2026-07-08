@@ -2132,6 +2132,8 @@ test("root route serves view index", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore Views/);
+  assert.match(response.body, /\/editors/);
+  assert.match(response.body, /Instrument Editors/);
   assert.match(response.body, /\/structure-editor/);
   assert.match(response.body, /\/matrix-edit/);
   assert.match(response.body, /\/event-list/);
@@ -2139,6 +2141,64 @@ test("root route serves view index", async () => {
   assert.match(response.body, /\/transport\/status/);
   assert.match(response.body, /\/rnbo\/devices/);
   assert.match(response.body, /:3000/);
+});
+
+test("editor manifest route lists registered instrument editors", async () => {
+  const context = createRouteContext();
+  const response = await requestJson(context, "GET", "/editors/manifest");
+
+  assert.equal(response.editors.length, 1);
+  assert.deepEqual(response.editors[0], {
+    id: "poland",
+    label: "Poland",
+    route: "/editors/poland",
+    targetFilter: {
+      app: "poland"
+    }
+  });
+});
+
+test("editor manifest route normalizes custom editor config", async () => {
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      editors: [
+        {
+          id: "Element Synth",
+          label: "Element",
+          route: "editors/element",
+          targetFilter: {
+            app: "Element",
+            capability: "Editor",
+            status: "Online"
+          }
+        }
+      ]
+    })
+  });
+  const response = await requestJson(context, "GET", "/editors/manifest");
+
+  assert.deepEqual(response.editors, [{
+    id: "element-synth",
+    label: "Element",
+    route: "/editors/element",
+    targetFilter: {
+      app: "element",
+      capability: "editor",
+      status: "online"
+    }
+  }]);
+});
+
+test("editor index route serves registered editor browser", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /ShadowScore Editors/);
+  assert.match(response.body, /\/editors\/manifest/);
+  assert.match(response.body, /\/osc\/targets/);
+  assert.match(response.body, /filterText/);
 });
 
 test("event list route serves server-bundled editor html", async () => {

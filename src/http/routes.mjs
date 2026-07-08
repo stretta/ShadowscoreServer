@@ -3,6 +3,7 @@ import { serveStaticAsset } from "./static-files.mjs";
 import { transportPage } from "./transport-page.mjs";
 import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
 import { configuredRnboTargets, discoverRnboControlTargets, discoverRnboDevices, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
+import { editorManifests } from "../editors/manifest.mjs";
 import { findOscMacro, listOscMacros, resolveMacroStepAddress, saveOscMacro, validateMacro } from "../osc/macros.mjs";
 import { sendOscMessage } from "../osc/send.mjs";
 import { buildOscTargets } from "../osc/targets.mjs";
@@ -70,6 +71,11 @@ export async function routeRequest(request, response, store, config, runtime = {
         status: url.searchParams.get("status")
       })
     });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/editors/manifest") {
+    writeJson(response, 200, { editors: editorManifests(config) });
     return;
   }
 

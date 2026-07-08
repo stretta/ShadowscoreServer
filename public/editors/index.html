@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShadowScore Editors</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    main {
+      margin: 0 auto;
+      padding: 18px 0 40px;
+      width: min(1040px, calc(100vw - 32px));
+    }
+
+    .top {
+      align-items: center;
+      display: flex;
+      gap: 16px;
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    h1 {
+      font-size: 18px;
+      line-height: 1.1;
+      margin: 0;
+    }
+
+    .subtitle,
+    .status,
+    .meta {
+      color: var(--ss-muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+    }
+
+    .status {
+      max-width: 46vw;
+      overflow: hidden;
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      margin-top: 18px;
+    }
+
+    .card {
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
+      color: var(--ss-text);
+      display: grid;
+      gap: 10px;
+      min-height: 142px;
+      padding: 14px;
+      text-decoration: none;
+    }
+
+    .card:hover,
+    .card:focus-visible {
+      background: var(--ss-surface);
+      border-color: var(--ss-accent-secondary);
+    }
+
+    .card-title {
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .card-path {
+      color: var(--ss-accent-secondary);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      overflow-wrap: anywhere;
+    }
+
+    .target-count {
+      align-self: end;
+      color: var(--ss-text);
+      font-size: 24px;
+      font-weight: 850;
+    }
+
+    .empty,
+    .error {
+      background: var(--ss-panel);
+      border: 1px dashed var(--ss-border-strong);
+      border-radius: var(--ss-radius-ui);
+      color: var(--ss-muted);
+      margin-top: 18px;
+      padding: 14px;
+    }
+
+    .error {
+      border-color: var(--ss-warn);
+      color: var(--ss-warn);
+    }
+
+    @media (max-width: 680px) {
+      main {
+        width: min(100vw - 24px, 1040px);
+        padding-top: 24px;
+      }
+
+      .top {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .status {
+        max-width: none;
+        text-align: left;
+        white-space: normal;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="ss-top-strip">
+    <div class="top">
+      <div>
+        <h1>ShadowScore Editors</h1>
+        <p class="subtitle">Instrument editor manifests and live targets</p>
+      </div>
+      <div id="status" class="status" role="status">Loading editors...</div>
+    </div>
+  </header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
+    <a href="/">Dashboard</a>
+    <a href="/editors" aria-current="page">Editors</a>
+    <a href="/tools/osc-volume">Volume</a>
+    <a href="/tools/osc-macros">Macros</a>
+  </nav>
+  <main>
+    <section id="editors" class="grid" aria-live="polite"></section>
+  </main>
+  <script>
+    const editorsEl = document.querySelector("#editors");
+    const statusEl = document.querySelector("#status");
+
+    refreshEditors().catch((error) => {
+      editorsEl.className = "";
+      editorsEl.innerHTML = `<div class="error">${escapeHtml(error.message)}</div>`;
+      statusEl.textContent = "Editor manifest unavailable";
+    });
+
+    async function refreshEditors() {
+      const manifest = await fetchJson("/editors/manifest");
+      const editors = Array.isArray(manifest.editors) ? manifest.editors : [];
+      const targetCounts = new Map(await Promise.all(editors.map(async (editor) => {
+        const targets = await fetchJson(`/osc/targets${queryFor(editor.targetFilter)}`);
+        return [editor.id, (targets.targets || []).filter((target) => target.status === "online").length];
+      })));
+      renderEditors(editors, targetCounts);
+      statusEl.textContent = `${editors.length} editor${editors.length === 1 ? "" : "s"} registered`;
+    }
+
+    async function fetchJson(url) {
+      const response = await fetch(url, { cache: "no-store" });
+      if (!response.ok) {
+        throw new Error(`${url}: ${response.status} ${response.statusText}`);
+      }
+      return response.json();
+    }
+
+    function renderEditors(editors, targetCounts) {
+      editorsEl.className = editors.length ? "grid" : "";
+      if (!editors.length) {
+        editorsEl.innerHTML = `<div class="empty">No instrument editors are registered.</div>`;
+        return;
+      }
+      editorsEl.innerHTML = editors.map((editor) => `
+        <a class="card" href="${escapeAttribute(editor.route)}">
+          <span class="card-title">${escapeHtml(editor.label || editor.id)}</span>
+          <span class="card-path">${escapeHtml(editor.route)}</span>
+          <span class="meta">${escapeHtml(filterText(editor.targetFilter))}</span>
+          <span class="target-count">${targetCounts.get(editor.id) ?? 0} online</span>
+        </a>
+      `).join("");
+    }
+
+    function queryFor(filter = {}) {
+      const params = new URLSearchParams();
+      if (filter.app) params.set("app", filter.app);
+      if (filter.capability) params.set("capability", filter.capability);
+      params.set("status", filter.status || "online");
+      return `?${params.toString()}`;
+    }
+
+    function filterText(filter = {}) {
+      const entries = Object.entries(filter).filter(([, value]) => value);
+      return entries.length ? entries.map(([key, value]) => `${key}: ${value}`).join(", ") : "all OSC targets";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+
+    function escapeAttribute(value) {
+      return escapeHtml(value).replace(/`/g, "&#96;");
+    }
+  </script>
+</body>
+</html>

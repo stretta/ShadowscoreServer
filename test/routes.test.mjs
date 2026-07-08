@@ -2298,12 +2298,13 @@ test("OSC volume tool route serves target selection and trim controls", async ()
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /OSC Volume/);
-  assert.match(response.body, /\/osc\/targets\?capability=volume&status=online/);
-  assert.match(response.body, /name="param-set" value="both"/);
+  assert.match(response.body, /\/osc\/targets\?status=online/);
+  assert.match(response.body, /data-param-map/);
+  assert.match(response.body, /editableParams/);
+  assert.match(response.body, /preferredParam/);
+  assert.match(response.body, /mappedValue/);
   assert.match(response.body, /data-trim/);
   assert.match(response.body, /Zero Trims/);
-  assert.match(response.body, /VolA/);
-  assert.match(response.body, /VolB/);
 });
 
 test("OSC macro tool route serves builder and validation controls", async () => {

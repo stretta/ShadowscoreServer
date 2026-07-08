@@ -55,40 +55,8 @@
       border-bottom: 1px solid var(--ss-border);
       display: grid;
       gap: 14px;
-      grid-template-columns: auto 1fr auto auto;
+      grid-template-columns: 1fr auto auto;
       padding: 14px 18px;
-    }
-
-    .param-set {
-      display: inline-grid;
-      gap: 4px;
-      grid-template-columns: repeat(3, minmax(58px, 1fr));
-    }
-
-    .param-set input {
-      position: absolute;
-      opacity: 0;
-      pointer-events: none;
-    }
-
-    .param-set span {
-      align-items: center;
-      background: var(--ss-surface);
-      border: 1px solid var(--ss-border-strong);
-      border-radius: var(--ss-radius-control);
-      color: var(--ss-text);
-      cursor: pointer;
-      display: flex;
-      font-weight: 800;
-      justify-content: center;
-      min-height: 34px;
-      padding: 6px 10px;
-    }
-
-    .param-set input:checked + span {
-      background: var(--ss-accent-strong);
-      border-color: var(--ss-accent-strong);
-      color: #07110a;
     }
 
     .master-control {
@@ -190,6 +158,23 @@
       width: 100%;
     }
 
+    .mapping-control {
+      display: grid;
+      gap: 4px;
+    }
+
+    .mapping-control span {
+      color: var(--ss-muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .mapping-control select {
+      min-width: 0;
+      width: 100%;
+    }
+
     .empty-state {
       align-items: center;
       color: var(--ss-muted);
@@ -215,10 +200,6 @@
       .control-strip {
         grid-template-columns: 1fr;
       }
-
-      .param-set {
-        grid-template-columns: repeat(3, 1fr);
-      }
     }
   </style>
 </head>
@@ -232,11 +213,6 @@
       </div>
     </header>
     <section class="control-strip">
-      <div class="param-set" aria-label="Volume parameter">
-        <label><input type="radio" name="param-set" value="VolA" checked><span>VolA</span></label>
-        <label><input type="radio" name="param-set" value="VolB"><span>VolB</span></label>
-        <label><input type="radio" name="param-set" value="both"><span>Both</span></label>
-      </div>
       <label class="master-control">
         <input id="master" type="range" min="-70" max="0" step="1" value="0" aria-label="Master volume">
         <output id="master-value">0 dB</output>
@@ -258,6 +234,7 @@
     const zeroTrimsButton = document.querySelector("#zero-trims");
     let targets = [];
     let trims = new Map();
+    let mappings = new Map();
 
     masterEl.addEventListener("input", updateReadouts);
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
@@ -267,15 +244,15 @@
     async function refresh() {
       refreshButton.disabled = true;
       setStatus("Refreshing");
-      const response = await fetch("/osc/targets?capability=volume&status=online");
+      const response = await fetch("/osc/targets?status=online");
       const body = await response.json();
       if (!response.ok || body.ok === false) {
         throw new Error(body.error || `Request failed: ${response.status}`);
       }
-      targets = (body.targets || []).filter((target) => hasVolumeParams(target));
+      targets = (body.targets || []).filter((target) => editableParams(target).length > 0);
       renderTargets();
       updateReadouts();
-      setStatus(targets.length ? `${targets.length} volume target${targets.length === 1 ? "" : "s"} online` : "No online volume targets");
+      setStatus(targets.length ? `${targets.length} mapped target${targets.length === 1 ? "" : "s"} online` : "No editable online targets");
       refreshButton.disabled = false;
     }
 
@@ -287,6 +264,9 @@
         card.dataset.enabled = "true";
         const trim = trims.get(target.id) ?? 0;
         trims.set(target.id, trim);
+        const params = editableParams(target);
+        const mapped = mappings.get(target.id) || preferredParam(params);
+        mappings.set(target.id, mapped);
         card.innerHTML = `
           <div class="target-top">
             <input type="checkbox" checked data-enable="${escapeHtml(target.id)}" aria-label="Enable ${escapeHtml(target.label || target.id)}">
@@ -296,6 +276,12 @@
             </div>
             <output class="target-total" data-total="${escapeHtml(target.id)}">0 dB</output>
           </div>
+          <label class="mapping-control">
+            <span>Parameter</span>
+            <select data-param-map="${escapeHtml(target.id)}" aria-label="${escapeHtml(target.label || target.id)} parameter">
+              ${params.map((param) => `<option value="${escapeHtml(param.name)}"${param.name === mapped ? " selected" : ""}>${escapeHtml(paramLabel(param))}</option>`).join("")}
+            </select>
+          </label>
           <label class="trim-control">
             <span>Trim</span>
             <input type="range" min="-24" max="12" step="1" value="${trim}" data-trim="${escapeHtml(target.id)}" aria-label="${escapeHtml(target.label || target.id)} trim">
@@ -304,6 +290,10 @@
         `;
         card.querySelector("[data-enable]").addEventListener("change", (event) => {
           card.dataset.enabled = String(event.target.checked);
+          updateReadouts();
+        });
+        card.querySelector("[data-param-map]").addEventListener("change", (event) => {
+          mappings.set(target.id, event.target.value);
           updateReadouts();
         });
         card.querySelector("[data-trim]").addEventListener("input", (event) => {
@@ -316,7 +306,7 @@
       if (cards.length === 0) {
         const empty = document.createElement("div");
         empty.className = "empty-state";
-        empty.textContent = "No online volume-capable OSC targets.";
+        empty.textContent = "No online OSC targets with editable parameters.";
         targetsEl.append(empty);
       }
     }
@@ -326,30 +316,29 @@
       masterValueEl.textContent = formatDb(master);
       for (const target of targets) {
         const trim = trims.get(target.id) ?? 0;
-        const total = clampedVolume(master + trim);
+        const total = mappedValue(target, master + trim);
         const trimValue = document.querySelector(`[data-trim-value="${cssEscape(target.id)}"]`);
         const totalValue = document.querySelector(`[data-total="${cssEscape(target.id)}"]`);
         if (trimValue) trimValue.textContent = formatDb(trim);
-        if (totalValue) totalValue.textContent = formatDb(total);
+        if (totalValue) totalValue.textContent = formatValue(total, mappedParameter(target)?.unit);
       }
     }
 
     async function send() {
       const selected = selectedTargets();
-      const params = selectedParams();
       if (selected.length === 0) {
         setStatus("No targets selected");
         return;
       }
       sendButton.disabled = true;
-      setStatus(`Sending ${params.join("+")}`);
+      setStatus("Sending canonical volume");
       const results = [];
       for (const target of selected) {
-        const value = clampedVolume(Number(masterEl.value) + (trims.get(target.id) ?? 0));
-        for (const param of params) {
-          const result = await sendOne(target.id, param, value);
-          results.push(result);
-        }
+        const param = mappings.get(target.id);
+        if (!param) continue;
+        const value = mappedValue(target, Number(masterEl.value) + (trims.get(target.id) ?? 0));
+        const result = await sendOne(target.id, param, value);
+        results.push(result);
       }
       const ok = results.filter((result) => result.ok).length;
       setStatus(`Sent ${ok}/${results.length}`);
@@ -374,14 +363,36 @@
       });
     }
 
-    function selectedParams() {
-      const value = document.querySelector('input[name="param-set"]:checked')?.value || "VolA";
-      return value === "both" ? ["VolA", "VolB"] : [value];
+    function editableParams(target) {
+      return (target.parameters || []).filter((param) => param.name && param.address);
     }
 
-    function hasVolumeParams(target) {
-      const names = new Set((target.parameters || []).map((param) => param.name));
-      return names.has("VolA") || names.has("VolB");
+    function preferredParam(params) {
+      const preferred = ["VolA", "VolB", "Volume", "volume", "Gain", "gain", "Level", "level"];
+      return preferred.find((name) => params.some((param) => param.name === name)) || params[0]?.name || "";
+    }
+
+    function mappedParameter(target) {
+      const name = mappings.get(target.id);
+      return editableParams(target).find((param) => param.name === name);
+    }
+
+    function mappedValue(target, value) {
+      const param = mappedParameter(target);
+      const min = Number(param?.min);
+      const max = Number(param?.max);
+      if (Number.isFinite(min) && Number.isFinite(max)) {
+        return Math.max(min, Math.min(max, Number(value)));
+      }
+      return Number(value);
+    }
+
+    function paramLabel(param) {
+      const unit = param.unit ? ` ${param.unit}` : "";
+      const min = Number.isFinite(Number(param.min)) ? Number(param.min) : undefined;
+      const max = Number.isFinite(Number(param.max)) ? Number(param.max) : undefined;
+      const range = min !== undefined && max !== undefined ? ` [${min}..${max}${unit}]` : "";
+      return `${param.displayName || param.name}${range}`;
     }
 
     function zeroTrims() {
@@ -390,13 +401,16 @@
       updateReadouts();
     }
 
-    function clampedVolume(value) {
-      return Math.max(-70, Math.min(0, Number(value)));
-    }
-
     function formatDb(value) {
       const number = Number(value);
       return `${number > 0 ? "+" : ""}${number.toFixed(0)} dB`;
+    }
+
+    function formatValue(value, unit) {
+      const number = Number(value);
+      if (!Number.isFinite(number)) return String(value ?? "");
+      const formatted = Math.abs(number) >= 10 ? number.toFixed(0) : number.toFixed(2);
+      return unit ? `${formatted} ${unit}` : formatted;
     }
 
     function setStatus(message) {

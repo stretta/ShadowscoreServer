@@ -253,7 +253,16 @@ This keeps authoring and runtime roles separate:
 
 ## Implementation Phases
 
-### Phase 1: Target Inventory
+Status as of the current implementation pass:
+
+- Phase 1 through Phase 6 are implemented in ShadowscoreServer.
+- The implemented routes and hosted pages have been deployed to `wren.local`.
+- Live verification used the three online Poland instances on `wren`, `heron`,
+  and `raven`.
+- Follow-on work remains for deeper Poland preset export, richer macro/group
+  semantics, and adding Element as the next editor.
+
+### Phase 1: Target Inventory - Complete
 
 - Add an internal `osc-targets` service that derives normalized targets from
   existing hardware units and RNBO target state.
@@ -263,7 +272,15 @@ This keeps authoring and runtime roles separate:
   solving every future instrument shape.
 - Add tests for online, offline, stale, and filtered target responses.
 
-### Phase 2: OSC Send Path
+Implemented notes:
+
+- Added normalized OSC control targets derived from local RNBO discovery and
+  peer registration.
+- Added Poland target detection from RNBOOSCQuery metadata and parameter shape.
+- Extended peer registration with `oscTargets` so editor/control targets stay
+  separate from score playback targets.
+
+### Phase 2: OSC Send Path - Complete
 
 - Add `POST /osc/send`.
 - Reuse the existing OSC adapter where possible.
@@ -274,7 +291,14 @@ This keeps authoring and runtime roles separate:
 - Add tests for single target, multi-target, missing target, and offline target
   behavior.
 
-### Phase 3: Poland Integration
+Implemented notes:
+
+- Added `POST /osc/send` and `POST /osc/broadcast`.
+- Added named parameter sends via `param` or `parameter`, resolving each
+  target's concrete OSC parameter address at send time.
+- Live verification resolved `VolA` for `wren`, `heron`, and `raven`.
+
+### Phase 3: Poland Integration - Complete
 
 - Export or copy the existing Poland editor bundle into ShadowscoreServer.
 - Serve it under `/editors/poland`.
@@ -285,7 +309,16 @@ This keeps authoring and runtime roles separate:
 - Preserve Poland UI behavior and visual design.
 - Verify against one live Poland instance, then multiple live instances.
 
-### Phase 4: All-Local Volume Tool
+Implemented notes:
+
+- Added `/editors/poland`.
+- Reused the existing Poland control grouping and labels from the Smol/Poland
+  UI instead of presenting a generic parameter dump.
+- Added target selection fed by `/osc/targets?app=poland&status=online`.
+- Live verification showed the page on `wren.local` and all three Poland
+  targets online.
+
+### Phase 4: All-Local Volume Tool - Complete
 
 - Add a simple `/tools/osc-volume` browser page.
 - List all online targets with `volume` capability.
@@ -297,7 +330,17 @@ This keeps authoring and runtime roles separate:
 - Verify that the same gesture can address all current local instances without
   manual endpoint editing.
 
-### Phase 5: Macro Tool
+Implemented notes:
+
+- Added `/tools/osc-volume`.
+- Added master volume, per-target enable/disable, and per-target trim.
+- The tool scans online OSC targets with editable parameters and lets the user
+  map the canonical volume gesture to the actual parameter each target should
+  receive.
+- `VolA` and `VolB` remain useful Poland candidates, but they are no longer
+  hard-coded as the only user-facing concept.
+
+### Phase 5: Macro Tool - Complete
 
 - Add macro persistence in a small server-owned JSON file or existing local
   data directory.
@@ -306,7 +349,22 @@ This keeps authoring and runtime roles separate:
 - Support simple ordered steps first.
 - Add dry-run validation before execution so stale targets are visible.
 
-### Phase 6: Generalize Editor Registration
+Implemented notes:
+
+- Added macro persistence and routes:
+  - `GET /osc/macros`
+  - `POST /osc/macros`
+  - `POST /osc/macros/:macroId/run`
+- Added `/tools/osc-macros`.
+- Added dry-run validation.
+- Added macro steps that can use `param` instead of raw `address`, allowing
+  each target to resolve its own concrete RNBO parameter path.
+- Live verification saved and dry-ran `poland-vola-zero`, resolving:
+  - `wren:poland:main` to `/rnbo/inst/1/params/VolA`
+  - `heron:poland:main` to `/rnbo/inst/9/params/VolA`
+  - `raven:poland:main` to `/rnbo/inst/10/params/VolA`
+
+### Phase 6: Generalize Editor Registration - Complete
 
 - Add an editor manifest convention:
 
@@ -323,6 +381,16 @@ This keeps authoring and runtime roles separate:
 
 - Use this to list available editors on an index page.
 - Add Element as the second instrument editor once Poland proves the shape.
+
+Implemented notes:
+
+- Added `config.editors`.
+- Added `GET /editors/manifest`.
+- Added `/editors` as a hosted editor index.
+- Registered Poland as the first manifest entry.
+- Updated the dashboard to link to `/editors`.
+- Fixed static route precedence so `/editors/poland` remains more specific
+  than `/editors`.
 
 ## Test And Verification Plan
 

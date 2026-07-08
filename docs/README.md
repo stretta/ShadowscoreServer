@@ -27,6 +27,9 @@ Design and implementation notes:
   timing-contract and target-capability design for RNBO playback.
 - [`scalable-rnbo-score-transport-plan.md`](scalable-rnbo-score-transport-plan.md):
   compact score replacement plan for scaling RNBO sends beyond full-row clears.
+- [`rnbo-connection-hardening-pass.md`](rnbo-connection-hardening-pass.md):
+  four-Pi baseline, canary rollout, ACK, debounce, and mixed-fleet hardening
+  strategy for the RNBO score connection.
 - [`beat-derived-macro-playback-plan.md`](beat-derived-macro-playback-plan.md):
   beat-witness model and macro playback design.
 - [`wren-jack-transport-macro-playback-plan.md`](wren-jack-transport-macro-playback-plan.md):

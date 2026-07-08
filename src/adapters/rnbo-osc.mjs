@@ -36,7 +36,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
     };
   }
 
-  const socket = dgram.createSocket("udp4");
+  const socket = runtime.socket ?? dgram.createSocket("udp4");
   let transactionId = Number(config.rnbo.transactionStart) || 1000;
   let store;
   let discoveryTimer;
@@ -48,6 +48,8 @@ export function createRnboOscAdapter(config, runtime = {}) {
   let queuedSend = undefined;
   let latestSendResult = undefined;
   let activeSend = undefined;
+  let debounceTimer = undefined;
+  const debounceWaiters = [];
 
   const adapter = {
     enabled: true,
@@ -57,7 +59,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
         if (!shouldSendScoreTransaction(event)) {
           return;
         }
-        void resendScore(event.score).catch((error) => {
+        void resendScore(event.score, event.type).catch((error) => {
           console.error(`[rnbo] send failed: ${messageForError(error)}`);
         });
       });
@@ -85,6 +87,11 @@ export function createRnboOscAdapter(config, runtime = {}) {
         clearInterval(discoveryTimer);
         discoveryTimer = undefined;
       }
+      if (debounceTimer) {
+        clearTimeout(debounceTimer);
+        debounceTimer = undefined;
+        rejectDebounceWaiters(new Error("RNBO adapter closed before debounced resend"));
+      }
       try {
         socket.close();
       } catch {
@@ -100,12 +107,63 @@ export function createRnboOscAdapter(config, runtime = {}) {
   }
 
   function resendScore(score, reason = "", options = {}) {
-    queuedSend = mergeSendRequest(queuedSend, { score, reason, options });
+    const request = { score, reason, options };
+    if (shouldDebounceResend(config, reason, options)) {
+      return scheduleDebouncedSend(request);
+    }
+    queuedSend = mergeSendRequest(queuedSend, request);
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+      debounceTimer = undefined;
+      startSendLoop();
+      settleDebounceWaiters(sendLoopPromise);
+      return sendLoopPromise;
+    }
+    return startSendLoop();
+  }
+
+  function startSendLoop() {
     if (!sendLoopActive) {
       sendLoopActive = true;
       sendLoopPromise = drainSendQueue();
     }
     return sendLoopPromise;
+  }
+
+  function scheduleDebouncedSend(request) {
+    queuedSend = mergeSendRequest(queuedSend, request);
+    if (sendLoopActive) {
+      return sendLoopPromise;
+    }
+
+    const waitForSend = new Promise((resolve, reject) => {
+      debounceWaiters.push({ resolve, reject });
+    });
+    const debounceMs = resendDebounceMs(config);
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
+    }
+    debounceTimer = setTimeout(() => {
+      debounceTimer = undefined;
+      startSendLoop();
+      settleDebounceWaiters(sendLoopPromise);
+    }, debounceMs);
+    debounceTimer.unref?.();
+    return waitForSend;
+  }
+
+  function settleDebounceWaiters(promise) {
+    const waiters = debounceWaiters.splice(0);
+    for (const waiter of waiters) {
+      promise.then(waiter.resolve, waiter.reject);
+    }
+  }
+
+  function rejectDebounceWaiters(error) {
+    const waiters = debounceWaiters.splice(0);
+    for (const waiter of waiters) {
+      waiter.reject(error);
+    }
   }
 
   async function drainSendQueue() {
@@ -216,7 +274,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
       const signature = rnboTargetSignature(liveTargets);
       if (signature && signature !== lastTargetSignature) {
         lastTargetSignature = signature;
-        await resendScore(store.getScore(), "target-discovery");
+        await resendScore(store.getScore(), "target-discovery", { immediate: true });
       } else {
         lastTargetSignature = signature;
       }
@@ -341,6 +399,7 @@ export function validateScoreTransactionAck(value, { target = {}, compiled = {},
   const opcodeIndex = ackOpcodeIndex(values);
   const opcode = values[opcodeIndex];
   const txn = values[opcodeIndex + 1];
+  const committedNoteCount = values[opcodeIndex + 2];
   const okFlag = values.at(-1);
   const clientId = opcodeIndex > 0 ? values[0] : undefined;
   const expectedClientId = target.clientId === undefined || target.clientId === null || target.clientId === ""
@@ -354,22 +413,31 @@ export function validateScoreTransactionAck(value, { target = {}, compiled = {},
     opcode,
     transactionId: txn,
     expectedTransactionId: transactionId,
+    committedNoteCount,
     expectedClientId,
     noteCount: compiled.noteCount ?? 0,
     transmittedRowCount: compiled.transmittedRowCount ?? 0
   };
 
   if (expectedClientId !== undefined && clientId !== expectedClientId) {
-    return { ...base, status: "client-mismatch", clientId };
+    return { ...base, status: "client mismatch", clientId };
   }
   if (opcode !== OPCODES.COMMIT) {
     return { ...base, status: opcode === 91 ? "rejected" : "opcode-mismatch", clientId };
   }
   if (txn !== transactionId) {
-    return { ...base, status: "stale", clientId };
+    return { ...base, status: "stale transaction", clientId };
   }
   if (okFlag !== 1) {
-    return { ...base, status: "commit-failed", clientId };
+    return { ...base, status: "rejected", clientId };
+  }
+  if (
+    compiled.validateAckNoteCount === true &&
+    Number.isFinite(committedNoteCount) &&
+    Number.isFinite(compiled.noteCount) &&
+    committedNoteCount !== compiled.noteCount
+  ) {
+    return { ...base, status: "note count mismatch", clientId };
   }
 
   return {
@@ -385,6 +453,20 @@ function ackOpcodeIndex(values) {
     return 1;
   }
   return 0;
+}
+
+function resendDebounceMs(config) {
+  return clampInt(config.rnbo?.resendDebounceMs ?? 100, 0, 60000);
+}
+
+function shouldDebounceResend(config, reason, options = {}) {
+  if (options.immediate === true || options.forceFullClearRows === true) {
+    return false;
+  }
+  if (["manual", "admin", "admin-full-clear", "target-discovery"].includes(String(reason ?? ""))) {
+    return false;
+  }
+  return resendDebounceMs(config) > 0;
 }
 
 function rnboAckConfig(config) {
@@ -439,9 +521,23 @@ function skippedAck(status, reason = "") {
 function badAck(status, extras = {}) {
   return {
     ok: false,
-    status,
+    status: operationalAckStatus(status),
     ...extras
   };
+}
+
+function operationalAckStatus(status) {
+  switch (status) {
+    case "http-error":
+    case "read-failed":
+      return "unreachable";
+    case "commit-failed":
+      return "rejected";
+    case "stale":
+      return "stale transaction";
+    default:
+      return status;
+  }
 }
 
 async function rnboTargetsForSend(config, score, runtime = {}) {

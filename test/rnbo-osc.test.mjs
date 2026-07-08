@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { compileScoreTransaction, compileTimingContract, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority, validateScoreTransactionAck } from "../src/adapters/rnbo-osc.mjs";
+import { compileScoreTransaction, compileTimingContract, createRnboOscAdapter, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority, validateScoreTransactionAck } from "../src/adapters/rnbo-osc.mjs";
 
 test("compiles ensemble score into RNBO ShadowScore transaction messages", () => {
   const config = mergeConfig(defaultConfig, {
@@ -955,9 +956,25 @@ test("score transaction surfaces stale or failed RNBO ACK state without throwing
   });
 
   assert.equal(result.ack.ok, false);
-  assert.equal(result.ack.status, "stale");
+  assert.equal(result.ack.status, "stale transaction");
   assert.equal(result.ack.expectedTransactionId, 703);
   assert.equal(result.ack.transactionId, 700);
+});
+
+test("validates operational RNBO ACK failure states", () => {
+  const mismatch = validateScoreTransactionAck([90, 705, 2, 819, 1], {
+    compiled: { noteCount: 3, transmittedRowCount: 819, validateAckNoteCount: true },
+    transactionId: 705
+  });
+  const rejected = validateScoreTransactionAck([91, 705, 0, 0, -1], {
+    compiled: { noteCount: 3, transmittedRowCount: 819 },
+    transactionId: 705
+  });
+
+  assert.equal(mismatch.ok, false);
+  assert.equal(mismatch.status, "note count mismatch");
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.status, "rejected");
 });
 
 test("validates client-prefixed RNBO commit ACKs", () => {
@@ -984,6 +1001,71 @@ test("RNBO adapter resends score transactions when assignments change", () => {
   assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { voices: true } }), true);
   assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { notes: true } }), true);
   assert.equal(shouldSendScoreTransaction({ type: "voice.notes.replaced", detail: {} }), true);
+});
+
+test("RNBO adapter debounces automatic score-change resends but leaves manual resend immediate", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      host: "127.0.0.1",
+      port: 9,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      oscQuery: { enabled: false },
+      targets: [
+        {
+          host: "127.0.0.1",
+          port: 9,
+          address: "/rnbo/inst/2/messages/in/shadowscore"
+        }
+      ],
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      resendDebounceMs: 25,
+      discoveryResendIntervalMs: 0,
+      log: false
+    }
+  });
+  const store = {
+    events: new EventEmitter(),
+    getScore: () => createScore()
+  };
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        callback();
+      },
+      close() {}
+    }
+  });
+  adapter.attach(store);
+  try {
+    const debounced = new Promise((resolve, reject) => {
+      store.events.emit("change", {
+        type: "voice.notes.replaced",
+        score: createScore()
+      });
+      setTimeout(() => {
+        try {
+          const queue = adapter.sendQueueStatus();
+          assert.equal(queue.inProgress, false);
+          assert.equal(queue.queued, true);
+          assert.deepEqual(queue.queuedRequest.reasons, ["voice.notes.replaced"]);
+          resolve();
+        } catch (error) {
+          reject(error);
+        }
+      }, 5);
+    });
+    await debounced;
+    await delay(50);
+    assert.equal(adapter.sendQueueStatus().queued, false);
+
+    const manual = adapter.resendCurrentScore("manual");
+    await manual;
+    assert.equal(adapter.sendQueueStatus().inProgress, false);
+  } finally {
+    adapter.close();
+  }
 });
 
 function createScore() {
@@ -1037,6 +1119,12 @@ function createScore() {
       }
     }
   };
+}
+
+function delay(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function readOscAddress(packet) {

@@ -2224,6 +2224,11 @@ test("Poland editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /Poland Editor/);
   assert.match(response.body, /\/osc\/targets\?app=poland/);
   assert.match(response.body, /param/);
+  assert.match(response.body, /POLAND_GROUPS/);
+  assert.match(response.body, /Oscillator A/);
+  assert.match(response.body, /data-group="oscillator-a"/);
+  assert.match(response.body, /VolA/);
+  assert.match(response.body, /FilterKeyTracking/);
 });
 
 test("shared client state module is served as a static asset", async () => {

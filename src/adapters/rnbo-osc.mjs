@@ -633,6 +633,7 @@ export function compileTimingContract(score, config, target = rnboTargets(config
 }
 
 export function compileScoreTransaction(score, config, transactionId, target = rnboTargets(config, score)[0], options = {}) {
+  target = normalizeTransactionTarget(config, target);
   const activeBlock = activeMesoBlock(score);
   const activeBlockId = activeMesoBlockId(score);
   const selectionStart = readNumber(score.context.clip?.time_selection_start, 0);
@@ -726,6 +727,13 @@ function noteValues(prefix, transactionId, index, note, selectionStart, stagesPe
     clampInt(note.velocity_deviation ?? 0, 0, 127),
     clampInt(note.release_velocity ?? 64, 0, 127)
   ];
+}
+
+function normalizeTransactionTarget(config, target = {}) {
+  return {
+    ...target,
+    capabilities: rnboPlaybackCapabilities(config, target.capabilities)
+  };
 }
 
 function compactScoreReplaceCapable(target = {}) {

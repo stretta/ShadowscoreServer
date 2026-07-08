@@ -26,6 +26,11 @@
       "timeoutMs": 1000,
       "addressPattern": "shadowscore"
     },
+    "capabilities": {
+      "supportsBeginReplaceClear": true,
+      "activeRowCountCommit": true,
+      "compactScoreReplace": true
+    },
     "stagesPerBeat": 16,
     "clearRowCount": 64,
     "transactionStart": 1000,

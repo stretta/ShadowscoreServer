@@ -38,6 +38,38 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
   assert.equal(capabilities.maxNoteRows, 819);
   assert.equal(capabilities.noteRowWidth, 10);
   assert.equal(capabilities.supportsAdaptiveResolution, true);
+  assert.equal(capabilities.activeRowCountCommit, false);
+  assert.equal(capabilities.compactScoreReplace, false);
+});
+
+test("extracts ShadowScoreClient compact replacement capabilities from OSCQuery metadata", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "192.168.68.96",
+      port: 1234,
+      oscQuery: {
+        enabled: true,
+        url: "http://pt5.local:5678/"
+      }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.messages.CONTENTS.in.CONTENTS.shadowscore.CONTENTS = {
+    capabilities: {
+      VALUE: JSON.stringify({
+        supportsBeginReplaceClear: true,
+        activeRowCountCommit: true,
+        compactScoreReplace: true
+      })
+    }
+  };
+
+  const targets = extractRnboTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].capabilities.supportsBeginReplaceClear, true);
+  assert.equal(targets[0].capabilities.activeRowCountCommit, true);
+  assert.equal(targets[0].capabilities.compactScoreReplace, true);
 });
 
 test("ignores nested ShadowScore metadata message paths", () => {

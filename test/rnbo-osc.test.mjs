@@ -543,6 +543,50 @@ test("compact-capable RNBO targets send only actual note rows", () => {
   assert.deepEqual(compiled.messages.at(-1).values, [90, 902, 2, 0]);
 });
 
+test("configured compact-capable RNBO targets inherit default compact capabilities", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 64,
+      capabilities: compactReplaceCapabilities()
+    }
+  });
+  const compiled = compileScoreTransaction(createScore(), config, 904, {
+    capabilities: {
+      maxNoteRows: 819
+    }
+  });
+
+  assert.equal(compiled.noteCount, 2);
+  assert.equal(compiled.transmittedRowCount, 2);
+  assert.equal(compiled.replacementMode, "compact");
+  assert.equal(compiled.compactScoreReplace, true);
+  assert.deepEqual(compiled.messages[0].values, [1, 904, 1, 2, 32, 16, 0]);
+  assert.deepEqual(compiled.messages.at(-1).values, [90, 904, 2, 0]);
+});
+
+test("target capability flags can opt out of configured compact defaults", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 64,
+      capabilities: compactReplaceCapabilities()
+    }
+  });
+  const compiled = compileScoreTransaction(createScore(), config, 905, {
+    capabilities: {
+      maxNoteRows: 819,
+      compactScoreReplace: false
+    }
+  });
+
+  assert.equal(compiled.transmittedRowCount, 819);
+  assert.equal(compiled.replacementMode, "legacy-full-clear");
+  assert.equal(compiled.compactScoreReplace, false);
+  assert.deepEqual(compiled.messages[0].values, [1, 905, 1, 819, 32, 16, 0]);
+  assert.deepEqual(compiled.messages.at(-1).values, [90, 905, 819, 0]);
+});
+
 test("full-clear option forces capacity rows for compact-capable RNBO targets", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

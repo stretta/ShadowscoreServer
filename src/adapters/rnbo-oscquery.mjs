@@ -156,7 +156,7 @@ export function extractRnboTargets(tree, config) {
       currentStagePath: outports.current_stage,
       currentStage: outports.current_stage_value,
       clientId: readClientId(node, instanceNode),
-      capabilities: rnboPlaybackCapabilities(config, node?.CONTENTS?.capabilities?.VALUE),
+      capabilities: rnboPlaybackCapabilities(config, readTargetCapabilities(node, instanceNode)),
       source: "rnbooscquery",
       available: true
     }));
@@ -333,6 +333,40 @@ function readClientId(inportNode, instanceNode) {
   ];
   const clientId = candidates.find((value) => Number.isInteger(value) && value > 0);
   return clientId === undefined ? undefined : String(clientId);
+}
+
+function readTargetCapabilities(inportNode, instanceNode) {
+  const candidates = [
+    inportNode?.CONTENTS?.capabilities?.VALUE,
+    inportNode?.CONTENTS?.capabilities?.CONTENTS?.value?.VALUE,
+    instanceNode?.CONTENTS?.messages?.CONTENTS?.out?.CONTENTS?.capabilities?.VALUE,
+    instanceNode?.CONTENTS?.messages?.CONTENTS?.out?.CONTENTS?.capabilities?.CONTENTS?.value?.VALUE
+  ];
+  for (const candidate of candidates) {
+    const parsed = parseCapabilityValue(candidate);
+    if (parsed) {
+      return parsed;
+    }
+  }
+  return undefined;
+}
+
+function parseCapabilityValue(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    return value;
+  }
+  if (Array.isArray(value) && value.length === 1) {
+    return parseCapabilityValue(value[0]);
+  }
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function firstListNumber(value) {

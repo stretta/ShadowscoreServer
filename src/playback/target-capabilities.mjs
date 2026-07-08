@@ -1,28 +1,31 @@
 export function rnboPlaybackCapabilities(config, override = {}) {
+  const configured = config.rnbo?.capabilities && typeof config.rnbo.capabilities === "object" && !Array.isArray(config.rnbo.capabilities)
+    ? config.rnbo.capabilities
+    : {};
   override = override && typeof override === "object" && !Array.isArray(override) ? override : {};
   const resolution = config.rnbo?.resolution ?? {};
-  const noteDataFloatCount = clampInt(override.noteDataFloatCount ?? resolution.noteDataFloatCount, 8192, 1, 2147483647);
-  const noteRowWidth = clampInt(override.noteRowWidth ?? resolution.noteRowWidth, 10, 1, 1024);
+  const noteDataFloatCount = clampInt(override.noteDataFloatCount ?? configured.noteDataFloatCount ?? resolution.noteDataFloatCount, 8192, 1, 2147483647);
+  const noteRowWidth = clampInt(override.noteRowWidth ?? configured.noteRowWidth ?? resolution.noteRowWidth, 10, 1, 1024);
   const maxNoteRows = clampInt(
-    override.maxNoteRows ?? resolution.maxNoteRows ?? Math.floor(noteDataFloatCount / noteRowWidth),
+    override.maxNoteRows ?? configured.maxNoteRows ?? resolution.maxNoteRows ?? Math.floor(noteDataFloatCount / noteRowWidth),
     Math.floor(noteDataFloatCount / noteRowWidth),
     1,
     2147483647
   );
 
   return {
-    maxStages: clampInt(override.maxStages ?? resolution.maxStages, 4096, 1, 2147483647),
+    maxStages: clampInt(override.maxStages ?? configured.maxStages ?? resolution.maxStages, 4096, 1, 2147483647),
     maxNoteRows,
     noteDataFloatCount,
     noteRowWidth,
-    contextDataFloatCount: clampInt(override.contextDataFloatCount ?? resolution.contextDataFloatCount, 64, 1, 2147483647),
-    supportsAdaptiveResolution: override.supportsAdaptiveResolution !== false,
-    supportsBeginReplaceClear: override.supportsBeginReplaceClear === true,
-    activeRowCountCommit: override.activeRowCountCommit === true,
-    compactScoreReplace: override.compactScoreReplace === true,
-    contractTransport: String(override.contractTransport ?? "rnbo-osc"),
-    bestEffort: override.bestEffort !== false,
-    supportedClockIntervals: clockIntervals(override.supportedClockIntervals ?? resolution.supportedClockIntervals)
+    contextDataFloatCount: clampInt(override.contextDataFloatCount ?? configured.contextDataFloatCount ?? resolution.contextDataFloatCount, 64, 1, 2147483647),
+    supportsAdaptiveResolution: boolCapability(override, configured, "supportsAdaptiveResolution", true),
+    supportsBeginReplaceClear: boolCapability(override, configured, "supportsBeginReplaceClear", false),
+    activeRowCountCommit: boolCapability(override, configured, "activeRowCountCommit", false),
+    compactScoreReplace: boolCapability(override, configured, "compactScoreReplace", false),
+    contractTransport: String(override.contractTransport ?? configured.contractTransport ?? "rnbo-osc"),
+    bestEffort: boolCapability(override, configured, "bestEffort", true),
+    supportedClockIntervals: clockIntervals(override.supportedClockIntervals ?? configured.supportedClockIntervals ?? resolution.supportedClockIntervals)
   };
 }
 
@@ -48,4 +51,14 @@ function clampInt(value, fallback, min, max) {
     return fallback;
   }
   return Math.min(max, Math.max(min, number));
+}
+
+function boolCapability(override, configured, name, fallback) {
+  if (override[name] !== undefined) {
+    return override[name] === true;
+  }
+  if (configured[name] !== undefined) {
+    return configured[name] === true;
+  }
+  return fallback;
 }

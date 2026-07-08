@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { discoverRnboTargets, extractRnboDevices, extractRnboTargets, rnboTransportControlWrites } from "../src/adapters/rnbo-oscquery.mjs";
+import { discoverRnboTargets, extractRnboControlTargets, extractRnboDevices, extractRnboTargets, rnboTransportControlWrites } from "../src/adapters/rnbo-oscquery.mjs";
 
 test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () => {
   const config = mergeConfig(defaultConfig, {
@@ -94,6 +94,68 @@ test("extracts RNBO devices even when no ShadowScore target is loaded", () => {
     available: true,
     rnboVersion: "1.4.4",
     runnerVersion: "1.4.4-9"
+  });
+});
+
+test("extracts Poland OSC control targets from RNBOOSCQuery params", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "192.168.68.96",
+      port: 1234,
+      oscQuery: {
+        enabled: true,
+        url: "http://pt5.local:5678/"
+      }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.jack = {
+    CONTENTS: {
+      info: {
+        CONTENTS: {
+          ports: {
+            CONTENTS: {
+              properties: {
+                CONTENTS: {
+                  "Poland-2:out1": {
+                    VALUE: "{\"rnbo-instance-id\":2,\"source\":true,\"type\":\"audio\"}"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.params = {
+    CONTENTS: {
+      VolA: rnboParam("/rnbo/inst/2/params/VolA", 0.5, 0, 1, 0),
+      VolB: rnboParam("/rnbo/inst/2/params/VolB", 0.6, 0, 1, 1),
+      WaveA: rnboParam("/rnbo/inst/2/params/WaveA", 1, 0, 127, 2),
+      WaveB: rnboParam("/rnbo/inst/2/params/WaveB", 2, 0, 127, 3)
+    }
+  };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].id, "rnbo-inst-2:poland");
+  assert.equal(targets[0].app, "poland");
+  assert.equal(targets[0].instance, "main");
+  assert.equal(targets[0].baseAddress, "/rnbo/inst/2");
+  assert.equal(targets[0].parameters.length, 4);
+  assert.deepEqual(targets[0].parameters[0], {
+    name: "VolA",
+    address: "/rnbo/inst/2/params/VolA",
+    type: "f",
+    value: 0.5,
+    range: [{ MIN: 0, MAX: 1 }],
+    min: 0,
+    max: 1,
+    displayName: "VolA",
+    index: 0,
+    normalized: 0.5
   });
 });
 
@@ -244,6 +306,32 @@ function createOscQueryTree() {
             }
           }
         }
+      }
+    }
+  };
+}
+
+function rnboParam(path, value, min, max, index) {
+  return {
+    FULL_PATH: path,
+    TYPE: "f",
+    VALUE: value,
+    RANGE: [{ MIN: min, MAX: max }],
+    CONTENTS: {
+      index: {
+        VALUE: index
+      },
+      display_name: {
+        VALUE: ""
+      },
+      normalized: {
+        VALUE: value
+      },
+      meta: {
+        VALUE: ""
+      },
+      unit: {
+        VALUE: ""
       }
     }
   };

@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSC Volume</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <style>
+    main { max-width: 920px; margin: 0 auto; padding: 24px; }
+    .toolbar, .target { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .toolbar { margin: 20px 0; }
+    .target { justify-content: space-between; border-top: 1px solid #ddd; padding: 12px 0; }
+    .target label { display: flex; gap: 10px; align-items: center; }
+    .meta { color: #666; font-size: 0.9rem; }
+    input[type="range"] { min-width: 220px; flex: 1; }
+    button { min-height: 36px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>OSC Volume</h1>
+    <section class="toolbar">
+      <select id="param" aria-label="Parameter">
+        <option>VolA</option>
+        <option>VolB</option>
+      </select>
+      <input id="master" type="range" min="-70" max="0" step="1" value="0" aria-label="Master volume">
+      <output id="value">0 dB</output>
+      <button id="send">Send</button>
+      <button id="refresh">Refresh</button>
+    </section>
+    <section id="targets"></section>
+    <p id="status" role="status"></p>
+  </main>
+  <script>
+    const targetsEl = document.querySelector("#targets");
+    const statusEl = document.querySelector("#status");
+    const masterEl = document.querySelector("#master");
+    const paramEl = document.querySelector("#param");
+    const valueEl = document.querySelector("#value");
+    let targets = [];
+
+    masterEl.addEventListener("input", () => {
+      valueEl.textContent = `${Number(masterEl.value).toFixed(0)} dB`;
+    });
+    document.querySelector("#refresh").addEventListener("click", refresh);
+    document.querySelector("#send").addEventListener("click", send);
+
+    async function refresh() {
+      statusEl.textContent = "";
+      const response = await fetch("/osc/targets?app=poland&capability=volume&status=online");
+      const body = await response.json();
+      targets = body.targets || [];
+      renderTargets();
+    }
+
+    function renderTargets() {
+      targetsEl.replaceChildren(...targets.map((target) => {
+        const row = document.createElement("div");
+        row.className = "target";
+        row.innerHTML = `
+          <label>
+            <input type="checkbox" checked data-target="${escapeHtml(target.id)}">
+            <span>
+              <strong>${escapeHtml(target.label)}</strong>
+              <span class="meta">${escapeHtml(target.unitId)} / ${escapeHtml(target.app)} / ${escapeHtml(target.instance)}</span>
+            </span>
+          </label>
+          <span class="meta">${escapeHtml(target.host)}:${escapeHtml(target.port)}</span>
+        `;
+        return row;
+      }));
+      if (targets.length === 0) {
+        targetsEl.textContent = "No online volume-capable OSC targets.";
+      }
+    }
+
+    async function send() {
+      const selected = Array.from(document.querySelectorAll("[data-target]:checked")).map((input) => input.dataset.target);
+      const response = await fetch("/osc/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets: selected, param: paramEl.value, args: [Number(masterEl.value)] })
+      });
+      const body = await response.json();
+      const sent = (body.results || []).filter((result) => result.ok).length;
+      statusEl.textContent = body.ok ? `Sent to ${sent} target${sent === 1 ? "" : "s"}.` : `Some sends failed (${sent}/${selected.length}).`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[char]));
+    }
+
+    refresh().catch((error) => {
+      statusEl.textContent = error.message;
+    });
+  </script>
+</body>
+</html>

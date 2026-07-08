@@ -2215,6 +2215,17 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.doesNotMatch(response.body, /scoreWithLocalDrafts/);
 });
 
+test("Poland editor route serves the OSC target integration page", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/poland");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /Poland Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=poland/);
+  assert.match(response.body, /param/);
+});
+
 test("shared client state module is served as a static asset", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/shared/shadowscore-client-state.js");
@@ -2233,6 +2244,251 @@ test("shared ShadowScore stylesheet is served as a static asset", async () => {
   assert.match(response.headers["Content-Type"], /text\/css/);
   assert.match(response.body, /--ss-bg/);
   assert.match(response.body, /ss-route-tabs/);
+});
+
+test("OSC target route normalizes, filters, and reports stale targets", async () => {
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  registry.register({
+    id: "finch",
+    advertisedName: "Finch",
+    targets: [{
+      id: "poland-main",
+      name: "Finch Poland",
+      host: "192.168.68.90",
+      port: 1234,
+      address: "/rnbo/inst/1/messages/in/poland",
+      app: "poland",
+      instance: "main",
+      oscCapabilities: ["volume", "preset"]
+    }]
+  }, { remoteAddress: "192.168.68.91" });
+  const context = createRouteContext({ runtime: { peerRegistry: registry } });
+
+  const response = await requestJson(context, "GET", "/osc/targets?app=poland&capability=volume");
+
+  assert.equal(response.targets.length, 1);
+  assert.equal(response.targets[0].id, "finch:poland:main");
+  assert.equal(response.targets[0].label, "Finch Poland");
+  assert.equal(response.targets[0].status, "stale");
+  assert.equal(response.targets[0].sendable, false);
+  assert.equal(response.targets[0].capabilities.includes("poland-edit"), true);
+  assert.equal(response.targets[0].diagnostics[0].type, "target-host-mismatch");
+});
+
+test("OSC send route resolves stable ids and reports per-target delivery", async () => {
+  const sends = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      server: {
+        hostIdentity: "local",
+        advertisedName: "Local"
+      },
+      rnbo: {
+        targets: [{
+          id: "poland-source",
+          name: "Poland Main",
+          host: "192.168.68.96",
+          port: 9000,
+          address: "/rnbo/inst/2/messages/in/poland",
+          app: "poland",
+          instance: "main"
+        }]
+      }
+    }),
+    runtime: {
+      oscSender: async (send) => {
+        sends.push(send);
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/osc/send", {
+    targets: ["local:poland:main", "missing:poland:main"],
+    address: "/volume",
+    args: [0.7]
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.results[0].ok, true);
+  assert.equal(result.results[0].targetId, "local:poland:main");
+  assert.equal(result.results[1].ok, false);
+  assert.match(result.results[1].error, /missing/);
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].host, "192.168.68.96");
+  assert.equal(sends[0].port, 9000);
+  assert.equal(sends[0].address, "/volume");
+  assert.deepEqual(sends[0].args, [0.7]);
+});
+
+test("OSC target route exposes registered Poland control targets", async () => {
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  registry.register({
+    id: "heron",
+    advertisedName: "Heron",
+    oscTargets: [{
+      id: "rnbo-inst-10:poland",
+      label: "Poland 10",
+      host: "192.168.68.101",
+      port: 1234,
+      baseAddress: "/rnbo/inst/10",
+      app: "poland",
+      instance: "main",
+      parameters: [{
+        name: "VolA",
+        address: "/rnbo/inst/10/params/VolA",
+        value: 0.5,
+        min: 0,
+        max: 1
+      }]
+    }]
+  }, { remoteAddress: "192.168.68.101" });
+  const context = createRouteContext({ runtime: { peerRegistry: registry } });
+
+  const response = await requestJson(context, "GET", "/osc/targets?app=poland");
+
+  assert.equal(response.targets.length, 1);
+  assert.equal(response.targets[0].id, "heron:poland:main");
+  assert.equal(response.targets[0].status, "online");
+  assert.equal(response.targets[0].parameters[0].address, "/rnbo/inst/10/params/VolA");
+});
+
+test("OSC send route resolves named parameters per target", async () => {
+  const sends = [];
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  registry.register({
+    id: "heron",
+    advertisedName: "Heron",
+    oscTargets: [{
+      id: "rnbo-inst-10:poland",
+      label: "Poland 10",
+      host: "192.168.68.101",
+      port: 1234,
+      baseAddress: "/rnbo/inst/10",
+      app: "poland",
+      instance: "main",
+      parameters: [{ name: "VolA", address: "/rnbo/inst/10/params/VolA" }]
+    }]
+  }, { remoteAddress: "192.168.68.101" });
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: registry,
+      oscSender: async (send) => sends.push(send)
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/osc/send", {
+    targets: ["heron:poland:main"],
+    param: "VolA",
+    args: [0.42]
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.param, "VolA");
+  assert.equal(result.results[0].address, "/rnbo/inst/10/params/VolA");
+  assert.equal(sends[0].address, "/rnbo/inst/10/params/VolA");
+  assert.deepEqual(sends[0].args, [0.42]);
+});
+
+test("OSC broadcast route expands live targets by query", async () => {
+  const sends = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      server: {
+        hostIdentity: "local",
+        advertisedName: "Local"
+      },
+      rnbo: {
+        targets: [
+          {
+            id: "poland-source",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/poland",
+            app: "poland",
+            instance: "main"
+          },
+          {
+            id: "element-source",
+            host: "192.168.68.97",
+            port: 9000,
+            address: "/rnbo/inst/3/messages/in/element",
+            app: "element",
+            instance: "main"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      oscSender: async (send) => {
+        sends.push(send);
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/osc/broadcast", {
+    where: { app: "poland", capability: "volume", status: "online" },
+    address: "/volume",
+    args: [0.5]
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.results.length, 1);
+  assert.equal(result.results[0].targetId, "local:poland:main");
+  assert.equal(sends.length, 1);
+  assert.equal(sends[0].host, "192.168.68.96");
+});
+
+test("OSC macro routes persist, validate, and run ordered steps", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-osc-macros-"));
+  const sends = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      server: {
+        hostIdentity: "local",
+        advertisedName: "Local"
+      },
+      osc: {
+        macros: {
+          path: path.join(tmp, "macros.json")
+        }
+      },
+      rnbo: {
+        targets: [{
+          id: "poland-source",
+          host: "192.168.68.96",
+          port: 9000,
+          address: "/rnbo/inst/2/messages/in/poland",
+          app: "poland",
+          instance: "main"
+        }]
+      }
+    }),
+    runtime: {
+      oscSender: async (send) => {
+        sends.push(send);
+      }
+    }
+  });
+
+  const saved = await requestJson(context, "POST", "/osc/macros", {
+    id: "soft-start-room",
+    label: "Soft Start Room",
+    steps: [{ target: "local:poland:main", address: "/volume", args: [0.4] }]
+  });
+  assert.equal(saved.macro.id, "soft-start-room");
+
+  const listed = await requestJson(context, "GET", "/osc/macros");
+  assert.equal(listed.macros.length, 1);
+
+  const dryRun = await requestJson(context, "POST", "/osc/macros/soft-start-room/run", { dryRun: true });
+  assert.equal(dryRun.ok, true);
+  assert.equal(dryRun.validation[0].ok, true);
+  assert.equal(sends.length, 0);
+
+  const run = await requestJson(context, "POST", "/osc/macros/soft-start-room/run", {});
+  assert.equal(run.ok, true);
+  assert.equal(run.results[0].targetId, "local:poland:main");
+  assert.equal(sends.length, 1);
 });
 
 test("clip routes reject stale expected score revisions", async () => {

@@ -59,10 +59,25 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/structure-editor"]
       },
+      polandEditor: {
+        root: "public/editors/poland",
+        index: "index.html",
+        routes: ["/editors/poland"]
+      },
       shared: {
         root: "public/shared",
         index: "index.html",
         routes: ["/shared"]
+      },
+      oscVolume: {
+        root: "public/tools/osc-volume",
+        index: "index.html",
+        routes: ["/tools/osc-volume"]
+      },
+      oscMacros: {
+        root: "public/tools/osc-macros",
+        index: "index.html",
+        routes: ["/tools/osc-macros"]
       }
     }
   },
@@ -130,6 +145,11 @@ export const defaultConfig = Object.freeze({
     clearRowCount: 64,
     transactionStart: 1000,
     sendDelayMs: 5
+  },
+  osc: {
+    macros: {
+      path: "data/osc-macros.json"
+    }
   }
 });
 

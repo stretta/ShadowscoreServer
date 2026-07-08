@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Poland Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <style>
+    main { max-width: 1080px; margin: 0 auto; padding: 24px; }
+    .toolbar, .row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    .toolbar { margin: 18px 0; }
+    .targets { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px; margin-bottom: 20px; }
+    .target { border: 1px solid #ddd; padding: 10px; }
+    .controls { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 10px 18px; }
+    .row { border-top: 1px solid #ddd; padding: 10px 0; }
+    .row label { min-width: 120px; font-weight: 600; }
+    .row input[type="range"] { flex: 1; min-width: 140px; }
+    .meta { color: #666; font-size: 0.9rem; }
+    button, select { min-height: 36px; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Poland Editor</h1>
+    <section class="toolbar">
+      <button id="refresh">Refresh</button>
+      <span id="status" role="status"></span>
+    </section>
+    <section id="targets" class="targets"></section>
+    <section id="controls" class="controls"></section>
+  </main>
+  <script>
+    const targetsEl = document.querySelector("#targets");
+    const controlsEl = document.querySelector("#controls");
+    const statusEl = document.querySelector("#status");
+    let targets = [];
+
+    document.querySelector("#refresh").addEventListener("click", refresh);
+
+    async function refresh() {
+      const response = await fetch("/osc/targets?app=poland&status=online");
+      const body = await response.json();
+      targets = body.targets || [];
+      renderTargets();
+      renderControls();
+    }
+
+    function renderTargets() {
+      targetsEl.replaceChildren(...targets.map((target) => {
+        const label = document.createElement("label");
+        label.className = "target";
+        label.innerHTML = `
+          <input type="checkbox" checked data-target="${escapeHtml(target.id)}">
+          <strong>${escapeHtml(target.label)}</strong>
+          <div class="meta">${escapeHtml(target.unitId)} ${escapeHtml(target.baseAddress)}</div>
+        `;
+        return label;
+      }));
+      if (targets.length === 0) {
+        targetsEl.textContent = "No online Poland targets.";
+      }
+    }
+
+    function renderControls() {
+      const params = preferredParams(targets[0]?.parameters || []);
+      controlsEl.replaceChildren(...params.map(renderParam));
+      statusEl.textContent = targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online.` : "";
+    }
+
+    function preferredParams(params) {
+      const preferred = ["VolA", "VolB", "WaveA", "WaveB", "FilterFrequency", "FilterResonance", "Spread"];
+      const byName = new Map(params.map((param) => [param.name, param]));
+      const first = preferred.map((name) => byName.get(name)).filter(Boolean);
+      const rest = params.filter((param) => !preferred.includes(param.name)).slice(0, 24);
+      return [...first, ...rest];
+    }
+
+    function renderParam(param) {
+      const row = document.createElement("div");
+      row.className = "row";
+      const min = Number.isFinite(Number(param.min)) ? Number(param.min) : 0;
+      const max = Number.isFinite(Number(param.max)) ? Number(param.max) : 1;
+      const value = Number.isFinite(Number(param.value)) ? Number(param.value) : min;
+      row.innerHTML = `
+        <label>${escapeHtml(param.displayName || param.name)}</label>
+        <input type="range" min="${min}" max="${max}" step="${stepFor(param)}" value="${value}" data-param="${escapeHtml(param.name)}">
+        <output>${formatValue(value, param.unit)}</output>
+      `;
+      const input = row.querySelector("input");
+      const output = row.querySelector("output");
+      input.addEventListener("input", () => {
+        output.textContent = formatValue(Number(input.value), param.unit);
+      });
+      input.addEventListener("change", () => sendParam(param.name, Number(input.value)));
+      return row;
+    }
+
+    async function sendParam(param, value) {
+      const selected = Array.from(document.querySelectorAll("[data-target]:checked")).map((input) => input.dataset.target);
+      const response = await fetch("/osc/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets: selected, param, args: [value] })
+      });
+      const body = await response.json();
+      const sent = (body.results || []).filter((result) => result.ok).length;
+      statusEl.textContent = body.ok ? `Sent ${param} to ${sent}.` : `Some ${param} sends failed (${sent}/${selected.length}).`;
+    }
+
+    function stepFor(param) {
+      const metaStep = Number(param.meta?.edit_step);
+      if (Number.isFinite(metaStep) && metaStep > 0) return metaStep;
+      const range = Math.abs(Number(param.max) - Number(param.min));
+      return range > 10 ? 1 : 0.01;
+    }
+
+    function formatValue(value, unit) {
+      const formatted = Math.abs(value) >= 10 ? value.toFixed(1) : value.toFixed(2);
+      return unit ? `${formatted} ${unit}` : formatted;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[char]));
+    }
+
+    refresh().catch((error) => {
+      statusEl.textContent = error.message;
+    });
+  </script>
+</body>
+</html>

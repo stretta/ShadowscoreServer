@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import os from "node:os";
-import { configuredRnboTargets, discoverRnboDevices, discoverRnboTargets } from "./adapters/rnbo-oscquery.mjs";
+import { configuredRnboTargets, discoverRnboControlTargets, discoverRnboDevices, discoverRnboTargets } from "./adapters/rnbo-oscquery.mjs";
 import { loadConfig } from "./config.mjs";
 
 if (import.meta.url === `file://${process.argv[1]}`) {
@@ -39,15 +39,17 @@ export async function runRegistrationAgent(config, options = {}) {
 
 export async function refreshRegistration(config, sessionHostUrl, unitId, options = {}) {
   const targets = await readLocalTargets(config, unitId, options);
+  const oscTargets = await readLocalOscTargets(config, unitId, options);
   const rnboDevices = await readLocalRnboDevices(config, unitId, options);
-  if (targets.length > 0 || rnboDevices.length > 0) {
-    return register(config, sessionHostUrl, unitId, { ...options, targets, rnboDevices });
+  if (targets.length > 0 || oscTargets.length > 0 || rnboDevices.length > 0) {
+    return register(config, sessionHostUrl, unitId, { ...options, targets, oscTargets, rnboDevices });
   }
   return heartbeat(sessionHostUrl, unitId, options);
 }
 
 async function register(config, sessionHostUrl, unitId, options = {}) {
   const targets = options.targets ?? await readLocalTargets(config, unitId, options);
+  const oscTargets = options.oscTargets ?? await readLocalOscTargets(config, unitId, options);
   const rnboDevices = options.rnboDevices ?? await readLocalRnboDevices(config, unitId, options);
   const body = {
     id: unitId,
@@ -57,11 +59,26 @@ async function register(config, sessionHostUrl, unitId, options = {}) {
     sessionHostUrl,
     heartbeatTtlMs: config.registration?.heartbeatTtlMs,
     rnboDevices,
+    oscTargets,
     targets
   };
   const response = await postJson(`${sessionHostUrl}/hardware/register`, body, options.fetchImpl);
   console.log(`[registration-agent] registered ${unitId} with ${targets.length} target(s)`);
   return response;
+}
+
+export async function readLocalOscTargets(config, unitId = config.server?.hostIdentity || os.hostname(), options = {}) {
+  const targets = await discoverRnboControlTargets(config, { fetchImpl: options.fetchImpl });
+  const registrationHost = registrationTargetHost(config, unitId);
+  return targets.map((target) => {
+    const host = isLoopbackHost(target.host) ? registrationHost : target.host;
+    return {
+      ...target,
+      host,
+      hardwareUnitId: unitId,
+      hardwareUnitName: config.server?.advertisedName || unitId
+    };
+  });
 }
 
 async function heartbeat(sessionHostUrl, unitId, options = {}) {

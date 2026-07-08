@@ -48,6 +48,17 @@ export function createPeerRegistry(config, options = {}) {
         }))
       );
     },
+    oscTargets() {
+      return this.snapshot().flatMap((unit) =>
+        (unit.oscTargets ?? []).map((target) => ({
+          ...target,
+          hardwareUnitId: unit.id,
+          hardwareUnitName: unit.advertisedName || unit.id,
+          available: unit.available && target.available !== false,
+          unitStatus: unit.status
+        }))
+      );
+    },
     rnboDevices() {
       return this.snapshot().flatMap((unit) => unit.rnboDevices ?? []);
     },
@@ -82,7 +93,8 @@ export function createPeerRegistry(config, options = {}) {
           ...unit,
           status: "offline",
           available: false,
-          targets: unit.targets.map((target) => ({ ...target, available: false }))
+          targets: unit.targets.map((target) => ({ ...target, available: false })),
+          oscTargets: (unit.oscTargets ?? []).map((target) => ({ ...target, available: false }))
         });
       }
     }
@@ -117,7 +129,7 @@ export function createPeerRegistry(config, options = {}) {
   }
 }
 
-export function createLocalHardwareUnit(config, targets = [], rnboDevices = []) {
+export function createLocalHardwareUnit(config, targets = [], rnboDevices = [], oscTargets = []) {
   const id = config.server?.hostIdentity || os.hostname();
   const normalizedRnboDevices = normalizeRnboDevices(rnboDevices, id, config.server?.advertisedName || id);
   return {
@@ -134,6 +146,13 @@ export function createLocalHardwareUnit(config, targets = [], rnboDevices = []) 
     targets: targets.map((target) => ({
       ...target,
       capabilities: target.capabilities ?? rnboPlaybackCapabilities(config),
+      hardwareUnitId: id,
+      hardwareUnitName: config.server?.advertisedName || id,
+      available: target.available !== false,
+      unitStatus: "online"
+    })),
+    oscTargets: oscTargets.map((target) => ({
+      ...target,
       hardwareUnitId: id,
       hardwareUnitName: config.server?.advertisedName || id,
       available: target.available !== false,
@@ -179,6 +198,7 @@ function normalizeUnit(document, config, metadata, timestamp) {
     expiresAt: new Date(timestamp + ttlMs).toISOString(),
     heartbeatTtlMs: ttlMs,
     rnboDevices: normalizeRnboDevices(document.rnboDevices, id, advertisedName),
+    oscTargets: normalizeOscTargets(document.oscTargets, id, advertisedName),
     targets: normalizeTargets(document.targets, id, advertisedName, config)
   };
 }
@@ -224,11 +244,50 @@ function normalizeTargets(targets, hardwareUnitId, hardwareUnitName, config) {
       address,
       instanceId: stringField(target.instanceId),
       messagePath: stringField(target.messagePath) || address,
+      app: stringField(target.app ?? target.instrument) || undefined,
+      instance: stringField(target.instance ?? target.instanceName) || undefined,
+      oscTargetId: stringField(target.oscTargetId ?? target.oscId) || undefined,
+      oscCapabilities: target.oscCapabilities ?? target.controlCapabilities,
+      label: stringField(target.label) || undefined,
+      kind: stringField(target.kind) || undefined,
+      baseAddress: stringField(target.baseAddress) || undefined,
       voiceId: stringField(target.voiceId) || undefined,
       clientId: target.clientId === undefined ? undefined : nullableStringField(target.clientId),
       capabilities: target.capabilities
         ? rnboPlaybackCapabilities(config, target.capabilities)
         : legacyRnboPlaybackCapabilities(config),
+      source: stringField(target.source) || "registration",
+      hardwareUnitId,
+      hardwareUnitName,
+      available: target.available !== false
+    };
+  });
+}
+
+function normalizeOscTargets(targets, hardwareUnitId, hardwareUnitName) {
+  if (!Array.isArray(targets)) {
+    return [];
+  }
+  return targets.map((target, index) => {
+    const address = stringField(target.address ?? target.baseAddress);
+    const rawId = stringField(target.id) || `osc-target-${index + 1}`;
+    const id = rawId.startsWith(`${hardwareUnitId}:`) ? rawId : `${hardwareUnitId}:${rawId}`;
+    return {
+      id,
+      localId: rawId,
+      name: stringField(target.name) || address || id,
+      label: stringField(target.label) || stringField(target.name) || id,
+      host: stringField(target.host),
+      port: nullableNumberField(target.port),
+      address,
+      baseAddress: stringField(target.baseAddress) || address,
+      instanceId: stringField(target.instanceId),
+      app: stringField(target.app ?? target.instrument) || undefined,
+      instance: stringField(target.instance ?? target.instanceName) || undefined,
+      oscTargetId: stringField(target.oscTargetId ?? target.oscId) || undefined,
+      oscCapabilities: target.oscCapabilities ?? target.controlCapabilities,
+      parameters: Array.isArray(target.parameters) ? target.parameters : [],
+      kind: stringField(target.kind) || "rnbo",
       source: stringField(target.source) || "registration",
       hardwareUnitId,
       hardwareUnitName,

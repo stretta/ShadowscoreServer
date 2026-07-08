@@ -1,0 +1,128 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OSC Macros</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <style>
+    main { max-width: 980px; margin: 0 auto; padding: 24px; }
+    .grid { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(280px, 1.4fr); gap: 20px; align-items: start; }
+    .macro { border-top: 1px solid #ddd; padding: 12px 0; display: flex; justify-content: space-between; gap: 12px; }
+    textarea { width: 100%; min-height: 260px; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    button { min-height: 36px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .meta, pre { color: #666; }
+    @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>OSC Macros</h1>
+    <section class="grid">
+      <div>
+        <div class="actions"><button id="refresh">Refresh</button></div>
+        <section id="macros"></section>
+      </div>
+      <form id="editor">
+        <textarea id="macro" spellcheck="false"></textarea>
+        <div class="actions">
+          <button type="submit">Save</button>
+          <button type="button" id="dry-run">Dry Run</button>
+        </div>
+        <pre id="status" role="status"></pre>
+      </form>
+    </section>
+  </main>
+  <script>
+    const macrosEl = document.querySelector("#macros");
+    const macroEl = document.querySelector("#macro");
+    const statusEl = document.querySelector("#status");
+    let macros = [];
+
+    macroEl.value = JSON.stringify({
+      id: "soft-start-room",
+      label: "Soft Start Room",
+      steps: [{ target: "finch:poland:main", address: "/volume", args: [0.4] }]
+    }, null, 2);
+
+    document.querySelector("#refresh").addEventListener("click", refresh);
+    document.querySelector("#dry-run").addEventListener("click", () => runSelected(true));
+    document.querySelector("#editor").addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const response = await fetch("/osc/macros", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: macroEl.value
+      });
+      show(await response.json());
+      await refresh();
+    });
+
+    async function refresh() {
+      const response = await fetch("/osc/macros");
+      const body = await response.json();
+      macros = body.macros || [];
+      macrosEl.replaceChildren(...macros.map(renderMacro));
+      if (macros.length === 0) {
+        macrosEl.textContent = "No saved OSC macros.";
+      }
+    }
+
+    function renderMacro(macro) {
+      const row = document.createElement("div");
+      row.className = "macro";
+      row.innerHTML = `<div><strong>${escapeHtml(macro.label)}</strong><div class="meta">${escapeHtml(macro.id)}</div></div>`;
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      const load = button("Load", () => { macroEl.value = JSON.stringify(macro, null, 2); });
+      const run = button("Run", () => runMacro(macro.id, false));
+      actions.append(load, run);
+      row.append(actions);
+      return row;
+    }
+
+    async function runSelected(dryRun) {
+      const macro = JSON.parse(macroEl.value);
+      if (!macros.some((entry) => entry.id === macro.id)) {
+        await fetch("/osc/macros", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(macro)
+        });
+        await refresh();
+      }
+      await runMacro(macro.id, dryRun);
+    }
+
+    async function runMacro(id, dryRun) {
+      const response = await fetch(`/osc/macros/${encodeURIComponent(id)}/run`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dryRun })
+      });
+      show(await response.json());
+    }
+
+    function button(label, onClick) {
+      const element = document.createElement("button");
+      element.type = "button";
+      element.textContent = label;
+      element.addEventListener("click", onClick);
+      return element;
+    }
+
+    function show(value) {
+      statusEl.textContent = JSON.stringify(value, null, 2);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[char]));
+    }
+
+    refresh().catch(show);
+  </script>
+</body>
+</html>

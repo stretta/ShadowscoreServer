@@ -41,6 +41,24 @@ export async function discoverRnboDevices(config, options = {}) {
   }
 }
 
+export async function discoverRnboControlTargets(config, options = {}) {
+  const rnbo = config.rnbo ?? {};
+  const oscQuery = rnbo.oscQuery ?? {};
+  if (!oscQuery.enabled) {
+    return [];
+  }
+
+  try {
+    const tree = await fetchOscQueryTree(oscQuery, options.fetchImpl ?? globalThis.fetch);
+    return extractRnboControlTargets(tree, config);
+  } catch (error) {
+    if (rnbo.log !== false) {
+      console.error(`[rnbo-oscquery] control target discovery failed: ${messageForError(error)}`);
+    }
+    return [];
+  }
+}
+
 export async function writeRnboTransportControls(config, target, controls, options = {}) {
   const writes = rnboTransportControlWrites(target, controls);
   const writer = options.writer ?? sendOscInportMessage;
@@ -171,6 +189,104 @@ export function extractRnboDevices(tree, config) {
     rnboVersion: tree.CONTENTS.rnbo.CONTENTS?.info?.CONTENTS?.version?.VALUE,
     runnerVersion: tree.CONTENTS.rnbo.CONTENTS?.info?.CONTENTS?.runner_version?.VALUE
   })];
+}
+
+export function extractRnboControlTargets(tree, config) {
+  const instances = tree?.CONTENTS?.rnbo?.CONTENTS?.inst?.CONTENTS ?? {};
+  const namesByInstance = rnboInstanceNames(tree);
+  const entries = Object.entries(instances).map(([instanceId, node]) => controlTargetForInstance(instanceId, node, namesByInstance.get(String(instanceId)), config)).filter(Boolean);
+  const countsByApp = entries.reduce((counts, target) => counts.set(target.app, (counts.get(target.app) ?? 0) + 1), new Map());
+  return entries.map((target) => ({
+    ...target,
+    instance: countsByApp.get(target.app) === 1 ? "main" : target.instance
+  }));
+}
+
+function controlTargetForInstance(instanceId, node, name, config) {
+  const parameters = extractRnboParams(node);
+  if (parameters.length === 0) {
+    return undefined;
+  }
+  const app = inferControlApp(name, parameters);
+  if (!app) {
+    return undefined;
+  }
+  const rnbo = config.rnbo ?? {};
+  const oscQuery = rnbo.oscQuery ?? {};
+  const instance = String(instanceId);
+  return withoutUndefined({
+    id: `rnbo-inst-${instance}:${app}`,
+    name: `${titleCase(app)} ${instance}`,
+    label: `${titleCase(app)} ${instance}`,
+    host: oscQuery.oscHost ?? rnbo.host,
+    port: Number(oscQuery.oscPort ?? rnbo.port),
+    address: `/rnbo/inst/${instance}`,
+    baseAddress: `/rnbo/inst/${instance}`,
+    instanceId: instance,
+    app,
+    instance,
+    oscCapabilities: ["editor", "volume", "preset", `${app}-edit`],
+    parameters,
+    source: "rnbooscquery",
+    available: true
+  });
+}
+
+function extractRnboParams(instanceNode) {
+  const contents = instanceNode?.CONTENTS?.params?.CONTENTS ?? instanceNode?.CONTENTS?.parameters?.CONTENTS ?? {};
+  return Object.entries(contents).map(([name, node]) => normalizeRnboParam(name, node)).filter(Boolean).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999));
+}
+
+function normalizeRnboParam(name, node) {
+  const address = normalizeAddress(node?.FULL_PATH);
+  if (!address || address.includes("/normalized") || address.includes("/meta") || address.includes("/index")) {
+    return undefined;
+  }
+  const range = Array.isArray(node.RANGE) ? node.RANGE : [];
+  return withoutUndefined({
+    name,
+    address,
+    type: node.TYPE,
+    value: node.VALUE,
+    range,
+    min: firstFinite(range.map((entry) => entry.MIN)),
+    max: firstFinite(range.map((entry) => entry.MAX)),
+    values: firstArray(range.map((entry) => entry.VALS)),
+    unit: stringField(node.CONTENTS?.unit?.VALUE) || undefined,
+    displayName: stringField(node.CONTENTS?.display_name?.VALUE) || name,
+    index: optionalFiniteNumber(node.CONTENTS?.index?.VALUE),
+    normalized: optionalFiniteNumber(node.CONTENTS?.normalized?.VALUE),
+    meta: parseJsonObject(node.CONTENTS?.meta?.VALUE)
+  });
+}
+
+function rnboInstanceNames(tree) {
+  const names = new Map();
+  const properties = tree?.CONTENTS?.rnbo?.CONTENTS?.jack?.CONTENTS?.info?.CONTENTS?.ports?.CONTENTS?.properties?.CONTENTS ?? {};
+  for (const [portName, node] of Object.entries(properties)) {
+    const metadata = parseJsonObject(node?.VALUE);
+    const instanceId = metadata?.["rnbo-instance-id"];
+    if (instanceId === undefined || instanceId === null) {
+      continue;
+    }
+    const name = String(portName).split(":")[0] || "";
+    if (name) {
+      names.set(String(instanceId), name);
+    }
+  }
+  return names;
+}
+
+function inferControlApp(name, parameters) {
+  const loweredName = stringField(name).toLowerCase();
+  if (loweredName.startsWith("poland")) {
+    return "poland";
+  }
+  const parameterNames = new Set(parameters.map((param) => param.name));
+  if (parameterNames.has("VolA") && parameterNames.has("VolB") && parameterNames.has("WaveA") && parameterNames.has("WaveB")) {
+    return "poland";
+  }
+  return "";
 }
 
 function walkOscQueryTree(node, path, visit) {
@@ -313,6 +429,13 @@ function normalizeConfiguredTarget(target, rnbo, index) {
     address,
     instanceId,
     messagePath: address,
+    app: stringField(target.app ?? target.instrument) || undefined,
+    instance: stringField(target.instance ?? target.instanceName) || undefined,
+    oscTargetId: stringField(target.oscTargetId ?? target.oscId) || undefined,
+    oscCapabilities: target.oscCapabilities ?? target.controlCapabilities,
+    label: stringField(target.label) || undefined,
+    kind: stringField(target.kind) || undefined,
+    baseAddress: stringField(target.baseAddress) || undefined,
     ackPath: target.ackPath,
     currentStagePath: target.currentStagePath,
     currentStage: optionalFiniteNumber(target.currentStage),
@@ -368,6 +491,31 @@ function optionalFiniteNumber(value) {
   }
   const number = Number(value);
   return Number.isFinite(number) ? number : undefined;
+}
+
+function firstFinite(values) {
+  return values.map(optionalFiniteNumber).find((value) => value !== undefined);
+}
+
+function firstArray(values) {
+  return values.find((value) => Array.isArray(value));
+}
+
+function parseJsonObject(value) {
+  if (!value || typeof value !== "string") {
+    return undefined;
+  }
+  try {
+    const parsed = JSON.parse(value);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function titleCase(value) {
+  const text = stringField(value);
+  return text ? `${text[0].toUpperCase()}${text.slice(1)}` : "RNBO";
 }
 
 function withoutUndefined(value) {

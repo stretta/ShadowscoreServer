@@ -2,7 +2,10 @@ import { adminPage } from "./admin-page.mjs";
 import { serveStaticAsset } from "./static-files.mjs";
 import { transportPage } from "./transport-page.mjs";
 import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
-import { configuredRnboTargets, discoverRnboDevices, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
+import { configuredRnboTargets, discoverRnboControlTargets, discoverRnboDevices, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
+import { findOscMacro, listOscMacros, saveOscMacro, validateMacro } from "../osc/macros.mjs";
+import { sendOscMessage } from "../osc/send.mjs";
+import { buildOscTargets } from "../osc/targets.mjs";
 import { selectBeatWitness } from "../playback/beat-witness.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
@@ -56,6 +59,80 @@ export async function routeRequest(request, response, store, config, runtime = {
 
   if (request.method === "GET" && url.pathname === "/rnbo/devices") {
     writeJson(response, 200, { devices: await readAllRnboDevices(config, runtime) });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/osc/targets") {
+    writeJson(response, 200, {
+      targets: buildOscTargets(await readAllOscTargets(config, runtime), {
+        app: url.searchParams.get("app"),
+        capability: url.searchParams.get("capability"),
+        status: url.searchParams.get("status")
+      })
+    });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/osc/send") {
+    try {
+      writeJson(response, 200, await sendOscToTargets(await readAllOscTargets(config, runtime), runtime, await readJson(request)));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/osc/broadcast") {
+    try {
+      const body = await readJson(request);
+      const targets = buildOscTargets(await readAllOscTargets(config, runtime), body.where ?? {});
+      writeJson(response, 200, await sendOscToResolvedTargets(targets, runtime, body));
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/osc/macros") {
+    writeJson(response, 200, { macros: await listOscMacros(config) });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/osc/macros") {
+    try {
+      writeJson(response, 200, { ok: true, macro: await saveOscMacro(config, await readJson(request)) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const oscMacroRunMatch = url.pathname.match(/^\/osc\/macros\/([^/]+)\/run$/);
+  if (request.method === "POST" && oscMacroRunMatch) {
+    try {
+      const macroId = decodeURIComponent(oscMacroRunMatch[1]);
+      const body = await readJson(request);
+      const macro = await findOscMacro(config, macroId);
+      if (!macro) {
+        throw new Error(`unknown OSC macro '${macroId}'`);
+      }
+      const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+      const targetsById = new Map(targets.map((target) => [target.id, target]));
+      const validation = validateMacro(macro, targetsById);
+      const valid = validation.every((step) => step.ok);
+      if (body.dryRun === true || !valid) {
+        writeJson(response, valid ? 200 : 409, { ok: valid, dryRun: true, macro, validation });
+      } else {
+        writeJson(response, 200, {
+          ok: true,
+          macro,
+          validation,
+          results: await sendOscSteps(macro.steps, targetsById, runtime)
+        });
+      }
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
     return;
   }
 
@@ -777,11 +854,14 @@ async function readRnboTargets(config) {
 async function readSessionRuntime(config, runtime) {
   const localTargets = await readRnboTargets(config);
   const localRnboDevices = await readRnboDevices(config);
-  const localUnit = createLocalHardwareUnit(config, localTargets, localRnboDevices);
+  const localOscTargets = await readOscControlTargets(config);
+  const localUnit = createLocalHardwareUnit(config, localTargets, localRnboDevices, localOscTargets);
   const peerUnits = runtime.peerRegistry?.snapshot?.() ?? [];
   const peerTargets = runtime.peerRegistry?.targets?.() ?? [];
+  const peerOscTargets = runtime.peerRegistry?.oscTargets?.() ?? [];
   return {
     rnboTargets: [...localUnit.targets, ...peerTargets],
+    oscTargets: [...localUnit.oscTargets, ...peerOscTargets],
     rnboDevices: [...localUnit.rnboDevices, ...(runtime.peerRegistry?.rnboDevices?.() ?? [])],
     hardwareUnits: [localUnit, ...peerUnits],
     macroPlayback: runtime.macroPlayback,
@@ -793,6 +873,10 @@ async function readRnboDevices(config) {
   return discoverRnboDevices(config);
 }
 
+async function readOscControlTargets(config) {
+  return discoverRnboControlTargets(config);
+}
+
 async function readAllRnboTargets(config, runtime) {
   const sessionRuntime = await readSessionRuntime(config, runtime);
   return sessionRuntime.rnboTargets;
@@ -801,6 +885,80 @@ async function readAllRnboTargets(config, runtime) {
 async function readAllRnboDevices(config, runtime) {
   const sessionRuntime = await readSessionRuntime(config, runtime);
   return sessionRuntime.rnboDevices;
+}
+
+async function readAllOscTargets(config, runtime) {
+  const sessionRuntime = await readSessionRuntime(config, runtime);
+  return [...sessionRuntime.rnboTargets, ...sessionRuntime.oscTargets];
+}
+
+async function sendOscToTargets(rnboTargets, runtime, body) {
+  const targetIds = Array.isArray(body.targets) ? body.targets.map((target) => String(target)) : [];
+  if (targetIds.length === 0) {
+    throw new Error("targets must include at least one OSC target id");
+  }
+  const targets = buildOscTargets(rnboTargets);
+  const targetsById = new Map(targets.map((target) => [target.id, target]));
+  return sendOscToResolvedTargets(targetIds.map((id) => targetsById.get(id) ?? { id, status: "missing", sendable: false }), runtime, body);
+}
+
+async function sendOscToResolvedTargets(targets, runtime, body) {
+  const address = String(body.address ?? "");
+  const param = optionalString(body.param ?? body.parameter);
+  if (!param && !address.startsWith("/")) {
+    throw new Error("OSC address must start with /");
+  }
+  const results = [];
+  for (const target of targets) {
+    try {
+      const targetAddress = param ? parameterAddressForTarget(target, param) : address;
+      results.push(await sendOscMessage(target, targetAddress, body.args ?? [], {
+        sender: runtime.oscSender,
+        allowUnavailable: body.allowUnavailable === true
+      }));
+    } catch (error) {
+      results.push({
+        ok: false,
+        targetId: target.id ?? "",
+        status: target.status ?? "unavailable",
+        error: messageForError(error)
+      });
+    }
+  }
+  return {
+    ok: results.every((result) => result.ok),
+    address: param ? "" : address,
+    param,
+    results
+  };
+}
+
+function parameterAddressForTarget(target, name) {
+  const parameter = (target.parameters ?? []).find((entry) => entry.name === name);
+  if (!parameter?.address) {
+    throw new Error(`OSC target '${target.id ?? ""}' does not expose parameter '${name}'`);
+  }
+  return parameter.address;
+}
+
+async function sendOscSteps(steps, targetsById, runtime) {
+  const results = [];
+  for (const step of steps) {
+    const target = targetsById.get(step.target);
+    try {
+      results.push(await sendOscMessage(target, step.address, step.args, {
+        sender: runtime.oscSender
+      }));
+    } catch (error) {
+      results.push({
+        ok: false,
+        targetId: step.target,
+        status: target?.status ?? "missing",
+        error: messageForError(error)
+      });
+    }
+  }
+  return results;
 }
 
 async function readPlaybackTimingContracts(score, config, runtime) {

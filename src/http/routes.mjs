@@ -54,7 +54,7 @@ export async function routeRequest(request, response, store, config, runtime = {
   }
 
   if (request.method === "GET" && url.pathname === "/rnbo/targets") {
-    writeJson(response, 200, { targets: await readAllRnboTargets(config, runtime) });
+    writeJson(response, 200, { targets: withRnboSendStatus(await readAllRnboTargets(config, runtime), runtime) });
     return;
   }
 
@@ -497,8 +497,17 @@ export async function routeRequest(request, response, store, config, runtime = {
       if (!rnboAdapter?.enabled || typeof rnboAdapter.resendCurrentScore !== "function") {
         throw new Error("RNBO adapter is not available");
       }
-      const result = await rnboAdapter.resendCurrentScore("admin");
-      writeJson(response, 200, { ok: true, result: summarizeRnboSendResult(result) });
+      const body = await readJson(request);
+      const mode = optionalString(body.mode) || optionalString(url.searchParams.get("mode"));
+      const forceFullClearRows = mode === "full-clear";
+      const result = await rnboAdapter.resendCurrentScore(forceFullClearRows ? "admin-full-clear" : "admin", {
+        forceFullClearRows
+      });
+      writeJson(response, 200, {
+        ok: true,
+        mode: forceFullClearRows ? "full-clear" : "default",
+        result: summarizeRnboSendResult(result)
+      });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -982,8 +991,11 @@ function playbackTimingContractForTarget(score, config, target) {
     available: target.available !== false,
     assignedVoiceId,
     timing: compiled.timing,
+    targetCapabilities: target.capabilities ?? {},
     noteCount: compiled.noteCount,
-    transmittedRowCount: compiled.transmittedRowCount
+    transmittedRowCount: compiled.transmittedRowCount,
+    replacementMode: compiled.replacementMode,
+    compactScoreReplace: compiled.compactScoreReplace === true
   };
 }
 
@@ -1336,13 +1348,29 @@ function summarizeRnboSendResult(result) {
 
 function summarizeCompiledTarget(target, compiled = {}) {
   return {
-    targetId: target?.id ?? "",
-    voiceId: target?.voiceId ?? "",
+    targetId: target?.id ?? compiled.targetId ?? "",
+    voiceId: target?.voiceId ?? compiled.voiceId ?? "",
     noteCount: compiled.noteCount ?? 0,
     transmittedRowCount: compiled.transmittedRowCount ?? 0,
+    replacementMode: compiled.replacementMode ?? "legacy-full-clear",
+    compactScoreReplace: compiled.compactScoreReplace === true,
+    forceFullClearRows: compiled.forceFullClearRows === true,
     patternLength: compiled.patternLength ?? 0,
-    stagesPerBeat: compiled.stagesPerBeat ?? compiled.timing?.stagesPerBeat ?? 0
+    stagesPerBeat: compiled.stagesPerBeat ?? compiled.timing?.stagesPerBeat ?? 0,
+    ack: compiled.ack
   };
+}
+
+function withRnboSendStatus(targets, runtime) {
+  const statuses = runtime.rnboAdapter?.sendStatus?.() ?? [];
+  if (!statuses.length) {
+    return targets;
+  }
+  const byTargetId = new Map(statuses.map((status) => [status.targetId, status]));
+  return targets.map((target) => {
+    const sendStatus = byTargetId.get(target.id);
+    return sendStatus ? { ...target, sendStatus } : target;
+  });
 }
 
 function messageForError(error) {

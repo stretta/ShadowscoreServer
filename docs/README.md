@@ -25,6 +25,8 @@ Design and implementation notes:
   notes, and styling rollout plan for server-hosted user-facing pages.
 - [`adaptive-rnbo-stage-resolution-plan.md`](adaptive-rnbo-stage-resolution-plan.md):
   timing-contract and target-capability design for RNBO playback.
+- [`scalable-rnbo-score-transport-plan.md`](scalable-rnbo-score-transport-plan.md):
+  compact score replacement plan for scaling RNBO sends beyond full-row clears.
 - [`beat-derived-macro-playback-plan.md`](beat-derived-macro-playback-plan.md):
   beat-witness model and macro playback design.
 - [`wren-jack-transport-macro-playback-plan.md`](wren-jack-transport-macro-playback-plan.md):

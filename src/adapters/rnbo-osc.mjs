@@ -42,6 +42,11 @@ export function createRnboOscAdapter(config, runtime = {}) {
   let discoveryTimer;
   let lastTargetSignature = "";
   let discoveryCheckPending = false;
+  const lastSendStatus = new Map();
+  let sendLoopActive = false;
+  let sendLoopPromise = Promise.resolve();
+  let queuedSend = undefined;
+  let latestSendResult = undefined;
 
   const adapter = {
     enabled: true,
@@ -57,11 +62,14 @@ export function createRnboOscAdapter(config, runtime = {}) {
       });
       startTargetDiscoveryMonitor();
     },
-    resendCurrentScore(reason = "manual") {
+    resendCurrentScore(reason = "manual", options = {}) {
       if (!store) {
         return Promise.reject(new Error("RNBO adapter is not attached to a score store"));
       }
-      return resendScore(store.getScore(), reason);
+      return resendScore(store.getScore(), reason, options);
+    },
+    sendStatus() {
+      return [...lastSendStatus.values()];
     },
     close() {
       if (discoveryTimer) {
@@ -82,12 +90,79 @@ export function createRnboOscAdapter(config, runtime = {}) {
     return transactionId;
   }
 
-  async function resendScore(score, reason = "") {
-    const result = await sendScoreTransaction(socket, config, score, nextTransactionId(), { runtime });
-    if (reason && config.rnbo.log !== false) {
-      console.log(`[rnbo] resend reason=${reason}`);
+  function resendScore(score, reason = "", options = {}) {
+    queuedSend = mergeSendRequest(queuedSend, { score, reason, options });
+    if (!sendLoopActive) {
+      sendLoopActive = true;
+      sendLoopPromise = drainSendQueue();
     }
-    return result;
+    return sendLoopPromise;
+  }
+
+  async function drainSendQueue() {
+    try {
+      while (queuedSend) {
+        const request = queuedSend;
+        queuedSend = undefined;
+        const result = await sendScoreTransaction(socket, config, request.score, nextTransactionId(), {
+          runtime,
+          ...request.options
+        });
+        latestSendResult = result;
+        recordSendStatus(result);
+        if (request.reasons.length && config.rnbo.log !== false) {
+          console.log(`[rnbo] resend reason=${request.reasons.join("+")}`);
+        }
+      }
+      return latestSendResult;
+    } finally {
+      sendLoopActive = false;
+      if (queuedSend) {
+        sendLoopActive = true;
+        sendLoopPromise = drainSendQueue();
+      }
+    }
+  }
+
+  function mergeSendRequest(previous, next) {
+    const reasons = [
+      ...(previous?.reasons ?? []),
+      ...(next.reason ? [next.reason] : [])
+    ];
+    return {
+      score: next.score,
+      reasons: [...new Set(reasons)],
+      options: {
+        ...(previous?.options ?? {}),
+        ...next.options,
+        forceFullClearRows: previous?.options?.forceFullClearRows === true || next.options?.forceFullClearRows === true
+      }
+    };
+  }
+
+  function recordSendStatus(result) {
+    const entries = Array.isArray(result?.targets)
+      ? result.targets
+      : [{ target: undefined, compiled: result }];
+    for (const { target, compiled } of entries) {
+      const targetId = target?.id ?? target?.address ?? compiled?.targetId ?? "";
+      if (!targetId) {
+        continue;
+      }
+      lastSendStatus.set(targetId, {
+        targetId,
+        voiceId: target?.voiceId ?? "",
+        at: new Date().toISOString(),
+        noteCount: compiled?.noteCount ?? 0,
+        transmittedRowCount: compiled?.transmittedRowCount ?? 0,
+        replacementMode: compiled?.replacementMode ?? "legacy-full-clear",
+        compactScoreReplace: compiled?.compactScoreReplace === true,
+        forceFullClearRows: compiled?.forceFullClearRows === true,
+        patternLength: compiled?.patternLength ?? 0,
+        stagesPerBeat: compiled?.stagesPerBeat ?? compiled?.timing?.stagesPerBeat ?? 0,
+        ack: compiled?.ack
+      });
+    }
   }
 
   function startTargetDiscoveryMonitor() {
@@ -126,31 +201,218 @@ export function createRnboOscAdapter(config, runtime = {}) {
 
 export async function sendScoreTransaction(socket, config, score, transactionId, options = {}) {
   const targets = await rnboTargetsForSend(config, score, options.runtime);
-  const compiledTargets = [];
-
-  for (const target of targets) {
-    const compiled = compileScoreTransaction(score, config, transactionId, target);
-    for (const message of compiled.messages) {
-      await sendOscMessage(socket, config, target, message.values);
-      if (config.rnbo.sendDelayMs > 0) {
-        await delay(config.rnbo.sendDelayMs);
-      }
-    }
-    for (const message of scoreTransportInportMessages(config, compiled)) {
-      await sendOscInportMessage(socket, target, message.name, message.value);
-      if (config.rnbo.sendDelayMs > 0) {
-        await delay(config.rnbo.sendDelayMs);
-      }
-    }
-    compiledTargets.push({ target, compiled });
+  const compiledTargets = await Promise.all(targets.map(async (target) => {
+    const compiled = await sendCompiledScoreTransaction(socket, config, score, transactionId, target, options);
     if (config.rnbo.log !== false) {
+      const ack = compiled.ack?.ok === false ? ` ack=${compiled.ack.status}` : "";
       console.log(
-        `[rnbo] sent score v${score.version} txn=${transactionId} voice=${target.voiceId ?? "*"} notes=${compiled.noteCount} maxSteps=${compiled.patternLength} -> ${target.host}:${target.port}${target.address}`
+        `[rnbo] sent score v${score.version} txn=${transactionId} voice=${target.voiceId ?? "*"} notes=${compiled.noteCount} maxSteps=${compiled.patternLength} -> ${target.host}:${target.port}${target.address}${ack}`
       );
+    }
+    return { target, compiled };
+  }));
+
+  return compiledTargets.length === 1 ? compiledTargets[0].compiled : { targets: compiledTargets };
+}
+
+async function sendCompiledScoreTransaction(socket, config, score, transactionId, target, options = {}) {
+  const ackConfig = rnboAckConfig(config);
+  const attempts = ackConfig.enabled ? ackConfig.retries + 1 : 1;
+  let compiled;
+  let ack = skippedAck("disabled");
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    compiled = compileScoreTransaction(score, config, transactionId, target, options);
+    await sendCompiledMessages(socket, config, target, compiled);
+    ack = await readScoreTransactionAck(config, target, compiled, transactionId, {
+      ...options,
+      attempt
+    });
+    if (ack.ok || ack.status === "skipped") {
+      break;
+    }
+    if (attempt < attempts - 1 && ackConfig.retryDelayMs > 0) {
+      await delay(ackConfig.retryDelayMs);
     }
   }
 
-  return compiledTargets.length === 1 ? compiledTargets[0].compiled : { targets: compiledTargets };
+  return {
+    ...compiled,
+    targetId: target.id ?? target.address ?? "",
+    voiceId: target.voiceId ?? "",
+    ack
+  };
+}
+
+async function sendCompiledMessages(socket, config, target, compiled) {
+  for (const message of compiled.messages) {
+    await sendOscMessage(socket, config, target, message.values);
+    if (config.rnbo.sendDelayMs > 0) {
+      await delay(config.rnbo.sendDelayMs);
+    }
+  }
+  for (const message of scoreTransportInportMessages(config, compiled)) {
+    await sendOscInportMessage(socket, target, message.name, message.value);
+    if (config.rnbo.sendDelayMs > 0) {
+      await delay(config.rnbo.sendDelayMs);
+    }
+  }
+}
+
+export async function readScoreTransactionAck(config, target, compiled, transactionId, options = {}) {
+  const ackConfig = rnboAckConfig(config);
+  if (!ackConfig.enabled) {
+    return skippedAck("disabled");
+  }
+
+  const url = rnboAckUrl(config, target, ackConfig);
+  if (!url) {
+    return skippedAck("unavailable", "no RNBO ACK OSCQuery path");
+  }
+
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  if (typeof fetchImpl !== "function") {
+    return skippedAck("unavailable", "fetch is not available");
+  }
+
+  if (ackConfig.settleMs > 0) {
+    await delay(ackConfig.settleMs);
+  }
+
+  try {
+    const response = await fetchImpl(url, {
+      signal: AbortSignal.timeout(ackConfig.timeoutMs)
+    });
+    if (!response.ok) {
+      return badAck("http-error", { url, httpStatus: response.status, attempt: options.attempt ?? 0 });
+    }
+    const body = await response.json();
+    return validateScoreTransactionAck(body?.VALUE, {
+      target,
+      compiled,
+      transactionId,
+      url,
+      attempt: options.attempt ?? 0
+    });
+  } catch (error) {
+    return badAck("read-failed", {
+      url,
+      attempt: options.attempt ?? 0,
+      error: messageForError(error)
+    });
+  }
+}
+
+export function validateScoreTransactionAck(value, { target = {}, compiled = {}, transactionId, url = "", attempt = 0 } = {}) {
+  if (!Array.isArray(value)) {
+    return badAck("missing", { value: [], url, attempt });
+  }
+
+  const values = value.map((entry) => Number(entry));
+  const opcodeIndex = ackOpcodeIndex(values);
+  const opcode = values[opcodeIndex];
+  const txn = values[opcodeIndex + 1];
+  const okFlag = values.at(-1);
+  const clientId = opcodeIndex > 0 ? values[0] : undefined;
+  const expectedClientId = target.clientId === undefined || target.clientId === null || target.clientId === ""
+    ? undefined
+    : clampInt(target.clientId, 0, 2147483647);
+  const base = {
+    ok: false,
+    value: values,
+    url,
+    attempt,
+    opcode,
+    transactionId: txn,
+    expectedTransactionId: transactionId,
+    expectedClientId,
+    noteCount: compiled.noteCount ?? 0,
+    transmittedRowCount: compiled.transmittedRowCount ?? 0
+  };
+
+  if (expectedClientId !== undefined && clientId !== expectedClientId) {
+    return { ...base, status: "client-mismatch", clientId };
+  }
+  if (opcode !== OPCODES.COMMIT) {
+    return { ...base, status: opcode === 91 ? "rejected" : "opcode-mismatch", clientId };
+  }
+  if (txn !== transactionId) {
+    return { ...base, status: "stale", clientId };
+  }
+  if (okFlag !== 1) {
+    return { ...base, status: "commit-failed", clientId };
+  }
+
+  return {
+    ...base,
+    ok: true,
+    status: "committed",
+    clientId
+  };
+}
+
+function ackOpcodeIndex(values) {
+  if (values.length > 1 && [1, 20, 30, 90, 91, 100].includes(values[1])) {
+    return 1;
+  }
+  return 0;
+}
+
+function rnboAckConfig(config) {
+  const rnbo = config.rnbo ?? {};
+  const ack = rnbo.ack ?? {};
+  const enabled = ack.enabled === undefined ? Boolean(rnbo.oscQuery?.enabled) : Boolean(ack.enabled);
+  return {
+    enabled,
+    retries: clampInt(ack.retries ?? 1, 0, 5),
+    retryDelayMs: clampInt(ack.retryDelayMs ?? 50, 0, 10000),
+    settleMs: clampInt(ack.settleMs ?? 50, 0, 10000),
+    timeoutMs: clampInt(ack.timeoutMs ?? rnbo.oscQuery?.timeoutMs ?? 1000, 1, 60000),
+    oscQueryPort: clampInt(ack.oscQueryPort ?? 5678, 1, 65535)
+  };
+}
+
+function rnboAckUrl(config, target, ackConfig) {
+  const path = normalizeAckPath(target.ackPath) || inferAckPath(target);
+  if (!path) {
+    return "";
+  }
+  const host = target.host ?? config.rnbo?.oscQuery?.oscHost ?? config.rnbo?.host;
+  if (!host) {
+    return "";
+  }
+  const baseUrl = target.oscQueryUrl ?? oscQueryBaseUrl(config, host, ackConfig.oscQueryPort);
+  return `${baseUrl}${path}`;
+}
+
+function oscQueryBaseUrl(config, host, port) {
+  const configuredUrl = config.rnbo?.oscQuery?.url;
+  if (isLoopbackHost(host) && configuredUrl) {
+    return stripTrailingSlash(configuredUrl);
+  }
+  return `http://${host}:${port}`;
+}
+
+function inferAckPath(target) {
+  const instanceId = target.instanceId ?? readInstanceId(target.address ?? target.messagePath ?? "");
+  return instanceId ? `/rnbo/inst/${instanceId}/messages/out/shadowscore_ack` : "";
+}
+
+function normalizeAckPath(path) {
+  const normalized = stringField(path, "");
+  return normalized.startsWith("/") ? normalized : "";
+}
+
+function skippedAck(status, reason = "") {
+  return { ok: true, status: "skipped", skipped: status, reason };
+}
+
+function badAck(status, extras = {}) {
+  return {
+    ok: false,
+    status,
+    ...extras
+  };
 }
 
 async function rnboTargetsForSend(config, score, runtime = {}) {
@@ -177,7 +439,10 @@ export function rnboTargetSignature(targets = []) {
       target.available === false ? "offline" : "online",
       target.capabilities?.maxStages ?? "",
       target.capabilities?.maxNoteRows ?? "",
-      target.capabilities?.noteDataFloatCount ?? ""
+      target.capabilities?.noteDataFloatCount ?? "",
+      target.capabilities?.supportsBeginReplaceClear === true ? "begin-clear" : "",
+      target.capabilities?.activeRowCountCommit === true ? "active-row-count" : "",
+      target.capabilities?.compactScoreReplace === true ? "compact" : ""
     ].join("\u001f"))
     .sort()
     .join("\u001e");
@@ -242,7 +507,7 @@ export function compileTimingContract(score, config, target = rnboTargets(config
   };
 }
 
-export function compileScoreTransaction(score, config, transactionId, target = rnboTargets(config, score)[0]) {
+export function compileScoreTransaction(score, config, transactionId, target = rnboTargets(config, score)[0], options = {}) {
   const activeBlock = activeMesoBlock(score);
   const activeBlockId = activeMesoBlockId(score);
   const selectionStart = readNumber(score.context.clip?.time_selection_start, 0);
@@ -259,11 +524,16 @@ export function compileScoreTransaction(score, config, transactionId, target = r
   const { patternLength, stagesPerBeat } = timing;
   const prefix = target.clientId === undefined ? [] : [clampInt(target.clientId, 0, 2147483647)];
 
-  const configuredClearRowCount = clampInt(config.rnbo.clearRowCount ?? 0, 0, 1024);
-  const clearRowCount = configuredClearRowCount > 0
-    ? Math.max(configuredClearRowCount, timing.maxNoteRows)
-    : 0;
-  const transmittedRowCount = Math.max(notes.length, clearRowCount);
+  const forceFullClearRows = options.forceFullClearRows === true || config.rnbo?.forceFullClearRows === true;
+  const compactScoreReplace = compactScoreReplaceCapable(target) && !forceFullClearRows;
+  const configuredClearRowCount = clampInt(config.rnbo.clearRowCount ?? 0, 0, 2147483647);
+  const clearRowCount = compactScoreReplace
+    ? 0
+    : Math.max(configuredClearRowCount, timing.maxNoteRows);
+  const transmittedRowCount = compactScoreReplace
+    ? notes.length
+    : Math.max(notes.length, clearRowCount);
+  const replacementMode = compactScoreReplace ? "compact" : "legacy-full-clear";
   const messages = [
     {
       label: "BEGIN_REPLACE",
@@ -288,6 +558,9 @@ export function compileScoreTransaction(score, config, transactionId, target = r
     messages,
     noteCount: notes.length,
     transmittedRowCount,
+    replacementMode,
+    compactScoreReplace,
+    forceFullClearRows,
     patternLength,
     stagesPerBeat,
     timing
@@ -328,6 +601,13 @@ function noteValues(prefix, transactionId, index, note, selectionStart, stagesPe
     clampInt(note.velocity_deviation ?? 0, 0, 127),
     clampInt(note.release_velocity ?? 64, 0, 127)
   ];
+}
+
+function compactScoreReplaceCapable(target = {}) {
+  const capabilities = target.capabilities ?? {};
+  return capabilities.compactScoreReplace === true &&
+    capabilities.supportsBeginReplaceClear === true &&
+    capabilities.activeRowCountCommit === true;
 }
 
 function chooseTimingResolution(mode, resolution, config, blockBeats, maxStages, notes, selectionStart) {
@@ -709,6 +989,10 @@ function assignmentRnboTargets(config, score, liveTargets = []) {
         host: configuredTarget?.host ?? assignment.rnboHost ?? config.rnbo.host,
         port: configuredTarget?.port ?? assignment.rnboPort ?? config.rnbo.port,
         address: configuredTarget?.address ?? assignment.rnboAddress,
+        instanceId: configuredTarget?.instanceId,
+        messagePath: configuredTarget?.messagePath,
+        ackPath: configuredTarget?.ackPath,
+        oscQueryUrl: configuredTarget?.oscQueryUrl,
         voiceId,
         clientId: assignment.clientId ?? configuredTarget?.clientId,
         id: assignment.rnboTargetId || undefined,
@@ -758,6 +1042,14 @@ function finiteNumber(value, fallback) {
 
 function stringField(value, fallback) {
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function stripTrailingSlash(value) {
+  return String(value ?? "").replace(/\/+$/, "");
+}
+
+function isLoopbackHost(value) {
+  return ["127.0.0.1", "localhost", "::1"].includes(String(value ?? "").toLowerCase());
 }
 
 function isPlainObject(value) {

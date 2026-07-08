@@ -17,6 +17,9 @@ export function rnboPlaybackCapabilities(config, override = {}) {
     noteRowWidth,
     contextDataFloatCount: clampInt(override.contextDataFloatCount ?? resolution.contextDataFloatCount, 64, 1, 2147483647),
     supportsAdaptiveResolution: override.supportsAdaptiveResolution !== false,
+    supportsBeginReplaceClear: override.supportsBeginReplaceClear === true,
+    activeRowCountCommit: override.activeRowCountCommit === true,
+    compactScoreReplace: override.compactScoreReplace === true,
     contractTransport: String(override.contractTransport ?? "rnbo-osc"),
     bestEffort: override.bestEffort !== false,
     supportedClockIntervals: clockIntervals(override.supportedClockIntervals ?? resolution.supportedClockIntervals)

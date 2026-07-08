@@ -1,13 +1,19 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { compileScoreTransaction, compileTimingContract, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority } from "../src/adapters/rnbo-osc.mjs";
+import { compileScoreTransaction, compileTimingContract, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority, validateScoreTransactionAck } from "../src/adapters/rnbo-osc.mjs";
 
 test("compiles ensemble score into RNBO ShadowScore transaction messages", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
       stagesPerBeat: 16,
-      clearRowCount: 0
+      clearRowCount: 0,
+      targets: [
+        {
+          address: "/rnbo/inst/2/messages/in/shadowscore",
+          capabilities: compactReplaceCapabilities()
+        }
+      ]
     }
   });
   const score = createScore();
@@ -283,7 +289,8 @@ test("compiles client-prefixed transactions for a specific voice target", () => 
         {
           voiceId: "player-2",
           clientId: 4404,
-          address: "/rnbo/inst/4/messages/in/shadowscore"
+          address: "/rnbo/inst/4/messages/in/shadowscore",
+          capabilities: compactReplaceCapabilities()
         }
       ]
     }
@@ -513,6 +520,56 @@ test("pads clear rows to the target row capacity so RNBO playback lookup overwri
   assert.deepEqual(compiled.messages[820].values, [90, 901, 819, 0]);
 });
 
+test("compact-capable RNBO targets send only actual note rows", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 64
+    }
+  });
+  const compiled = compileScoreTransaction(createScore(), config, 902, {
+    capabilities: {
+      maxNoteRows: 819,
+      ...compactReplaceCapabilities()
+    }
+  });
+
+  assert.equal(compiled.noteCount, 2);
+  assert.equal(compiled.transmittedRowCount, 2);
+  assert.equal(compiled.replacementMode, "compact");
+  assert.equal(compiled.compactScoreReplace, true);
+  assert.deepEqual(compiled.messages[0].values, [1, 902, 1, 2, 32, 16, 0]);
+  assert.deepEqual(compiled.messages.at(-1).values, [90, 902, 2, 0]);
+});
+
+test("full-clear option forces capacity rows for compact-capable RNBO targets", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 64
+    }
+  });
+  const score = createScore();
+  score.voices["player-1"].notes = [];
+  score.voices["player-2"].notes = [];
+
+  const compiled = compileScoreTransaction(score, config, 903, {
+    capabilities: {
+      maxNoteRows: 819,
+      ...compactReplaceCapabilities()
+    }
+  }, {
+    forceFullClearRows: true
+  });
+
+  assert.equal(compiled.noteCount, 0);
+  assert.equal(compiled.transmittedRowCount, 819);
+  assert.equal(compiled.replacementMode, "legacy-full-clear");
+  assert.equal(compiled.compactScoreReplace, false);
+  assert.equal(compiled.forceFullClearRows, true);
+  assert.deepEqual(compiled.messages[0].values, [1, 903, 1, 819, 32, 16, 0]);
+});
+
 test("sends one OSC packet per compiled transaction message", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
@@ -522,7 +579,13 @@ test("sends one OSC packet per compiled transaction message", async () => {
       stagesPerBeat: 16,
       clearRowCount: 0,
       sendDelayMs: 0,
-      log: false
+      log: false,
+      targets: [
+        {
+          address: "/rnbo/inst/2/messages/in/shadowscore",
+          capabilities: compactReplaceCapabilities()
+        }
+      ]
     }
   });
   const packets = [];
@@ -536,7 +599,7 @@ test("sends one OSC packet per compiled transaction message", async () => {
   const compiled = await sendScoreTransaction(socket, config, createScore(), 124);
 
   assert.equal(compiled.messages.length, 4);
-  assert.equal(packets.length, 6);
+  assert.equal(packets.length, compiled.messages.length + 2);
   assert.equal(packets[0].host, "127.0.0.1");
   assert.equal(packets[0].port, 9000);
   assert.equal(readOscAddress(packets[0].packet), "/rnbo/inst/2/messages/in/shadowscore");
@@ -678,12 +741,14 @@ test("sends one transaction per configured RNBO target", async () => {
         {
           voiceId: "player-1",
           clientId: 5505,
-          address: "/rnbo/inst/5/messages/in/shadowscore"
+          address: "/rnbo/inst/5/messages/in/shadowscore",
+          capabilities: compactReplaceCapabilities()
         },
         {
           voiceId: "player-2",
           clientId: 4404,
-          address: "/rnbo/inst/4/messages/in/shadowscore"
+          address: "/rnbo/inst/4/messages/in/shadowscore",
+          capabilities: compactReplaceCapabilities()
         }
       ]
     }
@@ -736,10 +801,11 @@ test("sends score updates to assignment-bound RNBO targets", async () => {
   const result = await sendScoreTransaction(socket, config, score, 700);
 
   assert.equal(result.noteCount, 1);
-  assert.equal(packets.length, 5);
+  assert.equal(packets.length, result.messages.length + 2);
   assert.equal(packets[0].host, "192.168.68.96");
   assert.equal(packets[0].port, 1234);
-  assert.deepEqual(result.messages[0].values, [2202, 1, 700, 1, 1, 32, 16, 0]);
+  assert.deepEqual(result.messages[0].values, [2202, 1, 700, 1, 819, 32, 16, 0]);
+  assert.equal(result.replacementMode, "legacy-full-clear");
   assert.equal(packets.map(({ packet }) => readOscAddress(packet)).includes("/rnbo/inst/2/messages/in/Tempo"), false);
 });
 
@@ -781,7 +847,8 @@ test("assignment-bound RNBO targets inherit live target connection details", asy
             host: "192.168.68.88",
             port: 1234,
             address: "/rnbo/inst/4/messages/in/shadowscore",
-            clientId: "90"
+            clientId: "90",
+            capabilities: compactReplaceCapabilities()
           }
         ];
       }
@@ -794,6 +861,115 @@ test("assignment-bound RNBO targets inherit live target connection details", asy
   assert.equal(packets[0].port, 1234);
   assert.deepEqual(result.messages[0].values, [90, 1, 701, 1, 1, 32, 16, 0]);
   assert.deepEqual(result.messages.at(-1).values, [90, 90, 701, 1, 0]);
+});
+
+test("score transaction retries once when RNBO ACK reports a rejected commit", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      stagesPerBeat: 16,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      log: false,
+      targets: [
+        {
+          address: "/rnbo/inst/2/messages/in/shadowscore",
+          capabilities: compactReplaceCapabilities()
+        }
+      ],
+      oscQuery: {
+        enabled: true,
+        url: "http://127.0.0.1:5678/"
+      },
+      ack: {
+        enabled: true,
+        retries: 1,
+        retryDelayMs: 0,
+        settleMs: 0
+      }
+    }
+  });
+  const packets = [];
+  const ackValues = [
+    [91, 702, 0, -1, -1],
+    [90, 702, 1, 1, 1]
+  ];
+  const socket = {
+    send(packet, port, host, callback) {
+      packets.push({ packet, port, host });
+      callback();
+    }
+  };
+
+  const result = await sendScoreTransaction(socket, config, createScore(), 702, {
+    fetchImpl: async (url) => ({
+      ok: true,
+      async json() {
+        return { VALUE: ackValues.shift(), url };
+      }
+    })
+  });
+
+  assert.equal(result.ack.ok, true);
+  assert.equal(result.ack.status, "committed");
+  assert.equal(result.ack.attempt, 1);
+  assert.equal(packets.length, 12);
+});
+
+test("score transaction surfaces stale or failed RNBO ACK state without throwing", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      stagesPerBeat: 16,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      log: false,
+      oscQuery: {
+        enabled: true,
+        url: "http://127.0.0.1:5678/"
+      },
+      ack: {
+        enabled: true,
+        retries: 0,
+        settleMs: 0
+      }
+    }
+  });
+  const socket = {
+    send(packet, port, host, callback) {
+      callback();
+    }
+  };
+
+  const result = await sendScoreTransaction(socket, config, createScore(), 703, {
+    fetchImpl: async () => ({
+      ok: true,
+      async json() {
+        return { VALUE: [90, 700, 1, 1, 1] };
+      }
+    })
+  });
+
+  assert.equal(result.ack.ok, false);
+  assert.equal(result.ack.status, "stale");
+  assert.equal(result.ack.expectedTransactionId, 703);
+  assert.equal(result.ack.transactionId, 700);
+});
+
+test("validates client-prefixed RNBO commit ACKs", () => {
+  const ack = validateScoreTransactionAck([90, 90, 704, 74, 64, 1], {
+    target: { clientId: "90" },
+    compiled: { noteCount: 13, transmittedRowCount: 819 },
+    transactionId: 704
+  });
+
+  assert.equal(ack.ok, true);
+  assert.equal(ack.status, "committed");
+  assert.equal(ack.clientId, 90);
 });
 
 test("RNBO adapter resends score transactions when assignments change", () => {
@@ -866,4 +1042,12 @@ function createScore() {
 function readOscAddress(packet) {
   const end = packet.indexOf(0, 0);
   return packet.subarray(0, end).toString("utf8");
+}
+
+function compactReplaceCapabilities() {
+  return {
+    compactScoreReplace: true,
+    supportsBeginReplaceClear: true,
+    activeRowCountCommit: true
+  };
 }

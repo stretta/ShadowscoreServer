@@ -108,6 +108,7 @@ test("admin RNBO resend route asks the adapter to resend the current score", asy
   const result = await requestJson(context, "POST", "/admin/rnbo/resend");
 
   assert.equal(result.ok, true);
+  assert.equal(result.mode, "default");
   assert.equal(reason, "admin");
   assert.equal(version, context.store.getScore().version);
   assert.deepEqual(result.result, {
@@ -115,9 +116,34 @@ test("admin RNBO resend route asks the adapter to resend the current score", asy
     voiceId: "",
     noteCount: 2,
     transmittedRowCount: 0,
+    replacementMode: "legacy-full-clear",
+    compactScoreReplace: false,
+    forceFullClearRows: false,
     patternLength: 64,
     stagesPerBeat: 0
   });
+});
+
+test("admin RNBO resend route can force a full-clear resend", async () => {
+  let options;
+  const context = createRouteContext({
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async resendCurrentScore(reason, nextOptions) {
+          options = { reason, ...nextOptions };
+          return { noteCount: 0, transmittedRowCount: 819, forceFullClearRows: true };
+        }
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/admin/rnbo/resend?mode=full-clear");
+
+  assert.equal(result.ok, true);
+  assert.equal(result.mode, "full-clear");
+  assert.deepEqual(options, { reason: "admin-full-clear", forceFullClearRows: true });
+  assert.equal(result.result.forceFullClearRows, true);
 });
 
 test("session route exposes host metadata and voice assignments", async () => {
@@ -1614,25 +1640,29 @@ test("playback timing contract route exposes target-specific compiled contracts"
   const result = await requestJson(context, "GET", "/playback/timing-contracts");
 
   assert.equal(result.contracts.length, 1);
-  assert.deepEqual(result.contracts[0], {
-    targetId: "source-client",
-    targetType: "rnbo",
-    contractTransport: "rnbo-osc",
-    available: true,
-    assignedVoiceId: "player-1",
-    timing: {
-      blockId: "A",
-      stagesPerBeat: 240,
-      ticksPerStage: 2,
-      patternLength: 960,
-      maxStages: 1024,
-      maxNoteRows: 819,
-      resolutionMode: "fit",
-      quantizationError: null
-    },
-    noteCount: 4,
-    transmittedRowCount: 819
+  const [contract] = result.contracts;
+  assert.equal(contract.targetId, "source-client");
+  assert.equal(contract.targetType, "rnbo");
+  assert.equal(contract.contractTransport, "rnbo-osc");
+  assert.equal(contract.available, true);
+  assert.equal(contract.assignedVoiceId, "player-1");
+  assert.deepEqual(contract.timing, {
+    blockId: "A",
+    stagesPerBeat: 240,
+    ticksPerStage: 2,
+    patternLength: 960,
+    maxStages: 1024,
+    maxNoteRows: 819,
+    resolutionMode: "fit",
+    quantizationError: null
   });
+  assert.equal(contract.noteCount, 4);
+  assert.equal(contract.transmittedRowCount, 819);
+  assert.equal(contract.replacementMode, "legacy-full-clear");
+  assert.equal(contract.compactScoreReplace, false);
+  assert.equal(contract.targetCapabilities.compactScoreReplace, false);
+  assert.equal(contract.targetCapabilities.supportsBeginReplaceClear, false);
+  assert.equal(contract.targetCapabilities.activeRowCountCommit, false);
 });
 
 test("playback timing contracts honor per-target registered stage capacity", async () => {

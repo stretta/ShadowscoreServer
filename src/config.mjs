@@ -158,6 +158,7 @@ export const defaultConfig = Object.freeze({
       MaxSteps: 64
     },
     clearRowCount: 64,
+    forceFullClearRows: false,
     transactionStart: 1000,
     sendDelayMs: 5
   },

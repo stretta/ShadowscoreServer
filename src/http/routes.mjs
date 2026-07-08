@@ -54,7 +54,10 @@ export async function routeRequest(request, response, store, config, runtime = {
   }
 
   if (request.method === "GET" && url.pathname === "/rnbo/targets") {
-    writeJson(response, 200, { targets: withRnboSendStatus(await readAllRnboTargets(config, runtime), runtime) });
+    writeJson(response, 200, {
+      targets: withRnboSendStatus(await readAllRnboTargets(config, runtime), runtime),
+      sendQueue: rnboSendQueueStatus(runtime)
+    });
     return;
   }
 
@@ -500,13 +503,18 @@ export async function routeRequest(request, response, store, config, runtime = {
       const body = await readJson(request);
       const mode = optionalString(body.mode) || optionalString(url.searchParams.get("mode"));
       const forceFullClearRows = mode === "full-clear";
-      const result = await rnboAdapter.resendCurrentScore(forceFullClearRows ? "admin-full-clear" : "admin", {
+      const sendPromise = rnboAdapter.resendCurrentScore(forceFullClearRows ? "admin-full-clear" : "admin", {
         forceFullClearRows
       });
+      if (sendPromise && typeof sendPromise.catch === "function") {
+        sendPromise.catch((error) => {
+          console.error(`[rnbo] admin resend failed: ${messageForError(error)}`);
+        });
+      }
       writeJson(response, 200, {
         ok: true,
         mode: forceFullClearRows ? "full-clear" : "default",
-        result: summarizeRnboSendResult(result)
+        sendQueue: rnboSendQueueStatus(runtime)
       });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
@@ -880,7 +888,8 @@ async function readSessionRuntime(config, runtime) {
     rnboDevices: [...localUnit.rnboDevices, ...(runtime.peerRegistry?.rnboDevices?.() ?? [])],
     hardwareUnits: [localUnit, ...peerUnits],
     macroPlayback: runtime.macroPlayback,
-    jackTransport: runtime.jackTransport
+    jackTransport: runtime.jackTransport,
+    rnboAdapter: runtime.rnboAdapter
   };
 }
 
@@ -1371,6 +1380,15 @@ function withRnboSendStatus(targets, runtime) {
     const sendStatus = byTargetId.get(target.id);
     return sendStatus ? { ...target, sendStatus } : target;
   });
+}
+
+function rnboSendQueueStatus(runtime) {
+  return runtime.rnboAdapter?.sendQueueStatus?.() ?? {
+    inProgress: false,
+    queued: false,
+    active: null,
+    queuedRequest: null
+  };
 }
 
 function messageForError(error) {

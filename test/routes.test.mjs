@@ -85,6 +85,9 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /Import voice notes to clips/);
   assert.match(response.body, /\/admin\/import-legacy-voice-notes/);
   assert.match(response.body, /Resend RNBO score/);
+  assert.match(response.body, /rnbo-send-state/);
+  assert.match(response.body, /RNBO resend in progress/);
+  assert.match(response.body, /Last commit/);
   assert.match(response.body, /\/admin\/rnbo\/resend/);
   assert.match(response.body, /voice\.assignment\.reconciled/);
 });
@@ -96,6 +99,14 @@ test("admin RNBO resend route asks the adapter to resend the current score", asy
     runtime: {
       rnboAdapter: {
         enabled: true,
+        sendQueueStatus() {
+          return {
+            inProgress: true,
+            queued: false,
+            active: { scoreVersion: version, reasons: ["admin"], transactionId: 12 },
+            queuedRequest: null
+          };
+        },
         async resendCurrentScore(nextReason) {
           reason = nextReason;
           version = context.store.getScore().version;
@@ -111,17 +122,8 @@ test("admin RNBO resend route asks the adapter to resend the current score", asy
   assert.equal(result.mode, "default");
   assert.equal(reason, "admin");
   assert.equal(version, context.store.getScore().version);
-  assert.deepEqual(result.result, {
-    targetId: "",
-    voiceId: "",
-    noteCount: 2,
-    transmittedRowCount: 0,
-    replacementMode: "legacy-full-clear",
-    compactScoreReplace: false,
-    forceFullClearRows: false,
-    patternLength: 64,
-    stagesPerBeat: 0
-  });
+  assert.equal(result.sendQueue.inProgress, true);
+  assert.equal(result.sendQueue.active.transactionId, 12);
 });
 
 test("admin RNBO resend route can force a full-clear resend", async () => {
@@ -143,7 +145,12 @@ test("admin RNBO resend route can force a full-clear resend", async () => {
   assert.equal(result.ok, true);
   assert.equal(result.mode, "full-clear");
   assert.deepEqual(options, { reason: "admin-full-clear", forceFullClearRows: true });
-  assert.equal(result.result.forceFullClearRows, true);
+  assert.deepEqual(result.sendQueue, {
+    inProgress: false,
+    queued: false,
+    active: null,
+    queuedRequest: null
+  });
 });
 
 test("session route exposes host metadata and voice assignments", async () => {
@@ -1352,6 +1359,81 @@ test("hardware registration appears in session and RNBO targets", async () => {
   assert.equal(Boolean(target), true);
   assert.equal(target.capabilities.maxStages, 1024);
   assert.equal(target.capabilities.maxNoteRows, 512);
+  assert.deepEqual(targets.sendQueue, {
+    inProgress: false,
+    queued: false,
+    active: null,
+    queuedRequest: null
+  });
+});
+
+test("RNBO targets route exposes resend queue and per-target commit status", async () => {
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "127.0.0.1",
+            port: 1234,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      rnboAdapter: {
+        sendStatus() {
+          return [
+            {
+              targetId: "source-client",
+              voiceId: "player-1",
+              at: "2026-07-08T20:53:50.401Z",
+              noteCount: 4,
+              transmittedRowCount: 819,
+              ack: {
+                ok: true,
+                status: "committed",
+                transactionId: 1001
+              }
+            }
+          ];
+        },
+        sendQueueStatus() {
+          return {
+            inProgress: true,
+            queued: true,
+            active: {
+              scoreVersion: 12,
+              scoreRevision: 12,
+              structureRevision: 2,
+              reasons: ["admin"],
+              forceFullClearRows: false,
+              startedAt: "2026-07-08T20:53:49.000Z",
+              transactionId: 1002
+            },
+            queuedRequest: {
+              scoreVersion: 13,
+              scoreRevision: 13,
+              structureRevision: 2,
+              reasons: ["macro-playback"],
+              forceFullClearRows: false
+            }
+          };
+        }
+      }
+    }
+  });
+
+  const targets = await requestJson(context, "GET", "/rnbo/targets");
+
+  assert.equal(targets.sendQueue.inProgress, true);
+  assert.equal(targets.sendQueue.queued, true);
+  assert.equal(targets.sendQueue.active.transactionId, 1002);
+  assert.equal(targets.targets[0].sendStatus.ack.status, "committed");
+
+  const session = await requestJson(context, "GET", "/session");
+  assert.equal(session.rnbo.sendQueue.active.transactionId, 1002);
 });
 
 test("hardware registration exposes RNBO devices separately from ShadowScore targets", async () => {

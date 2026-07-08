@@ -57,6 +57,21 @@ export function adminPage() {
       margin-top: 6px;
     }
     .target-list, .unit-list, .score-list { display: grid; gap: 8px; }
+    .rnbo-send-state {
+      background: rgba(38, 51, 65, 0.46);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-control);
+      display: grid;
+      gap: 4px;
+      margin-bottom: 8px;
+      padding: 9px;
+    }
+    .rnbo-send-state strong { font-size: 13px; }
+    .send-detail {
+      color: var(--ss-muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
     .target, .unit, .score-item {
       align-items: center;
       background: rgba(38, 51, 65, 0.46);
@@ -200,6 +215,7 @@ export function adminPage() {
     </section>
     <section class="targets">
       <h2>Discovered RNBO targets</h2>
+      <div class="rnbo-send-state" id="rnbo-send-state"></div>
       <div class="target-list" id="targets"></div>
     </section>
     <section class="hardware">
@@ -232,6 +248,7 @@ export function adminPage() {
     const statusEl = document.querySelector("#status");
     const voicesEl = document.querySelector("#voices");
     const targetsEl = document.querySelector("#targets");
+    const rnboSendStateEl = document.querySelector("#rnbo-send-state");
     const hardwareUnitsEl = document.querySelector("#hardware-units");
     const shareUrlEl = document.querySelector("#share-url");
     const qrCodeEl = document.querySelector("#qr-code");
@@ -244,6 +261,12 @@ export function adminPage() {
     const inputs = new Map();
     let discoveredTargets = [];
     let hardwareUnits = [];
+    let rnboSendQueue = {
+      inProgress: false,
+      queued: false,
+      active: null,
+      queuedRequest: null
+    };
 
     document.querySelector("#refresh").addEventListener("click", loadSession);
     document.querySelector("#reconcile-assignments").addEventListener("click", reconcileAssignments);
@@ -275,14 +298,16 @@ export function adminPage() {
     events.addEventListener("admin.restore", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.legacyVoiceNotes.imported", (event) => render(JSON.parse(event.data).score));
     events.onerror = () => setStatus("Event stream reconnecting...");
+    window.setInterval(refreshRnboTargets, 2000);
 
     async function loadSession() {
       const response = await fetch("/session");
       const session = await response.json();
       discoveredTargets = session.rnbo?.targets ?? [];
+      rnboSendQueue = session.rnbo?.sendQueue ?? rnboSendQueue;
       hardwareUnits = session.hardwareUnits ?? [];
       renderSessionTools(session);
-      renderTargets(discoveredTargets);
+      await refreshRnboTargets();
       renderHardwareUnits(hardwareUnits);
       await loadSavedScores();
       const scoreResponse = await fetch("/score");
@@ -330,11 +355,69 @@ export function adminPage() {
         label.textContent = displayTargetLabel(target);
         const code = document.createElement("code");
         code.textContent = target.host + ":" + target.port + target.address;
-        main.append(label, code);
+        main.append(label, code, targetSendStatus(target));
         appendDiagnostics(main, target);
         row.append(main, statusBadge(target.available === false ? "offline" : "online"));
         targetsEl.append(row);
       }
+    }
+
+    function renderRnboSendState() {
+      rnboSendStateEl.textContent = "";
+      const title = document.createElement("strong");
+      title.textContent = rnboSendQueue.inProgress
+        ? "RNBO resend in progress"
+        : rnboSendQueue.queued
+          ? "RNBO resend queued"
+          : "RNBO resend idle";
+      const active = document.createElement("div");
+      active.className = "send-detail";
+      active.textContent = sendQueueDetail(rnboSendQueue.active);
+      rnboSendStateEl.append(title, active);
+      if (rnboSendQueue.queuedRequest) {
+        const queued = document.createElement("div");
+        queued.className = "send-detail";
+        queued.textContent = "Queued: " + sendQueueDetail(rnboSendQueue.queuedRequest);
+        rnboSendStateEl.append(queued);
+      }
+    }
+
+    function sendQueueDetail(request) {
+      if (!request) {
+        return "No resend is currently queued or running.";
+      }
+      const bits = [
+        "score v" + request.scoreVersion,
+        "score rev " + request.scoreRevision,
+        "structure rev " + request.structureRevision,
+        request.transactionId ? "txn " + request.transactionId : "",
+        request.forceFullClearRows ? "full-clear" : "",
+        request.reasons?.length ? request.reasons.join("+") : ""
+      ].filter(Boolean);
+      return bits.join(" · ");
+    }
+
+    function targetSendStatus(target) {
+      const detail = document.createElement("div");
+      detail.className = "send-detail";
+      const status = target.sendStatus;
+      if (!status) {
+        detail.textContent = "No RNBO score commit recorded yet.";
+        return detail;
+      }
+      const ack = status.ack;
+      const ackText = ack
+        ? (ack.ok ? "ACK " + ack.status : "ACK " + ack.status)
+        : "ACK unavailable";
+      detail.textContent = [
+        "Last commit " + formatTime(status.at),
+        "voice " + (status.voiceId || "unassigned"),
+        "notes " + status.noteCount,
+        "rows " + status.transmittedRowCount,
+        "txn " + (ack?.transactionId ?? ""),
+        ackText
+      ].filter(Boolean).join(" · ");
+      return detail;
     }
 
     function renderHardwareUnits(units) {
@@ -674,6 +757,15 @@ export function adminPage() {
       renderSavedScores(body.scores ?? []);
     }
 
+    async function refreshRnboTargets() {
+      const response = await fetch("/rnbo/targets");
+      const body = await response.json();
+      discoveredTargets = body.targets ?? [];
+      rnboSendQueue = body.sendQueue ?? rnboSendQueue;
+      renderRnboSendState();
+      renderTargets(discoveredTargets);
+    }
+
     async function saveScoreToLibrary() {
       const name = savedScoreNameEl.value.trim();
       const response = await fetch("/admin/scores", {
@@ -768,13 +860,18 @@ export function adminPage() {
     }
 
     async function resendRnboScore() {
+      setStatus("RNBO resend requested.");
       const response = await fetch("/admin/rnbo/resend", { method: "POST" });
+      await refreshRnboTargets();
       const body = await response.json();
       if (body.ok === false) {
         setStatus(body.error);
         return;
       }
-      setStatus("Resent current score to RNBO clients.");
+      rnboSendQueue = body.sendQueue ?? rnboSendQueue;
+      renderRnboSendState();
+      setStatus("RNBO resend queued.");
+      await refreshRnboTargets();
     }
 
     async function useObservedHost(unitId, targetId) {
@@ -843,6 +940,11 @@ export function adminPage() {
 
     function assignmentLabel(voiceId, assignment) {
       return assignment?.label || assignment?.assignee || assignment?.deviceId || voiceId;
+    }
+
+    function formatTime(value) {
+      const date = new Date(value);
+      return Number.isFinite(date.valueOf()) ? date.toLocaleTimeString() : "unknown time";
     }
 
     async function clearAssignment(voiceId) {

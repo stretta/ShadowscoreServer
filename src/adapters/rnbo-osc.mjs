@@ -47,6 +47,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   let sendLoopPromise = Promise.resolve();
   let queuedSend = undefined;
   let latestSendResult = undefined;
+  let activeSend = undefined;
 
   const adapter = {
     enabled: true,
@@ -70,6 +71,14 @@ export function createRnboOscAdapter(config, runtime = {}) {
     },
     sendStatus() {
       return [...lastSendStatus.values()];
+    },
+    sendQueueStatus() {
+      return {
+        inProgress: Boolean(activeSend),
+        queued: Boolean(queuedSend),
+        active: activeSend ? structuredClone(activeSend) : null,
+        queuedRequest: queuedSend ? summarizeSendRequest(queuedSend) : null
+      };
     },
     close() {
       if (discoveryTimer) {
@@ -104,14 +113,24 @@ export function createRnboOscAdapter(config, runtime = {}) {
       while (queuedSend) {
         const request = queuedSend;
         queuedSend = undefined;
-        const result = await sendScoreTransaction(socket, config, request.score, nextTransactionId(), {
-          runtime,
-          ...request.options
-        });
-        latestSendResult = result;
-        recordSendStatus(result);
-        if (request.reasons.length && config.rnbo.log !== false) {
-          console.log(`[rnbo] resend reason=${request.reasons.join("+")}`);
+        const transactionId = nextTransactionId();
+        activeSend = {
+          ...summarizeSendRequest(request),
+          startedAt: new Date().toISOString(),
+          transactionId
+        };
+        try {
+          const result = await sendScoreTransaction(socket, config, request.score, transactionId, {
+            runtime,
+            ...request.options
+          });
+          latestSendResult = result;
+          recordSendStatus(result);
+          if (request.reasons.length && config.rnbo.log !== false) {
+            console.log(`[rnbo] resend reason=${request.reasons.join("+")}`);
+          }
+        } finally {
+          activeSend = undefined;
         }
       }
       return latestSendResult;
@@ -137,6 +156,16 @@ export function createRnboOscAdapter(config, runtime = {}) {
         ...next.options,
         forceFullClearRows: previous?.options?.forceFullClearRows === true || next.options?.forceFullClearRows === true
       }
+    };
+  }
+
+  function summarizeSendRequest(request) {
+    return {
+      scoreVersion: request.score?.version ?? 0,
+      scoreRevision: request.score?.scoreRevision ?? request.score?.version ?? 0,
+      structureRevision: request.score?.structureRevision ?? 0,
+      reasons: [...(request.reasons ?? [])],
+      forceFullClearRows: request.options?.forceFullClearRows === true
     };
   }
 

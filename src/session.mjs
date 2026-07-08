@@ -101,6 +101,12 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
         enabled: Boolean(config.rnbo?.oscQuery?.enabled),
         url: config.rnbo?.oscQuery?.url ?? ""
       },
+      sendQueue: runtime.rnboAdapter?.sendQueueStatus?.() ?? {
+        inProgress: false,
+        queued: false,
+        active: null,
+        queuedRequest: null
+      },
       targets,
       devices: rnboDevices
     }

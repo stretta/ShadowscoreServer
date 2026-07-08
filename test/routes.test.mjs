@@ -2231,6 +2231,36 @@ test("Poland editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /FilterKeyTracking/);
 });
 
+test("OSC volume tool route serves target selection and trim controls", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/tools/osc-volume");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /OSC Volume/);
+  assert.match(response.body, /\/osc\/targets\?capability=volume&status=online/);
+  assert.match(response.body, /name="param-set" value="both"/);
+  assert.match(response.body, /data-trim/);
+  assert.match(response.body, /Zero Trims/);
+  assert.match(response.body, /VolA/);
+  assert.match(response.body, /VolB/);
+});
+
+test("OSC macro tool route serves builder and validation controls", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/tools/osc-macros");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /OSC Macros/);
+  assert.match(response.body, /\/osc\/macros/);
+  assert.match(response.body, /\/osc\/targets\?status=online/);
+  assert.match(response.body, /id="step-target"/);
+  assert.match(response.body, /id="step-param"/);
+  assert.match(response.body, /Dry Run/);
+  assert.match(response.body, /validation-row/);
+});
+
 test("shared client state module is served as a static asset", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/shared/shadowscore-client-state.js");
@@ -2494,6 +2524,58 @@ test("OSC macro routes persist, validate, and run ordered steps", async () => {
   assert.equal(run.ok, true);
   assert.equal(run.results[0].targetId, "local:poland:main");
   assert.equal(sends.length, 1);
+});
+
+test("OSC macro routes resolve named parameters per target", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-osc-param-macros-"));
+  const sends = [];
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  registry.register({
+    id: "heron",
+    advertisedName: "Heron",
+    oscTargets: [{
+      id: "rnbo-inst-9:poland",
+      label: "Poland 9",
+      host: "192.168.68.101",
+      port: 1234,
+      baseAddress: "/rnbo/inst/9",
+      app: "poland",
+      instance: "main",
+      parameters: [{ name: "VolA", address: "/rnbo/inst/9/params/VolA" }]
+    }]
+  }, { remoteAddress: "192.168.68.101" });
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      osc: {
+        macros: {
+          path: path.join(tmp, "macros.json")
+        }
+      }
+    }),
+    runtime: {
+      peerRegistry: registry,
+      oscSender: async (send) => {
+        sends.push(send);
+      }
+    }
+  });
+
+  const saved = await requestJson(context, "POST", "/osc/macros", {
+    id: "trim-heron",
+    label: "Trim Heron",
+    steps: [{ target: "heron:poland:main", param: "VolA", args: [-6] }]
+  });
+  assert.equal(saved.macro.steps[0].param, "VolA");
+
+  const dryRun = await requestJson(context, "POST", "/osc/macros/trim-heron/run", { dryRun: true });
+  assert.equal(dryRun.ok, true);
+  assert.equal(dryRun.validation[0].address, "/rnbo/inst/9/params/VolA");
+  assert.equal(sends.length, 0);
+
+  const run = await requestJson(context, "POST", "/osc/macros/trim-heron/run", {});
+  assert.equal(run.ok, true);
+  assert.equal(run.results[0].address, "/rnbo/inst/9/params/VolA");
+  assert.deepEqual(sends[0].args, [-6]);
 });
 
 test("clip routes reject stale expected score revisions", async () => {

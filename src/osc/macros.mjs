@@ -26,17 +26,29 @@ export async function findOscMacro(config, macroId) {
 export function validateMacro(macro, targetsById) {
   return macro.steps.map((step, index) => {
     const target = targetsById.get(step.target);
-    const ok = Boolean(target?.sendable);
+    const address = resolveMacroStepAddress(step, target);
+    const ok = Boolean(target?.sendable) && Boolean(address);
     return {
       index,
       target: step.target,
-      address: step.address,
+      address,
+      param: step.param,
       args: step.args,
       ok,
       status: target?.status ?? "missing",
-      error: ok ? "" : `OSC target '${step.target}' is ${target?.status ?? "missing"}`
+      error: ok ? "" : validationError(step, target, address)
     };
   });
+}
+
+export function resolveMacroStepAddress(step, target) {
+  if (step.address) {
+    return step.address;
+  }
+  if (!step.param) {
+    return "";
+  }
+  return (target?.parameters ?? []).find((entry) => entry.name === step.param)?.address ?? "";
 }
 
 function normalizeMacro(document) {
@@ -67,13 +79,30 @@ function normalizeStep(step) {
     throw new Error("macro step target is required");
   }
   const address = stringField(step.address);
-  if (!address.startsWith("/")) {
+  const param = stringField(step.param ?? step.parameter);
+  if (!address && !param) {
+    throw new Error("macro step address or param is required");
+  }
+  if (address && !address.startsWith("/")) {
     throw new Error("macro step address must start with /");
   }
   if (!Array.isArray(step.args)) {
     throw new Error("macro step args must be an array");
   }
-  return { target, address, args: step.args };
+  return { target, ...(address ? { address } : { param }), args: step.args };
+}
+
+function validationError(step, target, address) {
+  if (!target) {
+    return `OSC target '${step.target}' is missing`;
+  }
+  if (!target.sendable) {
+    return `OSC target '${step.target}' is ${target.status ?? "unavailable"}`;
+  }
+  if (step.param && !address) {
+    return `OSC target '${step.target}' does not expose parameter '${step.param}'`;
+  }
+  return `OSC macro step for '${step.target}' is invalid`;
 }
 
 async function readMacroFile(config) {

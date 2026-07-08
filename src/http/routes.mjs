@@ -3,7 +3,7 @@ import { serveStaticAsset } from "./static-files.mjs";
 import { transportPage } from "./transport-page.mjs";
 import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
 import { configuredRnboTargets, discoverRnboControlTargets, discoverRnboDevices, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
-import { findOscMacro, listOscMacros, saveOscMacro, validateMacro } from "../osc/macros.mjs";
+import { findOscMacro, listOscMacros, resolveMacroStepAddress, saveOscMacro, validateMacro } from "../osc/macros.mjs";
 import { sendOscMessage } from "../osc/send.mjs";
 import { buildOscTargets } from "../osc/targets.mjs";
 import { selectBeatWitness } from "../playback/beat-witness.mjs";
@@ -946,7 +946,7 @@ async function sendOscSteps(steps, targetsById, runtime) {
   for (const step of steps) {
     const target = targetsById.get(step.target);
     try {
-      results.push(await sendOscMessage(target, step.address, step.args, {
+      results.push(await sendOscMessage(target, resolveMacroStepAddress(step, target), step.args, {
         sender: runtime.oscSender
       }));
     } catch (error) {

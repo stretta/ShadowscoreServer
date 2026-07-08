@@ -6,85 +6,412 @@
   <title>OSC Volume</title>
   <link rel="stylesheet" href="/shared/shadowscore-style.css">
   <style>
-    main { max-width: 920px; margin: 0 auto; padding: 24px; }
-    .toolbar, .target { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
-    .toolbar { margin: 20px 0; }
-    .target { justify-content: space-between; border-top: 1px solid #ddd; padding: 12px 0; }
-    .target label { display: flex; gap: 10px; align-items: center; }
-    .meta { color: #666; font-size: 0.9rem; }
-    input[type="range"] { min-width: 220px; flex: 1; }
-    button { min-height: 36px; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    main {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      min-height: 100vh;
+    }
+
+    .volume-header {
+      align-items: center;
+      display: flex;
+      gap: 14px;
+      justify-content: space-between;
+      min-height: 56px;
+      padding: 10px 18px;
+    }
+
+    .volume-header h1 {
+      font-size: 18px;
+      margin: 0;
+    }
+
+    .actions {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .status {
+      color: var(--ss-muted);
+      font-size: 13px;
+      font-variant-numeric: tabular-nums;
+      min-width: 15rem;
+      overflow: hidden;
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .control-strip {
+      align-items: center;
+      background: var(--ss-panel);
+      border-bottom: 1px solid var(--ss-border);
+      display: grid;
+      gap: 14px;
+      grid-template-columns: auto 1fr auto auto;
+      padding: 14px 18px;
+    }
+
+    .param-set {
+      display: inline-grid;
+      gap: 4px;
+      grid-template-columns: repeat(3, minmax(58px, 1fr));
+    }
+
+    .param-set input {
+      position: absolute;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .param-set span {
+      align-items: center;
+      background: var(--ss-surface);
+      border: 1px solid var(--ss-border-strong);
+      border-radius: var(--ss-radius-control);
+      color: var(--ss-text);
+      cursor: pointer;
+      display: flex;
+      font-weight: 800;
+      justify-content: center;
+      min-height: 34px;
+      padding: 6px 10px;
+    }
+
+    .param-set input:checked + span {
+      background: var(--ss-accent-strong);
+      border-color: var(--ss-accent-strong);
+      color: #07110a;
+    }
+
+    .master-control {
+      align-items: center;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: minmax(160px, 1fr) 56px;
+      min-width: 0;
+    }
+
+    .master-control input {
+      min-width: 0;
+      width: 100%;
+    }
+
+    output {
+      color: var(--ss-text);
+      font-variant-numeric: tabular-nums;
+      font-weight: 800;
+      text-align: right;
+      white-space: nowrap;
+    }
+
+    .target-panel {
+      min-height: 0;
+      overflow: auto;
+      padding: 12px 18px 20px;
+    }
+
+    .target-grid {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    }
+
+    .target-card {
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .target-card[data-enabled="false"] {
+      opacity: 0.58;
+    }
+
+    .target-top {
+      align-items: center;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: auto 1fr auto;
+      min-width: 0;
+    }
+
+    .target-name {
+      color: var(--ss-text);
+      font-weight: 800;
+      line-height: 1.1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .target-detail {
+      color: var(--ss-muted);
+      font-size: 12px;
+      line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .target-total {
+      color: var(--ss-accent-secondary);
+      font-variant-numeric: tabular-nums;
+      font-weight: 800;
+      min-width: 54px;
+      text-align: right;
+    }
+
+    .trim-control {
+      align-items: center;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: auto 1fr 44px;
+    }
+
+    .trim-control span {
+      color: var(--ss-muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+    }
+
+    .trim-control input {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .empty-state {
+      align-items: center;
+      color: var(--ss-muted);
+      display: flex;
+      min-height: 180px;
+    }
+
+    @media (max-width: 760px) {
+      .volume-header {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .actions {
+        justify-content: space-between;
+      }
+
+      .status {
+        min-width: 0;
+        text-align: left;
+      }
+
+      .control-strip {
+        grid-template-columns: 1fr;
+      }
+
+      .param-set {
+        grid-template-columns: repeat(3, 1fr);
+      }
+    }
   </style>
 </head>
 <body>
   <main>
-    <h1>OSC Volume</h1>
-    <section class="toolbar">
-      <select id="param" aria-label="Parameter">
-        <option>VolA</option>
-        <option>VolB</option>
-      </select>
-      <input id="master" type="range" min="-70" max="0" step="1" value="0" aria-label="Master volume">
-      <output id="value">0 dB</output>
-      <button id="send">Send</button>
-      <button id="refresh">Refresh</button>
+    <header class="volume-header">
+      <h1>OSC Volume</h1>
+      <div class="actions">
+        <button id="refresh" type="button">Refresh</button>
+        <span id="status" class="status" role="status"></span>
+      </div>
+    </header>
+    <section class="control-strip">
+      <div class="param-set" aria-label="Volume parameter">
+        <label><input type="radio" name="param-set" value="VolA" checked><span>VolA</span></label>
+        <label><input type="radio" name="param-set" value="VolB"><span>VolB</span></label>
+        <label><input type="radio" name="param-set" value="both"><span>Both</span></label>
+      </div>
+      <label class="master-control">
+        <input id="master" type="range" min="-70" max="0" step="1" value="0" aria-label="Master volume">
+        <output id="master-value">0 dB</output>
+      </label>
+      <button id="zero-trims" type="button">Zero Trims</button>
+      <button id="send" class="primary" type="button">Send</button>
     </section>
-    <section id="targets"></section>
-    <p id="status" role="status"></p>
+    <section class="target-panel">
+      <div id="targets" class="target-grid"></div>
+    </section>
   </main>
   <script>
     const targetsEl = document.querySelector("#targets");
     const statusEl = document.querySelector("#status");
     const masterEl = document.querySelector("#master");
-    const paramEl = document.querySelector("#param");
-    const valueEl = document.querySelector("#value");
+    const masterValueEl = document.querySelector("#master-value");
+    const refreshButton = document.querySelector("#refresh");
+    const sendButton = document.querySelector("#send");
+    const zeroTrimsButton = document.querySelector("#zero-trims");
     let targets = [];
+    let trims = new Map();
 
-    masterEl.addEventListener("input", () => {
-      valueEl.textContent = `${Number(masterEl.value).toFixed(0)} dB`;
-    });
-    document.querySelector("#refresh").addEventListener("click", refresh);
-    document.querySelector("#send").addEventListener("click", send);
+    masterEl.addEventListener("input", updateReadouts);
+    refreshButton.addEventListener("click", () => refresh().catch(reportError));
+    sendButton.addEventListener("click", () => send().catch(reportError));
+    zeroTrimsButton.addEventListener("click", zeroTrims);
 
     async function refresh() {
-      statusEl.textContent = "";
-      const response = await fetch("/osc/targets?app=poland&capability=volume&status=online");
+      refreshButton.disabled = true;
+      setStatus("Refreshing");
+      const response = await fetch("/osc/targets?capability=volume&status=online");
       const body = await response.json();
-      targets = body.targets || [];
+      if (!response.ok || body.ok === false) {
+        throw new Error(body.error || `Request failed: ${response.status}`);
+      }
+      targets = (body.targets || []).filter((target) => hasVolumeParams(target));
       renderTargets();
+      updateReadouts();
+      setStatus(targets.length ? `${targets.length} volume target${targets.length === 1 ? "" : "s"} online` : "No online volume targets");
+      refreshButton.disabled = false;
     }
 
     function renderTargets() {
-      targetsEl.replaceChildren(...targets.map((target) => {
-        const row = document.createElement("div");
-        row.className = "target";
-        row.innerHTML = `
-          <label>
-            <input type="checkbox" checked data-target="${escapeHtml(target.id)}">
-            <span>
-              <strong>${escapeHtml(target.label)}</strong>
-              <span class="meta">${escapeHtml(target.unitId)} / ${escapeHtml(target.app)} / ${escapeHtml(target.instance)}</span>
-            </span>
+      const cards = targets.map((target) => {
+        const card = document.createElement("section");
+        card.className = "target-card";
+        card.dataset.target = target.id;
+        card.dataset.enabled = "true";
+        const trim = trims.get(target.id) ?? 0;
+        trims.set(target.id, trim);
+        card.innerHTML = `
+          <div class="target-top">
+            <input type="checkbox" checked data-enable="${escapeHtml(target.id)}" aria-label="Enable ${escapeHtml(target.label || target.id)}">
+            <div>
+              <div class="target-name">${escapeHtml(target.label || target.id)}</div>
+              <div class="target-detail">${escapeHtml(target.unitId || "")} ${escapeHtml(target.app || "")} ${escapeHtml(target.baseAddress || "")}</div>
+            </div>
+            <output class="target-total" data-total="${escapeHtml(target.id)}">0 dB</output>
+          </div>
+          <label class="trim-control">
+            <span>Trim</span>
+            <input type="range" min="-24" max="12" step="1" value="${trim}" data-trim="${escapeHtml(target.id)}" aria-label="${escapeHtml(target.label || target.id)} trim">
+            <output data-trim-value="${escapeHtml(target.id)}">${formatDb(trim)}</output>
           </label>
-          <span class="meta">${escapeHtml(target.host)}:${escapeHtml(target.port)}</span>
         `;
-        return row;
-      }));
-      if (targets.length === 0) {
-        targetsEl.textContent = "No online volume-capable OSC targets.";
+        card.querySelector("[data-enable]").addEventListener("change", (event) => {
+          card.dataset.enabled = String(event.target.checked);
+          updateReadouts();
+        });
+        card.querySelector("[data-trim]").addEventListener("input", (event) => {
+          trims.set(target.id, Number(event.target.value));
+          updateReadouts();
+        });
+        return card;
+      });
+      targetsEl.replaceChildren(...cards);
+      if (cards.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = "No online volume-capable OSC targets.";
+        targetsEl.append(empty);
+      }
+    }
+
+    function updateReadouts() {
+      const master = Number(masterEl.value);
+      masterValueEl.textContent = formatDb(master);
+      for (const target of targets) {
+        const trim = trims.get(target.id) ?? 0;
+        const total = clampedVolume(master + trim);
+        const trimValue = document.querySelector(`[data-trim-value="${cssEscape(target.id)}"]`);
+        const totalValue = document.querySelector(`[data-total="${cssEscape(target.id)}"]`);
+        if (trimValue) trimValue.textContent = formatDb(trim);
+        if (totalValue) totalValue.textContent = formatDb(total);
       }
     }
 
     async function send() {
-      const selected = Array.from(document.querySelectorAll("[data-target]:checked")).map((input) => input.dataset.target);
+      const selected = selectedTargets();
+      const params = selectedParams();
+      if (selected.length === 0) {
+        setStatus("No targets selected");
+        return;
+      }
+      sendButton.disabled = true;
+      setStatus(`Sending ${params.join("+")}`);
+      const results = [];
+      for (const target of selected) {
+        const value = clampedVolume(Number(masterEl.value) + (trims.get(target.id) ?? 0));
+        for (const param of params) {
+          const result = await sendOne(target.id, param, value);
+          results.push(result);
+        }
+      }
+      const ok = results.filter((result) => result.ok).length;
+      setStatus(`Sent ${ok}/${results.length}`);
+      sendButton.disabled = false;
+    }
+
+    async function sendOne(targetId, param, value) {
       const response = await fetch("/osc/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets: selected, param: paramEl.value, args: [Number(masterEl.value)] })
+        body: JSON.stringify({ targets: [targetId], param, args: [value] })
       });
-      const body = await response.json();
-      const sent = (body.results || []).filter((result) => result.ok).length;
-      statusEl.textContent = body.ok ? `Sent to ${sent} target${sent === 1 ? "" : "s"}.` : `Some sends failed (${sent}/${selected.length}).`;
+      const body = await response.json().catch(() => ({}));
+      const first = (body.results || [])[0] || {};
+      return { ok: response.ok && body.ok !== false && first.ok !== false, targetId, param, value };
+    }
+
+    function selectedTargets() {
+      return targets.filter((target) => {
+        const enabled = document.querySelector(`[data-enable="${cssEscape(target.id)}"]`);
+        return enabled?.checked;
+      });
+    }
+
+    function selectedParams() {
+      const value = document.querySelector('input[name="param-set"]:checked')?.value || "VolA";
+      return value === "both" ? ["VolA", "VolB"] : [value];
+    }
+
+    function hasVolumeParams(target) {
+      const names = new Set((target.parameters || []).map((param) => param.name));
+      return names.has("VolA") || names.has("VolB");
+    }
+
+    function zeroTrims() {
+      for (const target of targets) trims.set(target.id, 0);
+      for (const input of document.querySelectorAll("[data-trim]")) input.value = "0";
+      updateReadouts();
+    }
+
+    function clampedVolume(value) {
+      return Math.max(-70, Math.min(0, Number(value)));
+    }
+
+    function formatDb(value) {
+      const number = Number(value);
+      return `${number > 0 ? "+" : ""}${number.toFixed(0)} dB`;
+    }
+
+    function setStatus(message) {
+      statusEl.textContent = message;
+    }
+
+    function reportError(error) {
+      refreshButton.disabled = false;
+      sendButton.disabled = false;
+      setStatus(error.message);
+    }
+
+    function cssEscape(value) {
+      if (window.CSS?.escape) return CSS.escape(value);
+      return String(value).replace(/["\\]/g, "\\$&");
     }
 
     function escapeHtml(value) {
@@ -93,9 +420,7 @@
       }[char]));
     }
 
-    refresh().catch((error) => {
-      statusEl.textContent = error.message;
-    });
+    refresh().catch(reportError);
   </script>
 </body>
 </html>

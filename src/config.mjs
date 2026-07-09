@@ -69,6 +69,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/editors/poland"]
       },
+      plateEditor: {
+        root: "public/editors/plate",
+        index: "index.html",
+        routes: ["/editors/plate"]
+      },
       shared: {
         root: "public/shared",
         index: "index.html",
@@ -93,6 +98,14 @@ export const defaultConfig = Object.freeze({
       route: "/editors/poland",
       targetFilter: {
         app: "poland"
+      }
+    },
+    {
+      id: "plate",
+      label: "Plate",
+      route: "/editors/plate",
+      targetFilter: {
+        app: "plate"
       }
     }
   ],

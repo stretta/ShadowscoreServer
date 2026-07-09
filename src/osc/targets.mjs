@@ -106,6 +106,9 @@ function inferApp(target) {
   if (text.includes("poland")) {
     return "poland";
   }
+  if (text.includes("plate")) {
+    return "plate";
+  }
   if (text.includes("element")) {
     return "element";
   }

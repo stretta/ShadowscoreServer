@@ -282,11 +282,22 @@ function inferControlApp(name, parameters) {
   if (loweredName.startsWith("poland")) {
     return "poland";
   }
+  if (loweredName.startsWith("plate")) {
+    return "plate";
+  }
   const parameterNames = new Set(parameters.map((param) => param.name));
+  const loweredParameterNames = new Set(parameters.map((param) => stringField(param.name).toLowerCase()));
   if (parameterNames.has("VolA") && parameterNames.has("VolB") && parameterNames.has("WaveA") && parameterNames.has("WaveB")) {
     return "poland";
   }
+  if (hasAtLeastParameters(loweredParameterNames, ["decay", "predelay", "damping", "damp", "diffusion", "diff", "size", "mix", "wet", "dry"], 2)) {
+    return "plate";
+  }
   return "";
+}
+
+function hasAtLeastParameters(parameterNames, candidates, threshold) {
+  return candidates.filter((candidate) => parameterNames.has(candidate)).length >= threshold;
 }
 
 function walkOscQueryTree(node, path, visit) {

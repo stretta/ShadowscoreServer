@@ -35,6 +35,7 @@ open http://127.0.0.1:8790/matrix-edit
 open http://127.0.0.1:8790/event-list
 open http://127.0.0.1:8790/structure-editor
 open http://127.0.0.1:8790/admin
+open http://127.0.0.1:8790/editors/plate
 ```
 
 Use a config file to override defaults:
@@ -119,9 +120,9 @@ without changing the Matrix Edit or Event List surfaces.
 
 The `/editors` route serves the registered instrument-editor index from
 `public/editors`, and `/editors/manifest` exposes the editor manifest JSON.
-The bundled Poland editor is served at `/editors/poland`. Utility tools for
-live OSC target volume trims and macro building are served at
-`/tools/osc-volume` and `/tools/osc-macros`.
+The bundled Poland and Plate editors are served at `/editors/poland` and
+`/editors/plate`. Utility tools for live OSC target volume trims and macro
+building are served at `/tools/osc-volume` and `/tools/osc-macros`.
 
 By default, the active score persists to `data/score.json`, the previous
 snapshot is kept at `data/score.previous.json`, and named saved scores are
@@ -224,6 +225,7 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /`: ShadowScore view index with editor and RNBO graph-editor links.
 - `GET /editors`: registered instrument-editor browser.
 - `GET /editors/poland`: bundled Poland OSC editor.
+- `GET /editors/plate`: bundled Plate reverb OSC editor.
 - `GET /tools/osc-volume`: OSC target volume trim tool.
 - `GET /tools/osc-macros`: OSC macro builder and validator.
 - `GET /event-list`: canonical clip attribute and note-event editor.

@@ -1,0 +1,616 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Plate Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <style>
+    body {
+      background:
+        linear-gradient(180deg, rgba(143, 236, 121, 0.08), transparent 220px),
+        var(--ss-bg);
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    main {
+      display: grid;
+      grid-template-rows: auto auto 1fr;
+      min-height: 100vh;
+    }
+
+    .editor-header {
+      align-items: center;
+      display: flex;
+      gap: 14px;
+      justify-content: space-between;
+      min-height: 56px;
+      padding: 10px 18px;
+    }
+
+    .editor-header h1 {
+      font-size: 18px;
+      margin: 0;
+    }
+
+    .actions {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      min-width: 0;
+    }
+
+    .status {
+      color: var(--ss-muted);
+      font-size: 12px;
+      font-weight: 750;
+      min-width: 15rem;
+      overflow: hidden;
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .target-strip {
+      align-items: stretch;
+      border-bottom: 1px solid var(--ss-border);
+      display: flex;
+      gap: 8px;
+      min-height: 58px;
+      overflow-x: auto;
+      padding: 8px 18px 10px;
+    }
+
+    .target-card {
+      align-items: center;
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
+      cursor: pointer;
+      display: grid;
+      flex: 0 0 188px;
+      gap: 2px 8px;
+      grid-template-columns: auto 1fr;
+      padding: 8px 10px;
+    }
+
+    .target-card input {
+      grid-row: 1 / span 2;
+      margin: 0;
+    }
+
+    .target-name {
+      color: var(--ss-text);
+      font-weight: 800;
+      line-height: 1.1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .target-detail {
+      color: var(--ss-muted);
+      font-size: 12px;
+      line-height: 1.2;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .reverb-param-panel {
+      min-height: 0;
+      overflow: auto;
+      padding: 14px 18px 20px;
+    }
+
+    .reverb-param-grid {
+      align-items: stretch;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 9px;
+      min-width: 0;
+    }
+
+    .control-group {
+      --group-accent: var(--ss-accent-secondary);
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+      display: flex;
+      flex: 0 0 auto;
+      flex-direction: column;
+      gap: 6px;
+      justify-content: flex-start;
+      min-width: 0;
+      padding: 28px 7px 8px;
+      position: relative;
+    }
+
+    .control-group::before {
+      background: var(--group-accent);
+      border-radius: calc(var(--ss-radius-ui) - 1px) calc(var(--ss-radius-ui) - 1px) 0 0;
+      content: "";
+      height: 22px;
+      inset: 0 0 auto;
+      position: absolute;
+    }
+
+    .control-group[data-group="time"] {
+      --group-accent: #0f9f8e;
+    }
+
+    .control-group[data-group="tone"] {
+      --group-accent: #0284a8;
+    }
+
+    .control-group[data-group="mod"] {
+      --group-accent: #6d63c4;
+    }
+
+    .control-group[data-group="mix"] {
+      --group-accent: #d97706;
+    }
+
+    .control-group[data-group="other"] {
+      --group-accent: #60758a;
+    }
+
+    .control-group-title {
+      align-items: center;
+      color: #ffffff;
+      display: flex;
+      font-size: 11px;
+      font-weight: 800;
+      height: 22px;
+      inset: 0 0 auto;
+      justify-content: center;
+      letter-spacing: 0.08em;
+      line-height: 1;
+      margin: 0;
+      position: absolute;
+      text-align: center;
+      text-shadow: 0 1px 0 rgba(0, 0, 0, 0.22);
+      text-transform: uppercase;
+      z-index: 1;
+    }
+
+    .control-group-grid {
+      align-items: flex-end;
+      display: flex;
+      gap: 5px;
+      justify-content: center;
+      min-height: 158px;
+      min-width: max-content;
+    }
+
+    .control-strip {
+      align-items: center;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      min-width: 48px;
+    }
+
+    .control-label {
+      color: var(--ss-text);
+      font-size: 10px;
+      font-weight: 800;
+      line-height: 1.1;
+      max-width: 58px;
+      min-height: 22px;
+      overflow-wrap: anywhere;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .control-readout {
+      color: var(--ss-muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+      min-height: 14px;
+      text-align: center;
+    }
+
+    .vertical-slider {
+      accent-color: var(--group-accent);
+      appearance: auto;
+      direction: rtl;
+      height: 114px;
+      margin: 0;
+      width: 20px;
+      writing-mode: vertical-lr;
+    }
+
+    .choice-options {
+      align-content: center;
+      display: grid;
+      gap: 4px;
+      min-height: 114px;
+      width: 54px;
+    }
+
+    .choice-option {
+      align-items: center;
+      background: var(--ss-surface);
+      border: 1px solid var(--ss-border-strong);
+      border-radius: var(--ss-radius-control);
+      color: var(--ss-text);
+      display: flex;
+      font-size: 12px;
+      font-weight: 800;
+      height: 28px;
+      justify-content: center;
+      min-height: 28px;
+      padding: 0 6px;
+    }
+
+    .choice-option[data-active="true"] {
+      background: color-mix(in srgb, var(--group-accent) 28%, var(--ss-surface));
+      border-color: var(--group-accent);
+    }
+
+    .empty-state {
+      align-items: center;
+      color: var(--ss-muted);
+      display: flex;
+      min-height: 180px;
+      padding: 0 4px;
+    }
+
+    @media (max-width: 720px) {
+      .editor-header {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      .actions {
+        justify-content: space-between;
+      }
+
+      .status {
+        min-width: 0;
+        text-align: left;
+      }
+
+      .target-card {
+        flex-basis: 164px;
+      }
+
+      .reverb-param-panel {
+        padding-inline: 12px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="editor-header">
+      <h1>Plate Editor</h1>
+      <div class="actions">
+        <button id="refresh" type="button">Refresh</button>
+        <span id="status" class="status" role="status"></span>
+      </div>
+    </header>
+    <section id="targets" class="target-strip" aria-label="Plate targets"></section>
+    <section class="reverb-param-panel">
+      <div id="controls" class="reverb-param-grid"></div>
+    </section>
+  </main>
+  <script>
+    const PLATE_GROUPS = [
+      { title: "Time", key: "time", match: ["decay", "time", "size", "predelay", "pre-delay", "delay"] },
+      { title: "Tone", key: "tone", match: ["damp", "damping", "diffusion", "diffuse", "brightness", "color", "tone", "low", "high", "cut", "filter"] },
+      { title: "Mod", key: "mod", match: ["mod", "chorus", "rate", "depth", "spread", "width"] },
+      { title: "Mix", key: "mix", match: ["mix", "wet", "dry", "level", "gain", "volume", "trim"] }
+    ];
+
+    const LABEL_OVERRIDES = new Map(Object.entries({
+      PreDelay: "Pre Delay",
+      Predelay: "Pre Delay",
+      HighCut: "High Cut",
+      LowCut: "Low Cut",
+      WetLevel: "Wet",
+      DryLevel: "Dry",
+      OutputGain: "Output",
+      ModRate: "Mod Rate",
+      ModDepth: "Mod Depth"
+    }));
+
+    const targetsEl = document.querySelector("#targets");
+    const controlsEl = document.querySelector("#controls");
+    const statusEl = document.querySelector("#status");
+    const refreshButton = document.querySelector("#refresh");
+    let targets = [];
+    let paramState = new Map();
+    const pendingSends = new Map();
+
+    refreshButton.addEventListener("click", () => {
+      refresh().catch(reportError);
+    });
+
+    refresh().catch(reportError);
+
+    async function refresh() {
+      refreshButton.disabled = true;
+      try {
+        const response = await fetch("/osc/targets?app=plate&status=online", { cache: "no-store" });
+        const body = await response.json();
+        if (!response.ok || body.ok === false) {
+          throw new Error(body.error || `Request failed: ${response.status}`);
+        }
+        targets = body.targets || [];
+        paramState = mergeParamState(targets);
+        renderTargets();
+        renderControls();
+        setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online Plate targets");
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+
+    function mergeParamState(nextTargets) {
+      const next = new Map();
+      for (const target of nextTargets) {
+        for (const param of target.parameters || []) {
+          if (!next.has(param.name)) next.set(param.name, { ...param });
+        }
+      }
+      for (const [name, existing] of paramState.entries()) {
+        if (next.has(name)) next.get(name).value = existing.value;
+      }
+      return next;
+    }
+
+    function renderTargets() {
+      const cards = targets.map((target) => {
+        const label = document.createElement("label");
+        label.className = "target-card";
+        label.innerHTML = `
+          <input type="checkbox" checked data-target="${escapeHtml(target.id)}">
+          <span class="target-name">${escapeHtml(target.label || target.id)}</span>
+          <span class="target-detail">${escapeHtml(target.unitId || "")} ${escapeHtml(target.baseAddress || "")}</span>
+        `;
+        return label;
+      });
+      targetsEl.replaceChildren(...cards);
+      if (cards.length === 0) targetsEl.textContent = "";
+    }
+
+    function renderControls() {
+      const parameters = Array.from(paramState.values()).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999));
+      const groups = groupParameters(parameters);
+      const nodes = groups.map(renderGroup);
+      controlsEl.replaceChildren(...nodes);
+      if (nodes.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = targets.length ? "No Plate parameters reported." : "No online Plate targets.";
+        controlsEl.append(empty);
+      }
+    }
+
+    function groupParameters(parameters) {
+      const byKey = new Map(PLATE_GROUPS.map((group) => [group.key, { ...group, params: [] }]));
+      const other = { title: "Other", key: "other", params: [] };
+      for (const param of parameters) {
+        const group = PLATE_GROUPS.find((candidate) => matchesGroup(param, candidate));
+        (group ? byKey.get(group.key).params : other.params).push(param);
+      }
+      return [...byKey.values(), other].filter((group) => group.params.length > 0);
+    }
+
+    function matchesGroup(param, group) {
+      const name = `${param.name || ""} ${param.displayName || ""}`.toLowerCase();
+      return group.match.some((token) => name.includes(token));
+    }
+
+    function renderGroup(group) {
+      const section = document.createElement("section");
+      section.className = "control-group";
+      section.dataset.group = group.key;
+      const title = document.createElement("h2");
+      title.className = "control-group-title";
+      title.textContent = group.title;
+      const grid = document.createElement("div");
+      grid.className = "control-group-grid";
+      grid.replaceChildren(...group.params.map((param) => renderParam(param)));
+      section.replaceChildren(title, grid);
+      return section;
+    }
+
+    function renderParam(param) {
+      const strip = document.createElement("div");
+      strip.className = "control-strip";
+      strip.dataset.param = param.name;
+
+      const label = document.createElement("div");
+      label.className = "control-label";
+      label.textContent = labelFor(param);
+
+      const control = choiceValues(param).length ? renderChoice(param) : renderSlider(param);
+
+      const readout = document.createElement("output");
+      readout.className = "control-readout";
+      readout.value = String(valueFor(param));
+      readout.textContent = formatValue(valueFor(param), param.unit);
+      control.addEventListener("input", () => {
+        readout.textContent = formatValue(controlValue(control), param.unit);
+      });
+      control.addEventListener("plate-choice", () => {
+        readout.textContent = formatValue(controlValue(control), param.unit);
+      });
+      strip.replaceChildren(label, control, readout);
+      return strip;
+    }
+
+    function renderSlider(param) {
+      const min = finiteNumber(param.min, 0);
+      const max = finiteNumber(param.max, 1);
+      const input = document.createElement("input");
+      input.className = "vertical-slider";
+      input.type = "range";
+      input.min = String(min);
+      input.max = String(max);
+      input.step = String(stepFor(param, min, max));
+      input.value = String(clamp(finiteNumber(valueFor(param), min), min, max));
+      input.dataset.param = param.name;
+      input.addEventListener("input", () => scheduleParamSend(param.name, Number(input.value)));
+      input.addEventListener("change", () => flushParamSend(param.name, Number(input.value)));
+      return input;
+    }
+
+    function renderChoice(param) {
+      const values = choiceValues(param);
+      const wrap = document.createElement("div");
+      wrap.className = "choice-options";
+      wrap.dataset.param = param.name;
+      wrap.dataset.value = String(valueFor(param));
+      for (const value of values) {
+        const button = document.createElement("button");
+        button.className = "choice-option";
+        button.type = "button";
+        button.textContent = choiceLabel(value);
+        button.dataset.value = String(value);
+        button.dataset.active = String(String(value) === String(valueFor(param)));
+        button.addEventListener("click", () => {
+          wrap.dataset.value = String(value);
+          for (const option of wrap.querySelectorAll(".choice-option")) {
+            option.dataset.active = String(option.dataset.value === String(value));
+          }
+          wrap.dispatchEvent(new CustomEvent("plate-choice"));
+          sendParam(param.name, parseChoiceValue(value));
+        });
+        wrap.append(button);
+      }
+      return wrap;
+    }
+
+    function scheduleParamSend(param, value) {
+      if (pendingSends.has(param)) clearTimeout(pendingSends.get(param));
+      pendingSends.set(param, setTimeout(() => {
+        pendingSends.delete(param);
+        sendParam(param, value).catch(reportError);
+      }, 90));
+    }
+
+    function flushParamSend(param, value) {
+      if (pendingSends.has(param)) {
+        clearTimeout(pendingSends.get(param));
+        pendingSends.delete(param);
+      }
+      sendParam(param, value).catch(reportError);
+    }
+
+    async function sendParam(param, value) {
+      const selected = selectedTargets();
+      if (selected.length === 0) {
+        setStatus("No targets selected");
+        return;
+      }
+      if (paramState.has(param)) paramState.get(param).value = value;
+      setStatus(`Sending ${labelFor({ name: param })}`);
+      const response = await fetch("/osc/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets: selected, param, args: [value] })
+      });
+      const body = await response.json().catch(() => ({}));
+      const sent = (body.results || []).filter((result) => result.ok).length;
+      if (!response.ok || body.ok === false) {
+        setStatus(`Failed ${labelFor({ name: param })} (${sent}/${selected.length})`);
+        return;
+      }
+      setStatus(`Sent ${labelFor({ name: param })} to ${sent}/${selected.length}`);
+    }
+
+    function selectedTargets() {
+      return Array.from(document.querySelectorAll("[data-target]:checked"))
+        .map((input) => input.dataset.target)
+        .filter(Boolean);
+    }
+
+    function choiceValues(param) {
+      if (Array.isArray(param.values) && param.values.length) return param.values;
+      if (Array.isArray(param.enum) && param.enum.length) return param.enum;
+      if (Array.isArray(param.meta?.values) && param.meta.values.length) return param.meta.values;
+      if (param.meta?.type === "boolean") return [0, 1];
+      return [];
+    }
+
+    function valueFor(param) {
+      return paramState.get(param.name)?.value ?? param.value ?? param.min ?? 0;
+    }
+
+    function controlValue(control) {
+      if (control.classList.contains("choice-options")) return control.dataset.value;
+      return Number(control.value);
+    }
+
+    function parseChoiceValue(value) {
+      const numeric = Number(value);
+      return Number.isFinite(numeric) && String(value).trim() !== "" ? numeric : value;
+    }
+
+    function choiceLabel(value) {
+      if (String(value) === "0") return "Off";
+      if (String(value) === "1") return "On";
+      return String(value);
+    }
+
+    function labelFor(param) {
+      return LABEL_OVERRIDES.get(param.name) || param.displayName || splitCamel(param.name);
+    }
+
+    function splitCamel(value) {
+      return String(value || "").replace(/([a-z0-9])([A-Z])/g, "$1 $2");
+    }
+
+    function stepFor(param, min, max) {
+      const metaStep = finiteNumber(param.meta?.edit_step, NaN);
+      if (Number.isFinite(metaStep) && metaStep > 0) return metaStep;
+      const range = Math.abs(max - min);
+      if (range > 64) return 1;
+      if (range > 8) return 0.1;
+      return 0.01;
+    }
+
+    function formatValue(value, unit) {
+      if (typeof value === "string") return value;
+      if (!Number.isFinite(Number(value))) return "";
+      const digits = Math.abs(Number(value)) >= 10 ? 1 : 2;
+      const formatted = Number(value).toFixed(digits).replace(/\.?0+$/, "");
+      return `${formatted}${unit ? ` ${unit}` : ""}`;
+    }
+
+    function finiteNumber(value, fallback) {
+      const number = Number(value);
+      return Number.isFinite(number) ? number : fallback;
+    }
+
+    function clamp(value, min, max) {
+      return Math.min(max, Math.max(min, value));
+    }
+
+    function setStatus(message) {
+      statusEl.textContent = message;
+    }
+
+    function reportError(error) {
+      refreshButton.disabled = false;
+      setStatus(error.message || "Plate editor failed");
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+  </script>
+</body>
+</html>

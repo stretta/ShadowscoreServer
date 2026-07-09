@@ -177,6 +177,11 @@ config.static.apps = {
     index: "index.html",
     routes: ["/editors/poland"]
   },
+  plateEditor: {
+    root: "public/editors/plate",
+    index: "index.html",
+    routes: ["/editors/plate"]
+  },
   shared: {
     root: "public/shared",
     index: "index.html",
@@ -193,6 +198,24 @@ config.static.apps = {
     routes: ["/tools/osc-macros"]
   }
 };
+config.editors = [
+  {
+    id: "poland",
+    label: "Poland",
+    route: "/editors/poland",
+    targetFilter: {
+      app: "poland"
+    }
+  },
+  {
+    id: "plate",
+    label: "Plate",
+    route: "/editors/plate",
+    targetFilter: {
+      app: "plate"
+    }
+  }
+];
 if (process.env.SHADOWSCORE_ROLE_VALUE === "host") {
   config.http.publicUrl = process.env.SHADOWSCORE_PUBLIC_URL_VALUE;
   config.registration ??= {};

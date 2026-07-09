@@ -33,6 +33,7 @@ http://<host>.local:8790/matrix-edit
 http://<host>.local:8790/admin
 http://<host>.local:8790/transport/status
 http://<host>.local:8790/editors
+http://<host>.local:8790/editors/plate
 http://<host>.local:8790/tools/osc-volume
 http://<host>.local:8790/tools/osc-macros
 ```

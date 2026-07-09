@@ -191,6 +191,94 @@ test("extracts Poland OSC control targets from RNBOOSCQuery params", () => {
   });
 });
 
+test("extracts Plate OSC control targets from RNBOOSCQuery instance names", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "192.168.68.96",
+      port: 1234,
+      oscQuery: {
+        enabled: true,
+        url: "http://pt5.local:5678/"
+      }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.jack = {
+    CONTENTS: {
+      info: {
+        CONTENTS: {
+          ports: {
+            CONTENTS: {
+              properties: {
+                CONTENTS: {
+                  "Plate-3:out1": {
+                    VALUE: "{\"rnbo-instance-id\":3,\"source\":true,\"type\":\"audio\"}"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["3"] = {
+    CONTENTS: {
+      params: {
+        CONTENTS: {
+          Decay: rnboParam("/rnbo/inst/3/params/Decay", 0.8, 0, 1, 0),
+          PreDelay: rnboParam("/rnbo/inst/3/params/PreDelay", 22, 0, 200, 1),
+          Mix: rnboParam("/rnbo/inst/3/params/Mix", 0.35, 0, 1, 2)
+        }
+      }
+    }
+  };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].id, "rnbo-inst-3:plate");
+  assert.equal(targets[0].app, "plate");
+  assert.equal(targets[0].label, "Plate 3");
+  assert.equal(targets[0].instance, "main");
+  assert.equal(targets[0].baseAddress, "/rnbo/inst/3");
+  assert.equal(targets[0].oscCapabilities.includes("plate-edit"), true);
+  assert.equal(targets[0].parameters.length, 3);
+});
+
+test("extracts Plate OSC control targets from lowercase reverb params", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "192.168.68.96",
+      port: 1234,
+      oscQuery: {
+        enabled: true,
+        url: "http://pt5.local:5678/"
+      }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["4"] = {
+    CONTENTS: {
+      params: {
+        CONTENTS: {
+          decay: rnboParam("/rnbo/inst/4/params/decay", 0.6, 0, 1, 0),
+          mix: rnboParam("/rnbo/inst/4/params/mix", 0.3, 0, 1, 1),
+          damp: rnboParam("/rnbo/inst/4/params/damp", 0.4, 0, 1, 2),
+          diff: rnboParam("/rnbo/inst/4/params/diff", 0.7, 0, 1, 3)
+        }
+      }
+    }
+  };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].id, "rnbo-inst-4:plate");
+  assert.equal(targets[0].app, "plate");
+  assert.equal(targets[0].parameters.length, 4);
+});
+
 test("RNBOOSCQuery discovery returns an empty target list on fetch failure", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

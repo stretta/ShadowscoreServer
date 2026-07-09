@@ -2317,15 +2317,25 @@ test("editor manifest route lists registered instrument editors", async () => {
   const context = createRouteContext();
   const response = await requestJson(context, "GET", "/editors/manifest");
 
-  assert.equal(response.editors.length, 1);
-  assert.deepEqual(response.editors[0], {
-    id: "poland",
-    label: "Poland",
-    route: "/editors/poland",
-    targetFilter: {
-      app: "poland"
+  assert.equal(response.editors.length, 2);
+  assert.deepEqual(response.editors, [
+    {
+      id: "poland",
+      label: "Poland",
+      route: "/editors/poland",
+      targetFilter: {
+        app: "poland"
+      }
+    },
+    {
+      id: "plate",
+      label: "Plate",
+      route: "/editors/plate",
+      targetFilter: {
+        app: "plate"
+      }
     }
-  });
+  ]);
 });
 
 test("editor manifest route normalizes custom editor config", async () => {
@@ -2459,6 +2469,23 @@ test("Poland editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /data-group="oscillator-a"/);
   assert.match(response.body, /VolA/);
   assert.match(response.body, /FilterKeyTracking/);
+});
+
+test("Plate editor route serves the OSC target integration page", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/plate");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /Plate Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=plate/);
+  assert.match(response.body, /param/);
+  assert.match(response.body, /PLATE_GROUPS/);
+  assert.match(response.body, /data-group="time"/);
+  assert.match(response.body, /PreDelay/);
+  assert.match(response.body, /plate-choice/);
+  assert.match(response.body, /scheduleParamSend/);
+  assert.match(response.body, /flushParamSend/);
 });
 
 test("OSC volume tool route serves target selection and trim controls", async () => {

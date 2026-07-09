@@ -298,9 +298,33 @@ if [[ "${RESTART_SERVICE}" == "1" ]]; then
   else
     ssh "${PI_USER}@${RESOLVED_PI_HOST}" \
       "sudo systemctl restart $(quote "${SERVICE_NAME}") && sudo systemctl status $(quote "${SERVICE_NAME}") --no-pager -l"
+    SERVICE_STARTED_AT="$(
+      ssh "${PI_USER}@${RESOLVED_PI_HOST}" \
+        "systemctl show $(quote "${SERVICE_NAME}") --property=ActiveEnterTimestamp --value" \
+        || true
+    )"
+    if [[ -n "${SERVICE_STARTED_AT}" ]]; then
+      echo "Service active since: ${SERVICE_STARTED_AT}"
+    fi
   fi
 else
   echo "Skipping service restart."
+fi
+
+if [[ "${SHADOWSCORE_ROLE}" == "host" ]]; then
+  if [[ "${DRY_RUN}" == "1" ]]; then
+    echo "Would verify live host routes at '${SHADOWSCORE_BASE_URL}'"
+  else
+    echo "Verifying live host route shape at ${SHADOWSCORE_BASE_URL}"
+    curl -fsS "${SHADOWSCORE_BASE_URL}/healthz" >/dev/null
+    curl -fsS "${SHADOWSCORE_BASE_URL}/transport" >/dev/null
+    TRANSPORT_STATUS_HTML="$(curl -fsS "${SHADOWSCORE_BASE_URL}/transport/status")"
+    if [[ "${TRANSPORT_STATUS_HTML}" != *'id="timing-contracts"'* ]]; then
+      echo "Transport status route did not expose the timing-contracts panel." >&2
+      exit 1
+    fi
+    echo "Verified /healthz, /transport, and /transport/status timing-contracts panel."
+  fi
 fi
 
 if [[ "${RUN_SMOKE}" == "1" ]]; then

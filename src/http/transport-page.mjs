@@ -79,6 +79,42 @@ export function transportPage() {
       padding: 10px;
       white-space: pre-wrap;
     }
+    .contract-list {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+    .contract-card {
+      background: rgba(38, 51, 65, 0.54);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-control);
+      padding: 10px;
+    }
+    .contract-card.warn {
+      border-color: #d79c36;
+      box-shadow: inset 0 0 0 1px rgba(215, 156, 54, 0.35);
+    }
+    .contract-title {
+      font-size: 15px;
+      font-weight: 750;
+      margin-bottom: 8px;
+      overflow-wrap: anywhere;
+    }
+    .contract-facts {
+      display: grid;
+      gap: 6px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+    .contract-fact {
+      min-width: 0;
+    }
+    .contract-fact .label {
+      margin-bottom: 2px;
+    }
+    .contract-fact .value {
+      font-size: 15px;
+      font-weight: 650;
+    }
     @media (max-width: 900px) {
       .toolbar button { flex: 1 1 150px; }
     }
@@ -155,12 +191,7 @@ export function transportPage() {
       </section>
       <section>
       <h2>Timing Contract</h2>
-      <div class="grid">
-        <div class="metric"><div class="label">Target</div><div class="value small" id="contract-target">-</div></div>
-        <div class="metric"><div class="label">Pattern Length</div><div class="value" id="pattern-length">-</div></div>
-        <div class="metric"><div class="label">Stages / Beat</div><div class="value" id="stages-per-beat">-</div></div>
-        <div class="metric"><div class="label">Ticks / Stage</div><div class="value" id="ticks-per-stage">-</div></div>
-      </div>
+      <div class="contract-list" id="timing-contracts"></div>
       </section>
     </details>
     <section>
@@ -205,7 +236,7 @@ export function transportPage() {
         lastTransport = transport;
         renderTransport(transport);
         renderPlayback(playback);
-        renderContract(contracts.contracts?.[0]);
+        renderContracts(contracts.contracts || []);
         fields.status.textContent = new Date().toLocaleTimeString();
       } catch (error) {
         fields.status.textContent = String(error.message || error);
@@ -276,11 +307,74 @@ export function transportPage() {
       fields["phase-reset"].textContent = playback.phaseAlignment?.pending ? "pending" : phaseAlignmentLabel(playback.phaseAlignment?.last);
     }
 
-    function renderContract(contract) {
-      fields["contract-target"].textContent = contract?.targetId || "-";
-      fields["pattern-length"].textContent = String(contract?.timing?.patternLength ?? "-");
-      fields["stages-per-beat"].textContent = String(contract?.timing?.stagesPerBeat ?? "-");
-      fields["ticks-per-stage"].textContent = String(contract?.timing?.ticksPerStage ?? "-");
+    function renderContracts(contracts) {
+      if (!contracts.length) {
+        const empty = document.createElement("div");
+        empty.className = "metric";
+        empty.textContent = "No playback clients.";
+        fields["timing-contracts"].replaceChildren(empty);
+        return;
+      }
+      const disagreements = timingDisagreements(contracts);
+      fields["timing-contracts"].replaceChildren(...contracts.map((contract) => contractCard(contract, disagreements)));
+    }
+
+    function contractCard(contract, disagreements) {
+      const timing = contract.timing || {};
+      const card = document.createElement("article");
+      card.className = "contract-card" + (contractHasDisagreement(contract, disagreements) ? " warn" : "");
+      const title = document.createElement("div");
+      title.className = "contract-title";
+      title.textContent = contract.targetId || "-";
+      const facts = document.createElement("div");
+      facts.className = "contract-facts";
+      facts.append(
+        contractFact("Voice", contract.assignedVoiceId || "-"),
+        contractFact("Block", timing.blockId || "-"),
+        contractFact("Stages / Beat", timing.stagesPerBeat ?? "-"),
+        contractFact("Ticks / Stage", timing.ticksPerStage ?? "-"),
+        contractFact("Pattern", timing.patternLength ?? "-"),
+        contractFact("Notes", contract.noteCount ?? "-"),
+        contractFact("Available", contract.available === false ? "no" : "yes"),
+        contractFact("Rows", contract.transmittedRowCount ?? "-")
+      );
+      const detail = document.createElement("div");
+      detail.className = "detail";
+      detail.textContent = disagreementLabel(contract, disagreements);
+      card.append(title, facts, detail);
+      return card;
+    }
+
+    function contractFact(label, value) {
+      const item = document.createElement("div");
+      item.className = "contract-fact";
+      const labelEl = document.createElement("div");
+      labelEl.className = "label";
+      labelEl.textContent = label;
+      const valueEl = document.createElement("div");
+      valueEl.className = "value";
+      valueEl.textContent = String(value);
+      item.append(labelEl, valueEl);
+      return item;
+    }
+
+    function timingDisagreements(contracts) {
+      const assigned = contracts.filter((contract) => contract.assignedVoiceId && contract.available !== false);
+      const comparable = assigned.length > 1 ? assigned : contracts.filter((contract) => contract.available !== false);
+      const fields = ["blockId", "stagesPerBeat", "ticksPerStage", "patternLength"];
+      return Object.fromEntries(fields.map((field) => {
+        const values = new Set(comparable.map((contract) => String(contract.timing?.[field] ?? "")));
+        return [field, comparable.length > 1 && values.size > 1];
+      }));
+    }
+
+    function contractHasDisagreement(contract, disagreements) {
+      return Object.keys(disagreements).some((field) => disagreements[field] && contract.timing?.[field] !== undefined);
+    }
+
+    function disagreementLabel(contract, disagreements) {
+      const fields = Object.keys(disagreements).filter((field) => disagreements[field] && contract.timing?.[field] !== undefined);
+      return fields.length ? "Disagrees on " + fields.join(", ") : "";
     }
 
     function formatNumber(value, digits) {

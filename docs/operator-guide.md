@@ -199,6 +199,19 @@ curl http://<host>.local:8790/transport
 journalctl -u shadowscore-jack-transport-bridge.service -n 80 --no-pager
 ```
 
+If `tools/deploy_pi.sh` syncs files but cannot complete the non-interactive
+service restart, restart the host service from an interactive shell and then
+check the process start time plus route shape:
+
+```sh
+ssh pi@<host>.local
+sudo systemctl restart shadowscore-server.service
+systemctl show shadowscore-server.service --property=ActiveEnterTimestamp --value
+curl http://<host>.local:8790/healthz
+curl http://<host>.local:8790/transport
+curl http://<host>.local:8790/transport/status
+```
+
 When diagnosing, keep these boundaries separate: server score state, peer
 registration, RNBO target visibility, transport beat evidence, and actual audio
 output.

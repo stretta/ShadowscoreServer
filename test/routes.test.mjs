@@ -355,12 +355,70 @@ test("transport status page exposes host transport controls", async () => {
   assert.match(response.body, /id="beat-into-block"/);
   assert.match(response.body, /id="macro-anchor"/);
   assert.match(response.body, /id="phase-reset"/);
+  assert.match(response.body, /id="timing-contracts"/);
+  assert.match(response.body, /renderContracts\(contracts\.contracts \|\| \[\]\)/);
+  assert.match(response.body, /Disagrees on/);
   assert.match(response.body, /\/transport\/events/);
   assert.match(response.body, /\/transport\/play/);
   assert.match(response.body, /\/transport\/stop/);
   assert.match(response.body, /\/macrostructure\/advance/);
   assert.match(response.body, /\/macrostructure\/reset/);
   assert.match(response.body, /\/playback\/timing-contracts/);
+});
+
+test("playback timing contracts include one entry per playback target", async () => {
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "left-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          },
+          {
+            id: "right-client",
+            host: "192.168.68.97",
+            port: 9000,
+            address: "/rnbo/inst/3/messages/in/shadowscore"
+          }
+        ]
+      }
+    })
+  });
+
+  const contracts = await requestJson(context, "GET", "/playback/timing-contracts");
+
+  assert.equal(contracts.contracts.length, 2);
+  assert.deepEqual(contracts.contracts.map((contract) => ({
+    targetId: contract.targetId,
+    blockId: contract.timing.blockId,
+    stagesPerBeat: contract.timing.stagesPerBeat,
+    ticksPerStage: contract.timing.ticksPerStage,
+    patternLength: contract.timing.patternLength,
+    noteCount: contract.noteCount,
+    available: contract.available
+  })), [
+    {
+      targetId: "left-client",
+      blockId: "A",
+      stagesPerBeat: 16,
+      ticksPerStage: 30,
+      patternLength: 256,
+      noteCount: 24,
+      available: true
+    },
+    {
+      targetId: "right-client",
+      blockId: "A",
+      stagesPerBeat: 16,
+      ticksPerStage: 30,
+      patternLength: 256,
+      noteCount: 24,
+      available: true
+    }
+  ]);
 });
 
 test("voice routes add and remove arbitrary voices", async () => {

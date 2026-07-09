@@ -5,29 +5,40 @@ deployment.
 
 ## Transport Status Page
 
-- [ ] Show one timing contract entry per playback client on `/transport/status`.
+- [x] Show one timing contract entry per playback client on `/transport/status`.
   The API already returns one contract per target from `/playback/timing-contracts`;
-  the page currently renders only the first contract.
-- [ ] Include each contract's target id, assigned voice, block id,
+  the page renders the full contract set in the timing-contracts panel.
+- [x] Include each contract's target id, assigned voice, block id,
   `stagesPerBeat`, `ticksPerStage`, `patternLength`, note count, and available
   state.
-- [ ] Visually flag contracts that disagree on timing-critical fields when
+- [x] Visually flag contracts that disagree on timing-critical fields when
   disagreement is unexpected.
 
 ## Beat Witness Readback
 
 - [ ] Confirm live RNBOOSCQuery exposes current `current_stage` values, not just
   outport paths, for the assigned clients on `wren`.
-- [ ] If live `current_stage` values are absent from OSCQuery snapshots, add an
+- [x] If live `current_stage` values are absent from OSCQuery snapshots, add an
   explicit readback path for RNBO client stage values before relying on
   `rnbo-client` as a witness source in performance.
-- [ ] Decide whether RNBO-client witness comparison should use absolute client
+  The OSCQuery adapter already reads `current_stage.VALUE` into target
+  `currentStage`; if `wren` does not expose live VALUE updates, this item should
+  be reopened as a dedicated polling or client-report path.
+- [x] Decide whether RNBO-client witness comparison should use absolute client
   stage, block-local stage, or a server-maintained phase anchor when JACK is
   stopped.
+  Current implementation compares absolute client stage converted to beats via
+  each target timing contract, rejects assigned-client skew above
+  `transport.rnboClient.maxSkewBeats`, and anchors macro playback from the
+  selected witness beat at start/re-sync.
 
 ## Deployment
 
-- [ ] Fix non-interactive sudo restart in `tools/deploy_pi.sh` for `wren`, or
+- [x] Fix non-interactive sudo restart in `tools/deploy_pi.sh` for `wren`, or
   document the required manual force-restart path.
-- [ ] After deploys, verify the live process start time and route shape, not only
+  Manual fallback is documented in `docs/operator-guide.md`.
+- [x] After deploys, verify the live process start time and route shape, not only
   file sync and service status.
+  `tools/deploy_pi.sh` now prints the service `ActiveEnterTimestamp` after
+  restart and verifies `/healthz`, `/transport`, and the `/transport/status`
+  timing-contracts panel for host deploys.

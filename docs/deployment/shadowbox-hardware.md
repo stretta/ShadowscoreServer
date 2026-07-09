@@ -10,7 +10,7 @@ workflow after installation, see [`../operator-guide.md`](../operator-guide.md).
 - The repo lives at `/home/pi/ShadowscoreServer` by default. Use `--install-dir` if a unit needs a different path.
 - ShadowscoreServer listens on HTTP port `8790`.
 - RNBOOSCQuery is reachable at `http://127.0.0.1:5678/`.
-- ShadowScoreClient receives OSC at `127.0.0.1:9000` and message path `/rnbo/inst/2/messages/in/shadowscore`.
+- ShadowScoreClient receives OSC at `127.0.0.1:1234` and message path `/rnbo/inst/2/messages/in/shadowscore`.
 
 Adjust the config files if a unit uses different hostnames, ports, or RNBO message paths.
 
@@ -33,8 +33,9 @@ bash /tmp/install-shadowscore.sh --role peer --host-identity pt6 --advertised-na
 The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages,
 clones or updates the repo, writes the role-specific generated config, installs
 the matching systemd unit for the selected install directory, starts the
-service, waits for `/healthz`, Matrix Edit (`/matrix-edit`), and the Event List
-editor (`/event-list`), then runs the hardware smoke test.
+service, waits for `/healthz`, the root view index (`/`), Structure Editor
+(`/structure-editor`), Matrix Edit (`/matrix-edit`), and the Event List editor
+(`/event-list`), then runs the hardware smoke test.
 
 Manual install remains available:
 
@@ -137,9 +138,11 @@ The smoke test checks:
 - `/healthz`
 - `/session`
 - `/rnbo/targets`
-- Structure Editor at `/`
+- root view index at `/`
+- Structure Editor at `/structure-editor`
 - Matrix Edit at `/matrix-edit`
 - Event List editor at `/event-list`
+- JACK transport freshness at `/transport` when enabled
 - local HTTP port reachability
 - RNBOOSCQuery reachability when enabled
 - peer visibility on the host when running in peer role

@@ -175,9 +175,9 @@ Exit criteria:
 Goal: the system can be installed and updated repeatedly on actual Shadowbox hardware units.
 
 - Publish ShadowscoreServer to GitHub.
-- Add Pi install/update commands. Done: `deploy/install-shadowscore.sh` handles prerequisites, clone/update, generated config with bundled Matrix Edit and Event List routes, install-dir aware systemd install, service start, editor readiness checks, and smoke testing; `docs/deployment/shadowbox-hardware.md` documents fresh install and update commands for `/home/pi/ShadowscoreServer`.
+- Add Pi install/update commands. Done: `deploy/install-shadowscore.sh` handles prerequisites, clone/update, generated config with the root view index, Structure Editor, Matrix Edit, Event List, editor index, and OSC tool routes, install-dir aware systemd install, service start, editor readiness checks, and smoke testing; `docs/deployment/shadowbox-hardware.md` documents fresh install and update commands for `/home/pi/ShadowscoreServer`.
 - Add systemd unit templates and config examples. Done: `deploy/systemd/shadowscore-server.service`, `deploy/systemd/shadowscore-registration-agent.service`, `config/shadowbox.hardware-host.json`, and `config/shadowbox.hardware-peer.json`.
-- Add a smoke-test command for the hardware unit. Done: `npm run smoke:hardware -- --config <config>` checks the server, bundled Matrix Edit and Event List pages, RNBO targets, HTTP port, RNBOOSCQuery when enabled, and peer host visibility when applicable.
+- Add a smoke-test command for the hardware unit. Done: `npm run smoke:hardware -- --config <config>` checks the server, root view index, Structure Editor, bundled Matrix Edit and Event List pages, RNBO targets/devices, JACK transport freshness when enabled, HTTP port, RNBOOSCQuery when enabled, and peer host visibility when applicable.
 - Add a deployment checklist that verifies ports, services, browser access, RNBOOSCQuery, registration, persistence, and RNBO output. Done: see the checklist in `docs/deployment/shadowbox-hardware.md`.
 
 Exit criteria:
@@ -257,7 +257,7 @@ Phase 1 server-side status:
 
 - Static Matrix Edit hosting is implemented for `/matrix-edit`, backed by `public/matrix-edit`. The root `/` route now serves the ShadowScore view index, and Structure Editor lives at `/structure-editor`.
 - `GET /session` reports host role, advertised name, app/API endpoints, voices, assignments, local and registered RNBO targets, hardware units, and macro playback state.
-- `config/shadowbox.local.json` defines a starter voice set with fixed contrasting assignment colors and keeps RNBO output pointed at `127.0.0.1:9000`.
+- `config/shadowbox.local.json` defines a starter voice set with fixed contrasting assignment colors and keeps RNBO output pointed at `127.0.0.1:1234`.
 - `public/matrix-edit` contains the exported ShadowScore Matrix Edit build. Matrix Edit selects a mesostructural block, edits the selected player's assigned clip, and shows other assigned clips as contextual reference layers.
 
 This proves the browser and score-authority shape before adding peer registration and multi-unit RNBO routing.

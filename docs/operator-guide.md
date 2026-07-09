@@ -32,6 +32,9 @@ http://<host>.local:8790/event-list
 http://<host>.local:8790/matrix-edit
 http://<host>.local:8790/admin
 http://<host>.local:8790/transport/status
+http://<host>.local:8790/editors
+http://<host>.local:8790/tools/osc-volume
+http://<host>.local:8790/tools/osc-macros
 ```
 
 The root page is the ShadowScore view index. Use `/structure-editor` for
@@ -47,6 +50,7 @@ curl http://<host>.local:8790/session
 curl http://<host>.local:8790/hardware/units
 curl http://<host>.local:8790/rnbo/devices
 curl http://<host>.local:8790/rnbo/targets
+curl http://<host>.local:8790/osc/targets
 curl http://<host>.local:8790/playback/timing-contracts
 ```
 
@@ -56,6 +60,8 @@ The useful reading is:
 - `/rnbo/devices` shows RNBO graph editors, including boxes that do not yet
   have a ShadowScoreClient instance loaded.
 - `/rnbo/targets` shows the actual ShadowScore OSC targets the host can write to.
+- `/osc/targets` shows RNBO and instrument-control targets exposed to editor
+  and macro tools, including filters such as `?app=poland&status=online`.
 - `/playback/timing-contracts` shows per-target stage capacity, note-row
   capacity, selected `ClockInterval`, `MaxSteps`, and active-block compilation
   diagnostics.
@@ -115,6 +121,10 @@ Use Matrix Edit for:
 Matrix Edit is not the canonical place for clip attributes or structure changes.
 Those belong to Event List and Structure Editor respectively.
 
+Use `/editors`, `/editors/poland`, `/tools/osc-volume`, and `/tools/osc-macros`
+for instrument-control surfaces that route through `/osc/targets`, `/osc/send`,
+`/osc/broadcast`, and `/osc/macros`.
+
 ## Score Operations
 
 Admin exposes the usual session operations:
@@ -162,6 +172,7 @@ POST /macrostructure/phase-reset
 POST /transport/jack/start
 POST /transport/jack/stop
 POST /transport/jack/locate
+POST /transport/jack/tempo
 ```
 
 `/macrostructure/playback/start` starts macro playback and writes `Clock: 1` to
@@ -200,16 +211,20 @@ journalctl -u shadowscore-jack-transport-bridge.service -n 80 --no-pager
 ```
 
 If `tools/deploy_pi.sh` syncs files but cannot complete the non-interactive
-service restart, restart the host service from an interactive shell and then
-check the process start time plus route shape:
+service restart, re-run with `SHADOWSCORE_SUDO_PASSWORD` for known lab units or
+use `--force-restart` for the kill/reset/start recovery path. From an
+interactive shell, the manual recovery is:
 
 ```sh
 ssh pi@<host>.local
-sudo systemctl restart shadowscore-server.service
-systemctl show shadowscore-server.service --property=ActiveEnterTimestamp --value
+sudo systemctl kill -s SIGKILL shadowscore-server.service
+sudo systemctl reset-failed shadowscore-server.service
+sudo systemctl start shadowscore-server.service
+systemctl show shadowscore-server.service --property=MainPID --property=ActiveEnterTimestamp --value
 curl http://<host>.local:8790/healthz
-curl http://<host>.local:8790/transport
-curl http://<host>.local:8790/transport/status
+curl http://<host>.local:8790/session
+curl http://<host>.local:8790/matrix-edit
+curl http://<host>.local:8790/event-list
 ```
 
 When diagnosing, keep these boundaries separate: server score state, peer

@@ -117,6 +117,12 @@ The `/structure-editor` route serves a dedicated meso/macro editor from
 per-player clip assignments, macrostructure tempo, and the ordered macro chain
 without changing the Matrix Edit or Event List surfaces.
 
+The `/editors` route serves the registered instrument-editor index from
+`public/editors`, and `/editors/manifest` exposes the editor manifest JSON.
+The bundled Poland editor is served at `/editors/poland`. Utility tools for
+live OSC target volume trims and macro building are served at
+`/tools/osc-volume` and `/tools/osc-macros`.
+
 By default, the active score persists to `data/score.json`, the previous
 snapshot is kept at `data/score.previous.json`, and named saved scores are
 stored as JSON files under `data/scores/`.
@@ -153,12 +159,21 @@ For the session-day operator flow, see
 - `POST /hardware/units/:unitId/heartbeat`: refresh a registered peer heartbeat.
 - `POST /hardware/units/:unitId/targets/:targetId/use-observed-host`: replace a peer target's advertised host with the remote address observed by the session host. This is an admin repair path for peers that register with an unreachable address.
 - `GET /rnbo/targets`: local and registered RNBO targets with availability state and latest RNBO score send status when available.
+- `GET /rnbo/devices`: RNBO runner/graph-editor devices, including units that do not currently expose ShadowScore playback targets.
+- `GET /osc/targets`: normalized OSC-capable targets. Optional query filters include `app`, `capability`, and `status`.
+- `POST /osc/send`: send one OSC message or named parameter write to selected target IDs.
+- `POST /osc/broadcast`: expand filtered OSC targets at request time and send one OSC message or named parameter write to each resolved target.
+- `GET /osc/macros`: list saved OSC macros from the host macro library.
+- `POST /osc/macros`: save or replace an OSC macro.
+- `POST /osc/macros/:macroId/run`: validate, dry-run, or execute one saved OSC macro.
+- `GET /editors/manifest`: registered instrument-editor manifest.
 - `GET /playback/timing-contracts`: target-specific compiled playback timing contracts for the active block, including selected stage resolution, `ClockInterval`/ticks-per-stage, `MaxSteps`/pattern length, target capacities, compact/full-clear replacement mode, and quantization diagnostics when adaptive fidelity modes are enabled.
 - `POST /admin/rnbo/resend`: manually resend the current score to RNBO playback targets. Add `?mode=full-clear` or `{ "mode": "full-clear" }` to force capacity-sized clear rows even for compact-capable targets.
 - `POST /transport/jack/snapshot`: accept a host-local JACK BBT snapshot from the bridge helper.
 - `POST /transport/jack/start`: start JACK transport through a configured JACK controller.
 - `POST /transport/jack/stop`: stop JACK transport through a configured JACK controller.
 - `POST /transport/jack/locate`: locate JACK transport to a frame with `{ "frame": 0 }`; this does not write RNBO `Clock`.
+- `POST /transport/jack/tempo`: set JACK transport tempo through a configured JACK controller with `{ "bpm": 120 }`.
 - `POST /transport/play`: user-facing Play facade. Starts macrostructure playback, writes assigned-client playback transport controls, applies a phase reset by default, and returns aggregate transport readiness.
 - `POST /transport/stop`: user-facing Stop facade. Stops macrostructure playback, writes assigned-client playback stop controls, and returns aggregate transport readiness.
 - `POST /transport/return-to-start`: reset the macro playhead to the first section, write `SetStage: 0` to playback targets, and return aggregate transport readiness.
@@ -205,12 +220,13 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `DELETE /admin/scores/:scoreId`: delete a saved score JSON file from the host score library.
 - `POST /admin/assignment-preset`: apply a configured assignment preset by `{ "presetId": "..." }`.
 - `POST /admin/import-legacy-voice-notes`: copy non-empty `voices[player].notes` into looped clips such as `player-1-main` and assign them to block `A` by default. This leaves voice notes intact and does not overwrite existing clips unless `overwriteClips` is true.
-- `POST /admin/rnbo/resend`: resend the current active-block score transaction to available RNBO targets.
 - `GET /admin`: simple lab admin page for voice assignments and basic resets.
 - `GET /`: ShadowScore view index with editor and RNBO graph-editor links.
+- `GET /editors`: registered instrument-editor browser.
+- `GET /editors/poland`: bundled Poland OSC editor.
+- `GET /tools/osc-volume`: OSC target volume trim tool.
+- `GET /tools/osc-macros`: OSC macro builder and validator.
 - `GET /event-list`: canonical clip attribute and note-event editor.
-- `GET /rnbo/devices`: RNBO runner/graph-editor devices, including units that do not currently expose ShadowScore targets.
-- `GET /rnbo/targets`: ShadowScore RNBO OSC targets the host can write score data to.
 - `GET /structure-editor`: meso/macro structure editor.
 - `GET /events`: server-sent event stream of score changes.
 - `GET /collab`: WebSocket collaboration endpoint for realtime JSON commands.

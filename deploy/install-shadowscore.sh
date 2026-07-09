@@ -147,6 +147,11 @@ config.static.enabled = true;
 config.static.root = "public/matrix-edit";
 config.static.index = "index.html";
 config.static.apps = {
+  home: {
+    root: "public",
+    index: "index.html",
+    routes: ["/"]
+  },
   matrixEdit: {
     root: "public/matrix-edit",
     index: "index.html",
@@ -160,7 +165,32 @@ config.static.apps = {
   structureEditor: {
     root: "public/structure-editor",
     index: "index.html",
-    routes: ["/structure-editor", "/"]
+    routes: ["/structure-editor"]
+  },
+  editorsIndex: {
+    root: "public/editors",
+    index: "index.html",
+    routes: ["/editors"]
+  },
+  polandEditor: {
+    root: "public/editors/poland",
+    index: "index.html",
+    routes: ["/editors/poland"]
+  },
+  shared: {
+    root: "public/shared",
+    index: "index.html",
+    routes: ["/shared"]
+  },
+  oscVolume: {
+    root: "public/tools/osc-volume",
+    index: "index.html",
+    routes: ["/tools/osc-volume"]
+  },
+  oscMacros: {
+    root: "public/tools/osc-macros",
+    index: "index.html",
+    routes: ["/tools/osc-macros"]
   }
 };
 if (process.env.SHADOWSCORE_ROLE_VALUE === "host") {
@@ -230,7 +260,8 @@ if [[ "$ROLE" == "host" ]]; then
   ready=0
   for _ in $(seq 1 20); do
     if curl -fsS --max-time 1 "http://127.0.0.1:8790/healthz" >/dev/null 2>&1 \
-      && curl -fsS --max-time 1 "http://127.0.0.1:8790/" | grep -q "ShadowScore Structure Editor" \
+      && curl -fsS --max-time 1 "http://127.0.0.1:8790/" | grep -q "ShadowScore Views" \
+      && curl -fsS --max-time 1 "http://127.0.0.1:8790/structure-editor" | grep -q "ShadowScore Structure Editor" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/matrix-edit" | grep -q "ShadowScore Matrix Edit" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/event-list" | grep -q "ShadowScore Event List"; then
       ready=1
@@ -239,7 +270,7 @@ if [[ "$ROLE" == "host" ]]; then
     sleep 0.5
   done
   if [[ "$ready" != "1" ]]; then
-    echo "ShadowscoreServer did not serve /healthz, /, and /event-list successfully" >&2
+    echo "ShadowscoreServer did not serve /healthz, /, /structure-editor, /matrix-edit, and /event-list successfully" >&2
     $SUDO journalctl -u "$SERVICE_NAME" -n 80 --no-pager || true
     exit 1
   fi

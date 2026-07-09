@@ -104,6 +104,14 @@ Implemented endpoint groups include:
 - `POST /hardware/units/:unitId/heartbeat`
 - `POST /hardware/units/:unitId/targets/:targetId/use-observed-host`
 - `GET /rnbo/targets`
+- `GET /rnbo/devices`
+- `GET /osc/targets`
+- `POST /osc/send`
+- `POST /osc/broadcast`
+- `GET /osc/macros`
+- `POST /osc/macros`
+- `POST /osc/macros/:macroId/run`
+- `GET /editors/manifest`
 - `GET /playback/timing-contracts`
 - `GET /transport`
 - `GET /transport/events`
@@ -112,6 +120,10 @@ Implemented endpoint groups include:
 - `POST /transport/jack/start`
 - `POST /transport/jack/stop`
 - `POST /transport/jack/locate`
+- `POST /transport/jack/tempo`
+- `POST /transport/play`
+- `POST /transport/stop`
+- `POST /transport/return-to-start`
 - `GET /assignments`
 - `GET /clips`
 - `GET /structure`
@@ -148,6 +160,10 @@ Implemented endpoint groups include:
 - `POST /admin/rnbo/resend`
 - `GET /admin`
 - `GET /`
+- `GET /editors`
+- `GET /editors/poland`
+- `GET /tools/osc-volume`
+- `GET /tools/osc-macros`
 - `GET /event-list`
 - `GET /matrix-edit`
 - `GET /structure-editor`
@@ -156,9 +172,9 @@ Implemented endpoint groups include:
 
 ## Port Policy
 
-Do not default RNBO adapter traffic to UDP `1234`. That is likely to collide with RNBO runner expectations.
-
-The server default HTTP port is `8790`. RNBO/OSC output is disabled by default and must be enabled with an explicit host and port. The example config uses UDP `9000` only as a placeholder.
+The server default HTTP port is `8790`. RNBO/OSC output is disabled by default,
+so the checked-in default RNBO target can use the current ShadowScoreClient OSC
+port `1234` without claiming it unless RNBO output is explicitly enabled.
 
 ## Adapter Boundary
 
@@ -177,3 +193,4 @@ The Matrix Edit file `apps/rnbo-matrix-editor/bridge/rnbo-osc-bridge.mjs` is a u
 5. Voice assignment and simple lab admin controls. Done: the score now carries per-voice assignment metadata, exposes assignment/update/clear/reset endpoints, persists assignment state, streams assignment events, and serves a dependency-free `/admin` lab page for voice assignment, saved-score library operations, migration, and basic resets.
 6. Optional WebSocket/collaboration layer if multiple clients must edit the same voice concurrently. Done: `/collab` accepts dependency-free WebSocket clients, sends welcome/snapshot/presence messages, mirrors score updates as JSON broadcasts, accepts context/voice/assignment/reset commands, and supports optional expected-version guards for stale same-voice edit detection.
 7. Dedicated structure and clip editing surfaces. Done: `/` serves the ShadowScore view index, `/structure-editor` serves Structure Editor for meso/macro organization, `/event-list` serves the canonical clip attribute and note-event editor, and `/matrix-edit` serves block-context grid editing.
+8. OSC instrument editor and macro-control surfaces. Done: `/editors` serves the registered editor browser, `/editors/poland` serves the bundled Poland editor, `/tools/osc-volume` serves target trim controls, and `/tools/osc-macros` serves the macro builder.

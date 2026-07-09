@@ -9,6 +9,9 @@ Start with the current guides:
 - [`deployment/shadowbox-hardware.md`](deployment/shadowbox-hardware.md):
   Raspberry Pi install/update path, systemd services, smoke tests, and
   pre-session hardware checklist.
+- [`deploy-pi-hardening-plan.md`](deploy-pi-hardening-plan.md):
+  deploy helper restart proof, recovery, route verification, and validation
+  checklist.
 
 Design and implementation notes:
 

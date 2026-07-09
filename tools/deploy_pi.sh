@@ -17,15 +17,23 @@ Options:
   --dry-run              Show what would happen without modifying the remote host.
   --sync-only            Sync files only. Skip npm install, restart, and smoke test.
   --restart              Force a restart after sync.
+  --force-restart        Kill/reset/start the service instead of normal restart.
+  --restart-timeout <s>  Seconds to wait for service/route readiness. Default: 30
   --install-deps         Run npm install --omit=dev after sync.
   --no-install-deps      Skip npm install.
   --smoke                Run the hardware smoke test after restart.
   --no-smoke             Skip the hardware smoke test.
+  --verify-route <path>  Verify an extra host HTTP route after restart.
+  --no-verify-routes     Skip host HTTP route checks.
+  --no-sudo-preflight    Skip the non-interactive sudo preflight check.
+  --verbose-rsync        Show file-level rsync progress.
   --help                 Show this help text.
 
 Environment overrides still work: PI_HOST, PI_USER, PI_PATH, LOCAL_PATH,
 SHADOWSCORE_ROLE, SHADOWSCORE_CONFIG, SHADOWSCORE_BASE_URL,
-INSTALL_REQUIREMENTS, RESTART_SERVICE, and RUN_SMOKE.
+INSTALL_REQUIREMENTS, RESTART_SERVICE, RUN_SMOKE, RESTART_TIMEOUT,
+RUN_ROUTE_VERIFY, FORCE_RESTART, SUDO_PREFLIGHT, VERBOSE_RSYNC, and
+SHADOWSCORE_SUDO_PASSWORD.
 EOF
 }
 
@@ -95,6 +103,168 @@ quote() {
   printf '%q' "$1"
 }
 
+remote_sh() {
+  ssh "${PI_USER}@${RESOLVED_PI_HOST}" "$1"
+}
+
+remote_sudo_sh() {
+  if [[ -n "${SHADOWSCORE_SUDO_PASSWORD:-}" ]]; then
+    remote_sh "printf '%s\n' $(quote "${SHADOWSCORE_SUDO_PASSWORD}") | sudo -S -p '' $1"
+  else
+    remote_sh "sudo -n $1"
+  fi
+}
+
+service_snapshot() {
+  remote_sh \
+    "systemctl show $(quote "${SERVICE_NAME}") --no-pager --property=MainPID --property=ActiveState --property=SubState --property=ActiveEnterTimestamp --property=ExecMainStartTimestamp" \
+    || true
+}
+
+snapshot_value() {
+  local snapshot="$1"
+  local key="$2"
+  awk -F= -v key="${key}" '$1 == key { print substr($0, index($0, "=") + 1); exit }' <<<"${snapshot}"
+}
+
+print_service_snapshot() {
+  local label="$1"
+  local snapshot="$2"
+
+  echo "${label}:"
+  echo "  ActiveState=$(snapshot_value "${snapshot}" ActiveState)"
+  echo "  SubState=$(snapshot_value "${snapshot}" SubState)"
+  echo "  MainPID=$(snapshot_value "${snapshot}" MainPID)"
+  echo "  ActiveEnterTimestamp=$(snapshot_value "${snapshot}" ActiveEnterTimestamp)"
+  echo "  ExecMainStartTimestamp=$(snapshot_value "${snapshot}" ExecMainStartTimestamp)"
+}
+
+wait_for_service_ready() {
+  local deadline=$((SECONDS + RESTART_TIMEOUT))
+  local snapshot=""
+  local active_state=""
+  local sub_state=""
+
+  while (( SECONDS <= deadline )); do
+    snapshot="$(service_snapshot)"
+    active_state="$(snapshot_value "${snapshot}" ActiveState)"
+    sub_state="$(snapshot_value "${snapshot}" SubState)"
+
+    if [[ "${active_state}" == "active" && "${sub_state}" == "running" ]]; then
+      SERVICE_AFTER_SNAPSHOT="${snapshot}"
+      return 0
+    fi
+
+    sleep 2
+  done
+
+  SERVICE_AFTER_SNAPSHOT="${snapshot}"
+  return 1
+}
+
+print_manual_restart_recovery() {
+  echo "Manual recovery commands:" >&2
+  echo "  ssh ${PI_USER}@${RESOLVED_PI_HOST}" >&2
+  echo "  sudo systemctl kill -s SIGKILL ${SERVICE_NAME}" >&2
+  echo "  sudo systemctl reset-failed ${SERVICE_NAME}" >&2
+  echo "  sudo systemctl start ${SERVICE_NAME}" >&2
+}
+
+recover_service() {
+  echo "Recovering ${SERVICE_NAME} with kill/reset-failed/start..."
+  remote_sudo_sh "systemctl kill -s SIGKILL $(quote "${SERVICE_NAME}") || true"
+  remote_sudo_sh "systemctl reset-failed $(quote "${SERVICE_NAME}")"
+  remote_sudo_sh "systemctl start $(quote "${SERVICE_NAME}")"
+}
+
+restart_service_with_proof() {
+  local before_snapshot="$1"
+  local before_pid=""
+  local before_started=""
+  local after_pid=""
+  local after_started=""
+
+  before_pid="$(snapshot_value "${before_snapshot}" MainPID)"
+  before_started="$(snapshot_value "${before_snapshot}" ExecMainStartTimestamp)"
+
+  if [[ "${FORCE_RESTART}" == "1" ]]; then
+    recover_service
+  else
+    echo "Restarting ${SERVICE_NAME}..."
+    if ! remote_sudo_sh "systemctl restart $(quote "${SERVICE_NAME}")"; then
+      echo "Normal restart failed; attempting recovery." >&2
+      recover_service
+    fi
+  fi
+
+  if ! wait_for_service_ready; then
+    print_service_snapshot "Service state after restart attempt" "${SERVICE_AFTER_SNAPSHOT}"
+    echo "${SERVICE_NAME} did not become active/running within ${RESTART_TIMEOUT}s." >&2
+    if [[ "${FORCE_RESTART}" != "1" ]]; then
+      recover_service
+      if ! wait_for_service_ready; then
+        print_service_snapshot "Service state after recovery" "${SERVICE_AFTER_SNAPSHOT}"
+        print_manual_restart_recovery
+        exit 1
+      fi
+    else
+      print_manual_restart_recovery
+      exit 1
+    fi
+  fi
+
+  after_pid="$(snapshot_value "${SERVICE_AFTER_SNAPSHOT}" MainPID)"
+  after_started="$(snapshot_value "${SERVICE_AFTER_SNAPSHOT}" ExecMainStartTimestamp)"
+  print_service_snapshot "Service state after restart" "${SERVICE_AFTER_SNAPSHOT}"
+
+  if [[ -n "${before_pid}" && "${before_pid}" != "0" && "${before_pid}" == "${after_pid}" && "${before_started}" == "${after_started}" ]]; then
+    echo "Warning: ${SERVICE_NAME} reports the same MainPID and start timestamp after restart." >&2
+  fi
+}
+
+print_local_provenance() {
+  local git_commit=""
+  local git_dirty=""
+  local build_info="${LOCAL_PATH}public/matrix-edit/build-info.json"
+
+  if command -v git >/dev/null 2>&1 && git -C "${LOCAL_PATH}" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    git_commit="$(git -C "${LOCAL_PATH}" rev-parse --short HEAD 2>/dev/null || true)"
+    git_dirty="$(git -C "${LOCAL_PATH}" status --short 2>/dev/null || true)"
+    echo "Local git commit: ${git_commit:-unknown}"
+    if [[ -n "${git_dirty}" ]]; then
+      echo "Local git dirty: yes"
+    else
+      echo "Local git dirty: no"
+    fi
+  fi
+
+  if [[ -f "${build_info}" ]] && command -v node >/dev/null 2>&1; then
+    node -e '
+const fs = require("fs");
+const path = process.argv[1];
+const info = JSON.parse(fs.readFileSync(path, "utf8"));
+if (info.matrixeditCommit || Object.prototype.hasOwnProperty.call(info, "matrixeditDirty")) {
+  console.log(`Matrix Edit bundle: commit=${info.matrixeditCommit || "unknown"} dirty=${info.matrixeditDirty}`);
+}
+' "${build_info}" || true
+  fi
+}
+
+verify_url_with_retry() {
+  local url="$1"
+  local deadline=$((SECONDS + RESTART_TIMEOUT))
+
+  while (( SECONDS <= deadline )); do
+    if curl -fsS "${url}" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+
+  echo "Route verification failed: ${url}" >&2
+  return 1
+}
+
 PI_HOST="${PI_HOST:-wren.local}"
 PI_USER="${PI_USER:-pi}"
 PI_PATH="${PI_PATH:-/home/pi/ShadowscoreServer}"
@@ -105,8 +275,15 @@ SHADOWSCORE_BASE_URL="${SHADOWSCORE_BASE_URL:-}"
 INSTALL_REQUIREMENTS="${INSTALL_REQUIREMENTS:-1}"
 RESTART_SERVICE="${RESTART_SERVICE:-1}"
 RUN_SMOKE="${RUN_SMOKE:-1}"
+RESTART_TIMEOUT="${RESTART_TIMEOUT:-30}"
+RUN_ROUTE_VERIFY="${RUN_ROUTE_VERIFY:-1}"
+FORCE_RESTART="${FORCE_RESTART:-0}"
+SUDO_PREFLIGHT="${SUDO_PREFLIGHT:-1}"
+VERBOSE_RSYNC="${VERBOSE_RSYNC:-0}"
 DRY_RUN=0
 HOST_ALIAS=""
+VERIFY_ROUTES=()
+SERVICE_AFTER_SNAPSHOT=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -164,6 +341,16 @@ while [[ $# -gt 0 ]]; do
       RESTART_SERVICE=1
       shift
       ;;
+    --force-restart)
+      FORCE_RESTART=1
+      RESTART_SERVICE=1
+      shift
+      ;;
+    --restart-timeout)
+      require_value "$@"
+      RESTART_TIMEOUT="$2"
+      shift 2
+      ;;
     --install-deps)
       INSTALL_REQUIREMENTS=1
       shift
@@ -180,6 +367,23 @@ while [[ $# -gt 0 ]]; do
       RUN_SMOKE=0
       shift
       ;;
+    --verify-route)
+      require_value "$@"
+      VERIFY_ROUTES+=("$2")
+      shift 2
+      ;;
+    --no-verify-routes)
+      RUN_ROUTE_VERIFY=0
+      shift
+      ;;
+    --no-sudo-preflight)
+      SUDO_PREFLIGHT=0
+      shift
+      ;;
+    --verbose-rsync)
+      VERBOSE_RSYNC=1
+      shift
+      ;;
     --help|-h)
       usage
       exit 0
@@ -194,6 +398,11 @@ done
 
 if [[ "${SHADOWSCORE_ROLE}" != "host" && "${SHADOWSCORE_ROLE}" != "peer" ]]; then
   echo "--role must be host or peer." >&2
+  exit 1
+fi
+
+if ! [[ "${RESTART_TIMEOUT}" =~ ^[0-9]+$ ]] || [[ "${RESTART_TIMEOUT}" -lt 1 ]]; then
+  echo "--restart-timeout must be a positive integer." >&2
   exit 1
 fi
 
@@ -226,7 +435,15 @@ if [[ -z "${SHADOWSCORE_CONFIG}" ]]; then
 fi
 
 if [[ -z "${SHADOWSCORE_BASE_URL}" && "${SHADOWSCORE_ROLE}" == "host" ]]; then
-  SHADOWSCORE_BASE_URL="http://${PI_HOST}:8790"
+  SHADOWSCORE_BASE_URL="http://${RESOLVED_PI_HOST}:8790"
+fi
+
+if [[ "${SHADOWSCORE_ROLE}" == "host" ]]; then
+  if [[ "${#VERIFY_ROUTES[@]}" -gt 0 ]]; then
+    VERIFY_ROUTES=(/healthz /session /matrix-edit /event-list "${VERIFY_ROUTES[@]}")
+  else
+    VERIFY_ROUTES=(/healthz /session /matrix-edit /event-list)
+  fi
 fi
 
 SERVICE_NAME="shadowscore-server.service"
@@ -243,9 +460,15 @@ if [[ "${RESOLVED_PI_HOST}" != "${PI_HOST}" ]]; then
 fi
 echo "Role: ${SHADOWSCORE_ROLE}"
 echo "Service: ${SERVICE_NAME}"
+echo "Restart timeout: ${RESTART_TIMEOUT}s"
 echo "Smoke config: ${SHADOWSCORE_CONFIG}"
 if [[ "${SHADOWSCORE_ROLE}" == "host" ]]; then
   echo "Smoke base URL: ${SHADOWSCORE_BASE_URL}"
+  if [[ "${RUN_ROUTE_VERIFY}" == "1" ]]; then
+    echo "Verify routes: ${VERIFY_ROUTES[*]}"
+  else
+    echo "Verify routes: disabled"
+  fi
 fi
 if [[ "${DRY_RUN}" == "1" ]]; then
   echo "Dry run enabled: remote state will not be modified."
@@ -261,13 +484,27 @@ if [[ "${RESOLVED_PI_HOST}" == "${PI_HOST}" && "${PI_HOST}" != "localhost" && ! 
   fi
 fi
 
-RSYNC_OPTS=(-av --delete --progress)
+print_local_provenance
+
+if [[ "${RESTART_SERVICE}" == "1" && "${SUDO_PREFLIGHT}" == "1" && "${DRY_RUN}" != "1" ]]; then
+  echo "Checking non-interactive sudo on ${PI_USER}@${RESOLVED_PI_HOST}..."
+  if ! remote_sudo_sh "true"; then
+    echo "Non-interactive sudo is unavailable on ${PI_USER}@${RESOLVED_PI_HOST}." >&2
+    print_manual_restart_recovery
+    exit 1
+  fi
+fi
+
+RSYNC_OPTS=(-a --delete --stats)
+if [[ "${VERBOSE_RSYNC}" == "1" ]]; then
+  RSYNC_OPTS=(-av --delete --progress)
+fi
 if [[ "${DRY_RUN}" == "1" ]]; then
   RSYNC_OPTS+=(--dry-run)
 fi
 
 if [[ "${DRY_RUN}" != "1" ]]; then
-  ssh "${PI_USER}@${RESOLVED_PI_HOST}" "mkdir -p $(quote "${PI_PATH}")"
+  remote_sh "mkdir -p $(quote "${PI_PATH}")"
 else
   echo "Would create remote directory '${PI_PATH}'"
 fi
@@ -287,44 +524,38 @@ if [[ "${INSTALL_REQUIREMENTS}" == "1" ]]; then
   if [[ "${DRY_RUN}" == "1" ]]; then
     echo "Would run npm install --omit=dev in '${PI_PATH}'"
   else
-    ssh "${PI_USER}@${RESOLVED_PI_HOST}" \
-      "cd $(quote "${PI_PATH}") && npm install --omit=dev"
+    remote_sh "cd $(quote "${PI_PATH}") && npm install --omit=dev"
   fi
 fi
 
 if [[ "${RESTART_SERVICE}" == "1" ]]; then
   if [[ "${DRY_RUN}" == "1" ]]; then
-    echo "Would restart '${SERVICE_NAME}' and show its status"
-  else
-    ssh "${PI_USER}@${RESOLVED_PI_HOST}" \
-      "sudo systemctl restart $(quote "${SERVICE_NAME}") && sudo systemctl status $(quote "${SERVICE_NAME}") --no-pager -l"
-    SERVICE_STARTED_AT="$(
-      ssh "${PI_USER}@${RESOLVED_PI_HOST}" \
-        "systemctl show $(quote "${SERVICE_NAME}") --property=ActiveEnterTimestamp --value" \
-        || true
-    )"
-    if [[ -n "${SERVICE_STARTED_AT}" ]]; then
-      echo "Service active since: ${SERVICE_STARTED_AT}"
+    if [[ "${FORCE_RESTART}" == "1" ]]; then
+      echo "Would force-restart '${SERVICE_NAME}' and verify active/running state"
+    else
+      echo "Would restart '${SERVICE_NAME}' and verify active/running state"
     fi
+  else
+    SERVICE_BEFORE_SNAPSHOT="$(service_snapshot)"
+    print_service_snapshot "Service state before restart" "${SERVICE_BEFORE_SNAPSHOT}"
+    restart_service_with_proof "${SERVICE_BEFORE_SNAPSHOT}"
   fi
 else
   echo "Skipping service restart."
 fi
 
-if [[ "${SHADOWSCORE_ROLE}" == "host" ]]; then
+if [[ "${SHADOWSCORE_ROLE}" == "host" && "${RUN_ROUTE_VERIFY}" == "1" ]]; then
   if [[ "${DRY_RUN}" == "1" ]]; then
-    echo "Would verify live host routes at '${SHADOWSCORE_BASE_URL}'"
+    echo "Would verify live host routes at '${SHADOWSCORE_BASE_URL}': ${VERIFY_ROUTES[*]}"
   else
     echo "Verifying live host route shape at ${SHADOWSCORE_BASE_URL}"
-    curl -fsS "${SHADOWSCORE_BASE_URL}/healthz" >/dev/null
-    curl -fsS "${SHADOWSCORE_BASE_URL}/transport" >/dev/null
-    TRANSPORT_STATUS_HTML="$(curl -fsS "${SHADOWSCORE_BASE_URL}/transport/status")"
-    if [[ "${TRANSPORT_STATUS_HTML}" != *'id="timing-contracts"'* ]]; then
-      echo "Transport status route did not expose the timing-contracts panel." >&2
-      exit 1
-    fi
-    echo "Verified /healthz, /transport, and /transport/status timing-contracts panel."
+    for route in "${VERIFY_ROUTES[@]}"; do
+      verify_url_with_retry "${SHADOWSCORE_BASE_URL}${route}"
+    done
+    echo "Verified host routes: ${VERIFY_ROUTES[*]}"
   fi
+elif [[ "${SHADOWSCORE_ROLE}" == "host" ]]; then
+  echo "Skipping host route verification."
 fi
 
 if [[ "${RUN_SMOKE}" == "1" ]]; then
@@ -339,8 +570,7 @@ if [[ "${RUN_SMOKE}" == "1" ]]; then
     for arg in "${REMOTE_SMOKE_ARGS[@]}"; do
       quoted_smoke_args+=" $(quote "${arg}")"
     done
-    ssh "${PI_USER}@${RESOLVED_PI_HOST}" \
-      "cd $(quote "${PI_PATH}") && npm run smoke:hardware --${quoted_smoke_args}"
+    remote_sh "cd $(quote "${PI_PATH}") && npm run smoke:hardware --${quoted_smoke_args}"
   fi
 else
   echo "Skipping hardware smoke test."

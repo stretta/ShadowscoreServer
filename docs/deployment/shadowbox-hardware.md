@@ -90,9 +90,14 @@ npm run deploy:pi -- --host wren.local
 
 The helper syncs the current checkout to `/home/pi/ShadowscoreServer`, excludes
 remote runtime state (`data/`) and local config files (`config/*.local.json`),
-runs `npm install --omit=dev`, restarts `shadowscore-server.service`, and then
-runs the hardware smoke test against the target. Use `--role peer` to restart
-and verify `shadowscore-registration-agent.service` instead.
+runs `npm install --omit=dev`, checks non-interactive sudo, restarts
+`shadowscore-server.service`, verifies the systemd state and default host routes,
+and then runs the hardware smoke test against the target. Use `--role peer` to
+restart and verify `shadowscore-registration-agent.service` instead. Use
+`--force-restart` to run the kill/reset/start recovery path, `--restart-timeout
+<seconds>` to adjust service and route polling, and `--verify-route <path>` to
+add rollout-specific host route checks. If the unit requires a sudo password,
+set `SHADOWSCORE_SUDO_PASSWORD` for the deploy command.
 
 For Git checkouts on the unit, the manual update path remains:
 

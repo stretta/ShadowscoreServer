@@ -280,7 +280,10 @@ npm run deploy:pi -- --host wren.local
 ```
 
 The deploy helper syncs this checkout to `/home/pi/ShadowscoreServer`, preserves
-remote `config/*.local.json` files and `data/`, restarts the matching systemd
-service, and runs the hardware smoke test. Use `--role peer` for registration
-agent units, `--sync-only` for a file-only update, or `--dry-run` to preview the
-rsync.
+remote `config/*.local.json` files and `data/`, checks non-interactive sudo,
+restarts the matching systemd service, verifies the service state and host
+routes, and runs the hardware smoke test. Use `--role peer` for registration
+agent units, `--sync-only` for a file-only update, `--force-restart` for the
+kill/reset/start recovery path, `--verify-route <path>` for rollout-specific
+host checks, or `--dry-run` to preview the rsync. If the Pi does not allow
+passwordless sudo, set `SHADOWSCORE_SUDO_PASSWORD` for that deploy.

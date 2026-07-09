@@ -36,9 +36,11 @@ deployment.
 
 - [x] Fix non-interactive sudo restart in `tools/deploy_pi.sh` for `wren`, or
   document the required manual force-restart path.
-  Manual fallback is documented in `docs/operator-guide.md`.
+  The deploy helper now preflights sudo, supports password-fed sudo via
+  `SHADOWSCORE_SUDO_PASSWORD`, supports `--force-restart`, and prints manual
+  recovery commands when sudo is unavailable.
 - [x] After deploys, verify the live process start time and route shape, not only
   file sync and service status.
-  `tools/deploy_pi.sh` now prints the service `ActiveEnterTimestamp` after
-  restart and verifies `/healthz`, `/transport`, and the `/transport/status`
-  timing-contracts panel for host deploys.
+  `tools/deploy_pi.sh` now compares service snapshots around restart, polls for
+  `active/running`, and verifies default host routes plus any `--verify-route`
+  additions.

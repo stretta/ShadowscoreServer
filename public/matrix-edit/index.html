@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ShadowScore Matrix Edit</title>
     <link rel="stylesheet" href="/shared/shadowscore-style.css" />
-    <script type="module" crossorigin src="/matrix-edit/assets/index-C95J_Q04.js"></script>
-    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-B7v1vMF_.css">
+    <script type="module" crossorigin src="/matrix-edit/assets/index-Bxu1k095.js"></script>
+    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-CDL6V7Mr.css">
   </head>
   <body>
     <nav class="ss-route-tabs" aria-label="ShadowScore routes">
@@ -32,35 +32,37 @@
         <button id="stop-transport" type="button">Stop</button>
         <button id="return-start" type="button">Return to A</button>
         <span id="stage-status" class="stage-status"></span>
+        <details class="advanced-panel">
+          <summary>Advanced</summary>
+          <div class="advanced-popover">
+            <div class="toolbar">
+              <select id="mode" aria-label="Editor mode">
+                <option value="shadowscore" selected>ShadowScore Server</option>
+                <option value="rnbo">RNBO Packed Notes</option>
+              </select>
+              <select id="server-select" aria-label="ShadowScore servers"></select>
+              <button id="discover" type="button">Scan</button>
+              <input id="server" value="" aria-label="ShadowScore server" placeholder="Custom server" />
+              <select id="rnbo-target" aria-label="Live client"></select>
+              <input id="assignee" value="" aria-label="ShadowScore assignee" placeholder="Assignee" />
+              <input id="device-id" value="" aria-label="ShadowScore device" placeholder="Device" />
+              <input id="client-id" value="" aria-label="ShadowScore client" placeholder="Client" />
+              <input id="assignment-label" value="" aria-label="ShadowScore assignment label" placeholder="Label" />
+              <input id="assignment-color" value="" aria-label="ShadowScore assignment color" placeholder="Color" />
+              <label class="check-label">
+                <input id="assignment-locked" type="checkbox" />
+                Locked
+              </label>
+              <button id="assign" type="button">Assign</button>
+              <button id="clear" class="danger-button" type="button">Clear Voice</button>
+              <input id="target" value="http://192.168.68.96:5678" aria-label="RNBO target" />
+              <input id="bridge" value="http://127.0.0.1:8790" aria-label="RNBO OSC bridge" />
+              <button id="refresh" type="button">Refresh</button>
+              <button id="sync" type="button">Sync</button>
+            </div>
+          </div>
+        </details>
       </div>
-      <details class="advanced-panel">
-        <summary>Advanced</summary>
-        <div class="toolbar">
-          <select id="mode" aria-label="Editor mode">
-            <option value="shadowscore" selected>ShadowScore Server</option>
-            <option value="rnbo">RNBO Packed Notes</option>
-          </select>
-          <select id="server-select" aria-label="ShadowScore servers"></select>
-          <button id="discover" type="button">Scan</button>
-          <input id="server" value="" aria-label="ShadowScore server" placeholder="Custom server" />
-          <select id="rnbo-target" aria-label="Live client"></select>
-          <input id="assignee" value="" aria-label="ShadowScore assignee" placeholder="Assignee" />
-          <input id="device-id" value="" aria-label="ShadowScore device" placeholder="Device" />
-          <input id="client-id" value="" aria-label="ShadowScore client" placeholder="Client" />
-          <input id="assignment-label" value="" aria-label="ShadowScore assignment label" placeholder="Label" />
-          <input id="assignment-color" value="" aria-label="ShadowScore assignment color" placeholder="Color" />
-          <label class="check-label">
-            <input id="assignment-locked" type="checkbox" />
-            Locked
-          </label>
-          <button id="assign" type="button">Assign</button>
-          <button id="clear" class="danger-button" type="button">Clear Voice</button>
-          <input id="target" value="http://192.168.68.96:5678" aria-label="RNBO target" />
-          <input id="bridge" value="http://127.0.0.1:8790" aria-label="RNBO OSC bridge" />
-          <button id="refresh" type="button">Refresh</button>
-          <button id="sync" type="button">Sync</button>
-        </div>
-      </details>
       <div id="projection-header" class="projection-header" aria-live="polite">
         <div>
           <span>Playing</span>

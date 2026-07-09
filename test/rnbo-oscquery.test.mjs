@@ -279,6 +279,53 @@ test("extracts Plate OSC control targets from lowercase reverb params", () => {
   assert.equal(targets[0].parameters.length, 4);
 });
 
+test("extracts TTID OSC control targets from editor metadata", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "192.168.68.70",
+      port: 1234,
+      oscQuery: {
+        enabled: true,
+        url: "http://wren.local:5678/"
+      }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["12"] = {
+    CONTENTS: {
+      params: {
+        CONTENTS: {
+          ttid: {
+            ...rnboParam("/rnbo/inst/12/params/ttid", 2741, 0, 4095, 0),
+            CONTENTS: {
+              ...rnboParam("/rnbo/inst/12/params/ttid", 2741, 0, 4095, 0).CONTENTS,
+              meta: {
+                VALUE: "[\"ttid\", \"display_precision:0\", \"display_as:int\", \"edit_as:int\"]"
+              }
+            }
+          },
+          Root: rnboParam("/rnbo/inst/12/params/Root", 0, 0, 11, 1)
+        }
+      }
+    }
+  };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].id, "rnbo-inst-12:ttid");
+  assert.equal(targets[0].app, "ttid");
+  assert.equal(targets[0].label, "TTID 12");
+  assert.equal(targets[0].oscCapabilities.includes("ttid-edit"), true);
+  assert.deepEqual(targets[0].parameters[0].meta, {
+    tags: ["ttid", "display_precision:0", "display_as:int", "edit_as:int"],
+    editor: "ttid",
+    display_precision: 0,
+    display_as: "int",
+    edit_as: "int"
+  });
+});
+
 test("RNBOOSCQuery discovery returns an empty target list on fetch failure", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

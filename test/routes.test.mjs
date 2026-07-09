@@ -2317,7 +2317,7 @@ test("editor manifest route lists registered instrument editors", async () => {
   const context = createRouteContext();
   const response = await requestJson(context, "GET", "/editors/manifest");
 
-  assert.equal(response.editors.length, 2);
+  assert.equal(response.editors.length, 3);
   assert.deepEqual(response.editors, [
     {
       id: "poland",
@@ -2325,6 +2325,14 @@ test("editor manifest route lists registered instrument editors", async () => {
       route: "/editors/poland",
       targetFilter: {
         app: "poland"
+      }
+    },
+    {
+      id: "ttid",
+      label: "TTID",
+      route: "/editors/ttid",
+      targetFilter: {
+        app: "ttid"
       }
     },
     {
@@ -2469,6 +2477,20 @@ test("Poland editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /data-group="oscillator-a"/);
   assert.match(response.body, /VolA/);
   assert.match(response.body, /FilterKeyTracking/);
+});
+
+test("TTID editor route serves the OSC target integration page", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/ttid");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /TTID Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=ttid/);
+  assert.match(response.body, /editor: ttid/);
+  assert.match(response.body, /SCALES/);
+  assert.match(response.body, /ionian/);
+  assert.match(response.body, /formatMask/);
 });
 
 test("Plate editor route serves the OSC target integration page", async () => {
@@ -2643,6 +2665,40 @@ test("OSC target route exposes registered Poland control targets", async () => {
   assert.equal(response.targets[0].id, "heron:poland:main");
   assert.equal(response.targets[0].status, "online");
   assert.equal(response.targets[0].parameters[0].address, "/rnbo/inst/10/params/VolA");
+});
+
+test("OSC target route exposes registered TTID control targets", async () => {
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  registry.register({
+    id: "wren",
+    advertisedName: "Wren",
+    oscTargets: [{
+      id: "rnbo-inst-12:ttid",
+      label: "Quantizer 12",
+      host: "192.168.68.70",
+      port: 1234,
+      baseAddress: "/rnbo/inst/12",
+      app: "ttid",
+      instance: "main",
+      parameters: [{
+        name: "ttid",
+        address: "/rnbo/inst/12/params/ttid",
+        value: 2741,
+        min: 0,
+        max: 4095,
+        meta: { editor: "ttid", display_as: "int" }
+      }]
+    }]
+  }, { remoteAddress: "192.168.68.70" });
+  const context = createRouteContext({ runtime: { peerRegistry: registry } });
+
+  const response = await requestJson(context, "GET", "/osc/targets?app=ttid&capability=ttid-edit");
+
+  assert.equal(response.targets.length, 1);
+  assert.equal(response.targets[0].id, "wren:ttid:main");
+  assert.equal(response.targets[0].status, "online");
+  assert.equal(response.targets[0].capabilities.includes("ttid-edit"), true);
+  assert.equal(response.targets[0].parameters[0].meta.editor, "ttid");
 });
 
 test("OSC send route resolves named parameters per target", async () => {

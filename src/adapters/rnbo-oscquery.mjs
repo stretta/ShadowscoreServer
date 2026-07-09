@@ -243,6 +243,7 @@ function normalizeRnboParam(name, node) {
     return undefined;
   }
   const range = Array.isArray(node.RANGE) ? node.RANGE : [];
+  const meta = parseMetadata(node.CONTENTS);
   return withoutUndefined({
     name,
     address,
@@ -252,11 +253,11 @@ function normalizeRnboParam(name, node) {
     min: firstFinite(range.map((entry) => entry.MIN)),
     max: firstFinite(range.map((entry) => entry.MAX)),
     values: firstArray(range.map((entry) => entry.VALS)),
-    unit: stringField(node.CONTENTS?.unit?.VALUE) || undefined,
-    displayName: stringField(node.CONTENTS?.display_name?.VALUE) || name,
+    unit: stringField(meta?.unit ?? meta?.units ?? node.CONTENTS?.unit?.VALUE) || undefined,
+    displayName: stringField(meta?.display_name ?? node.CONTENTS?.display_name?.VALUE) || name,
     index: optionalFiniteNumber(node.CONTENTS?.index?.VALUE),
     normalized: optionalFiniteNumber(node.CONTENTS?.normalized?.VALUE),
-    meta: parseJsonObject(node.CONTENTS?.meta?.VALUE)
+    meta
   });
 }
 
@@ -282,11 +283,17 @@ function inferControlApp(name, parameters) {
   if (loweredName.startsWith("poland")) {
     return "poland";
   }
+  if (loweredName.startsWith("ttid")) {
+    return "ttid";
+  }
   if (loweredName.startsWith("plate")) {
     return "plate";
   }
   const parameterNames = new Set(parameters.map((param) => param.name));
   const loweredParameterNames = new Set(parameters.map((param) => stringField(param.name).toLowerCase()));
+  if (parameters.some(isTtidParameter)) {
+    return "ttid";
+  }
   if (parameterNames.has("VolA") && parameterNames.has("VolB") && parameterNames.has("WaveA") && parameterNames.has("WaveB")) {
     return "poland";
   }
@@ -294,6 +301,10 @@ function inferControlApp(name, parameters) {
     return "plate";
   }
   return "";
+}
+
+function isTtidParameter(param) {
+  return stringField(param?.meta?.editor).toLowerCase() === "ttid";
 }
 
 function hasAtLeastParameters(parameterNames, candidates, threshold) {
@@ -546,6 +557,85 @@ function firstArray(values) {
   return values.find((value) => Array.isArray(value));
 }
 
+function parseMetadata(contents) {
+  const metadata = {};
+  const applyTag = (value) => {
+    if (typeof value !== "string") {
+      return;
+    }
+    const text = value.trim();
+    if (!text) {
+      return;
+    }
+    const tags = Array.isArray(metadata.tags) ? metadata.tags : [];
+    if (!tags.includes(text)) {
+      tags.push(text);
+    }
+    metadata.tags = tags;
+
+    for (const separator of [":", "="]) {
+      if (!text.includes(separator)) {
+        continue;
+      }
+      const [key, ...rest] = text.split(separator);
+      const raw = rest.join(separator).trim();
+      const cleanKey = key.trim();
+      if (!cleanKey || !raw || metadata[cleanKey] !== undefined) {
+        return;
+      }
+      metadata[cleanKey] = parseScalar(raw);
+      return;
+    }
+
+    if (["ttid", "step16", "step 16", "pitch_display", "scope", "scope_display", "time_domain_scope"].includes(text.toLowerCase()) && metadata.editor === undefined) {
+      metadata.editor = text;
+    }
+  };
+
+  const rawMeta = contents?.meta?.VALUE;
+  if (typeof rawMeta === "string" && rawMeta.trim()) {
+    try {
+      const parsed = JSON.parse(rawMeta.trim());
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        Object.assign(metadata, parsed);
+      } else if (Array.isArray(parsed)) {
+        for (const item of parsed) {
+          applyTag(item);
+        }
+      } else {
+        applyTag(String(parsed));
+      }
+    } catch {
+      applyTag(rawMeta);
+    }
+  }
+
+  if (contents && typeof contents === "object") {
+    for (const [name, node] of Object.entries(contents)) {
+      if (name === "meta" || !node || typeof node !== "object" || !("VALUE" in node)) {
+        continue;
+      }
+      const value = node.VALUE;
+      if (!["editor", "display_name", "unit", "units", "ui_role", "display_as", "edit_as", "display_precision", "edit_step", "bool", "is_bool", "boolean", "label"].includes(name)) {
+        continue;
+      }
+      if (["string", "number", "boolean"].includes(typeof value) && String(value).trim()) {
+        metadata[name] = value;
+      }
+    }
+  }
+
+  return Object.keys(metadata).length ? metadata : undefined;
+}
+
+function parseScalar(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return value;
+  }
+}
+
 function parseJsonObject(value) {
   if (!value || typeof value !== "string") {
     return undefined;
@@ -560,6 +650,9 @@ function parseJsonObject(value) {
 
 function titleCase(value) {
   const text = stringField(value);
+  if (text.toLowerCase() === "ttid") {
+    return "TTID";
+  }
   return text ? `${text[0].toUpperCase()}${text.slice(1)}` : "RNBO";
 }
 

@@ -69,6 +69,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/editors/poland"]
       },
+      ttidEditor: {
+        root: "public/editors/ttid",
+        index: "index.html",
+        routes: ["/editors/ttid"]
+      },
       plateEditor: {
         root: "public/editors/plate",
         index: "index.html",
@@ -98,6 +103,14 @@ export const defaultConfig = Object.freeze({
       route: "/editors/poland",
       targetFilter: {
         app: "poland"
+      }
+    },
+    {
+      id: "ttid",
+      label: "TTID",
+      route: "/editors/ttid",
+      targetFilter: {
+        app: "ttid"
       }
     },
     {

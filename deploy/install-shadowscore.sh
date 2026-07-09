@@ -177,6 +177,11 @@ config.static.apps = {
     index: "index.html",
     routes: ["/editors/poland"]
   },
+  ttidEditor: {
+    root: "public/editors/ttid",
+    index: "index.html",
+    routes: ["/editors/ttid"]
+  },
   plateEditor: {
     root: "public/editors/plate",
     index: "index.html",
@@ -205,6 +210,14 @@ config.editors = [
     route: "/editors/poland",
     targetFilter: {
       app: "poland"
+    }
+  },
+  {
+    id: "ttid",
+    label: "TTID",
+    route: "/editors/ttid",
+    targetFilter: {
+      app: "ttid"
     }
   },
   {

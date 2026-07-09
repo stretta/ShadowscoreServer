@@ -1,0 +1,681 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>TTID Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    main {
+      display: grid;
+      gap: 14px;
+      margin: 0 auto;
+      padding: 18px 0 42px;
+      width: min(1180px, calc(100vw - 32px));
+    }
+
+    .top {
+      align-items: center;
+      display: flex;
+      gap: 16px;
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    h1,
+    h2 {
+      line-height: 1.1;
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 18px;
+    }
+
+    h2 {
+      font-size: 14px;
+    }
+
+    .subtitle,
+    .status,
+    .meta,
+    .empty-state {
+      color: var(--ss-muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+    }
+
+    .status {
+      max-width: 46vw;
+      overflow: hidden;
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toolbar,
+    .targets,
+    .editor-grid,
+    .editor-card {
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
+    }
+
+    .toolbar {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      padding: 10px;
+    }
+
+    .toolbar-actions,
+    .select-wrap {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+    }
+
+    select {
+      min-height: 34px;
+      min-width: 190px;
+      padding: 6px 8px;
+    }
+
+    .targets {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      padding: 10px;
+    }
+
+    .target-card {
+      align-items: flex-start;
+      background: var(--ss-surface);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-control);
+      color: var(--ss-text);
+      display: grid;
+      gap: 4px;
+      grid-template-columns: auto 1fr;
+      padding: 9px;
+    }
+
+    .target-card input {
+      margin: 2px 0 0;
+    }
+
+    .target-name,
+    .param-name {
+      color: var(--ss-text);
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .target-detail,
+    .param-detail {
+      color: var(--ss-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      grid-column: 2;
+      overflow-wrap: anywhere;
+    }
+
+    .editor-grid {
+      display: grid;
+      gap: 14px;
+      padding: 14px;
+    }
+
+    .editor-card {
+      display: grid;
+      gap: 14px;
+      padding: 14px;
+    }
+
+    .param-head {
+      align-items: start;
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+    }
+
+    .readout {
+      color: var(--ss-accent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 20px;
+      font-weight: 850;
+      text-align: right;
+    }
+
+    .keyboard {
+      height: 176px;
+      min-height: 152px;
+      position: relative;
+      width: 100%;
+    }
+
+    .key {
+      align-items: end;
+      background: transparent;
+      border: 1px solid rgba(184, 210, 224, 0.42);
+      border-radius: 0 0 7px 7px;
+      box-shadow:
+        inset 0 0 0 1px rgba(10, 16, 23, 0.7),
+        0 0 0 1px rgba(10, 16, 23, 0.52);
+      clip-path: var(--key-shape);
+      color: var(--ss-text);
+      display: flex;
+      font-size: 12px;
+      font-weight: 850;
+      justify-content: center;
+      left: var(--key-left);
+      min-height: 0;
+      padding: 9px 4px;
+      position: absolute;
+      top: 0;
+      width: var(--key-width);
+    }
+
+    .key::after {
+      background: rgba(217, 232, 239, 0.2);
+      content: "";
+      height: 10px;
+      left: 50%;
+      position: absolute;
+      top: 10px;
+      transform: translateX(-50%);
+      width: 1px;
+    }
+
+    .key.white {
+      height: 100%;
+      z-index: 1;
+    }
+
+    .key.black {
+      border-radius: 0 0 6px 6px;
+      height: 62%;
+      clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+      z-index: 2;
+    }
+
+    .key[data-active="true"] {
+      background: var(--ss-accent-strong);
+      border-color: rgba(7, 17, 10, 0.92);
+      box-shadow:
+        inset 0 0 0 1px rgba(7, 17, 10, 0.76),
+        0 0 0 1px rgba(10, 16, 23, 0.72);
+      color: #07110a;
+    }
+
+    .key[data-active="true"]::after {
+      background: rgba(7, 17, 10, 0.34);
+    }
+
+    .scale-row,
+    .roots {
+      display: grid;
+      gap: 8px;
+    }
+
+    .scale-row {
+      align-items: end;
+      grid-template-columns: minmax(160px, 1fr) minmax(190px, 1fr) auto;
+    }
+
+    .roots {
+      grid-template-columns: repeat(12, minmax(34px, 1fr));
+    }
+
+    .root-button[data-active="true"] {
+      background: var(--ss-accent-secondary);
+      border-color: var(--ss-accent-secondary);
+      color: #061015;
+    }
+
+    .empty-state {
+      border: 1px dashed var(--ss-border-strong);
+      border-radius: var(--ss-radius-ui);
+      padding: 14px;
+    }
+
+    @media (max-width: 760px) {
+      main {
+        width: min(100vw - 24px, 1180px);
+      }
+
+      .top,
+      .toolbar,
+      .param-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .status {
+        max-width: none;
+        text-align: left;
+        white-space: normal;
+      }
+
+      .toolbar-actions,
+      .select-wrap {
+        flex-wrap: wrap;
+        width: 100%;
+      }
+
+      select {
+        min-width: 0;
+        width: 100%;
+      }
+
+      .keyboard {
+        min-height: 136px;
+      }
+
+      .roots {
+        grid-template-columns: repeat(6, minmax(38px, 1fr));
+      }
+
+      .scale-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="ss-top-strip">
+    <div class="top">
+      <div>
+        <h1>TTID Editor</h1>
+        <p class="subtitle">12-tone integer dictionary masks from RNBO metadata</p>
+      </div>
+      <div id="status" class="status" role="status">Loading TTID targets...</div>
+    </div>
+  </header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
+    <a href="/">Dashboard</a>
+    <a href="/editors">Editors</a>
+    <a href="/editors/ttid" aria-current="page">TTID</a>
+    <a href="/tools/osc-volume">Volume</a>
+    <a href="/tools/osc-macros">Macros</a>
+  </nav>
+  <main>
+    <section class="toolbar" aria-label="TTID controls">
+      <div class="select-wrap">
+        <label for="param-select">Parameter</label>
+        <select id="param-select"></select>
+      </div>
+      <div class="toolbar-actions">
+        <button id="refresh" type="button">Refresh</button>
+        <button id="select-all" type="button">All Targets</button>
+      </div>
+    </section>
+    <section id="targets" class="targets" aria-label="OSC targets"></section>
+    <section id="editors" class="editor-grid" aria-live="polite"></section>
+  </main>
+  <script>
+    const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+    const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
+    const SCALES = Object.freeze({
+      "ionian": [0, 2, 4, 5, 7, 9, 11],
+      "dorian": [0, 2, 3, 5, 7, 9, 10],
+      "phrygian": [0, 1, 3, 5, 7, 8, 10],
+      "lydian": [0, 2, 4, 6, 7, 9, 11],
+      "mixolydian": [0, 2, 4, 5, 7, 9, 10],
+      "aeolian": [0, 2, 3, 5, 7, 8, 10],
+      "chromatic": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "harmonic-minor": [0, 2, 3, 5, 7, 8, 11],
+      "melodic-minor": [0, 2, 3, 5, 7, 9, 11],
+      "major-pentatonic": [0, 2, 4, 7, 9],
+      "minor-pentatonic": [0, 2, 3, 7, 8],
+      "lydian-augmented": [0, 2, 4, 6, 8, 9, 11],
+      "major-bebop": [0, 2, 4, 5, 7, 8, 9, 11],
+      "half-diminished": [0, 2, 3, 5, 6, 8, 10],
+      "lydian-dominant": [0, 2, 4, 6, 7, 9, 10],
+      "mixolydian-b6": [0, 2, 4, 5, 7, 8, 10],
+      "altered": [0, 1, 3, 4, 6, 8, 10],
+      "dorian-b2": [0, 1, 3, 5, 7, 9, 10],
+      "blues": [0, 3, 5, 6, 7, 10],
+      "5th-mode-of-harmonic-minor": [0, 1, 4, 5, 7, 8, 10],
+      "5th-mode-of-harmonic-major": [0, 1, 4, 5, 7, 9, 10],
+      "dominant-bebop": [0, 2, 4, 5, 7, 9, 10, 11],
+      "dominant-diminished": [0, 1, 3, 4, 6, 7, 9, 10],
+      "whole-tone": [0, 2, 4, 6, 8, 10]
+    });
+
+    const targetsEl = document.querySelector("#targets");
+    const editorsEl = document.querySelector("#editors");
+    const statusEl = document.querySelector("#status");
+    const refreshButton = document.querySelector("#refresh");
+    const selectAllButton = document.querySelector("#select-all");
+    const paramSelect = document.querySelector("#param-select");
+    let targets = [];
+    let ttidParams = [];
+    let paramState = new Map();
+    let scaleState = new Map();
+
+    refreshButton.addEventListener("click", () => refresh().catch(reportError));
+    selectAllButton.addEventListener("click", selectAllTargets);
+    paramSelect.addEventListener("change", renderEditors);
+
+    refresh().catch(reportError);
+
+    async function refresh() {
+      refreshButton.disabled = true;
+      const response = await fetch("/osc/targets?app=ttid&status=online", { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok || body.ok === false) {
+        throw new Error(body.error || `Request failed: ${response.status}`);
+      }
+      targets = body.targets || [];
+      ttidParams = collectTtidParams(targets);
+      paramState = mergeParamState(ttidParams);
+      renderTargets();
+      renderParamSelect();
+      renderEditors();
+      setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online TTID targets");
+      refreshButton.disabled = false;
+    }
+
+    function collectTtidParams(nextTargets) {
+      const byName = new Map();
+      for (const target of nextTargets) {
+        for (const param of target.parameters || []) {
+          if (String(param.meta?.editor || "").trim().toLowerCase() !== "ttid") continue;
+          if (!byName.has(param.name)) byName.set(param.name, { ...param, targetIds: [] });
+          byName.get(param.name).targetIds.push(target.id);
+        }
+      }
+      return Array.from(byName.values()).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999) || a.name.localeCompare(b.name));
+    }
+
+    function mergeParamState(nextParams) {
+      const next = new Map();
+      for (const param of nextParams) {
+        const old = paramState.get(param.name);
+        next.set(param.name, normalizeMask(old?.value ?? param.value ?? 0));
+      }
+      return next;
+    }
+
+    function renderTargets() {
+      const cards = targets.map((target) => {
+        const label = document.createElement("label");
+        label.className = "target-card";
+        label.innerHTML = `
+          <input type="checkbox" checked data-target="${escapeHtml(target.id)}">
+          <span class="target-name">${escapeHtml(target.label || target.id)}</span>
+          <span class="target-detail">${escapeHtml(target.unitId || "")} ${escapeHtml(target.baseAddress || "")}</span>
+        `;
+        return label;
+      });
+      targetsEl.replaceChildren(...cards);
+      if (!cards.length) targetsEl.innerHTML = `<div class="empty-state">No online TTID targets.</div>`;
+    }
+
+    function renderParamSelect() {
+      const selected = paramSelect.value;
+      const all = document.createElement("option");
+      all.value = "";
+      all.textContent = "All TTID parameters";
+      const options = ttidParams.map((param) => {
+        const option = document.createElement("option");
+        option.value = param.name;
+        option.textContent = `${labelFor(param)} (${param.targetIds.length})`;
+        return option;
+      });
+      paramSelect.replaceChildren(all, ...options);
+      paramSelect.value = ttidParams.some((param) => param.name === selected) ? selected : "";
+    }
+
+    function renderEditors() {
+      const selected = paramSelect.value;
+      const params = selected ? ttidParams.filter((param) => param.name === selected) : ttidParams;
+      const nodes = params.map(renderTtidParam);
+      editorsEl.replaceChildren(...nodes);
+      if (!nodes.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty-state";
+        empty.textContent = targets.length ? "No parameters with editor: ttid metadata were reported." : "No online TTID targets.";
+        editorsEl.append(empty);
+      }
+    }
+
+    function renderTtidParam(param) {
+      const card = document.createElement("article");
+      card.className = "editor-card";
+      card.dataset.param = param.name;
+
+      const mask = valueFor(param);
+      const scale = scaleFor(param.name);
+      const head = document.createElement("div");
+      head.className = "param-head";
+      head.innerHTML = `
+        <div>
+          <h2 class="param-name">${escapeHtml(labelFor(param))}</h2>
+          <div class="param-detail">${escapeHtml(param.name)} · ${param.targetIds.length} target${param.targetIds.length === 1 ? "" : "s"}</div>
+        </div>
+        <output class="readout">${formatMask(mask)}</output>
+      `;
+
+      const keyboard = document.createElement("div");
+      keyboard.className = "keyboard";
+      keyboard.replaceChildren(...ROOTS.map((name, pc) => renderKey(param, pc, name, mask)));
+
+      const roots = document.createElement("div");
+      roots.className = "roots";
+      roots.replaceChildren(...ROOTS.map((root, index) => {
+        const button = document.createElement("button");
+        button.className = "root-button";
+        button.type = "button";
+        button.textContent = root;
+        button.dataset.active = String(index === scale.root);
+        button.addEventListener("click", () => {
+          scale.root = index;
+          renderEditors();
+        });
+        return button;
+      }));
+
+      const row = document.createElement("div");
+      row.className = "scale-row";
+      const rootWrap = document.createElement("div");
+      rootWrap.replaceChildren(labelNode("Root"), roots);
+      const scaleWrap = document.createElement("div");
+      const select = document.createElement("select");
+      for (const name of scaleNames()) {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        select.append(option);
+      }
+      select.value = scale.name;
+      select.addEventListener("change", () => {
+        scale.name = select.value;
+        renderEditors();
+      });
+      scaleWrap.replaceChildren(labelNode("Scale"), select);
+      const load = document.createElement("button");
+      load.className = "primary";
+      load.type = "button";
+      load.textContent = "Load";
+      load.addEventListener("click", () => setMask(param, encodeScale(scale.root, scale.name)));
+      row.replaceChildren(rootWrap, scaleWrap, load);
+
+      card.replaceChildren(head, keyboard, row);
+      return card;
+    }
+
+    function renderKey(param, pc, name, mask) {
+      const button = document.createElement("button");
+      button.className = `key ${WHITE_PCS.has(pc) ? "white" : "black"}`;
+      button.type = "button";
+      button.textContent = name;
+      button.dataset.active = String(isPcOn(mask, pc));
+      const geometry = keyGeometry(pc);
+      button.style.setProperty("--key-left", geometry.left);
+      button.style.setProperty("--key-width", geometry.width);
+      button.style.setProperty("--key-shape", geometry.shape);
+      button.addEventListener("click", () => setMask(param, togglePc(valueFor(param), pc)));
+      return button;
+    }
+
+    function keyGeometry(pc) {
+      const whitePcs = [0, 2, 4, 5, 7, 9, 11];
+      const whiteIndex = whitePcs.indexOf(pc);
+      const whiteWidth = 100 / 7;
+      if (whiteIndex >= 0) {
+        return {
+          left: `${whiteIndex * whiteWidth}%`,
+          width: `${whiteWidth}%`,
+          shape: whiteKeyShape(pc)
+        };
+      }
+      const blackAnchors = new Map([
+        [1, 1],
+        [3, 2],
+        [6, 4],
+        [8, 5],
+        [10, 6]
+      ]);
+      const blackWidth = whiteWidth * 0.58;
+      const anchor = blackAnchors.get(pc) ?? 0;
+      return {
+        left: `${(anchor * whiteWidth) - (blackWidth / 2)}%`,
+        width: `${blackWidth}%`,
+        shape: "polygon(0 0, 100% 0, 100% 100%, 0 100%)"
+      };
+    }
+
+    function whiteKeyShape(pc) {
+      if ([0, 5].includes(pc)) {
+        return "polygon(0 0, 70% 0, 70% 60%, 100% 60%, 100% 100%, 0 100%)";
+      }
+      if ([2, 7, 9].includes(pc)) {
+        return "polygon(25% 0, 75% 0, 75% 60%, 100% 60%, 100% 100%, 0 100%, 0 60%, 25% 60%)";
+      }
+      return "polygon(30% 0, 100% 0, 100% 100%, 0 100%, 0 60%, 30% 60%)";
+    }
+
+    async function setMask(param, mask) {
+      const value = normalizeMask(mask);
+      paramState.set(param.name, value);
+      renderEditors();
+      await sendParam(param.name, value);
+    }
+
+    async function sendParam(param, value) {
+      const selected = selectedTargetsForParam(param);
+      if (selected.length === 0) {
+        setStatus("No targets selected");
+        return;
+      }
+      setStatus(`Sending ${labelFor({ name: param })}`);
+      const response = await fetch("/osc/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets: selected, param, args: [value] })
+      });
+      const body = await response.json().catch(() => ({}));
+      const sent = (body.results || []).filter((result) => result.ok).length;
+      if (!response.ok || body.ok === false) {
+        setStatus(`Failed ${labelFor({ name: param })} (${sent}/${selected.length})`);
+        return;
+      }
+      setStatus(`Sent ${labelFor({ name: param })} ${formatMask(value)} to ${sent}/${selected.length}`);
+    }
+
+    function selectedTargetsForParam(paramName) {
+      const param = ttidParams.find((entry) => entry.name === paramName);
+      const allowed = new Set(param?.targetIds || []);
+      return Array.from(document.querySelectorAll("[data-target]:checked"))
+        .map((input) => input.dataset.target)
+        .filter((id) => id && allowed.has(id));
+    }
+
+    function selectAllTargets() {
+      for (const input of document.querySelectorAll("[data-target]")) {
+        input.checked = true;
+      }
+    }
+
+    function scaleFor(paramName) {
+      if (!scaleState.has(paramName)) {
+        scaleState.set(paramName, { root: 0, name: "ionian" });
+      }
+      return scaleState.get(paramName);
+    }
+
+    function encodeScale(root, scaleName) {
+      return (SCALES[scaleName] || []).reduce((mask, pc) => mask | (1 << ((Number(pc) + Number(root)) % 12)), 0) & 0xFFF;
+    }
+
+    function valueFor(param) {
+      return normalizeMask(paramState.get(param.name) ?? param.value ?? 0);
+    }
+
+    function normalizeMask(value) {
+      return (Number(value) || 0) & 0xFFF;
+    }
+
+    function isPcOn(mask, pc) {
+      return (normalizeMask(mask) & (1 << (pc % 12))) !== 0;
+    }
+
+    function togglePc(mask, pc) {
+      return normalizeMask(mask) ^ (1 << (pc % 12));
+    }
+
+    function formatMask(mask) {
+      const value = normalizeMask(mask);
+      return `${value} / 0x${value.toString(16).toUpperCase().padStart(3, "0")}`;
+    }
+
+    function scaleNames() {
+      return Object.keys(SCALES).sort((a, b) => a.localeCompare(b));
+    }
+
+    function labelFor(param) {
+      return param.displayName || param.meta?.display_name || param.name || "TTID";
+    }
+
+    function labelNode(text) {
+      const label = document.createElement("div");
+      label.className = "meta";
+      label.textContent = text;
+      return label;
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function reportError(error) {
+      refreshButton.disabled = false;
+      setStatus(error.message || String(error));
+      editorsEl.innerHTML = `<div class="empty-state">${escapeHtml(error.message || String(error))}</div>`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+  </script>
+</body>
+</html>

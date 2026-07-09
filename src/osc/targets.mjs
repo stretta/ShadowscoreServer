@@ -192,6 +192,9 @@ function cleanToken(value) {
 
 function titleCase(value) {
   const text = stringField(value);
+  if (text.toLowerCase() === "ttid") {
+    return "TTID";
+  }
   return text ? `${text[0].toUpperCase()}${text.slice(1)}` : "OSC";
 }
 

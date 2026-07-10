@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ShadowScore Matrix Edit</title>
     <link rel="stylesheet" href="/shared/shadowscore-style.css" />
-    <script type="module" crossorigin src="/matrix-edit/assets/index-CA5ydSQl.js"></script>
-    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-CUIrJjWQ.css">
+    <script type="module" crossorigin src="/matrix-edit/assets/index-BggkRpK1.js"></script>
+    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-7k2Jdpbx.css">
   </head>
   <body>
     <nav class="ss-route-tabs" aria-label="ShadowScore routes">
@@ -24,8 +24,22 @@
           Chase
         </label>
         <select id="block" aria-label="Editing section"></select>
-        <select id="voice" aria-label="ShadowScore player"></select>
-        <span id="voice-color-swatch" class="voice-color-swatch" aria-hidden="true"></span>
+        <span class="voice-combobox">
+          <select id="voice" class="native-voice-select" aria-label="ShadowScore player" tabindex="-1"></select>
+          <button
+            id="voice-menu-button"
+            class="voice-menu-button"
+            type="button"
+            aria-haspopup="listbox"
+            aria-expanded="false"
+            aria-controls="voice-menu-options"
+          >
+            <span id="voice-color-swatch" class="voice-color-swatch" aria-hidden="true"></span>
+            <span id="voice-menu-label" class="voice-menu-label">No player</span>
+            <span class="voice-menu-chevron" aria-hidden="true"></span>
+          </button>
+          <span id="voice-menu-options" class="voice-menu-options" role="listbox" hidden></span>
+        </span>
         <select id="clip" aria-label="ShadowScore clip"></select>
         <button id="create-clip" type="button">Create Clip</button>
         <span id="routing-status" class="routing-status" aria-live="polite">Unassigned</span>

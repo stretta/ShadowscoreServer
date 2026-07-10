@@ -36,7 +36,12 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
 test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   const { html, js, css } = await readBuiltApp();
 
-  assert.match(html, /<select id="voice" aria-label="ShadowScore player"><\/select>/);
+  assert.match(html, /<span class="voice-combobox">/);
+  assert.match(html, /<select id="voice" class="native-voice-select" aria-label="ShadowScore player" tabindex="-1"><\/select>/);
+  assert.match(html, /id="voice-menu-button"/);
+  assert.match(html, /aria-controls="voice-menu-options"/);
+  assert.match(html, /id="voice-color-swatch"/);
+  assert.match(html, /id="voice-menu-options" class="voice-menu-options" role="listbox" hidden/);
   assert.match(html, /<select id="clip" aria-label="ShadowScore clip"><\/select>/);
   assert.match(html, /<select id="rnbo-target" aria-label="Live client"><\/select>/);
   assert.match(html, /id="routing-status"/);
@@ -78,6 +83,7 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(css, /webkit-inner-spin-button/);
   assert.match(css, /performance-toolbar/);
   assert.match(css, /advanced-panel/);
+  assert.match(css, /voice-menu-option/);
   assert.match(css, /--ss-bg:\s*#111821/);
   assert.match(css, /ss-route-tabs/);
   assert.match(css, /routing-status/);

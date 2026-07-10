@@ -359,6 +359,7 @@
       <section class="panel" aria-label="Selected block assignments">
         <div class="panel-header">
           <h2>Block Assignments</h2>
+          <button id="duplicate-block" type="button">Duplicate Block</button>
           <button class="danger" id="delete-block" type="button">Remove Block</button>
         </div>
         <div class="panel-body">
@@ -463,6 +464,7 @@
       server: document.querySelector("#server"),
       blockList: document.querySelector("#block-list"),
       addBlock: document.querySelector("#add-block"),
+      duplicateBlock: document.querySelector("#duplicate-block"),
       deleteBlock: document.querySelector("#delete-block"),
       blockId: document.querySelector("#block-id"),
       durationUnit: document.querySelector("#duration-unit"),
@@ -503,6 +505,7 @@
         void loadServer(els.server.value);
       });
       els.addBlock.addEventListener("click", addBlock);
+      els.duplicateBlock.addEventListener("click", duplicateBlock);
       els.deleteBlock.addEventListener("click", deleteBlock);
       els.revertBlock.addEventListener("click", () => {
         if (state.selectedBlockId) {
@@ -930,6 +933,42 @@
       }
     }
 
+    async function duplicateBlock() {
+      if (!state.score || !state.selectedBlockId) {
+        return;
+      }
+      if (state.blockDirty && !window.confirm("Discard unsaved block edits before duplicating?")) {
+        return;
+      }
+      const sourceBlockId = state.selectedBlockId;
+      const targetBlockId = normalizeId(window.prompt(`Duplicate block ${sourceBlockId} as`, nextBlockId()));
+      if (!targetBlockId) {
+        return;
+      }
+      setStatus(`Duplicating ${sourceBlockId} as ${targetBlockId}...`);
+      try {
+        state.saving = true;
+        state.score = await fetchJson(`${state.serverUrl}/mesostructure/${encodeURIComponent(sourceBlockId)}/duplicate`, undefined, {
+          method: "POST",
+          body: {
+            blockId: targetBlockId,
+            ...expectedStructureRevisionFields()
+          }
+        });
+        state.selectedBlockId = targetBlockId;
+        state.blockDirty = false;
+        state.client?.revertDraft(blockDraftKey(sourceBlockId));
+        state.client?.adoptServerScore(state.score);
+        renderAll();
+        setStatus(`Duplicated ${sourceBlockId} as ${targetBlockId}.`);
+      } catch (error) {
+        setStatus(`Duplicate failed: ${error.message}`);
+      } finally {
+        state.saving = false;
+        updateButtons();
+      }
+    }
+
     async function saveBlock() {
       if (!state.score || !state.selectedBlockId) {
         return;
@@ -1351,6 +1390,7 @@
       const hasScore = Boolean(state.score);
       const hasBlock = Boolean(state.selectedBlockId && currentBlock());
       els.addBlock.disabled = !hasScore || state.saving;
+      els.duplicateBlock.disabled = !hasBlock || state.saving;
       els.deleteBlock.disabled = !hasBlock || state.saving;
       els.saveBlock.disabled = !hasBlock || !state.blockDirty || state.saving;
       els.revertBlock.disabled = !state.blockDirty || state.saving;

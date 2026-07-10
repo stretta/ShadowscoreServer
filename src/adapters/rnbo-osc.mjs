@@ -597,6 +597,7 @@ export function shouldSendScoreTransaction(event) {
     event.type === "clip.renamed" ||
     event.type === "clip.removed" ||
     event.type === "mesostructure.block.replaced" ||
+    event.type === "mesostructure.block.duplicated" ||
     event.type === "mesostructure.block.removed" ||
     event.type === "macrostructure.updated" ||
     event.type === "structure.playhead.updated" ||

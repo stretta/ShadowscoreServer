@@ -134,6 +134,64 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "mesostructure.block.removed", score, { blockId: id }, options);
       return structuredClone(score);
     },
+    duplicateMesoBlock(sourceBlockId, targetBlockId, options = {}) {
+      const sourceId = normalizeBlockId(sourceBlockId);
+      const targetId = normalizeBlockId(targetBlockId);
+      const sourceBlock = score.mesostructure[sourceId];
+      if (!sourceBlock) {
+        throw new Error(`unknown mesostructural block '${sourceId}'`);
+      }
+      if (score.mesostructure[targetId]) {
+        throw new Error(`mesostructural block '${targetId}' already exists`);
+      }
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+
+      const nextClips = { ...score.clips };
+      const clipCopies = new Map();
+      const copiedClips = [];
+      const players = {};
+      for (const [playerId, assignment] of Object.entries(sourceBlock.players ?? {})) {
+        const clipId = assignment?.clipId;
+        if (!clipId) {
+          players[playerId] = structuredClone(assignment);
+          continue;
+        }
+        if (!nextClips[clipId]) {
+          throw new Error(`assigned clip '${clipId}' for ${sourceId}/${playerId} does not exist`);
+        }
+        if (!clipCopies.has(clipId)) {
+          const nextClipId = uniqueClipIdForDuplicate(nextClips, clipId, sourceId, targetId);
+          nextClips[nextClipId] = structuredClone(nextClips[clipId]);
+          clipCopies.set(clipId, nextClipId);
+          copiedClips.push({ sourceClipId: clipId, clipId: nextClipId });
+        }
+        players[playerId] = {
+          ...structuredClone(assignment),
+          clipId: clipCopies.get(clipId)
+        };
+      }
+
+      const block = {
+        ...structuredClone(sourceBlock),
+        players
+      };
+      score = {
+        ...score,
+        ...nextRevisionFields(score, { structure: true }),
+        clips: nextClips,
+        mesostructure: {
+          ...score.mesostructure,
+          [targetId]: block
+        }
+      };
+      emitChange(events, "mesostructure.block.duplicated", score, {
+        sourceBlockId: sourceId,
+        blockId: targetId,
+        copiedClips
+      }, options);
+      return structuredClone(score);
+    },
     updateMacrostructure(macrostructureDocument, options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
       assertExpectedRevisions(score, options);
@@ -865,6 +923,27 @@ function renameClipReferences(mesostructure, oldClipId, newClipId) {
       }
     ])
   );
+}
+
+function uniqueClipIdForDuplicate(clips, sourceClipId, sourceBlockId, targetBlockId) {
+  const sourcePrefix = `${sourceBlockId.toLowerCase()}-`;
+  const targetPrefix = `${targetBlockId.toLowerCase()}-`;
+  const base = sourceClipId.toLowerCase().startsWith(sourcePrefix)
+    ? `${targetPrefix}${sourceClipId.slice(sourcePrefix.length)}`
+    : `${targetPrefix}${sourceClipId}`;
+  return uniqueId(base, clips);
+}
+
+function uniqueId(base, existing) {
+  const cleanBase = normalizeClipId(base);
+  if (!existing[cleanBase]) {
+    return cleanBase;
+  }
+  let index = 2;
+  while (existing[`${cleanBase}-${index}`]) {
+    index += 1;
+  }
+  return `${cleanBase}-${index}`;
 }
 
 function normalizeMesostructure(mesostructureDocument) {

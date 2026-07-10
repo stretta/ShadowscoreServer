@@ -115,6 +115,46 @@ test("mesostructural blocks can be added, replaced, and removed at runtime", () 
   assert.deepEqual(removed.macrostructure.blocks, ["A", "B"]);
 });
 
+test("mesostructural blocks can be duplicated with independent assigned clips", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+
+  const duplicated = store.duplicateMesoBlock("A", "G");
+  assert.equal(duplicated.scoreRevision, 1);
+  assert.equal(duplicated.structureRevision, 1);
+  assert.deepEqual(duplicated.mesostructure.G.duration, duplicated.mesostructure.A.duration);
+  assert.equal(duplicated.mesostructure.A.players["player-1"].clipId, "a-player-1");
+  assert.equal(duplicated.mesostructure.G.players["player-1"].clipId, "g-player-1");
+  assert.notEqual(
+    duplicated.mesostructure.G.players["player-1"].clipId,
+    duplicated.mesostructure.A.players["player-1"].clipId
+  );
+  assert.deepEqual(duplicated.clips["g-player-1"], duplicated.clips["a-player-1"]);
+
+  const edited = store.replaceClip("g-player-1", {
+    ...duplicated.clips["g-player-1"],
+    notes: [{ pitch: 36, start_time: 0, duration: 1, velocity: 100 }]
+  });
+  assert.equal(edited.clips["g-player-1"].notes[0].pitch, 36);
+  assert.notEqual(edited.clips["a-player-1"].notes[0].pitch, 36);
+});
+
+test("mesostructural block duplication preserves shared clip assignments inside the copy", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+
+  store.replaceMesoBlock("A", {
+    duration: { bars: 4 },
+    players: {
+      "player-1": { clipId: "a-player-1" },
+      "player-2": { clipId: "a-player-1" }
+    }
+  });
+  const duplicated = store.duplicateMesoBlock("A", "G");
+
+  assert.equal(duplicated.mesostructure.G.players["player-1"].clipId, "g-player-1");
+  assert.equal(duplicated.mesostructure.G.players["player-2"].clipId, "g-player-1");
+  assert.equal(Object.keys(duplicated.clips).filter((clipId) => clipId === "g-player-1").length, 1);
+});
+
 test("clips can be added, replaced, renamed, and removed", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
 

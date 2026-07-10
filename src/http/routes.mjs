@@ -745,6 +745,17 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  const mesoBlockDuplicateMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/duplicate$/);
+  if (request.method === "POST" && mesoBlockDuplicateMatch) {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, store.duplicateMesoBlock(decodeURIComponent(mesoBlockDuplicateMatch[1]), body.blockId ?? body.id, revisionOptions(body)));
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
   const mesoBlockMatch = url.pathname.match(/^\/mesostructure\/([^/]+)$/);
   if ((request.method === "POST" || request.method === "DELETE") && mesoBlockMatch) {
     try {

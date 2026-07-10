@@ -1037,6 +1037,7 @@ test("RNBO adapter resends score transactions when assignments change", () => {
   assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.replaced", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "clip.replaced", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "mesostructure.block.replaced", detail: {} }), true);
+  assert.equal(shouldSendScoreTransaction({ type: "mesostructure.block.duplicated", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "macrostructure.updated", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "structure.playhead.updated", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.cleared", detail: {} }), false);

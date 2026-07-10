@@ -1251,6 +1251,25 @@ test("clip routes expose and mutate reusable clips", async () => {
   assert.match(rejected.body, /clip 'bass-main' is assigned in A\/player-1/);
 });
 
+test("mesostructure duplicate route copies assigned clips for the new block", async () => {
+  const context = createRouteContext();
+
+  const duplicated = await requestJson(context, "POST", "/mesostructure/A/duplicate", {
+    blockId: "G"
+  });
+
+  assert.equal(duplicated.mesostructure.G.players["player-1"].clipId, "g-player-1");
+  assert.deepEqual(duplicated.clips["g-player-1"], duplicated.clips["a-player-1"]);
+  assert.equal(duplicated.macrostructure.blocks.includes("G"), false);
+
+  const edited = await requestJson(context, "POST", "/clips/g-player-1", {
+    ...duplicated.clips["g-player-1"],
+    notes: [{ pitch: 35, start_time: 0, duration: 1, velocity: 100 }]
+  });
+  assert.equal(edited.clips["g-player-1"].notes[0].pitch, 35);
+  assert.notEqual(edited.clips["a-player-1"].notes[0].pitch, 35);
+});
+
 test("admin reset route can restore seeded structure", async () => {
   const context = createRouteContext();
 
@@ -2431,10 +2450,12 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /ShadowScore Structure Editor/);
   assert.match(response.body, /Block Assignments/);
   assert.match(response.body, /Assigned Clip/);
+  assert.match(response.body, /Duplicate Block/);
   assert.match(response.body, /Song Form/);
   assert.match(response.body, /Cue Section/);
   assert.match(response.body, /id="block-list"/);
   assert.match(response.body, /id="players"/);
+  assert.match(response.body, /id="duplicate-block"/);
   assert.match(response.body, /id="chain"/);
   assert.match(response.body, /id="active-block"/);
   assert.match(response.body, /id="set-active-block"/);
@@ -2448,6 +2469,7 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /formatRemaining/);
   assert.match(response.body, /Create new clip/);
   assert.match(response.body, /persistMacrostructure\("Updating playback chain/);
+  assert.match(response.body, /\/mesostructure\/\$\{encodeURIComponent\(sourceBlockId\)\}\/duplicate/);
   assert.match(response.body, /\/mesostructure\/\$\{encodeURIComponent\(nextId\)\}/);
   assert.match(response.body, /\/clips\/\$\{encodeURIComponent\(clipId\)\}/);
   assert.match(response.body, /\/macrostructure/);

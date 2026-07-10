@@ -391,6 +391,7 @@ function shouldReschedule(event) {
     event.type === "structure.playhead.updated" ||
     event.type === "macrostructure.updated" ||
     event.type === "mesostructure.block.replaced" ||
+    event.type === "mesostructure.block.duplicated" ||
     event.type === "mesostructure.block.removed" ||
     (event.type === "admin.reset" && event.detail?.structure)
   );

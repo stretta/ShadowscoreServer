@@ -204,10 +204,11 @@ export function extractRnboControlTargets(tree, config) {
 
 function controlTargetForInstance(instanceId, node, name, config) {
   const parameters = extractRnboParams(node);
-  if (parameters.length === 0) {
+  const inputPorts = extractRnboInputPorts(instanceId, node);
+  if (parameters.length === 0 && inputPorts.length === 0) {
     return undefined;
   }
-  const app = inferControlApp(name, parameters);
+  const app = inferControlApp(name, parameters, inputPorts);
   if (!app) {
     return undefined;
   }
@@ -227,6 +228,7 @@ function controlTargetForInstance(instanceId, node, name, config) {
     instance,
     oscCapabilities: ["editor", "volume", "preset", `${app}-edit`],
     parameters,
+    inputPorts,
     source: "rnbooscquery",
     available: true
   });
@@ -235,6 +237,14 @@ function controlTargetForInstance(instanceId, node, name, config) {
 function extractRnboParams(instanceNode) {
   const contents = instanceNode?.CONTENTS?.params?.CONTENTS ?? instanceNode?.CONTENTS?.parameters?.CONTENTS ?? {};
   return Object.entries(contents).map(([name, node]) => normalizeRnboParam(name, node)).filter(Boolean).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999));
+}
+
+function extractRnboInputPorts(instanceId, instanceNode) {
+  const contents = instanceNode?.CONTENTS?.messages?.CONTENTS?.in?.CONTENTS ?? {};
+  return Object.entries(contents)
+    .map(([name, node]) => normalizeRnboInputPort(instanceId, name, node))
+    .filter(Boolean)
+    .sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999) || a.name.localeCompare(b.name));
 }
 
 function normalizeRnboParam(name, node) {
@@ -261,6 +271,23 @@ function normalizeRnboParam(name, node) {
   });
 }
 
+function normalizeRnboInputPort(instanceId, name, node) {
+  const address = normalizeAddress(node?.FULL_PATH) || joinAddress(`/rnbo/inst/${instanceId}/messages/in`, name);
+  if (!address || address.includes("/meta")) {
+    return undefined;
+  }
+  const meta = parseMetadata(node?.CONTENTS);
+  return withoutUndefined({
+    name,
+    address,
+    type: stringField(node?.TYPE) || undefined,
+    value: node?.VALUE,
+    displayName: stringField(meta?.display_name ?? node?.CONTENTS?.display_name?.VALUE) || name,
+    index: optionalFiniteNumber(node?.CONTENTS?.index?.VALUE),
+    meta
+  });
+}
+
 function rnboInstanceNames(tree) {
   const names = new Map();
   const properties = tree?.CONTENTS?.rnbo?.CONTENTS?.jack?.CONTENTS?.info?.CONTENTS?.ports?.CONTENTS?.properties?.CONTENTS ?? {};
@@ -278,7 +305,7 @@ function rnboInstanceNames(tree) {
   return names;
 }
 
-function inferControlApp(name, parameters) {
+function inferControlApp(name, parameters, inputPorts = []) {
   const loweredName = stringField(name).toLowerCase();
   if (loweredName.startsWith("poland")) {
     return "poland";
@@ -289,8 +316,12 @@ function inferControlApp(name, parameters) {
   if (loweredName.startsWith("plate")) {
     return "plate";
   }
+  if (loweredName.startsWith("listsequencer") || loweredName.startsWith("list sequencer")) {
+    return "listsequencer";
+  }
   const parameterNames = new Set(parameters.map((param) => param.name));
   const loweredParameterNames = new Set(parameters.map((param) => stringField(param.name).toLowerCase()));
+  const loweredInputPortNames = new Set(inputPorts.map((inputPort) => stringField(inputPort.name).toLowerCase()));
   if (parameters.some(isTtidParameter)) {
     return "ttid";
   }
@@ -299,6 +330,9 @@ function inferControlApp(name, parameters) {
   }
   if (hasAtLeastParameters(loweredParameterNames, ["decay", "predelay", "damping", "damp", "diffusion", "diff", "size", "mix", "wet", "dry"], 2)) {
     return "plate";
+  }
+  if (hasAtLeastParameters(loweredInputPortNames, ["steps", "primaryrotation", "secondaryrotation", "velocity", "duration"], 3)) {
+    return "listsequencer";
   }
   return "";
 }

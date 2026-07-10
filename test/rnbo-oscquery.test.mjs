@@ -326,6 +326,87 @@ test("extracts TTID OSC control targets from editor metadata", () => {
   });
 });
 
+test("extracts ListSequencer OSC control targets with message inports and TTID params", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "192.168.68.70",
+      port: 1234,
+      oscQuery: {
+        enabled: true,
+        url: "http://wren.local:5678/"
+      }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.jack = {
+    CONTENTS: {
+      info: {
+        CONTENTS: {
+          ports: {
+            CONTENTS: {
+              properties: {
+                CONTENTS: {
+                  "ListSequencer-13:out1": {
+                    VALUE: "{\"rnbo-instance-id\":13,\"source\":true,\"type\":\"audio\"}"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["13"] = {
+    CONTENTS: {
+      params: {
+        CONTENTS: {
+          ClockRate: rnboParam("/rnbo/inst/13/params/ClockRate", "16n", undefined, undefined, 0),
+          Root: rnboParam("/rnbo/inst/13/params/Root", 60, 0, 127, 1),
+          Scale: {
+            ...rnboParam("/rnbo/inst/13/params/Scale", 2741, 0, 4095, 2),
+            CONTENTS: {
+              ...rnboParam("/rnbo/inst/13/params/Scale", 2741, 0, 4095, 2).CONTENTS,
+              meta: {
+                VALUE: "{\"display_precision\":\"0\",\"editor\":\"ttid\"}"
+              }
+            }
+          }
+        }
+      },
+      messages: {
+        CONTENTS: {
+          in: {
+            CONTENTS: {
+              Steps: rnboInport("/rnbo/inst/13/messages/in/Steps"),
+              PrimaryRotation: rnboInport("/rnbo/inst/13/messages/in/PrimaryRotation"),
+              SecondaryRotation: rnboInport("/rnbo/inst/13/messages/in/SecondaryRotation"),
+              Velocity: rnboInport("/rnbo/inst/13/messages/in/Velocity"),
+              Duration: rnboInport("/rnbo/inst/13/messages/in/Duration")
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].id, "rnbo-inst-13:listsequencer");
+  assert.equal(targets[0].app, "listsequencer");
+  assert.equal(targets[0].label, "Listsequencer 13");
+  assert.equal(targets[0].oscCapabilities.includes("listsequencer-edit"), true);
+  assert.deepEqual(targets[0].inputPorts.map((inputPort) => inputPort.name), [
+    "Duration",
+    "PrimaryRotation",
+    "SecondaryRotation",
+    "Steps",
+    "Velocity"
+  ]);
+  assert.equal(targets[0].parameters.find((param) => param.name === "Scale")?.meta?.editor, "ttid");
+});
+
 test("RNBOOSCQuery discovery returns an empty target list on fetch failure", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
@@ -498,6 +579,19 @@ function rnboParam(path, value, min, max, index) {
         VALUE: ""
       },
       unit: {
+        VALUE: ""
+      }
+    }
+  };
+}
+
+function rnboInport(path) {
+  return {
+    FULL_PATH: path,
+    TYPE: "",
+    VALUE: [],
+    CONTENTS: {
+      meta: {
         VALUE: ""
       }
     }

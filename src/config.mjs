@@ -79,6 +79,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/editors/plate"]
       },
+      listSequencerEditor: {
+        root: "public/editors/listsequencer",
+        index: "index.html",
+        routes: ["/editors/listsequencer"]
+      },
       shared: {
         root: "public/shared",
         index: "index.html",
@@ -119,6 +124,14 @@ export const defaultConfig = Object.freeze({
       route: "/editors/plate",
       targetFilter: {
         app: "plate"
+      }
+    },
+    {
+      id: "listsequencer",
+      label: "ListSequencer",
+      route: "/editors/listsequencer",
+      targetFilter: {
+        app: "listsequencer"
       }
     }
   ],

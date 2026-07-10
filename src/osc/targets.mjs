@@ -45,6 +45,7 @@ function normalizeOscTarget(target, index) {
     baseAddress: target.baseAddress ?? baseAddressFromRnboTarget(target),
     address,
     parameters: normalizeParameters(target.parameters),
+    inputPorts: normalizeInputPorts(target.inputPorts),
     rnboTargetId: target.id,
     localTargetId: localId,
     source: target.source,
@@ -71,6 +72,21 @@ function normalizeParameters(parameters) {
     normalized: parameter.normalized,
     meta: parameter.meta
   })).filter((parameter) => parameter.name && parameter.address);
+}
+
+function normalizeInputPorts(inputPorts) {
+  if (!Array.isArray(inputPorts)) {
+    return [];
+  }
+  return inputPorts.map((inputPort) => ({
+    name: stringField(inputPort.name),
+    address: normalizeAddress(inputPort.address),
+    type: stringField(inputPort.type) || undefined,
+    value: inputPort.value,
+    displayName: stringField(inputPort.displayName) || stringField(inputPort.name),
+    index: inputPort.index,
+    meta: inputPort.meta
+  })).filter((inputPort) => inputPort.name && inputPort.address);
 }
 
 function stableOscTargetId(target, unitId, app, instance, localId) {

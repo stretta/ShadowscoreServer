@@ -1,0 +1,667 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ListSequencer Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+    }
+
+    main {
+      display: grid;
+      gap: 12px;
+      margin: 0 auto;
+      padding: 16px 0 32px;
+      width: min(960px, calc(100vw - 28px));
+    }
+
+    .top {
+      align-items: center;
+      display: flex;
+      gap: 14px;
+      justify-content: space-between;
+      width: 100%;
+    }
+
+    h1,
+    h2 {
+      line-height: 1.1;
+      margin: 0;
+    }
+
+    h1 {
+      font-size: 18px;
+    }
+
+    h2 {
+      font-size: 14px;
+    }
+
+    .subtitle,
+    .status,
+    .meta,
+    .empty-state {
+      color: var(--ss-muted);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .subtitle {
+      margin: 4px 0 0;
+    }
+
+    .status {
+      max-width: 46vw;
+      overflow: hidden;
+      text-align: right;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .toolbar,
+    .targets,
+    .panel,
+    .text-row,
+    .ttid-card {
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
+    }
+
+    .toolbar {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      padding: 10px;
+    }
+
+    .toolbar-actions {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+    }
+
+    .targets {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      padding: 10px;
+    }
+
+    .target-card {
+      align-items: start;
+      background: var(--ss-surface);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-control);
+      display: grid;
+      gap: 3px 8px;
+      grid-template-columns: auto 1fr;
+      padding: 8px;
+    }
+
+    .target-card input {
+      grid-row: 1 / span 2;
+      margin: 2px 0 0;
+    }
+
+    .target-name,
+    .control-name {
+      color: var(--ss-text);
+      font-weight: 800;
+      overflow-wrap: anywhere;
+    }
+
+    .target-detail,
+    .control-detail {
+      color: var(--ss-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 11px;
+      overflow-wrap: anywhere;
+    }
+
+    .panel {
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .text-row {
+      align-items: end;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(150px, 0.8fr) minmax(180px, 1.6fr) auto;
+      padding: 10px;
+    }
+
+    .text-row input[type="text"] {
+      min-height: 34px;
+      min-width: 0;
+      width: 100%;
+    }
+
+    .ttid-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    }
+
+    .ttid-card {
+      display: grid;
+      gap: 9px;
+      padding: 10px;
+    }
+
+    .ttid-head {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+    }
+
+    .readout {
+      color: var(--ss-accent);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      font-weight: 850;
+      text-align: right;
+    }
+
+    .keyboard {
+      height: 86px;
+      min-height: 86px;
+      position: relative;
+      width: 100%;
+    }
+
+    .key {
+      align-items: end;
+      background: transparent;
+      border: 1px solid rgba(184, 210, 224, 0.42);
+      border-radius: 0 0 5px 5px;
+      box-shadow: inset 0 0 0 1px rgba(10, 16, 23, 0.62);
+      clip-path: var(--key-shape);
+      color: var(--ss-text);
+      display: flex;
+      font-size: 10px;
+      font-weight: 850;
+      justify-content: center;
+      left: var(--key-left);
+      min-height: 0;
+      padding: 5px 2px;
+      position: absolute;
+      top: 0;
+      width: var(--key-width);
+    }
+
+    .key.white {
+      height: 100%;
+      z-index: 1;
+    }
+
+    .key.black {
+      border-radius: 0 0 4px 4px;
+      clip-path: polygon(0 0, 100% 0, 100% 100%, 0 100%);
+      height: 58%;
+      z-index: 2;
+    }
+
+    .key[data-active="true"] {
+      background: var(--ss-accent-strong);
+      border-color: rgba(7, 17, 10, 0.92);
+      color: #07110a;
+    }
+
+    .scale-row {
+      align-items: end;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(130px, 1fr) minmax(150px, 1fr) auto;
+    }
+
+    .roots {
+      display: grid;
+      gap: 5px;
+      grid-template-columns: repeat(6, minmax(30px, 1fr));
+    }
+
+    .root-button {
+      min-height: 28px;
+      padding: 4px 5px;
+    }
+
+    .root-button[data-active="true"] {
+      background: var(--ss-accent-secondary);
+      border-color: var(--ss-accent-secondary);
+      color: #061015;
+    }
+
+    .empty-state {
+      border: 1px dashed var(--ss-border-strong);
+      border-radius: var(--ss-radius-ui);
+      padding: 12px;
+    }
+
+    @media (max-width: 720px) {
+      main {
+        width: min(100vw - 24px, 960px);
+      }
+
+      .top,
+      .toolbar,
+      .ttid-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .status {
+        max-width: none;
+        text-align: left;
+        white-space: normal;
+      }
+
+      .text-row,
+      .scale-row {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header class="ss-top-strip">
+    <div class="top">
+      <div>
+        <h1>ListSequencer Editor</h1>
+        <p class="subtitle">Message inports and compact TTID scale control</p>
+      </div>
+      <div id="status" class="status" role="status">Loading ListSequencer targets...</div>
+    </div>
+  </header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
+    <a href="/">Dashboard</a>
+    <a href="/editors">Editors</a>
+    <a href="/editors/listsequencer" aria-current="page">ListSequencer</a>
+    <a href="/tools/osc-volume">Volume</a>
+    <a href="/tools/osc-macros">Macros</a>
+  </nav>
+  <main>
+    <section class="toolbar" aria-label="ListSequencer controls">
+      <div class="meta">Send values to selected live targets</div>
+      <div class="toolbar-actions">
+        <button id="refresh" type="button">Refresh</button>
+        <button id="select-all" type="button">All Targets</button>
+      </div>
+    </section>
+    <section id="targets" class="targets" aria-label="OSC targets"></section>
+    <section id="inports" class="panel" aria-live="polite"></section>
+    <section id="ttid" class="ttid-grid" aria-live="polite"></section>
+  </main>
+  <script>
+    const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+    const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
+    const SCALES = Object.freeze({
+      "ionian": [0, 2, 4, 5, 7, 9, 11],
+      "dorian": [0, 2, 3, 5, 7, 9, 10],
+      "phrygian": [0, 1, 3, 5, 7, 8, 10],
+      "lydian": [0, 2, 4, 6, 7, 9, 11],
+      "mixolydian": [0, 2, 4, 5, 7, 9, 10],
+      "aeolian": [0, 2, 3, 5, 7, 8, 10],
+      "chromatic": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+      "harmonic-minor": [0, 2, 3, 5, 7, 8, 11],
+      "melodic-minor": [0, 2, 3, 5, 7, 9, 11],
+      "major-pentatonic": [0, 2, 4, 7, 9],
+      "minor-pentatonic": [0, 2, 3, 7, 8],
+      "whole-tone": [0, 2, 4, 6, 8, 10]
+    });
+
+    const targetsEl = document.querySelector("#targets");
+    const inportsEl = document.querySelector("#inports");
+    const ttidEl = document.querySelector("#ttid");
+    const statusEl = document.querySelector("#status");
+    const refreshButton = document.querySelector("#refresh");
+    const selectAllButton = document.querySelector("#select-all");
+    let targets = [];
+    let inputPorts = [];
+    let ttidParams = [];
+    let ttidState = new Map();
+    let scaleState = new Map();
+
+    refreshButton.addEventListener("click", () => refresh().catch(reportError));
+    selectAllButton.addEventListener("click", selectAllTargets);
+
+    refresh().catch(reportError);
+
+    async function refresh() {
+      refreshButton.disabled = true;
+      const body = await fetchJson("/osc/targets?app=listsequencer&status=online");
+      targets = body.targets || [];
+      inputPorts = collectInputPorts(targets);
+      ttidParams = collectTtidParams(targets);
+      ttidState = mergeTtidState(ttidParams);
+      renderTargets();
+      renderInports();
+      renderTtid();
+      setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListSequencer targets");
+      refreshButton.disabled = false;
+    }
+
+    async function fetchJson(url) {
+      const response = await fetch(url, { cache: "no-store" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) {
+        throw new Error(body.error || `${url}: ${response.status} ${response.statusText}`);
+      }
+      return body;
+    }
+
+    function collectInputPorts(nextTargets) {
+      const byName = new Map();
+      for (const target of nextTargets) {
+        for (const inputPort of target.inputPorts || []) {
+          if (!byName.has(inputPort.name)) byName.set(inputPort.name, { ...inputPort, targetIds: [] });
+          byName.get(inputPort.name).targetIds.push(target.id);
+        }
+      }
+      return Array.from(byName.values()).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999) || a.name.localeCompare(b.name));
+    }
+
+    function collectTtidParams(nextTargets) {
+      const byName = new Map();
+      for (const target of nextTargets) {
+        for (const param of target.parameters || []) {
+          if (String(param.meta?.editor || "").trim().toLowerCase() !== "ttid") continue;
+          if (!byName.has(param.name)) byName.set(param.name, { ...param, targetIds: [] });
+          byName.get(param.name).targetIds.push(target.id);
+        }
+      }
+      return Array.from(byName.values()).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999) || a.name.localeCompare(b.name));
+    }
+
+    function mergeTtidState(nextParams) {
+      const next = new Map();
+      for (const param of nextParams) {
+        const old = ttidState.get(param.name);
+        next.set(param.name, normalizeMask(old ?? param.value ?? 0));
+      }
+      return next;
+    }
+
+    function renderTargets() {
+      const cards = targets.map((target) => {
+        const label = document.createElement("label");
+        label.className = "target-card";
+        label.innerHTML = `
+          <input type="checkbox" checked data-target="${escapeHtml(target.id)}">
+          <span class="target-name">${escapeHtml(target.label || target.id)}</span>
+          <span class="target-detail">${escapeHtml(target.unitId || "")} ${escapeHtml(target.baseAddress || "")}</span>
+        `;
+        return label;
+      });
+      targetsEl.replaceChildren(...cards);
+      if (!cards.length) targetsEl.innerHTML = `<div class="empty-state">No online ListSequencer targets.</div>`;
+    }
+
+    function renderInports() {
+      const rows = inputPorts.map(renderInputPort);
+      inportsEl.replaceChildren(...rows);
+      if (!rows.length) inportsEl.innerHTML = `<div class="empty-state">No ListSequencer message inports reported.</div>`;
+    }
+
+    function renderInputPort(inputPort) {
+      const row = document.createElement("article");
+      row.className = "text-row";
+      const inputId = `input-${cssToken(inputPort.name)}`;
+      row.innerHTML = `
+        <div>
+          <div class="control-name">${escapeHtml(labelFor(inputPort))}</div>
+          <div class="control-detail">${escapeHtml(inputPort.name)} · ${inputPort.targetIds.length}</div>
+        </div>
+        <input id="${inputId}" type="text" autocomplete="off" spellcheck="false">
+        <button type="button">Send</button>
+      `;
+      const input = row.querySelector("input");
+      const button = row.querySelector("button");
+      button.addEventListener("click", () => sendAddress(inputPort, parseArgs(input.value)));
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "Enter") {
+          event.preventDefault();
+          sendAddress(inputPort, parseArgs(input.value));
+        }
+      });
+      return row;
+    }
+
+    function renderTtid() {
+      const cards = ttidParams.map(renderTtidParam);
+      ttidEl.replaceChildren(...cards);
+      if (!cards.length) ttidEl.innerHTML = `<div class="empty-state">No compact TTID parameter reported.</div>`;
+    }
+
+    function renderTtidParam(param) {
+      const card = document.createElement("article");
+      card.className = "ttid-card";
+      const mask = valueFor(param);
+      const scale = scaleFor(param.name);
+      const head = document.createElement("div");
+      head.className = "ttid-head";
+      head.innerHTML = `
+        <div>
+          <h2 class="control-name">${escapeHtml(labelFor(param))}</h2>
+          <div class="control-detail">${escapeHtml(param.name)} · ${param.targetIds.length}</div>
+        </div>
+        <output class="readout">${formatMask(mask)}</output>
+      `;
+
+      const keyboard = document.createElement("div");
+      keyboard.className = "keyboard";
+      keyboard.replaceChildren(...ROOTS.map((name, pc) => renderKey(param, pc, name, mask)));
+
+      const roots = document.createElement("div");
+      roots.className = "roots";
+      roots.replaceChildren(...ROOTS.map((root, index) => {
+        const button = document.createElement("button");
+        button.className = "root-button";
+        button.type = "button";
+        button.textContent = root;
+        button.dataset.active = String(index === scale.root);
+        button.addEventListener("click", () => {
+          scale.root = index;
+          renderTtid();
+        });
+        return button;
+      }));
+
+      const select = document.createElement("select");
+      for (const name of Object.keys(SCALES).sort((a, b) => a.localeCompare(b))) {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        select.append(option);
+      }
+      select.value = scale.name;
+      select.addEventListener("change", () => {
+        scale.name = select.value;
+        renderTtid();
+      });
+
+      const load = document.createElement("button");
+      load.className = "primary";
+      load.type = "button";
+      load.textContent = "Load";
+      load.addEventListener("click", () => setMask(param, encodeScale(scale.root, scale.name)));
+
+      const row = document.createElement("div");
+      row.className = "scale-row";
+      row.replaceChildren(wrapControl("Root", roots), wrapControl("Scale", select), load);
+      card.replaceChildren(head, keyboard, row);
+      return card;
+    }
+
+    function renderKey(param, pc, name, mask) {
+      const button = document.createElement("button");
+      button.className = `key ${WHITE_PCS.has(pc) ? "white" : "black"}`;
+      button.type = "button";
+      button.textContent = name;
+      button.dataset.active = String(isPcOn(mask, pc));
+      const geometry = keyGeometry(pc);
+      button.style.setProperty("--key-left", geometry.left);
+      button.style.setProperty("--key-width", geometry.width);
+      button.style.setProperty("--key-shape", geometry.shape);
+      button.addEventListener("click", () => setMask(param, togglePc(valueFor(param), pc)));
+      return button;
+    }
+
+    function keyGeometry(pc) {
+      const whitePcs = [0, 2, 4, 5, 7, 9, 11];
+      const whiteWidth = 100 / 7;
+      const whiteIndex = whitePcs.indexOf(pc);
+      if (whiteIndex >= 0) {
+        return { left: `${whiteIndex * whiteWidth}%`, width: `${whiteWidth}%`, shape: whiteKeyShape(pc) };
+      }
+      const blackAnchors = new Map([[1, 1], [3, 2], [6, 4], [8, 5], [10, 6]]);
+      const blackWidth = whiteWidth * 0.58;
+      const anchor = blackAnchors.get(pc) ?? 0;
+      return { left: `${(anchor * whiteWidth) - (blackWidth / 2)}%`, width: `${blackWidth}%`, shape: "polygon(0 0, 100% 0, 100% 100%, 0 100%)" };
+    }
+
+    function whiteKeyShape(pc) {
+      if ([0, 5].includes(pc)) return "polygon(0 0, 70% 0, 70% 58%, 100% 58%, 100% 100%, 0 100%)";
+      if ([2, 7, 9].includes(pc)) return "polygon(25% 0, 75% 0, 75% 58%, 100% 58%, 100% 100%, 0 100%, 0 58%, 25% 58%)";
+      return "polygon(30% 0, 100% 0, 100% 100%, 0 100%, 0 58%, 30% 58%)";
+    }
+
+    async function sendAddress(inputPort, args) {
+      const selected = selectedTargetsFor(inputPort.targetIds);
+      if (!selected.length) {
+        setStatus("No targets selected");
+        return;
+      }
+      const body = await postOsc({ targets: selected, address: inputPort.address, args });
+      const sent = (body.results || []).filter((result) => result.ok).length;
+      setStatus(`Sent ${labelFor(inputPort)} to ${sent}/${selected.length}`);
+    }
+
+    async function setMask(param, mask) {
+      const value = normalizeMask(mask);
+      ttidState.set(param.name, value);
+      renderTtid();
+      const selected = selectedTargetsFor(param.targetIds);
+      if (!selected.length) {
+        setStatus("No targets selected");
+        return;
+      }
+      const body = await postOsc({ targets: selected, param: param.name, args: [value] });
+      const sent = (body.results || []).filter((result) => result.ok).length;
+      setStatus(`Sent ${labelFor(param)} ${formatMask(value)} to ${sent}/${selected.length}`);
+    }
+
+    async function postOsc(payload) {
+      const response = await fetch("/osc/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) {
+        throw new Error(body.error || `OSC send failed: ${response.status}`);
+      }
+      return body;
+    }
+
+    function selectedTargetsFor(allowedIds) {
+      const allowed = new Set(allowedIds || []);
+      return Array.from(document.querySelectorAll("[data-target]:checked"))
+        .map((input) => input.dataset.target)
+        .filter((id) => id && allowed.has(id));
+    }
+
+    function selectAllTargets() {
+      for (const input of document.querySelectorAll("[data-target]")) {
+        input.checked = true;
+      }
+    }
+
+    function parseArgs(text) {
+      const trimmed = String(text ?? "").trim();
+      if (!trimmed) return [];
+      return trimmed.split(/[\s,]+/g).filter(Boolean).map((part) => {
+        const number = Number(part);
+        return Number.isFinite(number) && part !== "" ? number : part;
+      });
+    }
+
+    function scaleFor(paramName) {
+      if (!scaleState.has(paramName)) {
+        scaleState.set(paramName, { root: 0, name: "ionian" });
+      }
+      return scaleState.get(paramName);
+    }
+
+    function encodeScale(root, scaleName) {
+      return (SCALES[scaleName] || []).reduce((mask, pc) => mask | (1 << ((Number(pc) + Number(root)) % 12)), 0) & 0xFFF;
+    }
+
+    function valueFor(param) {
+      return normalizeMask(ttidState.get(param.name) ?? param.value ?? 0);
+    }
+
+    function normalizeMask(value) {
+      return (Number(value) || 0) & 0xFFF;
+    }
+
+    function isPcOn(mask, pc) {
+      return (normalizeMask(mask) & (1 << (pc % 12))) !== 0;
+    }
+
+    function togglePc(mask, pc) {
+      return normalizeMask(mask) ^ (1 << (pc % 12));
+    }
+
+    function formatMask(mask) {
+      const value = normalizeMask(mask);
+      return `${value} / 0x${value.toString(16).toUpperCase().padStart(3, "0")}`;
+    }
+
+    function labelFor(control) {
+      return control.displayName || control.meta?.display_name || control.name || "Control";
+    }
+
+    function wrapControl(label, node) {
+      const wrapper = document.createElement("div");
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      meta.textContent = label;
+      wrapper.replaceChildren(meta, node);
+      return wrapper;
+    }
+
+    function cssToken(value) {
+      return String(value ?? "").replace(/[^a-zA-Z0-9_-]/g, "-");
+    }
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function reportError(error) {
+      refreshButton.disabled = false;
+      setStatus(error.message || String(error));
+      inportsEl.innerHTML = `<div class="empty-state">${escapeHtml(error.message || String(error))}</div>`;
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;"
+      }[char]));
+    }
+  </script>
+</body>
+</html>

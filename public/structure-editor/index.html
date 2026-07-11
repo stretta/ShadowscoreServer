@@ -100,7 +100,12 @@
     .panel-body {
       display: grid;
       gap: 12px;
+      min-width: 0;
       padding: 12px;
+    }
+
+    .panel-body > * {
+      min-width: 0;
     }
 
     label {
@@ -245,13 +250,21 @@
     .chain {
       display: grid;
       gap: 8px;
+      min-width: 0;
     }
 
     .playhead {
       align-items: end;
       display: grid;
       gap: 8px;
-      grid-template-columns: minmax(140px, 1fr) repeat(5, minmax(88px, auto));
+      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      min-width: 0;
+    }
+
+    .playhead > label,
+    .playback-status {
+      grid-column: 1 / -1;
+      min-width: 0;
     }
 
     .playback-status {
@@ -278,6 +291,11 @@
       display: grid;
       gap: 8px;
       grid-template-columns: 34px minmax(0, 1fr) auto;
+      min-width: 0;
+    }
+
+    .chain-row > * {
+      min-width: 0;
     }
 
     .chain-index {

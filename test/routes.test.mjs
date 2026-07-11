@@ -2474,6 +2474,8 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /id="macro-playback-status"/);
   assert.match(response.body, /id="macro-playback-state"/);
   assert.match(response.body, /id="macro-playback-detail"/);
+  assert.match(response.body, /repeat\(auto-fit, minmax\(110px, 1fr\)\)/);
+  assert.match(response.body, /\.panel-body > \* \{\s+min-width: 0;/);
   assert.match(response.body, /formatRemaining/);
   assert.match(response.body, /Create new clip/);
   assert.match(response.body, /persistMacrostructure\("Updating playback chain/);

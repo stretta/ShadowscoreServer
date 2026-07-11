@@ -8,10 +8,12 @@ import {
   snapBeat,
   velocityFromLanePosition
 } from "/piano-roll/clip-editor-core.js";
+import { createClipDraftStore } from "/piano-roll/clip-draft-store.js";
 
 const $ = (id) => document.getElementById(id);
 const ui = { block:$("block"), player:$("player"), clip:$("clip"), grid:$("grid"), zoomX:$("zoom-x"), zoomY:$("zoom-y"), save:$("save"), revert:$("revert"), dirty:$("dirty"), editing:$("editing"), playing:$("playing"), selection:$("selection"), status:$("status"), roll:$("roll"), velocity:$("velocity"), rollScroll:$("roll-scroll"), velocityScroll:$("velocity-scroll"), velocityValue:$("velocity-value") };
 const ctx = ui.roll.getContext("2d"); const vctx = ui.velocity.getContext("2d");
+const draftStore=createClipDraftStore();
 const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, drag:null, playback:null, dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, minPitch:36, maxPitch:84 };
 
 const clone = (value) => structuredClone(value);
@@ -36,9 +38,8 @@ function playerColor(player){ return state.score?.assignments?.[player]?.color |
 
 async function loadScore(preserve=false){
   try { const response=await fetch("/score",{cache:"no-store"}); if(!response.ok) throw new Error(`HTTP ${response.status}`); const score=await response.json();
-    if(state.dirty && preserve && score.version !== state.score?.version){ state.stale=true; markDirty(); status("Server score changed. Revert or Save to resolve the stale draft."); return; }
     if(preserve && score.version === state.score?.version){ state.score=score; updateLabels(); render(); return; }
-    state.score=score; state.stale=false; populateSelectors(preserve); loadClip(); status(`Score revision ${score.scoreRevision ?? score.version}. Draft edits save explicitly.`); render();
+    state.score=score;draftStore.reconcile(score);populateSelectors(preserve);loadClip(true);const entry=activeDraftEntry();status(entry?.stale?`${state.clipId} changed on the server. Revert before continuing or review it in Event List.`:`Score revision ${score.scoreRevision ?? score.version}. ${draftStore.dirtyCount()} unsaved clip draft${draftStore.dirtyCount()===1?"":"s"}.`);render();
   } catch(error){ status(`Load failed: ${error.message}`,true); }
 }
 function populateSelectors(preserve){
@@ -46,11 +47,12 @@ function populateSelectors(preserve){
   const oldPlayer=preserve?ui.player.value:""; const p=players(); setOptions(ui.player,p,p.includes(oldPlayer)?oldPlayer:p[0]||"",v=>state.score?.assignments?.[v]?.label||v);
   const oldClip=preserve?ui.clip.value:""; const c=clipsForPlayer(); setOptions(ui.clip,c,c.includes(oldClip)?oldClip:c[0]||"");
 }
-function loadClip(){ state.clipId=ui.clip.value; const clip=state.score?.clips?.[state.clipId]; state.snapshot=clip?clone(clip):null; state.draft=clip?clone(clip):{notes:[],duration:{bars:1},playbackType:"looped",context:{clip:{},grid:{subdivision:16}},behavior:{}}; state.selected=-1; state.dirty=false; state.stale=false; updateLabels(); markDirty(); }
+function loadClip(preserveSelection=false){ state.clipId=ui.clip.value; const clip=state.score?.clips?.[state.clipId]||{notes:[],duration:{bars:1},playbackType:"looped",context:{clip:{},grid:{subdivision:16}},behavior:{}};const entry=draftStore.open(state.clipId,clip,state.score?.version);state.snapshot=entry.snapshot;state.draft=entry.draft;state.dirty=entry.dirty;state.stale=entry.stale;if(!preserveSelection)state.selected=-1; updateLabels(); markDirty(); }
+function activeDraftEntry(){return draftStore.get(state.clipId);}
 function updateLabels(){ ui.editing.textContent=state.clipId?`${ui.block.value} · ${ui.player.options[ui.player.selectedIndex]?.text || ui.player.value} · ${state.clipId}`:"No assigned clip"; ui.playing.textContent=state.score?.structureState?.activeBlockId||"Stopped"; updateSelection(); }
 function updateSelection(){ const n=selectedNote(); ui.selection.textContent=n?`#${noteId(n,state.selected)} · ${n.pitch} · ${fmt(n.start_time)} + ${fmt(n.duration)}`:"None"; ui.velocityValue.value=n?String(n.velocity):"—"; }
-function markDirty(){ ui.save.disabled=!state.dirty||!state.clipId; ui.revert.disabled=!state.dirty; ui.dirty.textContent=state.stale?"Stale draft":state.dirty?"Unsaved":"Saved"; ui.dirty.className=`badge${state.stale?" stale":state.dirty?" dirty":""}`; }
-function mutate(fn){ fn(); state.dirty=true; markDirty(); updateSelection(); render(); }
+function markDirty(){const entry=activeDraftEntry();if(entry){state.dirty=entry.dirty;state.stale=entry.stale;}ui.save.disabled=!state.dirty||!state.clipId||state.stale; ui.revert.disabled=!state.dirty&&!state.stale;const count=draftStore.dirtyCount();ui.dirty.textContent=state.stale?"Stale draft":count?`${count} unsaved`:"Saved"; ui.dirty.className=`badge${state.stale?" stale":count?" dirty":""}`; }
+function mutate(fn){ fn();const entry=draftStore.markDirty(state.clipId);if(entry)entry.draft=state.draft; markDirty(); updateSelection(); render(); }
 function status(message,error=false){ ui.status.textContent=message; ui.status.style.color=error?"var(--ss-warn)":""; }
 function fmt(n){ return Number(n).toFixed(3).replace(/\.0+$|(?<=\.[0-9]*)0+$/g,""); }
 
@@ -82,15 +84,14 @@ ui.velocity.addEventListener("pointerdown",event=>{const p=pointer(event);const 
 ui.velocity.addEventListener("pointermove",event=>{if(state.drag?.kind==="velocity")editVelocity(pointer(event).y);});ui.velocity.addEventListener("pointerup",()=>state.drag=null);ui.velocity.addEventListener("pointercancel",cancelDrag);
 function editVelocity(y){if(!selectedNote())return;mutate(()=>selectedNote().velocity=velocityFromLanePosition(y,112));}
 function nextNoteId(){return Math.max(0,...(state.draft?.notes||[]).map((n,i)=>Number(noteId(n,i))||0))+1;}
-function cancelDrag(){if(!state.drag)return;if(state.drag.created)state.draft.notes.splice(state.selected,1);else if(state.drag.note&&selectedNote())state.draft.notes[state.selected]=state.drag.note;state.dirty=state.drag.wasDirty;state.drag=null;if(state.selected>=state.draft.notes.length)state.selected=state.draft.notes.length-1;markDirty();updateSelection();render();}
+function cancelDrag(){if(!state.drag)return;if(state.drag.created)state.draft.notes.splice(state.selected,1);else if(state.drag.note&&selectedNote())state.draft.notes[state.selected]=state.drag.note;const entry=activeDraftEntry();if(entry){entry.dirty=state.drag.wasDirty;entry.draft=state.draft;}state.drag=null;if(state.selected>=state.draft.notes.length)state.selected=state.draft.notes.length-1;markDirty();updateSelection();render();}
 
 ui.roll.addEventListener("keydown",event=>{const note=selectedNote();if(event.key==="Escape"){state.selected=-1;updateSelection();render();return;}if(!note)return;if(event.key==="Delete"||event.key==="Backspace"){event.preventDefault();mutate(()=>{state.draft.notes.splice(state.selected,1);state.selected=Math.min(state.selected,state.draft.notes.length-1);});return;}const directions={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"};const direction=directions[event.key];if(!direction)return;event.preventDefault();mutate(()=>{state.draft.notes[state.selected]=nudgeNote(note,{direction,resize:event.shiftKey,subdivision:Number(ui.grid.value),clipDuration:clipBeats()});});});
 
 async function loadPlayback(){try{const response=await fetch("/macrostructure/playback",{cache:"no-store"});if(!response.ok)return;const playback=await response.json();state.playback={...playback,playing:Boolean(playback.running)};ui.playing.textContent=state.playback.playing?`${state.playback.activeBlockId} · beat ${fmt(state.playback.beatIntoBlock??0)}`:"Stopped";render();}catch{}}
 
-ui.block.addEventListener("change",()=>{if(!confirmDiscard())return;populateSelectors(true);loadClip();resize();});ui.player.addEventListener("change",()=>{if(!confirmDiscard())return;setOptions(ui.clip,clipsForPlayer(),clipsForPlayer()[0]||"");loadClip();resize();});ui.clip.addEventListener("change",()=>{if(!confirmDiscard())return;loadClip();resize();});
-function confirmDiscard(){return !state.dirty||confirm("Discard unsaved piano-roll edits?");}
-ui.revert.addEventListener("click",()=>{state.draft=clone(state.snapshot);state.dirty=false;state.stale=false;state.selected=-1;markDirty();updateSelection();resize();status("Draft reverted to the last server version.");});
-ui.save.addEventListener("click",async()=>{try{ui.save.disabled=true;status("Saving clip…");const response=await fetch(`/clips/${encodeURIComponent(state.clipId)}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({clip:state.draft,expectedVersion:state.score.version})});const payload=await response.json();if(!response.ok)throw new Error(payload.error||`HTTP ${response.status}`);state.score=payload;state.snapshot=clone(payload.clips[state.clipId]);state.draft=clone(state.snapshot);state.dirty=false;state.stale=false;markDirty();status(`Saved ${state.clipId} at score revision ${payload.scoreRevision??payload.version}.`);render();}catch(error){state.stale=/stale|version/i.test(error.message);markDirty();status(`Save failed: ${error.message}`,true);}});
-[ui.grid,ui.zoomX,ui.zoomY].forEach(control=>control.addEventListener("input",resize));ui.rollScroll.addEventListener("scroll",()=>{ui.velocityScroll.scrollLeft=ui.rollScroll.scrollLeft;});addEventListener("resize",resize);addEventListener("beforeunload",event=>{if(state.dirty){event.preventDefault();event.returnValue="";}});
+ui.block.addEventListener("change",()=>{populateSelectors(true);loadClip();resize();});ui.player.addEventListener("change",()=>{setOptions(ui.clip,clipsForPlayer(),clipsForPlayer()[0]||"");loadClip();resize();});ui.clip.addEventListener("change",()=>{loadClip();resize();});
+ui.revert.addEventListener("click",()=>{const entry=draftStore.revert(state.clipId);state.snapshot=entry.snapshot;state.draft=entry.draft;state.selected=-1;markDirty();updateSelection();resize();status(`Reverted ${state.clipId} to its last server snapshot.`);});
+ui.save.addEventListener("click",async()=>{try{ui.save.disabled=true;status("Saving clip…");const entry=activeDraftEntry();const response=await fetch(`/clips/${encodeURIComponent(state.clipId)}`,{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({clip:state.draft,expectedVersion:entry.baseVersion})});const payload=await response.json();if(!response.ok)throw new Error(payload.error||`HTTP ${response.status}`);state.score=payload;draftStore.saved(state.clipId,payload.clips[state.clipId],payload.version);draftStore.reconcile(payload);loadClip(true);markDirty();status(`Saved ${state.clipId} at score revision ${payload.scoreRevision??payload.version}. ${draftStore.dirtyCount()} unsaved draft${draftStore.dirtyCount()===1?"":"s"} remain.`);render();}catch(error){const entry=activeDraftEntry();if(entry)entry.stale=/stale|version/i.test(error.message);markDirty();status(`Save failed: ${error.message}`,true);}});
+[ui.grid,ui.zoomX,ui.zoomY].forEach(control=>control.addEventListener("input",resize));ui.rollScroll.addEventListener("scroll",()=>{ui.velocityScroll.scrollLeft=ui.rollScroll.scrollLeft;});addEventListener("resize",resize);addEventListener("beforeunload",event=>{if(draftStore.hasDirty()){event.preventDefault();event.returnValue="";}});
 setInterval(()=>loadScore(true),5000);setInterval(loadPlayback,250);await loadScore();await loadPlayback();resize();

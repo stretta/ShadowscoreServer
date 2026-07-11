@@ -17,7 +17,7 @@ test("Piano Roll exposes explicit draft controls and editing surfaces", async ()
 
 test("Piano Roll saves revision-aware clip drafts and supports right-edge resize", async () => {
   const js = await readFile(jsUrl, "utf8");
-  assert.match(js, /expectedVersion:state\.score\.version/);
+  assert.match(js, /expectedVersion:entry\.baseVersion/);
   assert.match(js, /kind:right-p\.x<=9\?"resize":"move"/);
   assert.match(js, /resizeNoteRight/);
   assert.match(js, /moveNote/);
@@ -27,6 +27,9 @@ test("Piano Roll saves revision-aware clip drafts and supports right-edge resize
   assert.match(js, /addEventListener\("keydown"/);
   assert.match(js, /nudgeNote/);
   assert.match(js, /pointercancel",cancelDrag/);
+  assert.match(js, /createClipDraftStore/);
+  assert.match(js, /draftStore\.reconcile/);
+  assert.match(js, /expectedVersion:entry\.baseVersion/);
   assert.match(js, /state\.draft\.notes\.push/);
   assert.match(js, /Save failed:/);
 });

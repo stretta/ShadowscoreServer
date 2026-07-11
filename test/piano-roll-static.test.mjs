@@ -18,6 +18,8 @@ test("Piano Roll saves revision-aware clip drafts and supports right-edge resize
   const js = await readFile(jsUrl, "utf8");
   assert.match(js, /expectedVersion:state\.score\.version/);
   assert.match(js, /kind:right-p\.x<=9\?"resize":"move"/);
+  assert.match(js, /resizeNoteRight/);
+  assert.match(js, /moveNote/);
   assert.match(js, /state\.draft\.notes\.push/);
   assert.match(js, /Save failed:/);
 });

@@ -1,14 +1,22 @@
+import {
+  clamp,
+  hitTestNotes,
+  moveNote,
+  resizeNoteRight,
+  snapBeat,
+  velocityFromLanePosition
+} from "/piano-roll/clip-editor-core.js";
+
 const $ = (id) => document.getElementById(id);
 const ui = { block:$("block"), player:$("player"), clip:$("clip"), grid:$("grid"), zoomX:$("zoom-x"), zoomY:$("zoom-y"), save:$("save"), revert:$("revert"), dirty:$("dirty"), editing:$("editing"), playing:$("playing"), selection:$("selection"), status:$("status"), roll:$("roll"), velocity:$("velocity"), rollScroll:$("roll-scroll"), velocityScroll:$("velocity-scroll"), velocityValue:$("velocity-value") };
 const ctx = ui.roll.getContext("2d"); const vctx = ui.velocity.getContext("2d");
 const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, drag:null, dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, minPitch:36, maxPitch:84 };
 
 const clone = (value) => structuredClone(value);
-const clamp = (n,a,b) => Math.max(a,Math.min(b,n));
 const assignmentId = (value) => typeof value === "string" ? value : value?.clipId || "";
 const beatWidth = () => Number(ui.zoomX.value);
 const rowHeight = () => Number(ui.zoomY.value);
-const snap = (beat) => Math.round(beat * Number(ui.grid.value)) / Number(ui.grid.value);
+const snap = (beat) => snapBeat(beat, Number(ui.grid.value));
 const noteId = (note,index) => note.note_id ?? index + 1;
 const clipBeats = (clip=state.draft) => Math.max(1, Number(clip?.duration?.beats || 0) + Number(clip?.duration?.bars || 0) * timeSignature().numerator || maxNoteEnd(clip) || 4);
 const maxNoteEnd = (clip) => Math.ceil(Math.max(0,...(clip?.notes||[]).map(n=>Number(n.start_time)+Number(n.duration))));
@@ -59,13 +67,13 @@ function drawVelocity(){ prep(vctx);const w=ui.velocity.width/state.dpr,h=112;vc
 function pitchName(p){const names=["C","C♯","D","E♭","E","F","F♯","G","A♭","A","B♭","B"];return `${names[p%12]}${Math.floor(p/12)-1}`;}
 
 function pointer(event,lane){ const rect=event.currentTarget.getBoundingClientRect(); return {x:event.clientX-rect.left,y:event.clientY-rect.top}; }
-function hitNote(x,y){ const pitch=Math.round(state.maxPitch-(y-state.top)/rowHeight()); const candidates=(state.draft?.notes||[]).map((note,index)=>({note,index})).filter(({note})=>Number(note.pitch)===pitch&&x>=state.left+Number(note.start_time)*beatWidth()&&x<=state.left+(Number(note.start_time)+Number(note.duration))*beatWidth());return candidates.at(-1); }
+function hitNote(x,y){ return hitTestNotes(state.draft?.notes||[], { pitch:Math.round(state.maxPitch-(y-state.top)/rowHeight()), time:(x-state.left)/beatWidth() }); }
 ui.roll.addEventListener("pointerdown",event=>{ if(!state.clipId)return; const p=pointer(event);const hit=hitNote(p.x,p.y);ui.roll.setPointerCapture(event.pointerId);if(hit){state.selected=hit.index;const right=state.left+(Number(hit.note.start_time)+Number(hit.note.duration))*beatWidth();state.drag={kind:right-p.x<=9?"resize":"move",start:p,note:clone(hit.note)};}else{const start=Math.max(0,snap((p.x-state.left)/beatWidth()));const pitch=clamp(Math.round(state.maxPitch-(p.y-state.top)/rowHeight()),0,127);mutate(()=>{state.draft.notes.push({note_id:nextNoteId(),pitch,start_time:start,duration:1/Number(ui.grid.value),velocity:100,mute:0,probability:1,velocity_deviation:0,release_velocity:64});state.selected=state.draft.notes.length-1;});state.drag={kind:"resize",start:p,note:clone(selectedNote())};}updateSelection();render();});
-ui.roll.addEventListener("pointermove",event=>{if(!state.drag)return;const p=pointer(event);const dx=(p.x-state.drag.start.x)/beatWidth(),dy=Math.round((p.y-state.drag.start.y)/rowHeight());mutate(()=>{const n=selectedNote();if(state.drag.kind==="move"){n.start_time=clamp(snap(Number(state.drag.note.start_time)+dx),0,clipBeats()-1/Number(ui.grid.value));n.pitch=clamp(Number(state.drag.note.pitch)-dy,0,127);}else n.duration=clamp(snap(Number(state.drag.note.duration)+dx),1/Number(ui.grid.value),clipBeats()-Number(n.start_time));});});
+ui.roll.addEventListener("pointermove",event=>{if(!state.drag)return;const p=pointer(event);const dx=(p.x-state.drag.start.x)/beatWidth(),dy=Math.round((p.y-state.drag.start.y)/rowHeight());mutate(()=>{const next=state.drag.kind==="move"?moveNote(state.drag.note,{deltaTime:dx,deltaPitch:-dy,subdivision:Number(ui.grid.value),clipDuration:clipBeats()}):resizeNoteRight(state.drag.note,{deltaTime:dx,subdivision:Number(ui.grid.value),clipDuration:clipBeats()});state.draft.notes[state.selected]=next;});});
 ui.roll.addEventListener("pointerup",()=>state.drag=null);ui.roll.addEventListener("pointercancel",()=>state.drag=null);
 ui.velocity.addEventListener("pointerdown",event=>{const p=pointer(event);const nearest=(state.draft?.notes||[]).map((n,i)=>({i,d:Math.abs(state.left+Number(n.start_time)*beatWidth()-p.x)})).sort((a,b)=>a.d-b.d)[0];if(nearest&&nearest.d<18)state.selected=nearest.i;ui.velocity.setPointerCapture(event.pointerId);state.drag={kind:"velocity"};editVelocity(p.y);});
 ui.velocity.addEventListener("pointermove",event=>{if(state.drag?.kind==="velocity")editVelocity(pointer(event).y);});ui.velocity.addEventListener("pointerup",()=>state.drag=null);
-function editVelocity(y){if(!selectedNote())return;mutate(()=>selectedNote().velocity=clamp(Math.round((108-y)/102*127),1,127));}
+function editVelocity(y){if(!selectedNote())return;mutate(()=>selectedNote().velocity=velocityFromLanePosition(y,112));}
 function nextNoteId(){return Math.max(0,...(state.draft?.notes||[]).map((n,i)=>Number(noteId(n,i))||0))+1;}
 
 ui.block.addEventListener("change",()=>{if(!confirmDiscard())return;populateSelectors(true);loadClip();resize();});ui.player.addEventListener("change",()=>{if(!confirmDiscard())return;setOptions(ui.clip,clipsForPlayer(),clipsForPlayer()[0]||"");loadClip();resize();});ui.clip.addEventListener("change",()=>{if(!confirmDiscard())return;loadClip();resize();});

@@ -23,6 +23,7 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
   assert.match(html, /id="playing-block"/);
   assert.match(html, /id="projection-playback"/);
   assert.match(html, /performance-toolbar/);
+  assert.match(html, /<div class="toolbar compact">[\s\S]*<div class="edit-tools" aria-label="Focused player editing tools">/);
   assert.match(html, /advanced-panel/);
   assert.match(html, /Play/);
   assert.match(html, /Return to A/);
@@ -88,6 +89,8 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(css, /ss-route-tabs/);
   assert.match(css, /routing-status/);
   assert.match(css, /routing-status\.ambiguous/);
+  assert.match(css, /grid-template-rows:auto auto auto minmax\(320px,1fr\) auto/);
+  assert.match(css, /\.edit-tools\{[^}]*display:flex[^}]*flex-wrap:nowrap[^}]*margin-left:auto/);
 });
 
 test("Matrix Edit static app includes build provenance", async () => {
@@ -97,6 +100,7 @@ test("Matrix Edit static app includes build provenance", async () => {
   assert.equal(buildInfo.target, "shadowscore-server");
   assert.equal(buildInfo.outputBase, "/matrix-edit/");
   assert.match(buildInfo.matrixeditCommit, /^[0-9a-f]{40}$/);
+  assert.equal(buildInfo.matrixeditDirty, false);
   assert.doesNotThrow(() => new Date(buildInfo.buildTime).toISOString());
 });
 

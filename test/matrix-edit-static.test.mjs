@@ -14,6 +14,7 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
   assert.match(html, /<link rel="stylesheet" href="\/shared\/shadowscore-style\.css"\s*\/?>/);
   assert.match(html, /<nav class="ss-route-tabs" aria-label="ShadowScore routes">/);
   assert.match(html, /<a href="\/matrix-edit" aria-current="page">Matrix<\/a>/);
+  assert.match(html, /<a href="\/piano-roll">Piano Roll<\/a>/);
   assert.doesNotMatch(html, /fonts\.googleapis\.com/);
   assert.match(html, /id="start-transport"/);
   assert.match(html, /id="stop-transport"/);

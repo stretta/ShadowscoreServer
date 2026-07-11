@@ -2315,6 +2315,17 @@ test("matrix edit route works with legacy generated static config", async () => 
   assert.match(response.body, /ShadowScore Matrix Edit/);
 });
 
+test("piano roll route serves the explicit-save clip editor", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/piano-roll");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /ShadowScore Piano Roll/);
+  assert.match(response.body, /id="save"/);
+  assert.match(response.body, /id="roll"/);
+});
+
 test("root route serves view index", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/");
@@ -2326,6 +2337,7 @@ test("root route serves view index", async () => {
   assert.match(response.body, /Instrument Editors/);
   assert.match(response.body, /\/structure-editor/);
   assert.match(response.body, /\/matrix-edit/);
+  assert.match(response.body, /\/piano-roll/);
   assert.match(response.body, /\/event-list/);
   assert.match(response.body, /\/admin/);
   assert.match(response.body, /\/transport\/status/);

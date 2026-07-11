@@ -12,6 +12,7 @@ ShadowscoreServer host.
 - Structure Editor is the main form and assignment surface.
 - Event List is the canonical clip editor.
 - Matrix Edit is the live block-context performance workspace.
+- Piano Roll is the explicit-save time, duration, pitch, and velocity editor.
 - Admin is for lab operations: score backup/restore, saved scores, assignment
   presets, resets, migration tools, and RNBO resend.
 
@@ -30,6 +31,7 @@ From a laptop or tablet on the same network, open:
 http://<host>.local:8790/
 http://<host>.local:8790/event-list
 http://<host>.local:8790/matrix-edit
+http://<host>.local:8790/piano-roll
 http://<host>.local:8790/admin
 http://<host>.local:8790/transport/status
 http://<host>.local:8790/editors
@@ -121,6 +123,19 @@ Use Matrix Edit for:
 
 Matrix Edit is not the canonical place for clip attributes or structure changes.
 Those belong to Event List and Structure Editor respectively.
+
+Use Piano Roll for:
+
+- moving note onset and pitch while seeing note duration directly;
+- resizing a note from its right edge;
+- note-specific velocity edits and keyboard nudges;
+- reviewing loop aliases, reference clips, and the live playback wiper;
+- accumulating per-clip drafts and saving them explicitly.
+
+Piano Roll is a first-class clip editor for performance timing. Event List
+remains the exact-review surface for full clip attributes and advanced note
+fields such as probability, deviation, and release velocity. Structure Editor
+continues to own block duration and player-to-clip assignment.
 
 Use `/editors`, `/editors/poland`, `/tools/osc-volume`, and `/tools/osc-macros`
 for instrument-control surfaces that route through `/osc/targets`, `/osc/send`,

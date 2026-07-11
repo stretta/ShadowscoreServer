@@ -8,6 +8,7 @@ const jsUrl = new URL("../public/piano-roll/app.js", import.meta.url);
 test("Piano Roll exposes explicit draft controls and editing surfaces", async () => {
   const html = await readFile(htmlUrl, "utf8");
   assert.match(html, /<title>ShadowScore Piano Roll<\/title>/);
+  assert.match(html, /<a href="\/piano-roll" aria-current="page">Piano Roll<\/a>/);
   assert.match(html, /id="save"[^>]*disabled/);
   assert.match(html, /id="revert"[^>]*disabled/);
   assert.match(html, /id="roll"/);

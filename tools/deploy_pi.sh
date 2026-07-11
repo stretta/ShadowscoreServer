@@ -440,9 +440,9 @@ fi
 
 if [[ "${SHADOWSCORE_ROLE}" == "host" ]]; then
   if [[ "${#VERIFY_ROUTES[@]}" -gt 0 ]]; then
-    VERIFY_ROUTES=(/healthz /session /matrix-edit /event-list "${VERIFY_ROUTES[@]}")
+    VERIFY_ROUTES=(/healthz /session /matrix-edit /piano-roll /event-list "${VERIFY_ROUTES[@]}")
   else
-    VERIFY_ROUTES=(/healthz /session /matrix-edit /event-list)
+    VERIFY_ROUTES=(/healthz /session /matrix-edit /piano-roll /event-list)
   fi
 fi
 

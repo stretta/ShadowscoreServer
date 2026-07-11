@@ -133,6 +133,7 @@ export function transportPage() {
     <a href="/">Dashboard</a>
     <a href="/structure-editor">Structure</a>
     <a href="/matrix-edit">Matrix</a>
+    <a href="/piano-roll">Piano Roll</a>
     <a href="/event-list">Event List</a>
     <a href="/admin">Admin</a>
     <a href="/transport/status" aria-current="page">Transport</a>

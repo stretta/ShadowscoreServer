@@ -144,6 +144,9 @@ containing block duration; one-shot clips play once.
 - **Matrix Edit** owns block-context interlock editing: select a block, edit one
   assigned player's clip on the grid, and see other assigned clips as read-only
   reference layers.
+- **Piano Roll** owns duration, onset, pitch, and note-specific velocity edits
+  for an assigned clip. It preserves per-clip drafts until explicit Save and
+  shows projected loop aliases, reference clips, and live playback position.
 - **Admin** owns lab operations: assignments, saved scores, backup/restore,
   migration from legacy voice notes, and reset tools.
 
@@ -305,3 +308,6 @@ agent units, `--sync-only` for a file-only update, `--force-restart` for the
 kill/reset/start recovery path, `--verify-route <path>` for rollout-specific
 host checks, or `--dry-run` to preview the rsync. If the Pi does not allow
 passwordless sudo, set `SHADOWSCORE_SUDO_PASSWORD` for that deploy.
+- **Piano Roll** owns duration, onset, pitch, and note-specific velocity edits
+  for an assigned clip. It keeps per-clip drafts until explicit Save and shows
+  projected loop aliases and the live playback position.

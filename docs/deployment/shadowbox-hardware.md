@@ -34,8 +34,9 @@ The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages,
 clones or updates the repo, writes the role-specific generated config, installs
 the matching systemd unit for the selected install directory, starts the
 service, waits for `/healthz`, the root view index (`/`), Structure Editor
-(`/structure-editor`), Matrix Edit (`/matrix-edit`), and the Event List editor
-(`/event-list`), then runs the hardware smoke test.
+(`/structure-editor`), Matrix Edit (`/matrix-edit`), Piano Roll
+(`/piano-roll`), and the Event List editor (`/event-list`), then runs the
+hardware smoke test.
 
 Manual install remains available:
 
@@ -141,6 +142,7 @@ The smoke test checks:
 - root view index at `/`
 - Structure Editor at `/structure-editor`
 - Matrix Edit at `/matrix-edit`
+- Piano Roll at `/piano-roll`
 - Event List editor at `/event-list`
 - JACK transport freshness at `/transport` when enabled
 - local HTTP port reachability
@@ -155,6 +157,7 @@ Before students connect:
 - `journalctl -u shadowscore-server.service -n 80 --no-pager` shows the server listening on `8790`.
 - `curl http://127.0.0.1:8790/healthz` returns `"ok":true`.
 - A laptop can open Matrix Edit at `http://<host>.local:8790/matrix-edit`.
+- A laptop can open Piano Roll at `http://<host>.local:8790/piano-roll`.
 - A laptop can open the Event List editor at `http://<host>.local:8790/event-list`.
 - A laptop can open the ShadowScore view index at `http://<host>.local:8790/`.
 - A laptop can open Structure Editor at `http://<host>.local:8790/structure-editor`.

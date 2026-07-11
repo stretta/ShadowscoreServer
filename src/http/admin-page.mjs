@@ -166,6 +166,7 @@ export function adminPage() {
     <a href="/">Dashboard</a>
     <a href="/structure-editor">Structure</a>
     <a href="/matrix-edit">Matrix</a>
+    <a href="/piano-roll">Piano Roll</a>
     <a href="/event-list">Event List</a>
     <a href="/admin" aria-current="page">Admin</a>
     <a href="/transport/status">Transport</a>

@@ -23,6 +23,9 @@ Design and implementation notes:
 - [`transport-and-matrix-ui-ux-plan.md`](transport-and-matrix-ui-ux-plan.md):
   DAW-like transport facade, Matrix Edit simplification, and ownership
   boundaries for setup versus performance.
+- [`piano-roll-clip-editor-plan.md`](piano-roll-clip-editor-plan.md):
+  piano-roll clip editor plan, note-duration resizing, shared Matrix Edit
+  foundations, and enlarged velocity-lane rollout.
 - [`shadowscore-user-facing-style-plan.md`](shadowscore-user-facing-style-plan.md):
   Smol-derived visual direction, shared UI tokens, page-by-page application
   notes, and styling rollout plan for server-hosted user-facing pages.

@@ -21,6 +21,30 @@ export function sourceTimeForProjectedTime(projectedTime, clipDuration, playback
   };
 }
 
+export function projectClipOccurrences(notes, options) {
+  const clipDuration = Math.max(Number.EPSILON, Number(options.clipDuration));
+  const timelineDuration = Math.max(clipDuration, Number(options.timelineDuration));
+  const cycles = options.playbackType === "one-shot" ? 1 : Math.ceil(timelineDuration / clipDuration);
+  const occurrences = [];
+  notes.forEach((note, sourceIndex) => {
+    for (let occurrenceIndex = 0; occurrenceIndex < cycles; occurrenceIndex += 1) {
+      const startTime = Number(note.start_time) + occurrenceIndex * clipDuration;
+      if (startTime >= timelineDuration) break;
+      occurrences.push({
+        sourceIndex,
+        occurrenceIndex,
+        alias: occurrenceIndex > 0,
+        note: {
+          ...note,
+          start_time: startTime,
+          duration: Math.min(Number(note.duration), timelineDuration - startTime)
+        }
+      });
+    }
+  });
+  return occurrences;
+}
+
 export function moveNote(note, options) {
   const subdivision = Math.max(1, Math.round(Number(options.subdivision) || 1));
   const minimumDuration = 1 / subdivision;

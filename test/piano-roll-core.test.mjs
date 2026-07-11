@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   hitTestNotes,
   moveNote,
+  projectClipOccurrences,
   resizeNoteRight,
   sourceTimeForProjectedTime,
   velocityFromLanePosition
@@ -67,6 +68,35 @@ test("loop aliases map back to source clip time", () => {
     occurrenceIndex: 0,
     alias: false
   });
+});
+
+test("loop projection repeats source notes across block time without cloning identity", () => {
+  const occurrences = projectClipOccurrences([sourceNote], {
+    clipDuration: 2,
+    timelineDuration: 6,
+    playbackType: "looped"
+  });
+  assert.deepEqual(occurrences.map(({ sourceIndex, occurrenceIndex, alias, note }) => ({
+    sourceIndex,
+    occurrenceIndex,
+    alias,
+    noteId: note.note_id,
+    start: note.start_time
+  })), [
+    { sourceIndex: 0, occurrenceIndex: 0, alias: false, noteId: 42, start: 0.25 },
+    { sourceIndex: 0, occurrenceIndex: 1, alias: true, noteId: 42, start: 2.25 },
+    { sourceIndex: 0, occurrenceIndex: 2, alias: true, noteId: 42, start: 4.25 }
+  ]);
+});
+
+test("one-shot projection never creates aliases", () => {
+  const occurrences = projectClipOccurrences([sourceNote], {
+    clipDuration: 2,
+    timelineDuration: 8,
+    playbackType: "one-shot"
+  });
+  assert.equal(occurrences.length, 1);
+  assert.equal(occurrences[0].alias, false);
 });
 
 test("overlap hit testing chooses the last deterministic candidate", () => {

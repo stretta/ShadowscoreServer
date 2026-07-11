@@ -74,6 +74,26 @@ export function resizeNoteRight(note, options) {
   };
 }
 
+export function nudgeNote(note, options) {
+  const step = 1 / Math.max(1, Math.round(Number(options.subdivision) || 1));
+  if (options.resize && (options.direction === "left" || options.direction === "right")) {
+    return resizeNoteRight(note, {
+      deltaTime: options.direction === "left" ? -step : step,
+      subdivision: options.subdivision,
+      clipDuration: options.clipDuration,
+      minimumDuration: options.minimumDuration
+    });
+  }
+  const deltaTime = options.direction === "left" ? -step : options.direction === "right" ? step : 0;
+  const deltaPitch = options.direction === "up" ? 1 : options.direction === "down" ? -1 : 0;
+  return moveNote(note, {
+    deltaTime,
+    deltaPitch,
+    subdivision: options.subdivision,
+    clipDuration: options.clipDuration
+  });
+}
+
 export function velocityFromLanePosition(y, laneHeight, padding = 4) {
   const usableHeight = Math.max(1, Number(laneHeight) - padding * 2);
   return clamp(Math.round(((Number(laneHeight) - padding - Number(y)) / usableHeight) * 127), 1, 127);

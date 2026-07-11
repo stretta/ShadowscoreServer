@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   hitTestNotes,
   moveNote,
+  nudgeNote,
   projectClipOccurrences,
   resizeNoteRight,
   sourceTimeForProjectedTime,
@@ -55,6 +56,28 @@ test("right resize clamps to grid minimum and clip boundary", () => {
     subdivision: 8,
     clipDuration: 4
   }).duration, 0.25);
+});
+
+test("keyboard nudges move by one grid step and preserve other fields", () => {
+  assert.deepEqual(nudgeNote(sourceNote, {
+    direction: "right",
+    subdivision: 4,
+    clipDuration: 4
+  }), { ...sourceNote, start_time: 0.5 });
+  assert.deepEqual(nudgeNote(sourceNote, {
+    direction: "up",
+    subdivision: 4,
+    clipDuration: 4
+  }), { ...sourceNote, pitch: 61 });
+});
+
+test("shifted horizontal nudges resize only the right edge", () => {
+  assert.deepEqual(nudgeNote(sourceNote, {
+    direction: "right",
+    resize: true,
+    subdivision: 4,
+    clipDuration: 4
+  }), { ...sourceNote, duration: 0.75 });
 });
 
 test("loop aliases map back to source clip time", () => {

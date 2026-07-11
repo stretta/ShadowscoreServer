@@ -11,6 +11,7 @@ test("Piano Roll exposes explicit draft controls and editing surfaces", async ()
   assert.match(html, /id="save"[^>]*disabled/);
   assert.match(html, /id="revert"[^>]*disabled/);
   assert.match(html, /id="roll"/);
+  assert.match(html, /id="roll"[^>]*tabindex="0"/);
   assert.match(html, /id="velocity"/);
 });
 
@@ -23,6 +24,9 @@ test("Piano Roll saves revision-aware clip drafts and supports right-edge resize
   assert.match(js, /projectClipOccurrences/);
   assert.match(js, /\/macrostructure\/playback/);
   assert.match(js, /drawWiper/);
+  assert.match(js, /addEventListener\("keydown"/);
+  assert.match(js, /nudgeNote/);
+  assert.match(js, /pointercancel",cancelDrag/);
   assert.match(js, /state\.draft\.notes\.push/);
   assert.match(js, /Save failed:/);
 });

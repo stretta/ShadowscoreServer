@@ -14,6 +14,7 @@ test("hardware smoke passes required host checks and skips host-only registratio
       "http://127.0.0.1:8790/": "ShadowScore Views",
       "http://127.0.0.1:8790/structure-editor": "ShadowScore Structure Editor",
       "http://127.0.0.1:8790/matrix-edit": "ShadowScore Matrix Edit",
+      "http://127.0.0.1:8790/piano-roll": "ShadowScore Piano Roll",
       "http://127.0.0.1:8790/event-list": "ShadowScore Event List"
     }),
     netConnect: createNetConnect(),
@@ -42,6 +43,7 @@ test("hardware smoke requires fresh JACK transport when enabled", async () => {
       "http://127.0.0.1:8790/": "ShadowScore Views",
       "http://127.0.0.1:8790/structure-editor": "ShadowScore Structure Editor",
       "http://127.0.0.1:8790/matrix-edit": "ShadowScore Matrix Edit",
+      "http://127.0.0.1:8790/piano-roll": "ShadowScore Piano Roll",
       "http://127.0.0.1:8790/event-list": "ShadowScore Event List",
       "http://127.0.0.1:8790/transport": {
         fresh: true,
@@ -76,6 +78,7 @@ test("hardware smoke fails stale JACK transport when enabled", async () => {
       "http://127.0.0.1:8790/": "ShadowScore Views",
       "http://127.0.0.1:8790/structure-editor": "ShadowScore Structure Editor",
       "http://127.0.0.1:8790/matrix-edit": "ShadowScore Matrix Edit",
+      "http://127.0.0.1:8790/piano-roll": "ShadowScore Piano Roll",
       "http://127.0.0.1:8790/event-list": "ShadowScore Event List",
       "http://127.0.0.1:8790/transport": {
         fresh: false,
@@ -114,6 +117,7 @@ test("hardware smoke fails when peer is not visible on the session host", async 
       "http://127.0.0.1:8790/": "ShadowScore Views",
       "http://127.0.0.1:8790/structure-editor": "ShadowScore Structure Editor",
       "http://127.0.0.1:8790/matrix-edit": "ShadowScore Matrix Edit",
+      "http://127.0.0.1:8790/piano-roll": "ShadowScore Piano Roll",
       "http://127.0.0.1:8790/event-list": "ShadowScore Event List",
       "http://shadowbox-host.local:8790/hardware/units": { hardwareUnits: [] }
     }),

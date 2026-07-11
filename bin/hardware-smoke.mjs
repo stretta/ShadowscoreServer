@@ -25,6 +25,7 @@ export async function runHardwareSmoke(config, options = {}) {
   checks.push(await checkHttpText("view index", `${baseUrl}/`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Views")));
   checks.push(await checkHttpText("structure editor", `${baseUrl}/structure-editor`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Structure Editor")));
   checks.push(await checkHttpText("matrix edit", `${baseUrl}/matrix-edit`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Matrix Edit")));
+  checks.push(await checkHttpText("piano roll", `${baseUrl}/piano-roll`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Piano Roll")));
   checks.push(await checkHttpText("event list", `${baseUrl}/event-list`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Event List")));
   checks.push(await checkJackTransport(config, baseUrl, fetchImpl, timeoutMs));
   checks.push(await checkTcpPort("http port", config.http?.host ?? "127.0.0.1", config.http?.port ?? 8790, timeoutMs, options.netConnect));

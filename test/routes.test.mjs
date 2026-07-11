@@ -164,6 +164,7 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.endpoints.app, "http://127.0.0.1/");
   assert.equal(session.endpoints.collab, "ws://127.0.0.1/collab");
   assert.equal(session.endpoints.eventList, "http://127.0.0.1/event-list");
+  assert.equal(session.endpoints.pianoRoll, "http://127.0.0.1/piano-roll");
   assert.equal(session.endpoints.structureEditor, "http://127.0.0.1/structure-editor");
   assert.equal(session.endpoints.structure, "http://127.0.0.1/structure");
   assert.equal(session.endpoints.structurePlayhead, "http://127.0.0.1/structure/playhead");

@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ShadowScore Piano Roll</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <link rel="stylesheet" href="/piano-roll/style.css">
+</head>
+<body>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
+    <a href="/">Dashboard</a><a href="/structure-editor">Structure</a><a href="/matrix-edit">Matrix</a>
+    <a href="/piano-roll" aria-current="page">Piano Roll</a><a href="/event-list">Event List</a><a href="/admin">Admin</a>
+  </nav>
+  <main>
+    <header class="toolbar primary">
+      <label>Section <select id="block"></select></label>
+      <label>Player <select id="player"></select></label>
+      <label>Clip <select id="clip"></select></label>
+      <label>Grid <select id="grid"><option value="4">1/4</option><option value="8">1/8</option><option value="16" selected>1/16</option><option value="32">1/32</option></select></label>
+      <label>Time zoom <input id="zoom-x" type="range" min="36" max="160" value="72"></label>
+      <label>Pitch zoom <input id="zoom-y" type="range" min="12" max="32" value="20"></label>
+      <button id="revert" type="button" disabled>Revert</button><button id="save" type="button" disabled>Save</button>
+      <span id="dirty" class="badge">Saved</span>
+    </header>
+    <section class="summary" aria-live="polite">
+      <span><small>Editing</small><strong id="editing">No clip</strong></span>
+      <span><small>Playback</small><strong id="playing">Stopped</strong></span>
+      <span><small>Selection</small><strong id="selection">None</strong></span>
+      <span id="status">Loading score…</span>
+    </section>
+    <section class="editor-shell">
+      <div id="roll-scroll" class="roll-scroll">
+        <canvas id="roll" aria-label="Piano roll note grid"></canvas>
+      </div>
+      <div class="velocity-heading"><span>Velocity</span><output id="velocity-value">—</output></div>
+      <div id="velocity-scroll" class="velocity-scroll"><canvas id="velocity" aria-label="Note velocity lane"></canvas></div>
+    </section>
+    <p class="help">Click empty space to add. Drag a note to move it. Drag its right edge to resize. Select a note, then drag its velocity bar. Changes remain local until Save.</p>
+  </main>
+  <script type="module" src="/piano-roll/app.js"></script>
+</body>
+</html>

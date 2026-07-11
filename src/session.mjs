@@ -19,6 +19,7 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
     endpoints: {
       app: `${baseUrl}/`,
       matrixEdit: `${baseUrl}/matrix-edit`,
+      pianoRoll: `${baseUrl}/piano-roll`,
       eventList: `${baseUrl}/event-list`,
       structureEditor: `${baseUrl}/structure-editor`,
       structurePlayhead: `${baseUrl}/structure/playhead`,

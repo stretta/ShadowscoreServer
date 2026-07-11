@@ -1,0 +1,25 @@
+:root { color-scheme: dark; --roll-accent:#6ee7ff; --roll-reference:#7f8aa3; }
+* { box-sizing:border-box; }
+body { margin:0; min-height:100vh; overflow:hidden; }
+main { height:calc(100vh - 42px); padding:10px 14px 12px; display:flex; flex-direction:column; gap:8px; }
+.toolbar { display:flex; align-items:end; gap:8px; flex-wrap:wrap; }
+.toolbar label { display:grid; gap:3px; color:var(--ss-muted); font-size:11px; font-weight:750; }
+.toolbar select { min-width:110px; }
+.toolbar input[type=range] { width:104px; }
+.toolbar button { min-width:72px; }
+#save:not(:disabled) { background:var(--ss-accent-secondary); color:#07151b; font-weight:800; }
+.badge { padding:6px 9px; border:1px solid var(--ss-border); border-radius:999px; color:var(--ss-muted); font-size:12px; }
+.badge.dirty { color:#ffd166; border-color:#ffd166; }
+.badge.stale { color:var(--ss-warn); border-color:var(--ss-warn); }
+.summary { display:flex; align-items:center; gap:22px; min-height:42px; padding:7px 10px; border:1px solid var(--ss-border); border-radius:var(--ss-radius-ui); background:var(--ss-panel); }
+.summary span { display:grid; gap:2px; }
+.summary small { color:var(--ss-muted); font-size:10px; font-weight:800; text-transform:uppercase; }
+.summary strong { font-size:12px; }
+#status { margin-left:auto; display:block; max-width:42%; color:var(--ss-muted); font-size:12px; text-align:right; }
+.editor-shell { min-height:0; flex:1; display:grid; grid-template-rows:minmax(220px,1fr) auto 112px; border:1px solid var(--ss-border); border-radius:var(--ss-radius-ui); overflow:hidden; background:#10141d; }
+.roll-scroll,.velocity-scroll { overflow:auto; position:relative; }
+.velocity-scroll { overflow-x:hidden; overflow-y:hidden; border-top:1px solid var(--ss-border); }
+canvas { display:block; touch-action:none; user-select:none; }
+.velocity-heading { height:24px; display:flex; justify-content:space-between; align-items:center; padding:0 10px; color:var(--ss-muted); background:var(--ss-panel); font-size:11px; font-weight:800; text-transform:uppercase; }
+.help { margin:0; color:var(--ss-muted); font-size:11px; }
+@media(max-width:760px){ main{height:auto;min-height:calc(100vh - 42px);overflow:auto}.editor-shell{height:70vh;flex:none}.summary{align-items:flex-start;flex-wrap:wrap}#status{max-width:none;margin-left:0;text-align:left;width:100%}.toolbar label:nth-of-type(n+4){display:none} }

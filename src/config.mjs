@@ -49,6 +49,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/matrix-edit"]
       },
+      pianoRoll: {
+        root: "public/piano-roll",
+        index: "index.html",
+        routes: ["/piano-roll"]
+      },
       eventList: {
         root: "public/event-list",
         index: "index.html",

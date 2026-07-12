@@ -34,9 +34,9 @@ The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages,
 clones or updates the repo, writes the role-specific generated config, installs
 the matching systemd unit for the selected install directory, starts the
 service, waits for `/healthz`, the root view index (`/`), Structure Editor
-(`/structure-editor`), Matrix Edit (`/matrix-edit`), Piano Roll
-(`/piano-roll`), and the Event List editor (`/event-list`), then runs the
-hardware smoke test.
+(`/structure-editor`), Matrix Edit (`/matrix-edit`), and the Event List editor
+(`/event-list`), then runs the hardware smoke test. The smoke test also verifies
+Piano Roll (`/piano-roll`) and the remaining runtime surfaces listed below.
 
 Manual install remains available:
 
@@ -53,6 +53,10 @@ Edit `config/shadowbox.local.json` on the selected session host:
 - Set `http.publicUrl` to the browsable URL, for example `http://pt5.local:8790`.
 - Set `server.advertisedName` and `server.hostIdentity` to the unit name.
 - Confirm `rnbo.oscQuery.url`, `rnbo.port`, and `rnbo.address`.
+
+If you keep this local filename, update the host unit's `ExecStart` config path
+to `config/shadowbox.local.json` when installing the systemd template. The
+checked-in template otherwise starts with `config/shadowbox.hardware-host.json`.
 
 For a peer unit, copy `config/shadowbox.hardware-peer.json` instead and set:
 
@@ -139,6 +143,7 @@ The smoke test checks:
 - `/healthz`
 - `/session`
 - `/rnbo/targets`
+- `/rnbo/devices`
 - root view index at `/`
 - Structure Editor at `/structure-editor`
 - Matrix Edit at `/matrix-edit`

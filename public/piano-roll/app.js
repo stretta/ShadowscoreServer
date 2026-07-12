@@ -32,8 +32,12 @@ const timelineBeats = () => Math.max(clipBeats(),blockBeats());
 const maxNoteEnd = (clip) => Math.ceil(Math.max(0,...(clip?.notes||[]).map(n=>Number(n.start_time)+Number(n.duration))));
 const timeSignature = () => state.draft?.context?.clip?.TimeSignature || state.score?.context?.clip?.TimeSignature || {numerator:4,denominator:4};
 const selectedNote = () => state.draft?.notes?.[state.selected];
+const referenceNotes = () => Object.values(state.score?.mesostructure?.[ui.block.value]?.players || {})
+  .map(assignment => assignmentId(assignment))
+  .filter(id => id && id !== state.clipId)
+  .flatMap(id => state.score?.clips?.[id]?.notes || []);
 const visiblePitches = () => state.folded
-  ? [...new Set((state.draft?.notes || []).map(note => clamp(Math.round(Number(note.pitch)),0,127)))].sort((a,b)=>b-a)
+  ? [...new Set([...(state.draft?.notes || []), ...referenceNotes()].map(note => clamp(Math.round(Number(note.pitch)),0,127)))].sort((a,b)=>b-a)
   : Array.from({length:state.maxPitch-state.minPitch+1},(_,index)=>state.maxPitch-index);
 const pitchForY = (y,pitches=visiblePitches()) => pitches[clamp(Math.floor((y-state.top)/rowHeight()),0,pitches.length-1)];
 const rowForPitch = (pitch,pitches=visiblePitches()) => pitches.indexOf(clamp(Math.round(Number(pitch)),0,127));

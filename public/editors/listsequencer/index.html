@@ -144,6 +144,37 @@
       width: 100%;
     }
 
+    .number-object {
+      background: var(--ss-surface);
+      border: 1px solid var(--ss-border-strong);
+      border-radius: var(--ss-radius-control);
+      color: var(--ss-text);
+      cursor: ns-resize;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 14px;
+      font-variant-numeric: tabular-nums;
+      font-weight: 850;
+      min-height: 34px;
+      padding: 5px 8px;
+      text-align: right;
+      touch-action: none;
+      user-select: none;
+      width: 92px;
+    }
+
+    .number-object:focus {
+      border-color: var(--ss-accent-secondary);
+      outline: 2px solid color-mix(in srgb, var(--ss-accent-secondary) 28%, transparent);
+      outline-offset: 1px;
+      user-select: text;
+    }
+
+    .number-object[data-dragging="true"] {
+      background: var(--ss-accent-secondary);
+      border-color: var(--ss-accent-secondary);
+      color: #061015;
+    }
+
     .ttid-grid {
       display: grid;
       gap: 10px;
@@ -223,21 +254,8 @@
       grid-template-columns: minmax(130px, 1fr) minmax(150px, 1fr) auto;
     }
 
-    .roots {
-      display: grid;
-      gap: 5px;
-      grid-template-columns: repeat(6, minmax(30px, 1fr));
-    }
-
-    .root-button {
-      min-height: 28px;
-      padding: 4px 5px;
-    }
-
-    .root-button[data-active="true"] {
-      background: var(--ss-accent-secondary);
-      border-color: var(--ss-accent-secondary);
-      color: #061015;
+    .root-number {
+      width: 100%;
     }
 
     .empty-state {
@@ -320,6 +338,14 @@
       "minor-pentatonic": [0, 2, 3, 7, 8],
       "whole-tone": [0, 2, 4, 6, 8, 10]
     });
+    const INPORT_SPECS = Object.freeze([
+      { name: "Steps", label: "Steps (0/1)" },
+      { name: "PrimaryRotation", label: "Primary Rotation (-60 60)" },
+      { name: "SecondaryRotation", label: "Secondary Rotation (-60 60)" },
+      { name: "Velocity", label: "Velocity (0-127)" },
+      { name: "Duration", label: "Duration (ticks)" }
+    ]);
+    const TRANSPOSE_NAMES = new Set(["chromatictranspose", "scalartranspose", "chromatic", "scalar"]);
 
     const targetsEl = document.querySelector("#targets");
     const inportsEl = document.querySelector("#inports");
@@ -329,6 +355,8 @@
     const selectAllButton = document.querySelector("#select-all");
     let targets = [];
     let inputPorts = [];
+    let transposeParams = [];
+    let rootParams = [];
     let ttidParams = [];
     let ttidState = new Map();
     let scaleState = new Map();
@@ -343,6 +371,8 @@
       const body = await fetchJson("/osc/targets?app=listsequencer&status=online");
       targets = body.targets || [];
       inputPorts = collectInputPorts(targets);
+      transposeParams = collectTransposeParams(targets);
+      rootParams = collectNamedParams(targets, new Set(["root"]));
       ttidParams = collectTtidParams(targets);
       ttidState = mergeTtidState(ttidParams);
       renderTargets();
@@ -369,7 +399,24 @@
           byName.get(inputPort.name).targetIds.push(target.id);
         }
       }
-      return Array.from(byName.values()).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999) || a.name.localeCompare(b.name));
+      return Array.from(byName.values()).sort((a, b) => inportOrder(a.name) - inportOrder(b.name) || (a.index ?? 9999) - (b.index ?? 9999) || a.name.localeCompare(b.name));
+    }
+
+    function collectTransposeParams(nextTargets) {
+      return collectNamedParams(nextTargets, TRANSPOSE_NAMES)
+        .sort((a, b) => transposeOrder(a.name) - transposeOrder(b.name));
+    }
+
+    function collectNamedParams(nextTargets, acceptedNames) {
+      const byName = new Map();
+      for (const target of nextTargets) {
+        for (const param of target.parameters || []) {
+          if (!acceptedNames.has(normalizedName(param.name))) continue;
+          if (!byName.has(param.name)) byName.set(param.name, { ...param, targetIds: [] });
+          byName.get(param.name).targetIds.push(target.id);
+        }
+      }
+      return Array.from(byName.values());
     }
 
     function collectTtidParams(nextTargets) {
@@ -409,7 +456,7 @@
     }
 
     function renderInports() {
-      const rows = inputPorts.map(renderInputPort);
+      const rows = [...inputPorts.map(renderInputPort), ...transposeParams.map(renderTransposeParam)];
       inportsEl.replaceChildren(...rows);
       if (!rows.length) inportsEl.innerHTML = `<div class="empty-state">No ListSequencer message inports reported.</div>`;
     }
@@ -438,6 +485,28 @@
       return row;
     }
 
+    function renderTransposeParam(param) {
+      const row = document.createElement("article");
+      row.className = "text-row";
+      const range = rangeText(param);
+      row.innerHTML = `
+        <div>
+          <div class="control-name">${escapeHtml(transposeLabel(param.name))}${range ? ` (${escapeHtml(range)})` : ""}</div>
+          <div class="control-detail">${escapeHtml(param.name)} · ${param.targetIds.length}</div>
+        </div>
+      `;
+      const number = createNumberObject({
+        value: param.value ?? 0,
+        min: param.min,
+        max: param.max,
+        className: "number-object",
+        label: transposeLabel(param.name),
+        onChange: (value) => sendParam(param, value).catch(reportError)
+      });
+      row.append(number, document.createElement("span"));
+      return row;
+    }
+
     function renderTtid() {
       const cards = ttidParams.map(renderTtidParam);
       ttidEl.replaceChildren(...cards);
@@ -449,6 +518,11 @@
       card.className = "ttid-card";
       const mask = valueFor(param);
       const scale = scaleFor(param.name);
+      const rootParam = rootParams[0];
+      if (rootParam && !scale.initialized) {
+        scale.root = clampInteger(rootParam.value, rootParam.min, rootParam.max);
+        scale.initialized = true;
+      }
       const head = document.createElement("div");
       head.className = "ttid-head";
       head.innerHTML = `
@@ -463,20 +537,17 @@
       keyboard.className = "keyboard";
       keyboard.replaceChildren(...ROOTS.map((name, pc) => renderKey(param, pc, name, mask)));
 
-      const roots = document.createElement("div");
-      roots.className = "roots";
-      roots.replaceChildren(...ROOTS.map((root, index) => {
-        const button = document.createElement("button");
-        button.className = "root-button";
-        button.type = "button";
-        button.textContent = root;
-        button.dataset.active = String(index === scale.root);
-        button.addEventListener("click", () => {
-          scale.root = index;
-          renderTtid();
-        });
-        return button;
-      }));
+      const rootNumber = createNumberObject({
+        value: scale.root,
+        min: rootParam?.min,
+        max: rootParam?.max,
+        className: "number-object root-number",
+        label: rootParam ? `Root (${rangeText(rootParam)})` : "Root",
+        onChange: (value) => {
+          scale.root = value;
+          if (rootParam) sendParam(rootParam, value).catch(reportError);
+        }
+      });
 
       const select = document.createElement("select");
       for (const name of Object.keys(SCALES).sort((a, b) => a.localeCompare(b))) {
@@ -499,7 +570,7 @@
 
       const row = document.createElement("div");
       row.className = "scale-row";
-      row.replaceChildren(wrapControl("Root", roots), wrapControl("Scale", select), load);
+      row.replaceChildren(wrapControl(rootParam && rangeText(rootParam) ? `Root (${rangeText(rootParam)})` : "Root", rootNumber), wrapControl("Scale", select), load);
       card.replaceChildren(head, keyboard, row);
       return card;
     }
@@ -562,6 +633,17 @@
       setStatus(`Sent ${labelFor(param)} ${formatMask(value)} to ${sent}/${selected.length}`);
     }
 
+    async function sendParam(param, value) {
+      const selected = selectedTargetsFor(param.targetIds);
+      if (!selected.length) {
+        setStatus("No targets selected");
+        return;
+      }
+      const body = await postOsc({ targets: selected, param: param.name, args: [value] });
+      const sent = (body.results || []).filter((result) => result.ok).length;
+      setStatus(`Sent ${paramLabel(param.name)} ${value} to ${sent}/${selected.length}`);
+    }
+
     async function postOsc(payload) {
       const response = await fetch("/osc/send", {
         method: "POST",
@@ -597,9 +679,95 @@
       });
     }
 
+    function createNumberObject(options) {
+      const input = document.createElement("input");
+      input.type = "text";
+      input.inputMode = "numeric";
+      input.className = options.className || "number-object";
+      input.value = String(clampInteger(options.value, options.min, options.max));
+      input.setAttribute("role", "spinbutton");
+      input.setAttribute("aria-label", options.label || "Number");
+      if (isReportedNumber(options.min)) input.setAttribute("aria-valuemin", String(options.min));
+      if (isReportedNumber(options.max)) input.setAttribute("aria-valuemax", String(options.max));
+      let drag = null;
+
+      const commit = (nextValue) => {
+        const value = clampInteger(nextValue, options.min, options.max);
+        input.value = String(value);
+        input.setAttribute("aria-valuenow", String(value));
+        options.onChange(value);
+      };
+      input.addEventListener("change", () => commit(input.value));
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowUp" || event.key === "ArrowDown") {
+          event.preventDefault();
+          commit(Number(input.value) + (event.key === "ArrowUp" ? 1 : -1));
+        }
+      });
+      input.addEventListener("pointerdown", (event) => {
+        if (event.button !== 0) return;
+        drag = { id: event.pointerId, y: event.clientY, value: Number(input.value), last: Number(input.value) };
+        input.setPointerCapture(event.pointerId);
+      });
+      input.addEventListener("pointermove", (event) => {
+        if (!drag || drag.id !== event.pointerId) return;
+        const steps = Math.trunc((drag.y - event.clientY) / 8);
+        const value = clampInteger(drag.value + steps, options.min, options.max);
+        if (value === drag.last) return;
+        drag.last = value;
+        input.dataset.dragging = "true";
+        commit(value);
+      });
+      const endDrag = (event) => {
+        if (!drag || drag.id !== event.pointerId) return;
+        drag = null;
+        input.dataset.dragging = "false";
+      };
+      input.addEventListener("pointerup", endDrag);
+      input.addEventListener("pointercancel", endDrag);
+      return input;
+    }
+
+    function clampInteger(value, min, max) {
+      let next = Math.round(Number(value));
+      if (!Number.isFinite(next)) next = 0;
+      if (isReportedNumber(min)) next = Math.max(Number(min), next);
+      if (isReportedNumber(max)) next = Math.min(Number(max), next);
+      return next;
+    }
+
+    function normalizedName(value) {
+      return String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    }
+
+    function inportOrder(name) {
+      const index = INPORT_SPECS.findIndex((spec) => normalizedName(spec.name) === normalizedName(name));
+      return index < 0 ? 9999 : index;
+    }
+
+    function transposeOrder(name) {
+      return normalizedName(name).startsWith("chromatic") ? 0 : 1;
+    }
+
+    function transposeLabel(name) {
+      return normalizedName(name).startsWith("chromatic") ? "Chromatic Transpose" : "Scalar Transpose";
+    }
+
+    function paramLabel(name) {
+      return normalizedName(name) === "root" ? "Root" : transposeLabel(name);
+    }
+
+    function isReportedNumber(value) {
+      return value !== undefined && value !== null && value !== "" && Number.isFinite(Number(value));
+    }
+
+    function rangeText(param) {
+      return isReportedNumber(param.min) && isReportedNumber(param.max) ? `${param.min} ${param.max}` : "";
+    }
+
     function scaleFor(paramName) {
       if (!scaleState.has(paramName)) {
-        scaleState.set(paramName, { root: 0, name: "ionian" });
+        scaleState.set(paramName, { root: 0, name: "ionian", initialized: false });
       }
       return scaleState.get(paramName);
     }
@@ -630,6 +798,8 @@
     }
 
     function labelFor(control) {
+      const spec = INPORT_SPECS.find((entry) => normalizedName(entry.name) === normalizedName(control.name));
+      if (spec) return spec.label;
       return control.displayName || control.meta?.display_name || control.name || "Control";
     }
 

@@ -2575,6 +2575,15 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /parseArgs/);
   assert.match(response.body, /compact TTID/);
   assert.match(response.body, /formatMask/);
+  assert.match(response.body, /Steps \(0\/1\)/);
+  assert.match(response.body, /Primary Rotation \(-60 60\)/);
+  assert.match(response.body, /Secondary Rotation \(-60 60\)/);
+  assert.match(response.body, /Velocity \(0-127\)/);
+  assert.match(response.body, /Duration \(ticks\)/);
+  assert.match(response.body, /createNumberObject/);
+  assert.match(response.body, /chromatictranspose/);
+  assert.match(response.body, /scalartranspose/);
+  assert.match(response.body, /rootParams/);
 });
 
 test("OSC volume tool route serves target selection and trim controls", async () => {

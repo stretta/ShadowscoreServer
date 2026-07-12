@@ -410,6 +410,75 @@ test("extracts ListSequencer OSC control targets with message inports and TTID p
   assert.equal(targets[0].parameters.find((param) => param.name === "Scale")?.meta?.editor, "ttid");
 });
 
+test("extracts AnalogSequencer OSC control targets with zero-padded stage params", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 1234,
+      oscQuery: {
+        enabled: true,
+        url: "http://wren.local:5678/"
+      }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.jack = {
+    CONTENTS: {
+      info: {
+        CONTENTS: {
+          ports: {
+            CONTENTS: {
+              properties: {
+                CONTENTS: {
+                  "AnalogSequencer-15:out1": {
+                    VALUE: "{\"rnbo-instance-id\":15,\"source\":true,\"type\":\"midi\"}"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["15"] = {
+    CONTENTS: {
+      params: {
+        CONTENTS: {
+          "01StageStep": rnboParam("/rnbo/inst/15/params/01StageStep", 1, 0, 1, 0),
+          "01StageValue": rnboParam("/rnbo/inst/15/params/01StageValue", 61, 0, 127, 1),
+          "02StageStep": rnboParam("/rnbo/inst/15/params/02StageStep", 0, 0, 1, 2),
+          "02StageValue": rnboParam("/rnbo/inst/15/params/02StageValue", 64, 0, 127, 3)
+        }
+      },
+      messages: {
+        CONTENTS: {
+          in: {
+            CONTENTS: {
+              rtz: rnboInport("/rnbo/inst/15/messages/in/rtz")
+            }
+          }
+        }
+      }
+    }
+  };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].id, "rnbo-inst-15:analogsequencer");
+  assert.equal(targets[0].app, "analogsequencer");
+  assert.equal(targets[0].label, "Analogsequencer 15");
+  assert.equal(targets[0].oscCapabilities.includes("analogsequencer-edit"), true);
+  assert.deepEqual(targets[0].inputPorts.map((inputPort) => inputPort.name), ["rtz"]);
+  assert.deepEqual(targets[0].parameters.map((param) => param.name), [
+    "01StageStep",
+    "01StageValue",
+    "02StageStep",
+    "02StageValue"
+  ]);
+});
+
 test("RNBOOSCQuery discovery returns an empty target list on fetch failure", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

@@ -89,6 +89,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/editors/listsequencer"]
       },
+      analogSequencerEditor: {
+        root: "public/editors/analogsequencer",
+        index: "index.html",
+        routes: ["/editors/analogsequencer"]
+      },
       shared: {
         root: "public/shared",
         index: "index.html",
@@ -137,6 +142,14 @@ export const defaultConfig = Object.freeze({
       route: "/editors/listsequencer",
       targetFilter: {
         app: "listsequencer"
+      }
+    },
+    {
+      id: "analogsequencer",
+      label: "AnalogSequencer",
+      route: "/editors/analogsequencer",
+      targetFilter: {
+        app: "analogsequencer"
       }
     }
   ],

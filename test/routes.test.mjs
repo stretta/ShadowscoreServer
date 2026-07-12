@@ -2354,7 +2354,7 @@ test("editor manifest route lists registered instrument editors", async () => {
   const context = createRouteContext();
   const response = await requestJson(context, "GET", "/editors/manifest");
 
-  assert.equal(response.editors.length, 4);
+  assert.equal(response.editors.length, 5);
   assert.deepEqual(response.editors, [
     {
       id: "poland",
@@ -2386,6 +2386,14 @@ test("editor manifest route lists registered instrument editors", async () => {
       route: "/editors/listsequencer",
       targetFilter: {
         app: "listsequencer"
+      }
+    },
+    {
+      id: "analogsequencer",
+      label: "AnalogSequencer",
+      route: "/editors/analogsequencer",
+      targetFilter: {
+        app: "analogsequencer"
       }
     }
   ]);
@@ -2586,6 +2594,29 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /chromatictranspose/);
   assert.match(response.body, /scalartranspose/);
   assert.match(response.body, /rootParams/);
+});
+
+test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/analogsequencer");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /AnalogSequencer Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=analogsequencer/);
+  assert.match(response.body, /StageValue/);
+  assert.match(response.body, /StageStep/);
+  assert.match(response.body, /repeat\(16/);
+  assert.match(response.body, /midiNote/);
+  assert.match(response.body, /type = "checkbox"/);
+  assert.match(response.body, /messages\/out\/current_stage/);
+  assert.match(response.body, /setPlayingStage/);
+  assert.match(response.body, /\.stage\.playing/);
+  assert.match(response.body, /Return to Zero/);
+  assert.match(response.body, /messages\/in\/rtz/);
+  assert.match(response.body, /renderParameters/);
+  assert.match(response.body, /applyMaxCount/);
+  assert.match(response.body, /\.stage\.unused/);
 });
 
 test("OSC volume tool route serves target selection and trim controls", async () => {

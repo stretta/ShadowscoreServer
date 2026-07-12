@@ -323,6 +323,9 @@ function inferControlApp(name, parameters, inputPorts = []) {
   if (loweredName.startsWith("listsequencer") || loweredName.startsWith("list sequencer")) {
     return "listsequencer";
   }
+  if (loweredName.startsWith("analogsequencer") || loweredName.startsWith("analog sequencer")) {
+    return "analogsequencer";
+  }
   const parameterNames = new Set(parameters.map((param) => param.name));
   const loweredParameterNames = new Set(parameters.map((param) => stringField(param.name).toLowerCase()));
   const loweredInputPortNames = new Set(inputPorts.map((inputPort) => stringField(inputPort.name).toLowerCase()));
@@ -338,6 +341,9 @@ function inferControlApp(name, parameters, inputPorts = []) {
   if (hasAtLeastParameters(loweredInputPortNames, ["steps", "primaryrotation", "secondaryrotation", "velocity", "duration"], 3)) {
     return "listsequencer";
   }
+  if (hasNumberedStageParameters(loweredParameterNames, "stagevalue") && hasNumberedStageParameters(loweredParameterNames, "stagestep")) {
+    return "analogsequencer";
+  }
   return "";
 }
 
@@ -347,6 +353,10 @@ function isTtidParameter(param) {
 
 function hasAtLeastParameters(parameterNames, candidates, threshold) {
   return candidates.filter((candidate) => parameterNames.has(candidate)).length >= threshold;
+}
+
+function hasNumberedStageParameters(parameterNames, suffix) {
+  return [...parameterNames].filter((name) => new RegExp(`^(?:\\d{1,2}${suffix}|${suffix}[_ -]?\\d{1,2})$`).test(name)).length >= 2;
 }
 
 function walkOscQueryTree(node, path, visit) {

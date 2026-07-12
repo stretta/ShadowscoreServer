@@ -90,6 +90,12 @@ if [[ "$need_apt_update" -eq 1 ]]; then
   $SUDO apt-get install -y git curl ca-certificates nodejs npm
 fi
 
+node_major="$(node -p 'process.versions.node.split(".")[0]')"
+if [[ "$node_major" -lt 18 ]]; then
+  echo "ShadowscoreServer requires Node.js 18 or newer; found $(node --version). Install a current Node.js release and rerun this installer." >&2
+  exit 1
+fi
+
 log "Installing repository at $INSTALL_DIR"
 if [[ -d "$INSTALL_DIR/.git" ]]; then
   git -C "$INSTALL_DIR" fetch origin "$BRANCH"
@@ -105,7 +111,11 @@ fi
 cd "$INSTALL_DIR"
 
 log "Installing npm package metadata"
-npm install --omit=dev
+if [[ -f package-lock.json ]]; then
+  npm ci --omit=dev
+else
+  npm install --omit=dev
+fi
 
 if [[ "$ROLE" == "host" ]]; then
   CONFIG_TEMPLATE_PATH="config/shadowbox.hardware-host.json"
@@ -115,8 +125,11 @@ else
   CONFIG_PATH="config/shadowscore.peer.local.json"
 fi
 
-log "Writing $ROLE config to $CONFIG_PATH"
-cp "$CONFIG_TEMPLATE_PATH" "$CONFIG_PATH"
+if [[ -f "$CONFIG_PATH" ]]; then
+  log "Updating $ROLE config at $CONFIG_PATH while preserving local settings"
+else
+  log "Writing $ROLE config to $CONFIG_PATH"
+fi
 SHADOWSCORE_ROLE_VALUE="$ROLE" \
 SHADOWSCORE_PUBLIC_URL_VALUE="$PUBLIC_URL" \
 SHADOWSCORE_SESSION_HOST_URL_VALUE="$SESSION_HOST_URL" \
@@ -124,140 +137,9 @@ SHADOWSCORE_HOST_IDENTITY_VALUE="$HOST_IDENTITY" \
 SHADOWSCORE_ADVERTISED_NAME_VALUE="$ADVERTISED_NAME" \
 SHADOWSCORE_JACK_TRANSPORT_VALUE="$JACK_TRANSPORT" \
 SHADOWSCORE_JACK_TRANSPORT_INTERVAL_MS_VALUE="$JACK_TRANSPORT_INTERVAL_MS" \
+SHADOWSCORE_CONFIG_TEMPLATE_PATH="$CONFIG_TEMPLATE_PATH" \
 SHADOWSCORE_CONFIG_PATH="$CONFIG_PATH" \
-node --input-type=module <<'NODE'
-import fs from "node:fs";
-
-const path = process.env.SHADOWSCORE_CONFIG_PATH;
-const config = JSON.parse(fs.readFileSync(path, "utf8"));
-config.server ??= {};
-config.server.role = process.env.SHADOWSCORE_ROLE_VALUE;
-config.server.hostIdentity = process.env.SHADOWSCORE_HOST_IDENTITY_VALUE;
-config.server.advertisedName = process.env.SHADOWSCORE_ADVERTISED_NAME_VALUE;
-config.transport ??= {};
-config.transport.tempoAuthority = config.transport.tempoAuthority === "server" ? "server" : "link";
-config.transport.jack ??= {};
-config.transport.jack.enabled = process.env.SHADOWSCORE_ROLE_VALUE === "host" && process.env.SHADOWSCORE_JACK_TRANSPORT_VALUE === "1";
-config.transport.jack.host = process.env.SHADOWSCORE_HOST_IDENTITY_VALUE;
-config.transport.jack.freshnessMs = Number(config.transport.jack.freshnessMs ?? 500);
-config.transport.jack.pollIntervalMs = Number(process.env.SHADOWSCORE_JACK_TRANSPORT_INTERVAL_MS_VALUE || config.transport.jack.pollIntervalMs || 75);
-config.http ??= {};
-config.static ??= {};
-config.static.enabled = true;
-config.static.root = "public/matrix-edit";
-config.static.index = "index.html";
-config.static.apps = {
-  home: {
-    root: "public",
-    index: "index.html",
-    routes: ["/"]
-  },
-  matrixEdit: {
-    root: "public/matrix-edit",
-    index: "index.html",
-    routes: ["/matrix-edit"]
-  },
-  eventList: {
-    root: "public/event-list",
-    index: "index.html",
-    routes: ["/event-list"]
-  },
-  structureEditor: {
-    root: "public/structure-editor",
-    index: "index.html",
-    routes: ["/structure-editor"]
-  },
-  editorsIndex: {
-    root: "public/editors",
-    index: "index.html",
-    routes: ["/editors"]
-  },
-  polandEditor: {
-    root: "public/editors/poland",
-    index: "index.html",
-    routes: ["/editors/poland"]
-  },
-  ttidEditor: {
-    root: "public/editors/ttid",
-    index: "index.html",
-    routes: ["/editors/ttid"]
-  },
-  plateEditor: {
-    root: "public/editors/plate",
-    index: "index.html",
-    routes: ["/editors/plate"]
-  },
-  listSequencerEditor: {
-    root: "public/editors/listsequencer",
-    index: "index.html",
-    routes: ["/editors/listsequencer"]
-  },
-  shared: {
-    root: "public/shared",
-    index: "index.html",
-    routes: ["/shared"]
-  },
-  oscVolume: {
-    root: "public/tools/osc-volume",
-    index: "index.html",
-    routes: ["/tools/osc-volume"]
-  },
-  oscMacros: {
-    root: "public/tools/osc-macros",
-    index: "index.html",
-    routes: ["/tools/osc-macros"]
-  }
-};
-config.editors = [
-  {
-    id: "poland",
-    label: "Poland",
-    route: "/editors/poland",
-    targetFilter: {
-      app: "poland"
-    }
-  },
-  {
-    id: "ttid",
-    label: "TTID",
-    route: "/editors/ttid",
-    targetFilter: {
-      app: "ttid"
-    }
-  },
-  {
-    id: "plate",
-    label: "Plate",
-    route: "/editors/plate",
-    targetFilter: {
-      app: "plate"
-    }
-  },
-  {
-    id: "listsequencer",
-    label: "ListSequencer",
-    route: "/editors/listsequencer",
-    targetFilter: {
-      app: "listsequencer"
-    }
-  }
-];
-if (process.env.SHADOWSCORE_ROLE_VALUE === "host") {
-  config.http.publicUrl = process.env.SHADOWSCORE_PUBLIC_URL_VALUE;
-  config.registration ??= {};
-  config.registration.sessionHostUrl = "";
-} else {
-  config.http.publicUrl = "";
-  config.registration ??= {};
-  config.registration.sessionHostUrl = process.env.SHADOWSCORE_SESSION_HOST_URL_VALUE;
-  config.rnbo ??= {};
-  config.rnbo.oscQuery ??= {};
-  if (!config.rnbo.oscQuery.oscHost) {
-    config.rnbo.oscQuery.oscHost = `${process.env.SHADOWSCORE_HOST_IDENTITY_VALUE}.local`;
-  }
-}
-fs.writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
-NODE
+node bin/configure-install.mjs
 
 if [[ "$ROLE" == "host" ]]; then
   SERVICE_NAME="shadowscore-server.service"
@@ -312,6 +194,7 @@ if [[ "$ROLE" == "host" ]]; then
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/" | grep -q "ShadowScore Views" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/structure-editor" | grep -q "ShadowScore Structure Editor" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/matrix-edit" | grep -q "ShadowScore Matrix Edit" \
+      && curl -fsS --max-time 1 "http://127.0.0.1:8790/piano-roll" | grep -q "ShadowScore Piano Roll" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/event-list" | grep -q "ShadowScore Event List"; then
       ready=1
       break
@@ -319,7 +202,7 @@ if [[ "$ROLE" == "host" ]]; then
     sleep 0.5
   done
   if [[ "$ready" != "1" ]]; then
-    echo "ShadowscoreServer did not serve /healthz, /, /structure-editor, /matrix-edit, and /event-list successfully" >&2
+    echo "ShadowscoreServer did not serve /healthz, /, /structure-editor, /matrix-edit, /piano-roll, and /event-list successfully" >&2
     $SUDO journalctl -u "$SERVICE_NAME" -n 80 --no-pager || true
     exit 1
   fi

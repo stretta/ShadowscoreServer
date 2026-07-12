@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AnalogSequencer Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <style>
+    body { margin: 0; min-height: 100vh; }
+    main { display: grid; gap: 12px; margin: 0 auto; padding: 16px 0 32px; width: min(1440px, calc(100vw - 28px)); }
+    .top { align-items: center; display: flex; gap: 14px; justify-content: space-between; }
+    h1 { font-size: 18px; line-height: 1.1; margin: 0; }
+    .subtitle, .status, .detail, .empty { color: var(--ss-muted); font-size: 12px; font-weight: 750; }
+    .subtitle { margin: 4px 0 0; }
+    .status { max-width: 48vw; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+    .toolbar, .targets, .sequencer { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); }
+    .toolbar { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 10px; }
+    .toolbar-actions { align-items: center; display: flex; gap: 8px; }
+    .targets { display: flex; gap: 8px; overflow-x: auto; padding: 10px; }
+    .target { align-items: start; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); display: grid; flex: 0 0 210px; gap: 3px 8px; grid-template-columns: auto 1fr; padding: 8px; }
+    .target input { grid-row: 1 / span 2; margin-top: 2px; }
+    .target strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sequencer { min-width: 0; overflow-x: auto; padding: 14px; }
+    .stages { display: grid; gap: 7px; grid-template-columns: repeat(16, minmax(58px, 1fr)); min-width: 1030px; }
+    .stage { align-items: center; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); display: grid; gap: 7px; grid-template-rows: auto auto 190px auto auto; justify-items: center; padding: 8px 5px; }
+    .stage.playing { border-color: var(--ss-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-accent) 42%, transparent), inset 0 0 22px color-mix(in srgb, var(--ss-accent) 13%, transparent); }
+    .stage.playing .stage-number { color: var(--ss-accent); }
+    .stage.unused { opacity: .32; }
+    .stage-number { color: var(--ss-muted); font-size: 10px; font-weight: 850; letter-spacing: .08em; }
+    .note { color: var(--ss-accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; font-weight: 900; min-height: 16px; }
+    .value { color: var(--ss-text); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 850; }
+    .slider { accent-color: var(--ss-accent-secondary); appearance: auto; direction: rtl; height: 190px; margin: 0; width: 25px; writing-mode: vertical-lr; }
+    .step { align-items: center; cursor: pointer; display: flex; justify-content: center; }
+    .step input { appearance: none; background: var(--ss-bg); border: 2px solid var(--ss-border-strong); border-radius: 4px; height: 25px; margin: 0; width: 25px; }
+    .step input:checked { background: var(--ss-accent); border-color: var(--ss-accent); box-shadow: inset 0 0 0 5px var(--ss-surface); }
+    .step input:focus-visible { outline: 2px solid var(--ss-accent-secondary); outline-offset: 2px; }
+    .missing { opacity: .45; }
+    .parameters { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); display: grid; gap: 12px; padding: 14px; }
+    .parameters h2 { font-size: 14px; margin: 0; }
+    .parameter-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .parameter { background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); display: grid; gap: 7px; padding: 10px; }
+    .parameter-head { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+    .parameter-name { font-size: 12px; font-weight: 850; overflow-wrap: anywhere; }
+    .parameter-value { color: var(--ss-accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 850; }
+    .parameter input, .parameter select { min-width: 0; width: 100%; }
+    @media (max-width: 700px) { .top, .toolbar { align-items: flex-start; flex-direction: column; } .status { max-width: none; text-align: left; white-space: normal; } }
+  </style>
+</head>
+<body>
+  <header class="ss-top-strip"><div class="top"><div><h1>AnalogSequencer Editor</h1><p class="subtitle">16-stage pitch and step controls</p></div><div id="status" class="status" role="status">Loading targets...</div></div></header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes"><a href="/">Dashboard</a><a href="/structure-editor">Structure</a><a href="/matrix-edit">Matrix</a><a href="/piano-roll">Piano Roll</a><a href="/event-list">Event List</a><a href="/editors" aria-current="page">OSC Generators</a><a href="/admin">Admin</a></nav>
+  <main>
+    <section class="toolbar"><strong>Live targets</strong><div class="toolbar-actions"><button id="rtz" class="primary" type="button">Return to Zero</button><button id="refresh" type="button">Refresh</button></div></section>
+    <section id="targets" class="targets" aria-live="polite"></section>
+    <section class="sequencer"><div id="stages" class="stages"></div></section>
+    <section class="parameters"><h2>Sequence Parameters</h2><div id="parameters" class="parameter-grid"></div></section>
+  </main>
+  <script>
+    const targetsEl = document.querySelector("#targets");
+    const stagesEl = document.querySelector("#stages");
+    const parametersEl = document.querySelector("#parameters");
+    const statusEl = document.querySelector("#status");
+    const pending = new Map();
+    let targets = [];
+    let stagePollTimer;
+
+    document.querySelector("#refresh").addEventListener("click", () => refresh().catch(reportError));
+    document.querySelector("#rtz").addEventListener("click", () => returnToZero().catch(reportError));
+    refresh().catch(reportError);
+
+    async function refresh() {
+      statusEl.textContent = "Loading AnalogSequencer targets...";
+      const response = await fetch("/osc/targets?app=analogsequencer&status=online", { cache: "no-store" });
+      if (!response.ok) throw new Error(`Target discovery failed (${response.status})`);
+      targets = (await response.json()).targets || [];
+      renderTargets();
+      renderStages();
+      renderParameters();
+      statusEl.textContent = targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No AnalogSequencer target online";
+      startStagePolling();
+    }
+
+    function renderTargets() {
+      targetsEl.innerHTML = targets.length ? targets.map((target, index) => `<label class="target"><input type="checkbox" data-target="${escapeHtml(target.id)}" ${index === 0 ? "checked" : ""}><strong>${escapeHtml(target.label || target.id)}</strong><span class="detail">${escapeHtml(target.deviceId || target.unitId || target.host || "")}</span></label>`).join("") : `<span class="empty">No live target found. The editor will populate when AnalogSequencer is instantiated and discovered.</span>`;
+    }
+
+    function renderStages() {
+      const source = targets[0] || { parameters: [] };
+      const values = indexedParams(source.parameters, /^(?:(\d+)StageValue|StageValue[_ -]?(\d+))$/i);
+      const steps = indexedParams(source.parameters, /^(?:(\d+)StageStep|StageStep[_ -]?(\d+))$/i);
+      stagesEl.replaceChildren(...Array.from({ length: 16 }, (_, offset) => createStage(offset + 1, values.get(offset + 1), steps.get(offset + 1))));
+      applyMaxCount(maxCountValue(source));
+    }
+
+    function renderParameters() {
+      const source = targets[0] || { parameters: [] };
+      const params = (source.parameters || []).filter(param => !/Stage(?:Value|Step)/i.test(param.name));
+      parametersEl.replaceChildren(...params.map(createParameterControl));
+      if (!params.length) parametersEl.innerHTML = `<span class="empty">No additional parameters reported.</span>`;
+    }
+
+    function createParameterControl(param) {
+      const card = document.createElement("label"); card.className = "parameter";
+      const head = document.createElement("span"); head.className = "parameter-head";
+      const name = document.createElement("span"); name.className = "parameter-name"; name.textContent = param.displayName || param.name;
+      const readout = document.createElement("output"); readout.className = "parameter-value"; readout.textContent = formatParameterValue(param.value);
+      head.append(name, readout); card.append(head);
+      if (Array.isArray(param.values) && param.values.length) {
+        const select = document.createElement("select");
+        for (const value of param.values) { const option = document.createElement("option"); option.value = String(value); option.textContent = String(value); select.append(option); }
+        select.value = String(param.value); select.addEventListener("change", () => { param.value = select.value; readout.textContent = select.value; sendParam(param.name, select.value).catch(reportError); }); card.append(select);
+      } else {
+        const input = document.createElement("input"); input.type = "range"; input.min = String(param.min ?? 0); input.max = String(param.max ?? 1); input.step = String(parameterStep(param)); input.value = String(param.value ?? param.min ?? 0);
+        input.addEventListener("input", () => { const value = Number(input.value); param.value = value; readout.textContent = formatParameterValue(value); if (param.name.toLowerCase() === "maxcount") applyMaxCount(Math.round(value)); scheduleSend(param.name, value); });
+        input.addEventListener("change", () => flushSend(param.name, Number(input.value))); card.append(input);
+      }
+      return card;
+    }
+
+    function createStage(number, valueParam, stepParam) {
+      const stage = document.createElement("div");
+      stage.className = `stage${valueParam || stepParam ? "" : " missing"}`;
+      stage.dataset.stage = String(number);
+      const value = integerValue(valueParam?.value, integerValue(valueParam?.min, 0));
+      const min = integerValue(valueParam?.min, 0);
+      const max = integerValue(valueParam?.max, 127);
+      stage.innerHTML = `<span class="stage-number">STEP ${number}</span><span class="note">${midiNote(value)}</span>`;
+      const slider = document.createElement("input");
+      slider.className = "slider"; slider.type = "range"; slider.min = String(min); slider.max = String(max); slider.step = "1"; slider.value = String(clamp(value, min, max)); slider.disabled = !valueParam;
+      const readout = document.createElement("span"); readout.className = "value"; readout.textContent = String(value);
+      const note = stage.querySelector(".note");
+      slider.addEventListener("input", () => { const next = integerValue(slider.value, value); readout.textContent = String(next); note.textContent = midiNote(next); scheduleSend(valueParam.name, next); });
+      slider.addEventListener("change", () => flushSend(valueParam?.name, integerValue(slider.value, value)));
+      const toggleLabel = document.createElement("label"); toggleLabel.className = "step"; toggleLabel.title = `Enable step ${number}`;
+      const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = Boolean(Number(stepParam?.value)); toggle.disabled = !stepParam; toggle.setAttribute("aria-label", `Step ${number}`);
+      toggle.addEventListener("change", () => sendParam(stepParam.name, toggle.checked ? 1 : 0).catch(reportError));
+      toggleLabel.append(toggle); stage.append(slider, readout, toggleLabel); return stage;
+    }
+
+    function indexedParams(parameters, pattern) { const result = new Map(); for (const param of parameters || []) { const match = String(param.name || "").match(pattern); if (match) result.set(Number(match[1] || match[2]), param); } return result; }
+    function scheduleSend(param, value) { if (!param) return; if (pending.has(param)) clearTimeout(pending.get(param)); pending.set(param, setTimeout(() => { pending.delete(param); sendParam(param, value).catch(reportError); }, 75)); }
+    function flushSend(param, value) { if (!param) return; if (pending.has(param)) { clearTimeout(pending.get(param)); pending.delete(param); } sendParam(param, value).catch(reportError); }
+    async function sendParam(param, value) { const selected = Array.from(document.querySelectorAll("[data-target]:checked"), input => input.dataset.target); if (!selected.length) { statusEl.textContent = "No targets selected"; return; } const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: selected, param, args: [value] }) }); const body = await response.json().catch(() => ({})); const sent = (body.results || []).filter(result => result.ok).length; statusEl.textContent = response.ok && body.ok !== false ? `Sent ${param} = ${value} to ${sent}/${selected.length}` : `Failed ${param} (${sent}/${selected.length})`; }
+    async function returnToZero() { const selected = selectedTargetEntries(); if (!selected.length) { statusEl.textContent = "No targets selected"; return; } const results = await Promise.all(selected.map(async target => { const port = (target.inputPorts || []).find(entry => String(entry.name).toLowerCase() === "rtz"); const address = port?.address || `${target.baseAddress}/messages/in/rtz`; const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: [target.id], address, args: [1] }) }); return response.json().catch(() => ({ ok: false })); })); const sent = results.filter(result => result.ok !== false).length; statusEl.textContent = sent === selected.length ? `Return to Zero queued on ${sent}/${selected.length}` : `Return to Zero failed (${sent}/${selected.length})`; }
+    function startStagePolling() { clearTimeout(stagePollTimer); if (!targets.length) { setPlayingStage(); return; } pollCurrentStage(); }
+    async function pollCurrentStage() { try { const target = selectedTarget() || targets[0]; const host = isLoopback(target.host) ? location.hostname : target.host; const path = `${target.baseAddress}/messages/out/current_stage`; const response = await fetch(`${location.protocol}//${host}:5678${path}`, { cache: "no-store" }); if (!response.ok) throw new Error(`current_stage ${response.status}`); const body = await response.json(); setPlayingStage(integerValue(Array.isArray(body.VALUE) ? body.VALUE[0] : body.VALUE, 0)); } catch { setPlayingStage(); } finally { stagePollTimer = setTimeout(pollCurrentStage, 125); } }
+    function selectedTarget() { const id = document.querySelector("[data-target]:checked")?.dataset.target; return targets.find(target => target.id === id); }
+    function selectedTargetEntries() { const ids = new Set(Array.from(document.querySelectorAll("[data-target]:checked"), input => input.dataset.target)); return targets.filter(target => ids.has(target.id)); }
+    function setPlayingStage(number) { for (const stage of stagesEl.querySelectorAll(".stage")) { const playing = Number(stage.dataset.stage) === number; stage.classList.toggle("playing", playing); if (playing) stage.setAttribute("aria-current", "step"); else stage.removeAttribute("aria-current"); } }
+    function applyMaxCount(maxCount) { for (const stage of stagesEl.querySelectorAll(".stage")) { const unused = Number(stage.dataset.stage) > maxCount; stage.classList.toggle("unused", unused); for (const input of stage.querySelectorAll("input")) input.disabled = unused || stage.classList.contains("missing"); } }
+    function maxCountValue(target) { const param = (target.parameters || []).find(entry => String(entry.name).toLowerCase() === "maxcount"); return clamp(integerValue(param?.value, 16), 1, 16); }
+    function parameterStep(param) { if (String(param.name).toLowerCase() === "maxcount" || param.meta?.edit_as === "int") return 1; const span = Number(param.max) - Number(param.min); return span <= 1 ? 0.01 : span <= 100 ? 0.1 : 1; }
+    function formatParameterValue(value) { return typeof value === "number" ? String(Math.round(value * 100) / 100) : String(value ?? ""); }
+    function isLoopback(host) { return !host || host === "127.0.0.1" || host === "localhost" || host === "::1"; }
+    function midiNote(value) { const note = integerValue(value, 0); if (note < 0 || note > 127) return "—"; return `${["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"][note % 12]}${Math.floor(note / 12) - 1}`; }
+    function integerValue(value, fallback) { const number = Number(value); return Number.isFinite(number) ? Math.round(number) : fallback; }
+    function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+    function reportError(error) { statusEl.textContent = error.message; }
+    function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, char => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]); }
+  </script>
+</body>
+</html>

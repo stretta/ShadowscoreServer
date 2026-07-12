@@ -31,12 +31,13 @@ bash /tmp/install-shadowscore.sh --role peer --host-identity pt6 --advertised-na
 ```
 
 The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages,
-clones or updates the repo, writes the role-specific generated config, installs
-the matching systemd unit for the selected install directory, starts the
+requires Node.js 18 or newer, uses the lockfile for reproducible production
+dependency installs, clones or updates the repo, writes the role-specific
+generated config, installs the matching systemd unit for the selected install directory, starts the
 service, waits for `/healthz`, the root view index (`/`), Structure Editor
-(`/structure-editor`), Matrix Edit (`/matrix-edit`), and the Event List editor
-(`/event-list`), then runs the hardware smoke test. The smoke test also verifies
-Piano Roll (`/piano-roll`) and the remaining runtime surfaces listed below.
+(`/structure-editor`), Matrix Edit (`/matrix-edit`), Piano Roll (`/piano-roll`),
+and the Event List editor (`/event-list`), then runs the hardware smoke test.
+The smoke test verifies the remaining runtime surfaces listed below.
 
 Manual install remains available:
 
@@ -57,6 +58,9 @@ Edit `config/shadowbox.local.json` on the selected session host:
 If you keep this local filename, update the host unit's `ExecStart` config path
 to `config/shadowbox.local.json` when installing the systemd template. The
 checked-in template otherwise starts with `config/shadowbox.hardware-host.json`.
+On later runs, the installer preserves local configuration values while merging
+in new default hosted applications and editor registrations from the current
+server code.
 
 For a peer unit, copy `config/shadowbox.hardware-peer.json` instead and set:
 

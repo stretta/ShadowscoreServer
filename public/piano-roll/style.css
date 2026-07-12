@@ -7,6 +7,7 @@ main { height:calc(100vh - 42px); padding:10px 14px 12px; display:flex; flex-dir
 .toolbar select { min-width:110px; }
 .toolbar input[type=range] { width:104px; }
 .toolbar button { min-width:72px; }
+#fold[aria-pressed="true"] { background:var(--ss-accent-strong); border-color:var(--ss-accent-strong); color:#07110a; font-weight:800; }
 #save:not(:disabled) { background:var(--ss-accent-secondary); color:#07151b; font-weight:800; }
 .badge { padding:6px 9px; border:1px solid var(--ss-border); border-radius:999px; color:var(--ss-muted); font-size:12px; }
 .badge.dirty { color:#ffd166; border-color:#ffd166; }

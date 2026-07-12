@@ -2539,7 +2539,9 @@ test("TTID editor route serves the OSC target integration page", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /TTID Editor/);
-  assert.match(response.body, /\/osc\/targets\?app=ttid/);
+  assert.match(response.body, /\/osc\/targets\?capability=ttid-edit/);
+  assert.match(response.body, /ChromaticTranspose/);
+  assert.match(response.body, /ScalarTranspose/);
   assert.match(response.body, /editor: ttid/);
   assert.match(response.body, /SCALES/);
   assert.match(response.body, /ionian/);
@@ -2775,6 +2777,39 @@ test("OSC target route exposes registered TTID control targets", async () => {
   assert.equal(response.targets[0].status, "online");
   assert.equal(response.targets[0].capabilities.includes("ttid-edit"), true);
   assert.equal(response.targets[0].parameters[0].meta.editor, "ttid");
+});
+
+test("OSC target route exposes TTID-tagged parameters from other RNBO apps", async () => {
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  registry.register({
+    id: "wren",
+    advertisedName: "Wren",
+    oscTargets: [{
+      id: "rnbo-inst-13:listsequencer",
+      label: "ListSequencer 13",
+      host: "192.168.68.70",
+      port: 1234,
+      baseAddress: "/rnbo/inst/13",
+      app: "listsequencer",
+      instance: "main",
+      parameters: [
+        { name: "Scale", address: "/rnbo/inst/13/params/Scale", value: 2741, meta: { editor: "ttid" } },
+        { name: "ChromaticTranspose", address: "/rnbo/inst/13/params/ChromaticTranspose", value: 0, min: -24, max: 24 },
+        { name: "ScalarTranspose", address: "/rnbo/inst/13/params/ScalarTranspose", value: 0, min: -24, max: 24 }
+      ]
+    }]
+  }, { remoteAddress: "192.168.68.70" });
+  const context = createRouteContext({ runtime: { peerRegistry: registry } });
+
+  const response = await requestJson(context, "GET", "/osc/targets?capability=ttid-edit&status=online");
+
+  assert.equal(response.targets.length, 1);
+  assert.equal(response.targets[0].app, "listsequencer");
+  assert.deepEqual(response.targets[0].parameters.map((parameter) => parameter.name), [
+    "Scale",
+    "ChromaticTranspose",
+    "ScalarTranspose"
+  ]);
 });
 
 test("OSC send route resolves named parameters per target", async () => {

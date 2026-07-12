@@ -150,6 +150,9 @@ function oscCapabilities(target, app) {
   if (app) {
     values.add(`${app}-edit`);
   }
+  if (Array.isArray(target.parameters) && target.parameters.some((parameter) => stringField(parameter?.meta?.editor).toLowerCase() === "ttid")) {
+    values.add("ttid-edit");
+  }
   const configured = target.oscCapabilities ?? target.controlCapabilities ?? target.metadata?.oscCapabilities;
   if (Array.isArray(configured)) {
     for (const capability of configured) {

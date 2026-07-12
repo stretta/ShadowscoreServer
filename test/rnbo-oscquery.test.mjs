@@ -363,8 +363,10 @@ test("extracts ListSequencer OSC control targets with message inports and TTID p
         CONTENTS: {
           ClockRate: rnboParam("/rnbo/inst/13/params/ClockRate", "16n", undefined, undefined, 0),
           Root: rnboParam("/rnbo/inst/13/params/Root", 60, 0, 127, 1),
+          ChromaticTranspose: rnboParam("/rnbo/inst/13/params/ChromaticTranspose", 0, -24, 24, 2),
+          ScalarTranspose: rnboParam("/rnbo/inst/13/params/ScalarTranspose", 0, -24, 24, 3),
           Scale: {
-            ...rnboParam("/rnbo/inst/13/params/Scale", 2741, 0, 4095, 2),
+            ...rnboParam("/rnbo/inst/13/params/Scale", 2741, 0, 4095, 4),
             CONTENTS: {
               ...rnboParam("/rnbo/inst/13/params/Scale", 2741, 0, 4095, 2).CONTENTS,
               meta: {
@@ -397,6 +399,7 @@ test("extracts ListSequencer OSC control targets with message inports and TTID p
   assert.equal(targets[0].app, "listsequencer");
   assert.equal(targets[0].label, "Listsequencer 13");
   assert.equal(targets[0].oscCapabilities.includes("listsequencer-edit"), true);
+  assert.equal(targets[0].oscCapabilities.includes("ttid-edit"), true);
   assert.deepEqual(targets[0].inputPorts.map((inputPort) => inputPort.name), [
     "Duration",
     "PrimaryRotation",

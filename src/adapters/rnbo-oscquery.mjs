@@ -215,6 +215,10 @@ function controlTargetForInstance(instanceId, node, name, config) {
   const rnbo = config.rnbo ?? {};
   const oscQuery = rnbo.oscQuery ?? {};
   const instance = String(instanceId);
+  const oscCapabilities = ["editor", "volume", "preset", `${app}-edit`];
+  if (parameters.some(isTtidParameter) && !oscCapabilities.includes("ttid-edit")) {
+    oscCapabilities.push("ttid-edit");
+  }
   return withoutUndefined({
     id: `rnbo-inst-${instance}:${app}`,
     name: `${titleCase(app)} ${instance}`,
@@ -226,7 +230,7 @@ function controlTargetForInstance(instanceId, node, name, config) {
     instanceId: instance,
     app,
     instance,
-    oscCapabilities: ["editor", "volume", "preset", `${app}-edit`],
+    oscCapabilities,
     parameters,
     inputPorts,
     source: "rnbooscquery",

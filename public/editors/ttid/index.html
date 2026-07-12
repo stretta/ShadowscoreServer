@@ -224,6 +224,7 @@
     }
 
     .scale-row,
+    .transpose-row,
     .roots {
       display: grid;
       gap: 8px;
@@ -232,6 +233,20 @@
     .scale-row {
       align-items: end;
       grid-template-columns: minmax(160px, 1fr) minmax(190px, 1fr) auto;
+    }
+
+    .transpose-row {
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+
+    .transpose-control {
+      display: grid;
+      gap: 6px;
+    }
+
+    .transpose-control input {
+      min-height: 34px;
+      padding: 6px 8px;
     }
 
     .roots {
@@ -376,7 +391,7 @@
 
     async function refresh() {
       refreshButton.disabled = true;
-      const response = await fetch("/osc/targets?app=ttid&status=online", { cache: "no-store" });
+      const response = await fetch("/osc/targets?capability=ttid-edit&status=online", { cache: "no-store" });
       const body = await response.json();
       if (!response.ok || body.ok === false) {
         throw new Error(body.error || `Request failed: ${response.status}`);
@@ -517,7 +532,51 @@
       row.replaceChildren(rootWrap, scaleWrap, load);
 
       card.replaceChildren(head, keyboard, row);
+      const transposeRow = renderTransposeControls(param);
+      if (transposeRow) card.append(transposeRow);
       return card;
+    }
+
+    function renderTransposeControls(ttidParam) {
+      const names = ["ChromaticTranspose", "ScalarTranspose"];
+      const controls = names.map((name) => companionParam(ttidParam, name)).filter(Boolean).map((param) => {
+        const wrap = document.createElement("label");
+        wrap.className = "transpose-control";
+        const label = document.createElement("span");
+        label.className = "meta";
+        label.textContent = labelFor(param);
+        const input = document.createElement("input");
+        input.type = "number";
+        input.value = String(param.value ?? 0);
+        if (Number.isFinite(Number(param.min))) input.min = String(param.min);
+        if (Number.isFinite(Number(param.max))) input.max = String(param.max);
+        input.step = String(param.meta?.edit_step ?? 1);
+        input.addEventListener("change", async () => {
+          const value = Number(input.value);
+          if (!Number.isFinite(value)) return;
+          await sendParamToTargets(param, value, param.targetIds);
+        });
+        wrap.replaceChildren(label, input);
+        return wrap;
+      });
+      if (!controls.length) return null;
+      const row = document.createElement("div");
+      row.className = "transpose-row";
+      row.replaceChildren(...controls);
+      return row;
+    }
+
+    function companionParam(ttidParam, name) {
+      const targetIds = [];
+      let found;
+      for (const target of targets) {
+        if (!ttidParam.targetIds.includes(target.id)) continue;
+        const param = (target.parameters || []).find((entry) => entry.name === name);
+        if (!param) continue;
+        found ||= { ...param, targetIds };
+        targetIds.push(target.id);
+      }
+      return found;
     }
 
     function renderKey(param, pc, name, mask) {
@@ -580,23 +639,31 @@
 
     async function sendParam(param, value) {
       const selected = selectedTargetsForParam(param);
+      return sendParamToTargets({ name: param }, value, selected);
+    }
+
+    async function sendParamToTargets(param, value, allowedTargetIds) {
+      const allowed = new Set(allowedTargetIds || []);
+      const selected = Array.from(document.querySelectorAll("[data-target]:checked"))
+        .map((input) => input.dataset.target)
+        .filter((id) => id && allowed.has(id));
       if (selected.length === 0) {
         setStatus("No targets selected");
         return;
       }
-      setStatus(`Sending ${labelFor({ name: param })}`);
+      setStatus(`Sending ${labelFor(param)}`);
       const response = await fetch("/osc/send", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targets: selected, param, args: [value] })
+        body: JSON.stringify({ targets: selected, param: param.name, args: [value] })
       });
       const body = await response.json().catch(() => ({}));
       const sent = (body.results || []).filter((result) => result.ok).length;
       if (!response.ok || body.ok === false) {
-        setStatus(`Failed ${labelFor({ name: param })} (${sent}/${selected.length})`);
+        setStatus(`Failed ${labelFor(param)} (${sent}/${selected.length})`);
         return;
       }
-      setStatus(`Sent ${labelFor({ name: param })} ${formatMask(value)} to ${sent}/${selected.length}`);
+      setStatus(`Sent ${labelFor(param)} ${value} to ${sent}/${selected.length}`);
     }
 
     function selectedTargetsForParam(paramName) {

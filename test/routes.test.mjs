@@ -517,6 +517,10 @@ test("structure playhead routes select, advance, and reset active blocks", async
   });
   assert.deepEqual(reset.structureState, { activeBlockId: "A", macroIndex: 0 });
 
+  await requestJson(context, "POST", "/macrostructure", { blocks: ["F", "B", "A"] });
+  const resetToFirstBlock = await requestJson(context, "POST", "/macrostructure/reset", {});
+  assert.deepEqual(resetToFirstBlock.structureState, { activeBlockId: "F", macroIndex: 0 });
+
   const rejected = await request(context, "POST", "/structure/playhead", {
     activeBlockId: "missing"
   });
@@ -2334,10 +2338,11 @@ test("root route serves view index", async () => {
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore Views/);
   assert.match(response.body, /\/editors/);
-  assert.match(response.body, /Instrument Editors/);
+  assert.match(response.body, /ShadowScore Editors/);
+  assert.match(response.body, /OSC Generators/);
   assert.match(response.body, /\/structure-editor/);
   assert.match(response.body, /\/matrix-edit/);
-  assert.match(response.body, /\/piano-roll/);
+  assert.match(response.body, /<a href="\/piano-roll">Piano Roll<\/a>/);
   assert.match(response.body, /\/event-list/);
   assert.match(response.body, /\/admin/);
   assert.match(response.body, /\/transport\/status/);
@@ -2423,7 +2428,8 @@ test("editor index route serves registered editor browser", async () => {
 
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
-  assert.match(response.body, /ShadowScore Editors/);
+  assert.match(response.body, /ShadowScore OSC Generators/);
+  assert.match(response.body, /OSC Generators/);
   assert.match(response.body, /\/editors\/manifest/);
   assert.match(response.body, /\/osc\/targets/);
   assert.match(response.body, /filterText/);
@@ -2482,6 +2488,8 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /id="set-active-block"/);
   assert.match(response.body, /id="advance-block"/);
   assert.match(response.body, /id="reset-block"/);
+  assert.match(response.body, />Return to Start<\/button>/);
+  assert.doesNotMatch(response.body, /Return to A/);
   assert.match(response.body, /id="start-macro"/);
   assert.match(response.body, /id="stop-macro"/);
   assert.match(response.body, /id="macro-playback-status"/);

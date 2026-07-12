@@ -255,7 +255,11 @@ export function createScoreStore(initialScore, options = {}) {
     resetStructurePlayhead(options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
       assertExpectedRevisions(score, options);
-      const structureState = normalizeStructureState(createDefaultStructureState(), score.mesostructure, score.macrostructure);
+      const firstBlockId = score.macrostructure?.blocks?.[0];
+      const structureState = normalizeStructureState({
+        macroIndex: 0,
+        activeBlockId: firstBlockId
+      }, score.mesostructure, score.macrostructure);
       score = {
         ...score,
         ...nextRevisionFields(score),

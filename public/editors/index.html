@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ShadowScore Editors</title>
+  <title>ShadowScore OSC Generators</title>
   <link rel="stylesheet" href="/shared/shadowscore-style.css">
   <style>
     body {
@@ -133,17 +133,21 @@
   <header class="ss-top-strip">
     <div class="top">
       <div>
-        <h1>ShadowScore Editors</h1>
-        <p class="subtitle">Instrument editor manifests and live targets</p>
+        <h1>OSC Generators</h1>
+        <p class="subtitle">Parameter-driven generators and their live OSC targets</p>
       </div>
       <div id="status" class="status" role="status">Loading editors...</div>
     </div>
   </header>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes">
     <a href="/">Dashboard</a>
-    <a href="/editors" aria-current="page">Editors</a>
-    <a href="/tools/osc-volume">Volume</a>
-    <a href="/tools/osc-macros">Macros</a>
+    <a href="/structure-editor">Structure</a>
+    <a href="/matrix-edit">Matrix</a>
+    <a href="/piano-roll">Piano Roll</a>
+    <a href="/event-list">Event List</a>
+    <a href="/editors" aria-current="page">OSC Generators</a>
+    <a href="/admin">Admin</a>
+    <a href="/transport/status">Transport</a>
   </nav>
   <main>
     <section id="editors" class="grid" aria-live="polite"></section>
@@ -166,7 +170,7 @@
         return [editor.id, (targets.targets || []).filter((target) => target.status === "online").length];
       })));
       renderEditors(editors, targetCounts);
-      statusEl.textContent = `${editors.length} editor${editors.length === 1 ? "" : "s"} registered`;
+      statusEl.textContent = `${editors.length} generator${editors.length === 1 ? "" : "s"} registered`;
     }
 
     async function fetchJson(url) {
@@ -180,7 +184,7 @@
     function renderEditors(editors, targetCounts) {
       editorsEl.className = editors.length ? "grid" : "";
       if (!editors.length) {
-        editorsEl.innerHTML = `<div class="empty">No instrument editors are registered.</div>`;
+        editorsEl.innerHTML = `<div class="empty">No OSC generators are registered.</div>`;
         return;
       }
       editorsEl.innerHTML = editors.map((editor) => `

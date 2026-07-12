@@ -32,6 +32,7 @@ curl http://127.0.0.1:8790/score
 curl http://127.0.0.1:8790/session
 open http://127.0.0.1:8790/
 open http://127.0.0.1:8790/matrix-edit
+open http://127.0.0.1:8790/piano-roll
 open http://127.0.0.1:8790/event-list
 open http://127.0.0.1:8790/structure-editor
 open http://127.0.0.1:8790/admin
@@ -118,11 +119,12 @@ The `/structure-editor` route serves a dedicated meso/macro editor from
 per-player clip assignments, macrostructure tempo, and the ordered macro chain
 without changing the Matrix Edit or Event List surfaces.
 
-The `/editors` route serves the registered instrument-editor index from
-`public/editors`, and `/editors/manifest` exposes the editor manifest JSON.
-The bundled Poland and Plate editors are served at `/editors/poland` and
-`/editors/plate`. Utility tools for live OSC target volume trims and macro
-building are served at `/tools/osc-volume` and `/tools/osc-macros`.
+The `/editors` route serves the registered OSC-generator index from
+`public/editors`, and `/editors/manifest` exposes the generator manifest JSON.
+The bundled Poland, TTID, Plate, and ListSequencer editors are served at
+`/editors/poland`, `/editors/ttid`, `/editors/plate`, and
+`/editors/listsequencer`. Utility tools for live OSC target volume trims and
+macro building are served at `/tools/osc-volume` and `/tools/osc-macros`.
 
 By default, the active score persists to `data/score.json`, the previous
 snapshot is kept at `data/score.previous.json`, and named saved scores are
@@ -201,6 +203,7 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 `playbackType` is either `looped` or `one-shot`, and defaults to `looped`.
 - `POST /mesostructure`: add or replace a mesostructural block with `{ "blockId": "...", "block": { "duration": { "bars": 8 }, "players": {} } }`.
 - `POST /mesostructure/:blockId`: add or replace one mesostructural block.
+- `POST /mesostructure/:blockId/duplicate`: duplicate one mesostructural block, using `blockId` or `id` in the request body for the new block ID.
 - `DELETE /mesostructure/:blockId`: remove one mesostructural block and delete its appearances from the macro chain.
 - `POST /macrostructure`: merge macrostructure fields such as `{ "tempo": 120, "blocks": ["A", "B"] }`; use `?replace=1` to replace the macrostructure document.
 - `POST /structure/playhead`: select the active mesostructural block.
@@ -228,10 +231,13 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /`: ShadowScore view index with editor and RNBO graph-editor links.
 - `GET /editors`: registered instrument-editor browser.
 - `GET /editors/poland`: bundled Poland OSC editor.
+- `GET /editors/ttid`: bundled TTID OSC editor.
 - `GET /editors/plate`: bundled Plate reverb OSC editor.
+- `GET /editors/listsequencer`: bundled ListSequencer OSC editor.
 - `GET /tools/osc-volume`: OSC target volume trim tool.
 - `GET /tools/osc-macros`: OSC macro builder and validator.
 - `GET /event-list`: canonical clip attribute and note-event editor.
+- `GET /piano-roll`: assigned-clip piano-roll editor with explicit per-clip drafts and Save.
 - `GET /structure-editor`: meso/macro structure editor.
 - `GET /events`: server-sent event stream of score changes.
 - `GET /collab`: WebSocket collaboration endpoint for realtime JSON commands.

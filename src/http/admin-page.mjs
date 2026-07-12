@@ -168,6 +168,7 @@ export function adminPage() {
     <a href="/matrix-edit">Matrix</a>
     <a href="/piano-roll">Piano Roll</a>
     <a href="/event-list">Event List</a>
+    <a href="/editors">OSC Generators</a>
     <a href="/admin" aria-current="page">Admin</a>
     <a href="/transport/status">Transport</a>
   </nav>

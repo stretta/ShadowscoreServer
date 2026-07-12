@@ -1,8 +1,8 @@
 {
   "appName": "@matrixedit/rnbo-matrix-editor",
   "target": "shadowscore-server",
-  "buildTime": "2026-07-11T17:52:37.713Z",
-  "matrixeditCommit": "3b3ab60ed19a837a76e061444548b08b8ff4d734",
+  "buildTime": "2026-07-12T10:39:42.778Z",
+  "matrixeditCommit": "ac5ee276061a977fcd34f28f91ba0bddd8be91fa",
   "matrixeditDirty": false,
   "source": "apps/rnbo-matrix-editor/dist",
   "outputBase": "/matrix-edit/"

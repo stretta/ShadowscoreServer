@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   hitTestNotes,
+  gridStepsPerBeat,
   moveNote,
   nudgeNote,
   playbackBeatForVoice,
@@ -46,11 +47,18 @@ const sourceNote = {
   release_velocity: 54
 };
 
+test("note-value grid labels convert to subdivisions per quarter-note beat", () => {
+  assert.equal(gridStepsPerBeat(4), 1);
+  assert.equal(gridStepsPerBeat(8), 2);
+  assert.equal(gridStepsPerBeat(16), 4);
+  assert.equal(gridStepsPerBeat(32), 8);
+});
+
 test("move preserves note identity and expressive fields", () => {
   assert.deepEqual(moveNote(sourceNote, {
     deltaTime: 0.26,
     deltaPitch: 2,
-    subdivision: 4,
+    subdivision: 16,
     clipDuration: 4
   }), {
     ...sourceNote,
@@ -62,7 +70,7 @@ test("move preserves note identity and expressive fields", () => {
 test("right resize preserves onset and fractional expressive note fields", () => {
   assert.deepEqual(resizeNoteRight(sourceNote, {
     deltaTime: 0.26,
-    subdivision: 4,
+    subdivision: 16,
     clipDuration: 4
   }), {
     ...sourceNote,
@@ -73,12 +81,12 @@ test("right resize preserves onset and fractional expressive note fields", () =>
 test("right resize clamps to grid minimum and clip boundary", () => {
   assert.equal(resizeNoteRight(sourceNote, {
     deltaTime: -10,
-    subdivision: 8,
+    subdivision: 32,
     clipDuration: 4
   }).duration, 0.125);
   assert.equal(resizeNoteRight({ ...sourceNote, start_time: 3.75 }, {
     deltaTime: 10,
-    subdivision: 8,
+    subdivision: 32,
     clipDuration: 4
   }).duration, 0.25);
 });
@@ -86,12 +94,12 @@ test("right resize clamps to grid minimum and clip boundary", () => {
 test("keyboard nudges move by one grid step and preserve other fields", () => {
   assert.deepEqual(nudgeNote(sourceNote, {
     direction: "right",
-    subdivision: 4,
+    subdivision: 16,
     clipDuration: 4
   }), { ...sourceNote, start_time: 0.5 });
   assert.deepEqual(nudgeNote(sourceNote, {
     direction: "up",
-    subdivision: 4,
+    subdivision: 16,
     clipDuration: 4
   }), { ...sourceNote, pitch: 61 });
 });
@@ -100,7 +108,7 @@ test("shifted horizontal nudges resize only the right edge", () => {
   assert.deepEqual(nudgeNote(sourceNote, {
     direction: "right",
     resize: true,
-    subdivision: 4,
+    subdivision: 16,
     clipDuration: 4
   }), { ...sourceNote, duration: 0.75 });
 });

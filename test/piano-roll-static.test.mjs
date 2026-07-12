@@ -9,6 +9,8 @@ test("Piano Roll exposes explicit draft controls and editing surfaces", async ()
   const html = await readFile(htmlUrl, "utf8");
   assert.match(html, /<title>ShadowScore Piano Roll<\/title>/);
   assert.match(html, /<a href="\/piano-roll" aria-current="page">Piano Roll<\/a>/);
+  assert.match(html, /<a href="\/editors">OSC Generators<\/a>/);
+  assert.match(html, /<a href="\/transport\/status">Transport<\/a>/);
   assert.match(html, /id="save"[^>]*disabled/);
   assert.match(html, /id="revert"[^>]*disabled/);
   assert.match(html, /id="roll"/);
@@ -32,5 +34,6 @@ test("Piano Roll saves revision-aware clip drafts and supports right-edge resize
   assert.match(js, /draftStore\.reconcile/);
   assert.match(js, /expectedVersion:entry\.baseVersion/);
   assert.match(js, /state\.draft\.notes\.push/);
+  assert.match(js, /duration:gridStep\(\)/);
   assert.match(js, /Save failed:/);
 });

@@ -3,8 +3,12 @@ export function clamp(value, minimum, maximum) {
 }
 
 export function snapBeat(value, subdivision) {
-  const stepsPerBeat = Math.max(1, Math.round(Number(subdivision) || 1));
+  const stepsPerBeat = gridStepsPerBeat(subdivision);
   return Math.round(Number(value) * stepsPerBeat) / stepsPerBeat;
+}
+
+export function gridStepsPerBeat(subdivision) {
+  return Math.max(1, (Number(subdivision) || 4) / 4);
 }
 
 export function playbackBeatForVoice(options = {}) {
@@ -74,8 +78,8 @@ export function projectClipOccurrences(notes, options) {
 }
 
 export function moveNote(note, options) {
-  const subdivision = Math.max(1, Math.round(Number(options.subdivision) || 1));
-  const minimumDuration = 1 / subdivision;
+  const subdivision = Number(options.subdivision);
+  const minimumDuration = 1 / gridStepsPerBeat(subdivision);
   const clipDuration = Math.max(minimumDuration, Number(options.clipDuration));
   return {
     ...note,
@@ -89,8 +93,8 @@ export function moveNote(note, options) {
 }
 
 export function resizeNoteRight(note, options) {
-  const subdivision = Math.max(1, Math.round(Number(options.subdivision) || 1));
-  const minimumDuration = Math.max(1 / subdivision, Number(options.minimumDuration) || 0);
+  const subdivision = Number(options.subdivision);
+  const minimumDuration = Math.max(1 / gridStepsPerBeat(subdivision), Number(options.minimumDuration) || 0);
   const maximumDuration = Math.max(minimumDuration, Number(options.clipDuration) - Number(note.start_time));
   return {
     ...note,
@@ -103,7 +107,7 @@ export function resizeNoteRight(note, options) {
 }
 
 export function nudgeNote(note, options) {
-  const step = 1 / Math.max(1, Math.round(Number(options.subdivision) || 1));
+  const step = 1 / gridStepsPerBeat(options.subdivision);
   if (options.resize && (options.direction === "left" || options.direction === "right")) {
     return resizeNoteRight(note, {
       deltaTime: options.direction === "left" ? -step : step,

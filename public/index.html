@@ -189,10 +189,11 @@
   </header>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes">
     <a href="/" aria-current="page">Dashboard</a>
-    <a href="/editors">Editors</a>
     <a href="/structure-editor">Structure</a>
     <a href="/matrix-edit">Matrix</a>
+    <a href="/piano-roll">Piano Roll</a>
     <a href="/event-list">Event List</a>
+    <a href="/editors">OSC Generators</a>
     <a href="/admin">Admin</a>
     <a href="/transport/status">Transport</a>
   </nav>
@@ -221,17 +222,12 @@
     </section>
 
     <section aria-labelledby="editor-views-heading">
-      <h2 id="editor-views-heading">Editor Views</h2>
+      <h2 id="editor-views-heading">ShadowScore Editors</h2>
       <div class="grid">
         <a class="card" href="/structure-editor">
           <span class="card-title">Structure Editor</span>
           <span class="card-path">/structure-editor</span>
           <span class="card-body">Meso and macro structure, block assignments, and song form.</span>
-        </a>
-        <a class="card" href="/editors">
-          <span class="card-title">Instrument Editors</span>
-          <span class="card-path">/editors</span>
-          <span class="card-body">Registered instrument editor manifests and matching live OSC targets.</span>
         </a>
         <a class="card" href="/matrix-edit">
           <span class="card-title">Matrix Edit</span>
@@ -257,6 +253,17 @@
           <span class="card-title">Transport Status</span>
           <span class="card-path">/transport/status</span>
           <span class="card-body">Live transport facade and JACK status readout.</span>
+        </a>
+      </div>
+    </section>
+
+    <section aria-labelledby="osc-generators-heading">
+      <h2 id="osc-generators-heading">OSC Generators</h2>
+      <div class="grid">
+        <a class="card" href="/editors">
+          <span class="card-title">OSC Generators</span>
+          <span class="card-path">/editors</span>
+          <span class="card-body">Poland, TTID, Plate, ListSequencer, and future parameter-driven OSC surfaces.</span>
         </a>
       </div>
     </section>

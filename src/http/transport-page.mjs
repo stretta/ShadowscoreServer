@@ -135,6 +135,7 @@ export function transportPage() {
     <a href="/matrix-edit">Matrix</a>
     <a href="/piano-roll">Piano Roll</a>
     <a href="/event-list">Event List</a>
+    <a href="/editors">OSC Generators</a>
     <a href="/admin">Admin</a>
     <a href="/transport/status" aria-current="page">Transport</a>
   </nav>
@@ -142,7 +143,7 @@ export function transportPage() {
     <div class="toolbar">
       <button class="primary" id="play" type="button">Play</button>
       <button class="danger" id="stop" type="button">Stop</button>
-      <button id="reset" type="button">Return to A</button>
+      <button id="reset" type="button">Return to Start</button>
       <button id="advance" type="button">Next Section</button>
       <button id="reanchor" type="button">Re-sync</button>
     </div>

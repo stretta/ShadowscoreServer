@@ -3,6 +3,7 @@ import {
   hitTestNotes,
   moveNote,
   nudgeNote,
+  playbackBeatForVoice,
   projectClipOccurrences,
   resizeNoteRight,
   snapBeat,
@@ -14,7 +15,7 @@ const $ = (id) => document.getElementById(id);
 const ui = { block:$("block"), player:$("player"), clip:$("clip"), grid:$("grid"), zoomX:$("zoom-x"), zoomY:$("zoom-y"), save:$("save"), revert:$("revert"), dirty:$("dirty"), editing:$("editing"), playing:$("playing"), selection:$("selection"), status:$("status"), roll:$("roll"), velocity:$("velocity"), rollScroll:$("roll-scroll"), velocityScroll:$("velocity-scroll"), velocityValue:$("velocity-value") };
 const ctx = ui.roll.getContext("2d"); const vctx = ui.velocity.getContext("2d");
 const draftStore=createClipDraftStore();
-const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, drag:null, playback:null, dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, minPitch:36, maxPitch:84 };
+const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, drag:null, playback:null, rnboTargets:[], timingContracts:[], dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, minPitch:36, maxPitch:84 };
 
 const clone = (value) => structuredClone(value);
 const assignmentId = (value) => typeof value === "string" ? value : value?.clipId || "";
@@ -37,7 +38,8 @@ function clipsForPlayer(){ const assigned=assignmentId(state.score?.mesostructur
 function playerColor(player){ return state.score?.assignments?.[player]?.color || "#6ee7ff"; }
 
 async function loadScore(preserve=false){
-  try { const response=await fetch("/score",{cache:"no-store"}); if(!response.ok) throw new Error(`HTTP ${response.status}`); const score=await response.json();
+  try { const [response,timingResponse]=await Promise.all([fetch("/score",{cache:"no-store"}),fetch("/playback/timing-contracts",{cache:"no-store"})]); if(!response.ok) throw new Error(`HTTP ${response.status}`); const score=await response.json();
+    if(timingResponse.ok){const timing=await timingResponse.json();state.timingContracts=timing.contracts||[];}
     if(preserve && score.version === state.score?.version){ state.score=score; updateLabels(); render(); return; }
     state.score=score;draftStore.reconcile(score);populateSelectors(preserve);loadClip(true);const entry=activeDraftEntry();status(entry?.stale?`${state.clipId} changed on the server. Revert before continuing or review it in Event List.`:`Score revision ${score.scoreRevision ?? score.version}. ${draftStore.dirtyCount()} unsaved clip draft${draftStore.dirtyCount()===1?"":"s"}.`);render();
   } catch(error){ status(`Load failed: ${error.message}`,true); }
@@ -72,7 +74,7 @@ function drawFocusedOccurrences(){ const occurrences=projectClipOccurrences(stat
 function drawNote(note,index){ drawBar(note,playerColor(ui.player.value),index===state.selected?1:.82,index===state.selected); }
 function drawBar(note,color,alpha,selected,alias=false){ const x=state.left+Number(note.start_time)*beatWidth(), y=state.top+(state.maxPitch-clamp(Number(note.pitch),state.minPitch,state.maxPitch))*rowHeight()+2, width=Math.max(5,Number(note.duration)*beatWidth()),height=rowHeight()-4;ctx.globalAlpha=alpha;ctx.fillStyle=color;ctx.fillRect(x,y,width,height);ctx.globalAlpha=1;if(alias){ctx.save();ctx.setLineDash([5,4]);ctx.strokeStyle=color;ctx.strokeRect(x+.5,y+.5,width-1,height-1);ctx.restore();}if(selected){ctx.strokeStyle="#fff";ctx.lineWidth=2;ctx.strokeRect(x,y,width,height);ctx.fillStyle="#fff";ctx.fillRect(x+width-5,y,5,height);} }
 function drawVelocity(){ prep(vctx);const w=ui.velocity.width/state.dpr,h=112;vctx.fillStyle="#10141d";vctx.fillRect(0,0,w,h);for(let beat=0;beat<=timelineBeats();beat+=1){const x=state.left+beat*beatWidth();vctx.strokeStyle="#303746";vctx.beginPath();vctx.moveTo(x,0);vctx.lineTo(x,h);vctx.stroke();}(state.draft.notes||[]).forEach((note,index)=>{const x=state.left+Number(note.start_time)*beatWidth()+2,width=Math.max(5,Math.min(14,Number(note.duration)*beatWidth()-4)),height=clamp(Number(note.velocity),1,127)/127*102;vctx.fillStyle=index===state.selected?"#fff":playerColor(ui.player.value);vctx.globalAlpha=index===state.selected?1:.72;vctx.fillRect(x,108-height,width,height);});vctx.globalAlpha=1;drawWiper(vctx,h);}
-function drawWiper(context,height){const playback=state.playback;if(!playback?.playing||playback.activeBlockId!==ui.block.value||!Number.isFinite(playback.beatIntoBlock))return;const x=state.left+clamp(playback.beatIntoBlock,0,timelineBeats())*beatWidth();context.save();context.strokeStyle="#ffd166";context.lineWidth=2;context.beginPath();context.moveTo(x,0);context.lineTo(x,height);context.stroke();context.restore();}
+function drawWiper(context,height){const beat=playbackBeatForVoice({playback:state.playback,blockId:ui.block.value,voiceId:ui.player.value,assignment:state.score?.assignments?.[ui.player.value],targets:state.rnboTargets,contracts:state.timingContracts});if(!Number.isFinite(beat))return;const x=state.left+clamp(beat,0,timelineBeats())*beatWidth();context.save();context.strokeStyle="#ffd166";context.lineWidth=2;context.beginPath();context.moveTo(x,0);context.lineTo(x,height);context.stroke();context.restore();}
 function pitchName(p){const names=["C","C♯","D","E♭","E","F","F♯","G","A♭","A","B♭","B"];return `${names[p%12]}${Math.floor(p/12)-1}`;}
 
 function pointer(event,lane){ const rect=event.currentTarget.getBoundingClientRect(); return {x:event.clientX-rect.left,y:event.clientY-rect.top}; }
@@ -88,7 +90,7 @@ function cancelDrag(){if(!state.drag)return;if(state.drag.created)state.draft.no
 
 ui.roll.addEventListener("keydown",event=>{const note=selectedNote();if(event.key==="Escape"){state.selected=-1;updateSelection();render();return;}if(!note)return;if(event.key==="Delete"||event.key==="Backspace"){event.preventDefault();mutate(()=>{state.draft.notes.splice(state.selected,1);state.selected=Math.min(state.selected,state.draft.notes.length-1);});return;}const directions={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"};const direction=directions[event.key];if(!direction)return;event.preventDefault();mutate(()=>{state.draft.notes[state.selected]=nudgeNote(note,{direction,resize:event.shiftKey,subdivision:Number(ui.grid.value),clipDuration:clipBeats()});});});
 
-async function loadPlayback(){try{const response=await fetch("/macrostructure/playback",{cache:"no-store"});if(!response.ok)return;const playback=await response.json();state.playback={...playback,playing:Boolean(playback.running)};ui.playing.textContent=state.playback.playing?`${state.playback.activeBlockId} · beat ${fmt(state.playback.beatIntoBlock??0)}`:"Stopped";render();}catch{}}
+async function loadPlayback(){try{const [response,targetsResponse]=await Promise.all([fetch("/macrostructure/playback",{cache:"no-store"}),fetch("/rnbo/targets",{cache:"no-store"})]);if(!response.ok)return;const playback=await response.json();if(targetsResponse.ok){const targets=await targetsResponse.json();state.rnboTargets=targets.targets||[];}state.playback={...playback,playing:Boolean(playback.running)};const beat=playbackBeatForVoice({playback:state.playback,blockId:ui.block.value,voiceId:ui.player.value,assignment:state.score?.assignments?.[ui.player.value],targets:state.rnboTargets,contracts:state.timingContracts});ui.playing.textContent=state.playback.playing?`${state.playback.activeBlockId}${Number.isFinite(beat)?` · beat ${fmt(beat)}`:""}`:"Stopped";render();}catch{}}
 
 ui.block.addEventListener("change",()=>{populateSelectors(true);loadClip();resize();});ui.player.addEventListener("change",()=>{setOptions(ui.clip,clipsForPlayer(),clipsForPlayer()[0]||"");loadClip();resize();});ui.clip.addEventListener("change",()=>{loadClip();resize();});
 ui.revert.addEventListener("click",()=>{const entry=draftStore.revert(state.clipId);state.snapshot=entry.snapshot;state.draft=entry.draft;state.selected=-1;markDirty();updateSelection();resize();status(`Reverted ${state.clipId} to its last server snapshot.`);});

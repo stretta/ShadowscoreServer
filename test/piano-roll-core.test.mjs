@@ -4,11 +4,36 @@ import {
   hitTestNotes,
   moveNote,
   nudgeNote,
+  playbackBeatForVoice,
   projectClipOccurrences,
   resizeNoteRight,
   sourceTimeForProjectedTime,
   velocityFromLanePosition
 } from "../public/piano-roll/clip-editor-core.js";
+
+test("playback wiper uses the focused voice RNBO stage when macro beat is unavailable", () => {
+  assert.equal(playbackBeatForVoice({
+    playback: { playing: true, activeBlockId: "F", beatIntoBlock: null },
+    blockId: "F",
+    voiceId: "player-1",
+    assignment: { rnboTargetId: "rnbo-inst-5:shadowscore" },
+    targets: [{ id: "rnbo-inst-5:shadowscore", currentStage: 89 }],
+    contracts: [{ targetId: "rnbo-inst-5:shadowscore", assignedVoiceId: "player-1", timing: { blockId: "F", stagesPerBeat: 16 } }]
+  }), 89 / 16);
+});
+
+test("playback wiper falls back to macro beat and remains gated to the active block", () => {
+  const options = {
+    playback: { playing: true, activeBlockId: "B", beatIntoBlock: 2.5 },
+    blockId: "B",
+    voiceId: "player-1",
+    assignment: {},
+    targets: [],
+    contracts: []
+  };
+  assert.equal(playbackBeatForVoice(options), 2.5);
+  assert.equal(playbackBeatForVoice({ ...options, blockId: "A" }), undefined);
+});
 
 const sourceNote = {
   note_id: 42,

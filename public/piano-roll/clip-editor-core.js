@@ -7,6 +7,34 @@ export function snapBeat(value, subdivision) {
   return Math.round(Number(value) * stepsPerBeat) / stepsPerBeat;
 }
 
+export function playbackBeatForVoice(options = {}) {
+  const playback = options.playback;
+  if (!playback?.playing || playback.activeBlockId !== options.blockId) {
+    return undefined;
+  }
+
+  const targetId = options.assignment?.rnboTargetId;
+  const target = (options.targets || []).find((entry) => entry.id === targetId);
+  const contract = (options.contracts || []).find((entry) =>
+    entry.targetId === targetId || entry.assignedVoiceId === options.voiceId
+  );
+  const currentStage = target?.currentStage == null ? NaN : Number(target.currentStage);
+  const stagesPerBeat = Number(contract?.timing?.stagesPerBeat);
+  if (
+    targetId
+    && Number.isFinite(currentStage)
+    && currentStage >= 0
+    && Number.isFinite(stagesPerBeat)
+    && stagesPerBeat > 0
+    && (!contract?.timing?.blockId || contract.timing.blockId === options.blockId)
+  ) {
+    return currentStage / stagesPerBeat;
+  }
+
+  const macroBeat = playback.beatIntoBlock == null ? NaN : Number(playback.beatIntoBlock);
+  return Number.isFinite(macroBeat) ? macroBeat : undefined;
+}
+
 export function sourceTimeForProjectedTime(projectedTime, clipDuration, playbackType = "looped") {
   const duration = Math.max(Number.EPSILON, Number(clipDuration));
   const projected = Math.max(0, Number(projectedTime));

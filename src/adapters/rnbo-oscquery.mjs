@@ -203,19 +203,23 @@ export function extractRnboControlTargets(tree, config) {
 }
 
 function controlTargetForInstance(instanceId, node, name, config) {
+  const instance = String(instanceId);
+  if (!/^\d+$/.test(instance)) {
+    return undefined;
+  }
   const parameters = extractRnboParams(node);
   const inputPorts = extractRnboInputPorts(instanceId, node);
   if (parameters.length === 0 && inputPorts.length === 0) {
     return undefined;
   }
-  const app = inferControlApp(name, parameters, inputPorts);
-  if (!app) {
+  const namedApp = normalizeControlAppName(name);
+  if ((!namedApp || namedApp === "shadowscoreclient") && inputPorts.some((inputPort) => stringField(inputPort.name).toLowerCase() === "shadowscore")) {
     return undefined;
   }
+  const app = inferControlApp(name, parameters, inputPorts) || "rnbo-instance";
   const rnbo = config.rnbo ?? {};
   const oscQuery = rnbo.oscQuery ?? {};
-  const instance = String(instanceId);
-  const oscCapabilities = ["editor", "volume", "preset", `${app}-edit`];
+  const oscCapabilities = controlCapabilities(app, parameters, inputPorts);
   if (parameters.some(isTtidParameter) && !oscCapabilities.includes("ttid-edit")) {
     oscCapabilities.push("ttid-edit");
   }
@@ -310,22 +314,23 @@ function rnboInstanceNames(tree) {
 }
 
 function inferControlApp(name, parameters, inputPorts = []) {
-  const loweredName = stringField(name).toLowerCase();
-  if (loweredName.startsWith("poland")) {
-    return "poland";
+  const explicitApp = [...parameters, ...inputPorts]
+    .map((control) => control?.meta?.app ?? control?.meta?.instrument)
+    .map(cleanControlToken)
+    .find(Boolean);
+  if (explicitApp) {
+    return explicitApp;
   }
-  if (loweredName.startsWith("ttid")) {
-    return "ttid";
+
+  const namedApp = normalizeControlAppName(name);
+  if (namedApp) {
+    return namedApp;
   }
-  if (loweredName.startsWith("plate")) {
-    return "plate";
-  }
-  if (loweredName.startsWith("listsequencer") || loweredName.startsWith("list sequencer")) {
-    return "listsequencer";
-  }
-  if (loweredName.startsWith("analogsequencer") || loweredName.startsWith("analog sequencer")) {
-    return "analogsequencer";
-  }
+
+  return inferLegacyControlApp(parameters, inputPorts);
+}
+
+function inferLegacyControlApp(parameters, inputPorts = []) {
   const parameterNames = new Set(parameters.map((param) => param.name));
   const loweredParameterNames = new Set(parameters.map((param) => stringField(param.name).toLowerCase()));
   const loweredInputPortNames = new Set(inputPorts.map((inputPort) => stringField(inputPort.name).toLowerCase()));
@@ -338,6 +343,9 @@ function inferControlApp(name, parameters, inputPorts = []) {
   if (hasAtLeastParameters(loweredParameterNames, ["decay", "predelay", "damping", "damp", "diffusion", "diff", "size", "mix", "wet", "dry"], 2)) {
     return "plate";
   }
+  if (hasAtLeastParameters(loweredParameterNames, ["lowpass", "filtervel", "filterkeytracking", "attack", "decay", "sustain", "release"], 4)) {
+    return "softpiano";
+  }
   if (hasAtLeastParameters(loweredInputPortNames, ["steps", "primaryrotation", "secondaryrotation", "velocity", "duration"], 3)) {
     return "listsequencer";
   }
@@ -345,6 +353,30 @@ function inferControlApp(name, parameters, inputPorts = []) {
     return "analogsequencer";
   }
   return "";
+}
+
+function normalizeControlAppName(name) {
+  return cleanControlToken(stringField(name).replace(/[-_ ]+\d+$/, ""));
+}
+
+function cleanControlToken(value) {
+  return stringField(value)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function controlCapabilities(app, parameters, inputPorts) {
+  const capabilities = new Set(["editor", "volume", "preset", `${app}-edit`]);
+  for (const control of [...parameters, ...inputPorts]) {
+    const configured = control?.meta?.capabilities ?? control?.meta?.oscCapabilities;
+    const values = Array.isArray(configured) ? configured : stringField(configured).split(/[\s,]+/);
+    for (const value of values) {
+      const capability = cleanControlToken(value);
+      if (capability) capabilities.add(capability);
+    }
+  }
+  return [...capabilities];
 }
 
 function isTtidParameter(param) {

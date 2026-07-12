@@ -16,19 +16,26 @@ export async function runHardwareSmoke(config, options = {}) {
   const timeoutMs = Number(options.timeoutMs ?? 1500);
   const baseUrl = stripTrailingSlash(options.baseUrl || config.http?.publicUrl || `http://127.0.0.1:${config.http?.port ?? 8790}`);
   const rnboOscQueryUrl = stripTrailingSlash(options.rnboOscQueryUrl || config.rnbo?.oscQuery?.url || "http://127.0.0.1:5678");
+  const peerRole = config.server?.role === "peer";
 
   const checks = [];
-  checks.push(await checkHttpJson("healthz", `${baseUrl}/healthz`, fetchImpl, timeoutMs, (payload) => payload.ok === true));
-  checks.push(await checkHttpJson("session", `${baseUrl}/session`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.voices) && payload.voices.length > 0));
-  checks.push(await checkHttpJson("rnbo targets", `${baseUrl}/rnbo/targets`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.targets)));
-  checks.push(await checkHttpJson("rnbo devices", `${baseUrl}/rnbo/devices`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.devices)));
-  checks.push(await checkHttpText("view index", `${baseUrl}/`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Views")));
-  checks.push(await checkHttpText("structure editor", `${baseUrl}/structure-editor`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Structure Editor")));
-  checks.push(await checkHttpText("matrix edit", `${baseUrl}/matrix-edit`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Matrix Edit")));
-  checks.push(await checkHttpText("piano roll", `${baseUrl}/piano-roll`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Piano Roll")));
-  checks.push(await checkHttpText("event list", `${baseUrl}/event-list`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Event List")));
-  checks.push(await checkJackTransport(config, baseUrl, fetchImpl, timeoutMs));
-  checks.push(await checkTcpPort("http port", config.http?.host ?? "127.0.0.1", config.http?.port ?? 8790, timeoutMs, options.netConnect));
+  if (peerRole) {
+    for (const name of ["healthz", "session", "rnbo targets", "rnbo devices", "view index", "structure editor", "matrix edit", "piano roll", "event list", "JACK transport", "http port"]) {
+      checks.push(skipCheck(name, "peer role"));
+    }
+  } else {
+    checks.push(await checkHttpJson("healthz", `${baseUrl}/healthz`, fetchImpl, timeoutMs, (payload) => payload.ok === true));
+    checks.push(await checkHttpJson("session", `${baseUrl}/session`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.voices) && payload.voices.length > 0));
+    checks.push(await checkHttpJson("rnbo targets", `${baseUrl}/rnbo/targets`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.targets)));
+    checks.push(await checkHttpJson("rnbo devices", `${baseUrl}/rnbo/devices`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.devices)));
+    checks.push(await checkHttpText("view index", `${baseUrl}/`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Views")));
+    checks.push(await checkHttpText("structure editor", `${baseUrl}/structure-editor`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Structure Editor")));
+    checks.push(await checkHttpText("matrix edit", `${baseUrl}/matrix-edit`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Matrix Edit")));
+    checks.push(await checkHttpText("piano roll", `${baseUrl}/piano-roll`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Piano Roll")));
+    checks.push(await checkHttpText("event list", `${baseUrl}/event-list`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Event List")));
+    checks.push(await checkJackTransport(config, baseUrl, fetchImpl, timeoutMs));
+    checks.push(await checkTcpPort("http port", config.http?.host ?? "127.0.0.1", config.http?.port ?? 8790, timeoutMs, options.netConnect));
+  }
 
   if (config.rnbo?.oscQuery?.enabled) {
     checks.push(await checkHttpJson("RNBOOSCQuery", rnboOscQueryUrl || "http://127.0.0.1:5678", fetchImpl, timeoutMs, (payload) => Boolean(payload)));

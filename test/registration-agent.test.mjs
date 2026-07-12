@@ -152,6 +152,7 @@ test("registration refresh re-registers RNBO devices without ShadowScore targets
   assert.equal(requests.length, 1);
   assert.equal(requests[0].url, "http://wren.local:8790/hardware/register");
   assert.deepEqual(requests[0].body.targets, []);
+  assert.deepEqual(requests[0].body.oscTargets, []);
   assert.equal(requests[0].body.rnboDevices.length, 1);
   assert.equal(requests[0].body.rnboDevices[0].graphEditorUrl, "http://wren.local:3000");
 });

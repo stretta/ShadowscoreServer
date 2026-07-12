@@ -23,6 +23,7 @@ test("installer config registry stays aligned with default applications and edit
   assert.deepEqual(config.editors, defaultConfig.editors);
   assert.deepEqual(config.static.apps.pianoRoll.routes, ["/piano-roll"]);
   assert.deepEqual(config.static.apps.analogSequencerEditor.routes, ["/editors/analogsequencer"]);
+  assert.deepEqual(config.static.apps.softPianoEditor.routes, ["/editors/softpiano"]);
 });
 
 test("installer updates preserve local settings and custom registry entries", () => {
@@ -50,6 +51,7 @@ test("installer updates preserve local settings and custom registry entries", ()
   assert.equal(config.editors.find((editor) => editor.id === "poland").label, "Local Poland");
   assert.equal(config.editors.some((editor) => editor.id === "custom"), true);
   assert.equal(config.editors.some((editor) => editor.id === "analogsequencer"), true);
+  assert.equal(config.editors.some((editor) => editor.id === "softpiano"), true);
 });
 
 test("installer writes a fresh config and then updates it in place", () => {

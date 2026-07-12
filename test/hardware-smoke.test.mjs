@@ -129,6 +129,27 @@ test("hardware smoke fails when peer is not visible on the session host", async 
   assert.equal(result.checks.find((check) => check.name === "peer registration").status, "fail");
 });
 
+test("peer hardware smoke skips host-only web checks", async () => {
+  const config = mergeConfig(defaultConfig, {
+    server: { role: "peer", hostIdentity: "finch" },
+    registration: { sessionHostUrl: "http://wren.local:8790" },
+    rnbo: { oscQuery: { enabled: true, url: "http://127.0.0.1:5678" } }
+  });
+  const result = await runHardwareSmoke(config, {
+    fetchImpl: createFetch({
+      "http://127.0.0.1:5678": { CONTENTS: { rnbo: {} } },
+      "http://wren.local:8790/hardware/units": { hardwareUnits: [{ id: "finch" }] }
+    }),
+    timeoutMs: 20
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.checks.find((check) => check.name === "healthz").status, "skip");
+  assert.equal(result.checks.find((check) => check.name === "http port").status, "skip");
+  assert.equal(result.checks.find((check) => check.name === "RNBOOSCQuery").status, "pass");
+  assert.equal(result.checks.find((check) => check.name === "peer registration").status, "pass");
+});
+
 test("evaluateChecks reports failed check names", () => {
   assert.deepEqual(evaluateChecks([
     { name: "healthz", status: "pass" },

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SoftPiano Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <style>
+    body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, rgba(110,231,183,.08), transparent 220px), var(--ss-bg); }
+    main { margin: 0 auto; padding: 18px 0 48px; width: min(920px, calc(100vw - 32px)); }
+    header, .actions, .target-card, .control-head { align-items: center; display: flex; }
+    header { gap: 16px; justify-content: space-between; }
+    h1 { font-size: 18px; margin: 0; }
+    .subtitle, .status, .target-detail, output { color: var(--ss-muted); font-size: 12px; font-weight: 700; }
+    .subtitle { margin: 4px 0 0; }
+    .actions { gap: 10px; }
+    .status { max-width: 420px; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+    .targets { display: flex; gap: 8px; margin: 18px 0 12px; overflow-x: auto; }
+    .target-card { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); cursor: pointer; flex: 0 0 210px; gap: 9px; padding: 10px; }
+    .target-copy { min-width: 0; }
+    .target-name, .target-detail { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .target-name { color: var(--ss-text); font-weight: 800; }
+    .panel { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); margin-top: 10px; padding: 14px; }
+    .panel h2 { color: var(--ss-accent-secondary); font-size: 11px; letter-spacing: .09em; margin: 0 0 12px; text-transform: uppercase; }
+    .controls { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .control { background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); padding: 10px; }
+    .control-head { gap: 8px; justify-content: space-between; margin-bottom: 9px; }
+    .control label { color: var(--ss-text); font-size: 12px; font-weight: 800; }
+    .control input, .control select { accent-color: var(--ss-accent-secondary); margin: 0; width: 100%; }
+    output { font-variant-numeric: tabular-nums; }
+    .empty { color: var(--ss-muted); padding: 28px 4px; }
+    @media (max-width: 620px) { header { align-items: flex-start; flex-direction: column; } .status { max-width: none; text-align: left; white-space: normal; } }
+  </style>
+</head>
+<body>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
+    <a href="/">Dashboard</a><a href="/structure-editor">Structure</a><a href="/matrix-edit">Matrix</a>
+    <a href="/piano-roll">Piano Roll</a><a href="/event-list">Event List</a>
+    <a href="/editors" aria-current="page">OSC Generators</a><a href="/admin">Admin</a><a href="/transport/status">Transport</a>
+  </nav>
+  <main>
+    <header>
+      <div><h1>SoftPiano Editor</h1><p class="subtitle">Tone and envelope controls</p></div>
+      <div class="actions"><button id="refresh" type="button">Refresh</button><span id="status" class="status" role="status"></span></div>
+    </header>
+    <section id="targets" class="targets" aria-label="SoftPiano targets"></section>
+    <div id="panels"></div>
+  </main>
+  <script>
+    const SOFTPIANO_GROUPS = [
+      { title: "Output", controls: ["Volume"] },
+      { title: "MIDI", controls: ["TransposeSoftPiano"] },
+      { title: "Tone", controls: ["LowPass", "FilterVel", "FilterKeyTracking", "Spread"] },
+      { title: "Amp Env", controls: ["Attack", "Decay", "Sustain", "Release"] }
+    ];
+    const LABELS = { Volume: "Volume", TransposeSoftPiano: "Transpose", LowPass: "Low Pass", FilterVel: "Filter Velocity", FilterKeyTracking: "Key Tracking" };
+    const targetsEl = document.querySelector("#targets");
+    const panelsEl = document.querySelector("#panels");
+    const statusEl = document.querySelector("#status");
+    const refreshButton = document.querySelector("#refresh");
+    let targets = [];
+    let params = new Map();
+    const pending = new Map();
+
+    refreshButton.addEventListener("click", () => refresh().catch(reportError));
+    refresh().catch(reportError);
+
+    async function refresh() {
+      refreshButton.disabled = true;
+      try {
+        const response = await fetch("/osc/targets?app=softpiano&status=online", { cache: "no-store" });
+        const body = await response.json();
+        if (!response.ok || body.ok === false) throw new Error(body.error || `Request failed: ${response.status}`);
+        targets = body.targets || [];
+        params = mergeParams(targets);
+        renderTargets();
+        renderPanels();
+        setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online SoftPiano targets");
+      } finally { refreshButton.disabled = false; }
+    }
+
+    function mergeParams(nextTargets) {
+      const next = new Map();
+      for (const target of nextTargets) for (const param of target.parameters || []) if (!next.has(param.name)) next.set(param.name, { ...param });
+      for (const [name, old] of params) if (next.has(name)) next.get(name).value = old.value;
+      return next;
+    }
+
+    function renderTargets() {
+      targetsEl.replaceChildren(...targets.map((target) => {
+        const card = document.createElement("label");
+        card.className = "target-card";
+        card.innerHTML = `<input type="checkbox" checked data-target="${escapeHtml(target.id)}"><span class="target-copy"><span class="target-name">${escapeHtml(target.label || target.id)}</span><span class="target-detail">${escapeHtml(target.unitId || target.baseAddress || "")}</span></span>`;
+        return card;
+      }));
+    }
+
+    function renderPanels() {
+      const known = new Set(SOFTPIANO_GROUPS.flatMap((group) => group.controls));
+      const groups = SOFTPIANO_GROUPS.map((group) => ({ ...group, params: group.controls.map((name) => params.get(name)).filter(Boolean) }));
+      const other = [...params.values()].filter((param) => !known.has(param.name)).sort(byIndex);
+      if (other.length) groups.push({ title: "Other", params: other });
+      const nodes = groups.filter((group) => group.params.length).map(renderGroup);
+      panelsEl.replaceChildren(...nodes);
+      if (!nodes.length) { const empty = document.createElement("div"); empty.className = "empty"; empty.textContent = targets.length ? "No SoftPiano parameters reported." : "No online SoftPiano targets."; panelsEl.append(empty); }
+    }
+
+    function renderGroup(group) {
+      const section = document.createElement("section"); section.className = "panel";
+      const title = document.createElement("h2"); title.textContent = group.title;
+      const controls = document.createElement("div"); controls.className = "controls";
+      controls.replaceChildren(...group.params.map(renderControl)); section.replaceChildren(title, controls); return section;
+    }
+
+    function renderControl(param) {
+      if (Array.isArray(param.values) && param.values.length) return renderChoice(param);
+      const min = finite(param.min, 0), max = finite(param.max, 1), value = clamp(finite(param.value, min), min, max);
+      const wrap = document.createElement("div"); wrap.className = "control";
+      const head = document.createElement("div"); head.className = "control-head";
+      const label = document.createElement("label"); label.htmlFor = `param-${cssSafe(param.name)}`; label.textContent = LABELS[param.name] || splitCamel(param.displayName || param.name);
+      const output = document.createElement("output"); output.textContent = format(value, param.unit);
+      const input = document.createElement("input"); input.id = label.htmlFor; input.type = "range"; input.min = min; input.max = max; input.step = stepFor(param, min, max); input.value = value;
+      input.addEventListener("input", () => { output.textContent = format(Number(input.value), param.unit); scheduleSend(param.name, Number(input.value)); });
+      input.addEventListener("change", () => flushSend(param.name, Number(input.value)));
+      head.replaceChildren(label, output); wrap.replaceChildren(head, input); return wrap;
+    }
+
+    function renderChoice(param) {
+      const wrap = document.createElement("div"); wrap.className = "control";
+      const head = document.createElement("div"); head.className = "control-head";
+      const label = document.createElement("label"); label.htmlFor = `param-${cssSafe(param.name)}`; label.textContent = LABELS[param.name] || splitCamel(param.displayName || param.name);
+      const output = document.createElement("output"); output.textContent = String(param.value ?? param.values[0]);
+      const select = document.createElement("select"); select.id = label.htmlFor;
+      for (const value of param.values) { const option = document.createElement("option"); option.value = String(value); option.textContent = splitCamel(value); option.selected = String(value) === String(param.value); select.append(option); }
+      select.addEventListener("change", () => { output.textContent = select.value; sendParam(param.name, select.value).catch(reportError); });
+      head.replaceChildren(label, output); wrap.replaceChildren(head, select); return wrap;
+    }
+
+    function scheduleSend(name, value) { if (pending.has(name)) clearTimeout(pending.get(name)); pending.set(name, setTimeout(() => { pending.delete(name); sendParam(name, value).catch(reportError); }, 90)); }
+    function flushSend(name, value) { if (pending.has(name)) clearTimeout(pending.get(name)); pending.delete(name); sendParam(name, value).catch(reportError); }
+    async function sendParam(param, value) {
+      const selected = [...document.querySelectorAll("[data-target]:checked")].map((input) => input.dataset.target).filter(Boolean);
+      if (!selected.length) return setStatus("No targets selected");
+      if (params.has(param)) params.get(param).value = value;
+      const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: selected, param, args: [value] }) });
+      const body = await response.json().catch(() => ({})); const sent = (body.results || []).filter((result) => result.ok).length;
+      setStatus(response.ok && body.ok !== false ? `Sent ${LABELS[param] || splitCamel(param)} to ${sent}/${selected.length}` : `Failed ${LABELS[param] || splitCamel(param)} (${sent}/${selected.length})`);
+    }
+
+    function byIndex(a, b) { return (a.index ?? 9999) - (b.index ?? 9999); }
+    function stepFor(param, min, max) { const step = finite(param.meta?.edit_step, NaN); if (step > 0) return step; const range = Math.abs(max - min); return range > 64 ? 1 : range > 8 ? .1 : .01; }
+    function format(value, unit) { const number = Number(value); const text = Number.isInteger(number) ? String(number) : number.toFixed(Math.abs(number) >= 10 ? 1 : 2).replace(/\.?0+$/, ""); return `${text}${unit ? ` ${unit}` : ""}`; }
+    function finite(value, fallback) { const number = Number(value); return Number.isFinite(number) ? number : fallback; }
+    function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+    function splitCamel(value) { return String(value || "").replace(/([a-z0-9])([A-Z])/g, "$1 $2"); }
+    function cssSafe(value) { return String(value).replace(/[^a-zA-Z0-9_-]/g, "-"); }
+    function setStatus(message) { statusEl.textContent = message; }
+    function reportError(error) { refreshButton.disabled = false; setStatus(error.message || "SoftPiano editor failed"); }
+    function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+  </script>
+</body>
+</html>

@@ -279,6 +279,101 @@ test("extracts Plate OSC control targets from lowercase reverb params", () => {
   assert.equal(targets[0].parameters.length, 4);
 });
 
+test("extracts SoftPiano OSC control targets from RNBOOSCQuery instance names", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: { host: "192.168.68.96", port: 1234, oscQuery: { enabled: true, url: "http://pt5.local:5678/" } }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.jack = {
+    CONTENTS: { info: { CONTENTS: { ports: { CONTENTS: { properties: { CONTENTS: {
+      "SoftPiano-7:out1": { VALUE: "{\"rnbo-instance-id\":7,\"source\":true,\"type\":\"audio\"}" }
+    } } } } } } }
+  };
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["7"] = {
+    CONTENTS: { params: { CONTENTS: {
+      LowPass: rnboParam("/rnbo/inst/7/params/LowPass", 8000, 20, 20000, 0),
+      FilterVel: rnboParam("/rnbo/inst/7/params/FilterVel", 0.5, 0, 1, 1),
+      FilterKeyTracking: rnboParam("/rnbo/inst/7/params/FilterKeyTracking", 0.5, 0, 1, 2),
+      Spread: rnboParam("/rnbo/inst/7/params/Spread", 0.25, 0, 1, 3),
+      Attack: rnboParam("/rnbo/inst/7/params/Attack", 0.01, 0, 2, 4),
+      Decay: rnboParam("/rnbo/inst/7/params/Decay", 0.5, 0, 4, 5),
+      Sustain: rnboParam("/rnbo/inst/7/params/Sustain", 0.8, 0, 1, 6),
+      Release: rnboParam("/rnbo/inst/7/params/Release", 1, 0, 8, 7)
+    } } }
+  };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].id, "rnbo-inst-7:softpiano");
+  assert.equal(targets[0].app, "softpiano");
+  assert.equal(targets[0].label, "Softpiano 7");
+  assert.equal(targets[0].instance, "main");
+  assert.equal(targets[0].oscCapabilities.includes("softpiano-edit"), true);
+  assert.equal(targets[0].parameters.length, 8);
+});
+
+test("control target identity prefers explicit RNBO parameter metadata", () => {
+  const config = mergeConfig(defaultConfig, { rnbo: { host: "127.0.0.1", port: 1234 } });
+  const tree = createOscQueryTree();
+  const gain = rnboParam("/rnbo/inst/18/params/Gain", 0.5, 0, 1, 0);
+  gain.CONTENTS.meta = { VALUE: "{\"app\":\"GranularClouds\",\"capabilities\":[\"freeze\"]}" };
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["18"] = { CONTENTS: { params: { CONTENTS: { Gain: gain } } } };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].app, "granularclouds");
+  assert.equal(targets[0].id, "rnbo-inst-18:granularclouds");
+  assert.equal(targets[0].oscCapabilities.includes("granularclouds-edit"), true);
+  assert.equal(targets[0].oscCapabilities.includes("freeze"), true);
+});
+
+test("control target discovery publishes previously unknown named RNBO apps", () => {
+  const config = mergeConfig(defaultConfig, { rnbo: { host: "127.0.0.1", port: 1234 } });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.jack = {
+    CONTENTS: { info: { CONTENTS: { ports: { CONTENTS: { properties: { CONTENTS: {
+      "Granular Clouds-19:out1": { VALUE: "{\"rnbo-instance-id\":19,\"source\":true,\"type\":\"audio\"}" }
+    } } } } } } }
+  };
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["19"] = {
+    CONTENTS: { params: { CONTENTS: { Density: rnboParam("/rnbo/inst/19/params/Density", 4, 1, 20, 0) } } }
+  };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].app, "granular-clouds");
+  assert.equal(targets[0].oscCapabilities.includes("granular-clouds-edit"), true);
+});
+
+test("control target discovery keeps unnamed controllable RNBO instances generic", () => {
+  const config = mergeConfig(defaultConfig, { rnbo: { host: "127.0.0.1", port: 1234 } });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["20"] = {
+    CONTENTS: { params: { CONTENTS: { Gain: rnboParam("/rnbo/inst/20/params/Gain", 0.5, 0, 1, 0) } } }
+  };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].app, "rnbo-instance");
+  assert.equal(targets[0].id, "rnbo-inst-20:rnbo-instance");
+});
+
+test("control target discovery excludes named ShadowScore playback protocol instances", () => {
+  const config = mergeConfig(defaultConfig, { rnbo: { host: "127.0.0.1", port: 1234 } });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.jack = {
+    CONTENTS: { info: { CONTENTS: { ports: { CONTENTS: { properties: { CONTENTS: {
+      "ShadowScoreClient-2:out1": { VALUE: "{\"rnbo-instance-id\":2,\"source\":true,\"type\":\"audio\"}" }
+    } } } } } } }
+  };
+
+  assert.deepEqual(extractRnboControlTargets(tree, config), []);
+});
+
 test("extracts TTID OSC control targets from editor metadata", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

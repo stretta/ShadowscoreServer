@@ -2354,7 +2354,7 @@ test("editor manifest route lists registered instrument editors", async () => {
   const context = createRouteContext();
   const response = await requestJson(context, "GET", "/editors/manifest");
 
-  assert.equal(response.editors.length, 5);
+  assert.equal(response.editors.length, 6);
   assert.deepEqual(response.editors, [
     {
       id: "poland",
@@ -2378,6 +2378,14 @@ test("editor manifest route lists registered instrument editors", async () => {
       route: "/editors/plate",
       targetFilter: {
         app: "plate"
+      }
+    },
+    {
+      id: "softpiano",
+      label: "SoftPiano",
+      route: "/editors/softpiano",
+      targetFilter: {
+        app: "softpiano"
       }
     },
     {
@@ -2571,6 +2579,24 @@ test("Plate editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /plate-choice/);
   assert.match(response.body, /scheduleParamSend/);
   assert.match(response.body, /flushParamSend/);
+});
+
+test("SoftPiano editor route serves the compact OSC control panel", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/softpiano");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /SoftPiano Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=softpiano/);
+  assert.match(response.body, /SOFTPIANO_GROUPS/);
+  assert.match(response.body, /TransposeSoftPiano/);
+  assert.match(response.body, /title: "Output", controls: \["Volume"\]/);
+  assert.match(response.body, /FilterKeyTracking/);
+  assert.match(response.body, /Amp Env/);
+  assert.match(response.body, /scheduleSend/);
+  assert.match(response.body, /flushSend/);
+  assert.match(response.body, /renderChoice/);
 });
 
 test("ListSequencer editor route serves the OSC target integration page", async () => {

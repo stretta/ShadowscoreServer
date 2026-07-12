@@ -940,13 +940,21 @@ async function sendOscToTargets(rnboTargets, runtime, body) {
 async function sendOscToResolvedTargets(targets, runtime, body) {
   const address = String(body.address ?? "");
   const param = optionalString(body.param ?? body.parameter);
-  if (!param && !address.startsWith("/")) {
+  const inputPort = optionalString(body.inputPort ?? body.inport);
+  if (param && inputPort) {
+    throw new Error("param and inputPort are mutually exclusive");
+  }
+  if (!param && !inputPort && !address.startsWith("/")) {
     throw new Error("OSC address must start with /");
   }
   const results = [];
   for (const target of targets) {
     try {
-      const targetAddress = param ? parameterAddressForTarget(target, param) : address;
+      const targetAddress = param
+        ? parameterAddressForTarget(target, param)
+        : inputPort
+          ? inputPortAddressForTarget(target, inputPort)
+          : address;
       results.push(await sendOscMessage(target, targetAddress, body.args ?? [], {
         sender: runtime.oscSender,
         allowUnavailable: body.allowUnavailable === true
@@ -962,8 +970,9 @@ async function sendOscToResolvedTargets(targets, runtime, body) {
   }
   return {
     ok: results.every((result) => result.ok),
-    address: param ? "" : address,
+    address: param || inputPort ? "" : address,
     param,
+    inputPort,
     results
   };
 }
@@ -974,6 +983,14 @@ function parameterAddressForTarget(target, name) {
     throw new Error(`OSC target '${target.id ?? ""}' does not expose parameter '${name}'`);
   }
   return parameter.address;
+}
+
+function inputPortAddressForTarget(target, name) {
+  const inputPort = (target.inputPorts ?? []).find((entry) => entry.name === name);
+  if (!inputPort?.address) {
+    throw new Error(`OSC target '${target.id ?? ""}' does not expose input port '${name}'`);
+  }
+  return inputPort.address;
 }
 
 async function sendOscSteps(steps, targetsById, runtime) {

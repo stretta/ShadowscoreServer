@@ -488,7 +488,7 @@ print_local_provenance
 
 if [[ "${RESTART_SERVICE}" == "1" && "${SUDO_PREFLIGHT}" == "1" && "${DRY_RUN}" != "1" ]]; then
   echo "Checking non-interactive sudo on ${PI_USER}@${RESOLVED_PI_HOST}..."
-  if ! remote_sudo_sh "true"; then
+  if ! remote_sudo_sh "systemctl show $(quote "${SERVICE_NAME}") -p ActiveState >/dev/null"; then
     echo "Non-interactive sudo is unavailable on ${PI_USER}@${RESOLVED_PI_HOST}." >&2
     print_manual_restart_recovery
     exit 1

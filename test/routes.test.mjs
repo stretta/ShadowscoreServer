@@ -2810,6 +2810,36 @@ test("OSC target route exposes registered TTID control targets", async () => {
   assert.equal(response.targets[0].parameters[0].meta.editor, "ttid");
 });
 
+test("OSC target route preserves registered ListSequencer message inports", async () => {
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  registry.register({
+    id: "heron",
+    advertisedName: "Heron",
+    oscTargets: [{
+      id: "rnbo-inst-14:listsequencer",
+      label: "ListSequencer 14",
+      host: "192.168.68.101",
+      port: 1234,
+      baseAddress: "/rnbo/inst/14",
+      app: "listsequencer",
+      instance: "main",
+      inputPorts: [
+        { name: "Steps", address: "/rnbo/inst/14/messages/in/Steps", type: "iiii" },
+        { name: "Duration", address: "/rnbo/inst/14/messages/in/Duration" }
+      ]
+    }]
+  }, { remoteAddress: "192.168.68.101" });
+  const context = createRouteContext({ runtime: { peerRegistry: registry } });
+
+  const response = await requestJson(context, "GET", "/osc/targets?app=listsequencer&status=online");
+
+  assert.equal(response.targets.length, 1);
+  assert.equal(response.targets[0].id, "heron:listsequencer:main");
+  assert.deepEqual(response.targets[0].inputPorts.map((inputPort) => inputPort.name), ["Steps", "Duration"]);
+  assert.equal(response.targets[0].inputPorts[0].address, "/rnbo/inst/14/messages/in/Steps");
+  assert.equal(response.targets[0].inputPorts[0].type, "iiii");
+});
+
 test("OSC target route exposes TTID-tagged parameters from other RNBO apps", async () => {
   const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
   registry.register({
@@ -2878,6 +2908,46 @@ test("OSC send route resolves named parameters per target", async () => {
   assert.equal(result.results[0].address, "/rnbo/inst/10/params/VolA");
   assert.equal(sends[0].address, "/rnbo/inst/10/params/VolA");
   assert.deepEqual(sends[0].args, [0.42]);
+});
+
+test("OSC send route resolves named input ports per target", async () => {
+  const sends = [];
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  for (const [id, host, instanceId] of [["heron", "192.168.68.101", "14"], ["raven", "192.168.68.103", "15"]]) {
+    registry.register({
+      id,
+      advertisedName: id,
+      oscTargets: [{
+        id: `rnbo-inst-${instanceId}:listsequencer`,
+        label: `ListSequencer ${instanceId}`,
+        host,
+        port: 1234,
+        baseAddress: `/rnbo/inst/${instanceId}`,
+        app: "listsequencer",
+        instance: "main",
+        inputPorts: [{ name: "Steps", address: `/rnbo/inst/${instanceId}/messages/in/Steps` }]
+      }]
+    }, { remoteAddress: host });
+  }
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: registry,
+      oscSender: async (send) => sends.push(send)
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/osc/send", {
+    targets: ["heron:listsequencer:main", "raven:listsequencer:main"],
+    inputPort: "Steps",
+    args: [0, 2, 4]
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.inputPort, "Steps");
+  assert.deepEqual(sends.map((send) => send.address), [
+    "/rnbo/inst/14/messages/in/Steps",
+    "/rnbo/inst/15/messages/in/Steps"
+  ]);
 });
 
 test("OSC broadcast route expands live targets by query", async () => {

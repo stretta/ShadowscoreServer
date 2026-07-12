@@ -614,7 +614,7 @@
         setStatus("No targets selected");
         return;
       }
-      const body = await postOsc({ targets: selected, address: inputPort.address, args });
+      const body = await postOsc({ targets: selected, inputPort: inputPort.name, args });
       const sent = (body.results || []).filter((result) => result.ok).length;
       setStatus(`Sent ${labelFor(inputPort)} to ${sent}/${selected.length}`);
     }

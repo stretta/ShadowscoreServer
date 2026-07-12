@@ -290,6 +290,7 @@ function normalizeOscTargets(targets, hardwareUnitId, hardwareUnitName) {
       oscTargetId: stringField(target.oscTargetId ?? target.oscId) || undefined,
       oscCapabilities: target.oscCapabilities ?? target.controlCapabilities,
       parameters: Array.isArray(target.parameters) ? target.parameters : [],
+      inputPorts: Array.isArray(target.inputPorts) ? target.inputPorts : [],
       kind: stringField(target.kind) || "rnbo",
       source: stringField(target.source) || "registration",
       hardwareUnitId,

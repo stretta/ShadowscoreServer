@@ -237,6 +237,10 @@ export const defaultConfig = Object.freeze({
     macros: {
       path: "data/osc-macros.json"
     }
+  },
+  oscQuery: {
+    manualDevicesPath: "data/oscquery-devices.json",
+    refreshIntervalMs: 5000
   }
 });
 

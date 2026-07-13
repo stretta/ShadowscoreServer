@@ -90,6 +90,9 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /Last commit/);
   assert.match(response.body, /\/admin\/rnbo\/resend/);
   assert.match(response.body, /voice\.assignment\.reconciled/);
+  assert.match(response.body, /OSCQuery Devices/);
+  assert.match(response.body, /Add device/);
+  assert.match(response.body, /\/oscquery\/devices/);
 });
 
 test("admin RNBO resend route asks the adapter to resend the current score", async () => {
@@ -2757,6 +2760,70 @@ test("OSC target route normalizes, filters, and reports stale targets", async ()
   assert.equal(response.targets[0].diagnostics[0].type, "target-host-mismatch");
 });
 
+test("manual OSCQuery device routes manage endpoints and expose their editor targets", async () => {
+  const devices = new Map();
+  const registry = {
+    async list() { return [...devices.values()]; },
+    async probe(document) { return manualDevice({ ...document, id: "probe" }); },
+    async save(document) {
+      const device = manualDevice({ ...document, id: "studio-mac" });
+      devices.set(device.id, device);
+      return device;
+    },
+    async update(id, document) {
+      const device = manualDevice({ ...devices.get(id), ...document, id });
+      devices.set(id, device);
+      return device;
+    },
+    async remove(id) {
+      const device = devices.get(id);
+      devices.delete(id);
+      return device;
+    },
+    async refresh(id) { return devices.get(id); },
+    async rnboTargets() { return []; },
+    async rnboDevices() { return []; },
+    async oscTargets() {
+      return devices.size === 0 ? [] : [{
+        id: "studio-mac:rnbo-inst-2:poland",
+        localId: "rnbo-inst-2:poland",
+        label: "Poland 2",
+        host: "studio.local",
+        port: 1234,
+        baseAddress: "/rnbo/inst/2",
+        app: "poland",
+        instance: "main",
+        hardwareUnitId: "studio-mac",
+        hardwareUnitName: "Studio Mac",
+        available: true,
+        parameters: [{ name: "VolA", address: "/rnbo/inst/2/params/VolA" }]
+      }];
+    }
+  };
+  const context = createRouteContext({ runtime: { manualOscQueryDevices: registry } });
+
+  const probe = await requestJson(context, "POST", "/oscquery/devices/probe", { host: "studio.local" });
+  assert.equal(probe.device.id, "probe");
+
+  const saved = await requestJson(context, "POST", "/oscquery/devices", { name: "Studio Mac", host: "studio.local" });
+  assert.equal(saved.device.id, "studio-mac");
+  const listed = await requestJson(context, "GET", "/oscquery/devices");
+  assert.equal(listed.devices.length, 1);
+
+  const targets = await requestJson(context, "GET", "/osc/targets?app=poland&status=online");
+  assert.equal(targets.targets.length, 1);
+  assert.equal(targets.targets[0].id, "studio-mac:poland:main");
+  assert.equal(targets.targets[0].parameters[0].name, "VolA");
+
+  const updated = await requestJson(context, "PATCH", "/oscquery/devices/studio-mac", { name: "Studio Rack" });
+  assert.equal(updated.device.name, "Studio Rack");
+  const refreshed = await requestJson(context, "POST", "/oscquery/devices/studio-mac/refresh");
+  assert.equal(refreshed.device.id, "studio-mac");
+  const removed = await requestJson(context, "DELETE", "/oscquery/devices/studio-mac");
+  assert.equal(removed.device.id, "studio-mac");
+  assert.deepEqual((await requestJson(context, "GET", "/oscquery/devices")).devices, []);
+});
+
 test("OSC send route resolves stable ids and reports per-target delivery", async () => {
   const sends = [];
   const context = createRouteContext({
@@ -3161,6 +3228,22 @@ test("OSC macro routes resolve named parameters per target", async () => {
   assert.equal(run.results[0].address, "/rnbo/inst/9/params/VolA");
   assert.deepEqual(sends[0].args, [-6]);
 });
+
+function manualDevice(document) {
+  return {
+    id: document.id,
+    name: document.name ?? "Studio Mac",
+    host: document.host ?? "studio.local",
+    oscQueryUrl: document.oscQueryUrl ?? "http://studio.local:5678/",
+    oscPort: document.oscPort ?? 1234,
+    status: "online",
+    source: "manual",
+    lastSeenAt: "2026-07-13T12:00:00.000Z",
+    lastCheckedAt: "2026-07-13T12:00:00.000Z",
+    lastError: "",
+    instances: [{ id: "2", name: "Poland 2", app: "poland" }]
+  };
+}
 
 test("clip routes reject stale expected score revisions", async () => {
   const context = createRouteContext();

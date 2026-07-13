@@ -17,11 +17,11 @@ export function adminPage() {
     }
     main { margin: 0 auto; max-width: 1120px; padding: 24px clamp(16px, 4vw, 40px) 40px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
-    .session-tools, .scores, .targets, .hardware {
+    .session-tools, .scores, .targets, .oscquery-devices, .hardware {
       margin-bottom: 18px;
       padding: 14px;
     }
-    .session-tools h2, .scores h2, .targets h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
+    .session-tools h2, .scores h2, .targets h2, .oscquery-devices h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
     .session-grid {
       align-items: start;
       display: grid;
@@ -56,7 +56,16 @@ export function adminPage() {
       font-size: 13px;
       margin-top: 6px;
     }
-    .target-list, .unit-list, .score-list { display: grid; gap: 8px; }
+    .target-list, .unit-list, .score-list, .oscquery-device-list { display: grid; gap: 8px; }
+    .oscquery-device-form {
+      align-items: end;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(150px, 0.7fr) minmax(240px, 1.5fr) minmax(90px, 0.35fr) auto auto;
+      margin-bottom: 10px;
+    }
+    .oscquery-device-form label { color: var(--ss-muted); display: grid; font-size: 12px; gap: 4px; }
+    .oscquery-device-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .rnbo-send-state {
       background: rgba(38, 51, 65, 0.46);
       border: 1px solid var(--ss-border);
@@ -72,7 +81,7 @@ export function adminPage() {
       font-size: 12px;
       line-height: 1.35;
     }
-    .target, .unit, .score-item {
+    .target, .unit, .score-item, .oscquery-device {
       align-items: center;
       background: rgba(38, 51, 65, 0.46);
       border: 1px solid var(--ss-border);
@@ -82,10 +91,10 @@ export function adminPage() {
       justify-content: space-between;
       padding: 9px;
     }
-    .target, .unit { align-items: flex-start; }
+    .target, .unit, .oscquery-device { align-items: flex-start; }
     .item-main { display: grid; gap: 4px; min-width: 0; }
     .score-detail { font-size: 12px; margin-top: 3px; }
-    .target code, .unit code { color: var(--ss-muted); font-size: 12px; }
+    .target code, .unit code, .oscquery-device code { color: var(--ss-muted); font-size: 12px; }
     .diagnostic {
       background: rgba(251, 191, 36, 0.1);
       border: 1px solid rgba(251, 191, 36, 0.56);
@@ -154,6 +163,7 @@ export function adminPage() {
       td { border: 0; padding: 6px 0; }
       td::before { color: #66717d; content: attr(data-label); display: block; font-size: 12px; font-weight: 700; margin-bottom: 4px; text-transform: uppercase; }
       .actions { flex-wrap: wrap; }
+      .oscquery-device-form { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -220,6 +230,24 @@ export function adminPage() {
       <div class="rnbo-send-state" id="rnbo-send-state"></div>
       <div class="target-list" id="targets"></div>
     </section>
+    <section class="oscquery-devices">
+      <h2>OSCQuery Devices</h2>
+      <form class="oscquery-device-form" id="oscquery-device-form">
+        <label>Name
+          <input id="oscquery-device-name" autocomplete="off" placeholder="Studio Mac">
+        </label>
+        <label>Hostname, IP, or OSCQuery URL
+          <input id="oscquery-device-url" autocomplete="off" required placeholder="studio-mac.local">
+        </label>
+        <label>OSC port
+          <input id="oscquery-device-port" inputmode="numeric" type="number" min="1" max="65535" value="1234">
+        </label>
+        <button class="primary" id="save-oscquery-device" type="submit">Add device</button>
+        <button id="cancel-oscquery-device" type="button" hidden>Cancel</button>
+      </form>
+      <div class="hint">Add a device that exposes OSCQuery even when it does not run the Shadowscore registration agent. The server will probe it before saving.</div>
+      <div class="oscquery-device-list" id="oscquery-devices"></div>
+    </section>
     <section class="hardware">
       <h2>Hardware units</h2>
       <div class="unit-list" id="hardware-units"></div>
@@ -251,6 +279,13 @@ export function adminPage() {
     const voicesEl = document.querySelector("#voices");
     const targetsEl = document.querySelector("#targets");
     const rnboSendStateEl = document.querySelector("#rnbo-send-state");
+    const oscQueryDevicesEl = document.querySelector("#oscquery-devices");
+    const oscQueryDeviceFormEl = document.querySelector("#oscquery-device-form");
+    const oscQueryDeviceNameEl = document.querySelector("#oscquery-device-name");
+    const oscQueryDeviceUrlEl = document.querySelector("#oscquery-device-url");
+    const oscQueryDevicePortEl = document.querySelector("#oscquery-device-port");
+    const saveOscQueryDeviceEl = document.querySelector("#save-oscquery-device");
+    const cancelOscQueryDeviceEl = document.querySelector("#cancel-oscquery-device");
     const hardwareUnitsEl = document.querySelector("#hardware-units");
     const shareUrlEl = document.querySelector("#share-url");
     const qrCodeEl = document.querySelector("#qr-code");
@@ -263,6 +298,8 @@ export function adminPage() {
     const inputs = new Map();
     let discoveredTargets = [];
     let hardwareUnits = [];
+    let oscQueryDevices = [];
+    let editingOscQueryDeviceId = "";
     let rnboSendQueue = {
       inProgress: false,
       queued: false,
@@ -284,6 +321,8 @@ export function adminPage() {
     document.querySelector("#save-score").addEventListener("click", saveScoreToLibrary);
     document.querySelector("#refresh-scores").addEventListener("click", loadSavedScores);
     document.querySelector("#new-score").addEventListener("click", createNewScore);
+    oscQueryDeviceFormEl.addEventListener("submit", saveOscQueryDevice);
+    cancelOscQueryDeviceEl.addEventListener("click", resetOscQueryDeviceForm);
     restoreFileEl.addEventListener("change", restoreBackup);
 
     loadSession();
@@ -301,6 +340,7 @@ export function adminPage() {
     events.addEventListener("admin.legacyVoiceNotes.imported", (event) => render(JSON.parse(event.data).score));
     events.onerror = () => setStatus("Event stream reconnecting...");
     window.setInterval(refreshRnboTargets, 2000);
+    window.setInterval(loadOscQueryDevices, 5000);
 
     async function loadSession() {
       const response = await fetch("/session");
@@ -310,6 +350,7 @@ export function adminPage() {
       hardwareUnits = session.hardwareUnits ?? [];
       renderSessionTools(session);
       await refreshRnboTargets();
+      await loadOscQueryDevices();
       renderHardwareUnits(hardwareUnits);
       await loadSavedScores();
       const scoreResponse = await fetch("/score");
@@ -361,6 +402,56 @@ export function adminPage() {
         appendDiagnostics(main, target);
         row.append(main, statusBadge(target.available === false ? "offline" : "online"));
         targetsEl.append(row);
+      }
+    }
+
+    function renderOscQueryDevices(devices) {
+      oscQueryDevicesEl.textContent = "";
+      if (devices.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "oscquery-device";
+        empty.textContent = "No manually configured OSCQuery devices.";
+        oscQueryDevicesEl.append(empty);
+        return;
+      }
+      for (const device of devices) {
+        const row = document.createElement("div");
+        row.className = "oscquery-device";
+        const main = document.createElement("div");
+        main.className = "item-main";
+        const label = document.createElement("div");
+        label.textContent = device.name;
+        const endpoint = document.createElement("code");
+        endpoint.textContent = device.oscQueryUrl + " · OSC " + device.host + ":" + device.oscPort;
+        const detail = document.createElement("div");
+        detail.className = "send-detail";
+        const instances = (device.instances ?? []).map((instance) => instance.name).join(", ");
+        detail.textContent = (device.instances?.length ?? 0) + " instance(s)" + (instances ? " · " + instances : "") + (device.lastSeenAt ? " · seen " + formatTime(device.lastSeenAt) : "");
+        main.append(label, endpoint, detail);
+        if (device.lastError) {
+          const error = document.createElement("div");
+          error.className = "diagnostic";
+          error.textContent = device.lastError;
+          main.append(error);
+        }
+        const controls = document.createElement("div");
+        controls.className = "oscquery-device-actions";
+        const refresh = document.createElement("button");
+        refresh.type = "button";
+        refresh.textContent = "Refresh";
+        refresh.addEventListener("click", () => refreshOscQueryDevice(device.id));
+        const configure = document.createElement("button");
+        configure.type = "button";
+        configure.textContent = "Configure";
+        configure.addEventListener("click", () => configureOscQueryDevice(device));
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "danger";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => removeOscQueryDevice(device.id));
+        controls.append(statusBadge(device.status ?? "offline"), refresh, configure, remove);
+        row.append(main, controls);
+        oscQueryDevicesEl.append(row);
       }
     }
 
@@ -766,6 +857,90 @@ export function adminPage() {
       rnboSendQueue = body.sendQueue ?? rnboSendQueue;
       renderRnboSendState();
       renderTargets(discoveredTargets);
+    }
+
+    async function loadOscQueryDevices(force = false) {
+      const response = await fetch("/oscquery/devices" + (force ? "?refresh=true" : ""));
+      const body = await response.json();
+      if (body.ok === false) {
+        setStatus(body.error);
+        return;
+      }
+      oscQueryDevices = body.devices ?? [];
+      renderOscQueryDevices(oscQueryDevices);
+    }
+
+    async function saveOscQueryDevice(event) {
+      event.preventDefault();
+      const document = {
+        name: oscQueryDeviceNameEl.value.trim(),
+        oscQueryUrl: oscQueryDeviceUrlEl.value.trim(),
+        oscPort: Number(oscQueryDevicePortEl.value || 1234)
+      };
+      setStatus((editingOscQueryDeviceId ? "Updating" : "Probing") + " OSCQuery device...");
+      const response = await fetch(
+        editingOscQueryDeviceId ? "/oscquery/devices/" + encodeURIComponent(editingOscQueryDeviceId) : "/oscquery/devices",
+        {
+          method: editingOscQueryDeviceId ? "PATCH" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(document)
+        }
+      );
+      const body = await response.json();
+      if (body.ok === false) {
+        setStatus(body.error);
+        return;
+      }
+      resetOscQueryDeviceForm();
+      setStatus("Saved OSCQuery device " + body.device.name + ".");
+      await loadOscQueryDevices();
+      await refreshRnboTargets();
+    }
+
+    function configureOscQueryDevice(device) {
+      editingOscQueryDeviceId = device.id;
+      oscQueryDeviceNameEl.value = device.name ?? "";
+      oscQueryDeviceUrlEl.value = device.oscQueryUrl ?? "";
+      oscQueryDevicePortEl.value = device.oscPort ?? 1234;
+      saveOscQueryDeviceEl.textContent = "Update device";
+      cancelOscQueryDeviceEl.hidden = false;
+      oscQueryDeviceUrlEl.focus();
+    }
+
+    function resetOscQueryDeviceForm() {
+      editingOscQueryDeviceId = "";
+      oscQueryDeviceFormEl.reset();
+      oscQueryDevicePortEl.value = 1234;
+      saveOscQueryDeviceEl.textContent = "Add device";
+      cancelOscQueryDeviceEl.hidden = true;
+    }
+
+    async function refreshOscQueryDevice(deviceId) {
+      setStatus("Refreshing OSCQuery device...");
+      const response = await fetch("/oscquery/devices/" + encodeURIComponent(deviceId) + "/refresh", { method: "POST" });
+      const body = await response.json();
+      if (body.ok === false) {
+        setStatus(body.error);
+        return;
+      }
+      setStatus("Refreshed OSCQuery device " + body.device.name + ".");
+      await loadOscQueryDevices();
+      await refreshRnboTargets();
+    }
+
+    async function removeOscQueryDevice(deviceId) {
+      const device = oscQueryDevices.find((entry) => entry.id === deviceId);
+      if (!confirm("Remove OSCQuery device " + (device?.name ?? deviceId) + "?")) return;
+      const response = await fetch("/oscquery/devices/" + encodeURIComponent(deviceId), { method: "DELETE" });
+      const body = await response.json();
+      if (body.ok === false) {
+        setStatus(body.error);
+        return;
+      }
+      if (editingOscQueryDeviceId === deviceId) resetOscQueryDeviceForm();
+      setStatus("Removed OSCQuery device " + body.device.name + ".");
+      await loadOscQueryDevices();
+      await refreshRnboTargets();
     }
 
     async function saveScoreToLibrary() {

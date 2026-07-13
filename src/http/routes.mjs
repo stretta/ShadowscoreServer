@@ -66,6 +66,57 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/oscquery/devices") {
+    writeJson(response, 200, { devices: await requireManualOscQueryDevices(runtime).list({ refresh: url.searchParams.get("refresh") === "true" }) });
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/oscquery/devices/probe") {
+    try {
+      writeJson(response, 200, { ok: true, device: await requireManualOscQueryDevices(runtime).probe(await readJson(request)) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/oscquery/devices") {
+    try {
+      writeJson(response, 200, { ok: true, device: await requireManualOscQueryDevices(runtime).save(await readJson(request)) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const oscQueryDeviceMatch = url.pathname.match(/^\/oscquery\/devices\/([^/]+)$/);
+  if (oscQueryDeviceMatch && request.method === "PATCH") {
+    try {
+      writeJson(response, 200, { ok: true, device: await requireManualOscQueryDevices(runtime).update(decodeURIComponent(oscQueryDeviceMatch[1]), await readJson(request)) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+  if (oscQueryDeviceMatch && request.method === "DELETE") {
+    try {
+      writeJson(response, 200, { ok: true, device: await requireManualOscQueryDevices(runtime).remove(decodeURIComponent(oscQueryDeviceMatch[1])) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  const oscQueryRefreshMatch = url.pathname.match(/^\/oscquery\/devices\/([^/]+)\/refresh$/);
+  if (oscQueryRefreshMatch && request.method === "POST") {
+    try {
+      writeJson(response, 200, { ok: true, device: await requireManualOscQueryDevices(runtime).refresh(decodeURIComponent(oscQueryRefreshMatch[1])) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/osc/targets") {
     writeJson(response, 200, {
       targets: buildOscTargets(await readAllOscTargets(config, runtime), {
@@ -876,7 +927,7 @@ function writeEvent(response, eventName, payload) {
 
 function setCors(response) {
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  response.setHeader("Access-Control-Allow-Methods", "DELETE,GET,POST,OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "DELETE,GET,PATCH,POST,OPTIONS");
   response.setHeader("Access-Control-Allow-Origin", "*");
 }
 
@@ -893,15 +944,25 @@ async function readSessionRuntime(config, runtime) {
   const peerUnits = runtime.peerRegistry?.snapshot?.() ?? [];
   const peerTargets = runtime.peerRegistry?.targets?.() ?? [];
   const peerOscTargets = runtime.peerRegistry?.oscTargets?.() ?? [];
+  const manualTargets = await runtime.manualOscQueryDevices?.rnboTargets?.() ?? [];
+  const manualOscTargets = await runtime.manualOscQueryDevices?.oscTargets?.() ?? [];
+  const manualRnboDevices = await runtime.manualOscQueryDevices?.rnboDevices?.() ?? [];
   return {
-    rnboTargets: [...localUnit.targets, ...peerTargets],
-    oscTargets: [...localUnit.oscTargets, ...peerOscTargets],
-    rnboDevices: [...localUnit.rnboDevices, ...(runtime.peerRegistry?.rnboDevices?.() ?? [])],
+    rnboTargets: [...localUnit.targets, ...peerTargets, ...manualTargets],
+    oscTargets: [...localUnit.oscTargets, ...peerOscTargets, ...manualOscTargets],
+    rnboDevices: [...localUnit.rnboDevices, ...(runtime.peerRegistry?.rnboDevices?.() ?? []), ...manualRnboDevices],
     hardwareUnits: [localUnit, ...peerUnits],
     macroPlayback: runtime.macroPlayback,
     jackTransport: runtime.jackTransport,
     rnboAdapter: runtime.rnboAdapter
   };
+}
+
+function requireManualOscQueryDevices(runtime) {
+  if (!runtime.manualOscQueryDevices) {
+    throw new Error("manual OSCQuery device registry is not available");
+  }
+  return runtime.manualOscQueryDevices;
 }
 
 async function readRnboDevices(config) {

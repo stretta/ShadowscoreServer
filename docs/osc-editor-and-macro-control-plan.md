@@ -125,6 +125,26 @@ GET /osc/targets?capability=volume
 
 Returns normalized live and recently known OSC-controllable targets.
 
+### Manually Configured OSCQuery Devices
+
+Admin can supplement local and peer discovery with a directly configured
+OSCQuery endpoint. A saved device is re-queried and its RNBO instances enter
+the same normalized target lists as discovered instances.
+
+```http
+GET    /oscquery/devices
+POST   /oscquery/devices/probe
+POST   /oscquery/devices
+PATCH  /oscquery/devices/:deviceId
+DELETE /oscquery/devices/:deviceId
+POST   /oscquery/devices/:deviceId/refresh
+```
+
+The configured record stores the OSCQuery URL, OSC destination host and port,
+and a friendly name. It does not store a frozen instance inventory. The server
+continues to derive parameters, message inports, metadata, and editor
+classification from the live OSCQuery tree.
+
 The response should include enough status for browser clients to distinguish:
 
 - online and sendable
@@ -435,8 +455,9 @@ Live verification:
 
 - Do not redesign the Poland UI.
 - Do not make Shadowbox the primary authoring UI for instrument editors.
-- Do not replace OSCQuery or RNBO Runner discovery with a parallel manual
-  inventory.
+- Do not replace OSCQuery or RNBO Runner discovery with a frozen manual target
+  inventory. Directly configured OSCQuery endpoints may supplement automatic
+  discovery, but their live instance lists still come from OSCQuery.
 - Do not store raw IP/port/path tuples as the primary user-facing selection.
 - Do not make generic slider walls the main editor experience for archetypal
   instruments.

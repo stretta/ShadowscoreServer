@@ -2622,6 +2622,15 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /chromatictranspose/);
   assert.match(response.body, /scalartranspose/);
   assert.match(response.body, /rootParams/);
+  assert.match(response.body, /genericParams/);
+  assert.match(response.body, /renderGenericParam/);
+  assert.match(response.body, /param\.values/);
+  assert.match(response.body, /isToggleParam/);
+  assert.match(response.body, /Read from/);
+  assert.match(response.body, /Populate Fields/);
+  assert.match(response.body, /args: \[-999\]/);
+  assert.match(response.body, /messages\/out\/\$\{encodeURIComponent\(inputPortName\)\}Ack/);
+  assert.match(response.body, /formatAckValue/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {

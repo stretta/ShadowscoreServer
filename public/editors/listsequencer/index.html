@@ -83,7 +83,20 @@
     .toolbar-actions {
       align-items: center;
       display: flex;
+      flex-wrap: wrap;
       gap: 8px;
+    }
+
+    .readback-controls {
+      align-items: center;
+      display: flex;
+      gap: 6px;
+    }
+
+    .readback-controls label {
+      color: var(--ss-muted);
+      font-size: 12px;
+      font-weight: 800;
     }
 
     .targets {
@@ -271,7 +284,8 @@
 
       .top,
       .toolbar,
-      .ttid-head {
+      .ttid-head,
+      .readback-controls {
         align-items: flex-start;
         flex-direction: column;
       }
@@ -313,6 +327,11 @@
     <section class="toolbar" aria-label="ListSequencer controls">
       <div class="meta">Send values to selected live targets</div>
       <div class="toolbar-actions">
+        <div class="readback-controls">
+          <label for="read-source">Read from</label>
+          <select id="read-source" aria-label="Read list values from client"></select>
+          <button id="populate" type="button">Populate Fields</button>
+        </div>
         <button id="refresh" type="button">Refresh</button>
         <button id="select-all" type="button">All Targets</button>
       </div>
@@ -353,9 +372,12 @@
     const statusEl = document.querySelector("#status");
     const refreshButton = document.querySelector("#refresh");
     const selectAllButton = document.querySelector("#select-all");
+    const readSourceSelect = document.querySelector("#read-source");
+    const populateButton = document.querySelector("#populate");
     let targets = [];
     let inputPorts = [];
     let transposeParams = [];
+    let genericParams = [];
     let rootParams = [];
     let ttidParams = [];
     let ttidState = new Map();
@@ -363,6 +385,7 @@
 
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     selectAllButton.addEventListener("click", selectAllTargets);
+    populateButton.addEventListener("click", () => populateFields().catch(reportError));
 
     refresh().catch(reportError);
 
@@ -374,8 +397,10 @@
       transposeParams = collectTransposeParams(targets);
       rootParams = collectNamedParams(targets, new Set(["root"]));
       ttidParams = collectTtidParams(targets);
+      genericParams = collectGenericParams(targets);
       ttidState = mergeTtidState(ttidParams);
       renderTargets();
+      renderReadSources();
       renderInports();
       renderTtid();
       setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListSequencer targets");
@@ -431,6 +456,23 @@
       return Array.from(byName.values()).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999) || a.name.localeCompare(b.name));
     }
 
+    function collectGenericParams(nextTargets) {
+      const specializedNames = new Set([
+        ...TRANSPOSE_NAMES,
+        "root",
+        ...collectTtidParams(nextTargets).map((param) => normalizedName(param.name))
+      ]);
+      const byName = new Map();
+      for (const target of nextTargets) {
+        for (const param of target.parameters || []) {
+          if (specializedNames.has(normalizedName(param.name))) continue;
+          if (!byName.has(param.name)) byName.set(param.name, { ...param, targetIds: [] });
+          byName.get(param.name).targetIds.push(target.id);
+        }
+      }
+      return Array.from(byName.values()).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999) || a.name.localeCompare(b.name));
+    }
+
     function mergeTtidState(nextParams) {
       const next = new Map();
       for (const param of nextParams) {
@@ -455,8 +497,27 @@
       if (!cards.length) targetsEl.innerHTML = `<div class="empty-state">No online ListSequencer targets.</div>`;
     }
 
+    function renderReadSources() {
+      const previous = readSourceSelect.value;
+      const options = targets.map((target) => {
+        const option = document.createElement("option");
+        option.value = target.id;
+        option.textContent = `${target.label || target.id}${target.unitId ? ` (${target.unitId})` : ""}`;
+        return option;
+      });
+      readSourceSelect.replaceChildren(...options);
+      if (targets.some((target) => target.id === previous)) readSourceSelect.value = previous;
+      const disabled = targets.length === 0;
+      readSourceSelect.disabled = disabled;
+      populateButton.disabled = disabled;
+    }
+
     function renderInports() {
-      const rows = [...inputPorts.map(renderInputPort), ...transposeParams.map(renderTransposeParam)];
+      const rows = [
+        ...inputPorts.map(renderInputPort),
+        ...transposeParams.map(renderTransposeParam),
+        ...genericParams.map(renderGenericParam)
+      ];
       inportsEl.replaceChildren(...rows);
       if (!rows.length) inportsEl.innerHTML = `<div class="empty-state">No ListSequencer message inports reported.</div>`;
     }
@@ -470,7 +531,7 @@
           <div class="control-name">${escapeHtml(labelFor(inputPort))}</div>
           <div class="control-detail">${escapeHtml(inputPort.name)} · ${inputPort.targetIds.length}</div>
         </div>
-        <input id="${inputId}" type="text" autocomplete="off" spellcheck="false">
+        <input id="${inputId}" type="text" autocomplete="off" spellcheck="false" data-inport="${escapeHtml(inputPort.name)}">
         <button type="button">Send</button>
       `;
       const input = row.querySelector("input");
@@ -504,6 +565,68 @@
         onChange: (value) => sendParam(param, value).catch(reportError)
       });
       row.append(number, document.createElement("span"));
+      return row;
+    }
+
+    function renderGenericParam(param) {
+      const row = document.createElement("article");
+      row.className = "text-row";
+      const range = rangeText(param);
+      row.innerHTML = `
+        <div>
+          <div class="control-name">${escapeHtml(param.displayName || param.name)}${range ? ` (${escapeHtml(range)})` : ""}</div>
+          <div class="control-detail">${escapeHtml(param.name)} · ${param.targetIds.length}</div>
+        </div>
+      `;
+
+      if (Array.isArray(param.values) && param.values.length) {
+        const select = document.createElement("select");
+        for (const value of param.values) {
+          const option = document.createElement("option");
+          option.value = String(value);
+          option.textContent = String(value);
+          select.append(option);
+        }
+        select.value = String(param.value ?? param.values[0]);
+        select.addEventListener("change", () => sendParam(param, select.value).catch(reportError));
+        row.append(select, document.createElement("span"));
+        return row;
+      }
+
+      if (isToggleParam(param)) {
+        const label = document.createElement("label");
+        label.className = "meta";
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.checked = Boolean(Number(param.value));
+        toggle.addEventListener("change", () => sendParam(param, toggle.checked ? 1 : 0).catch(reportError));
+        label.append(toggle, document.createTextNode(" Enabled"));
+        row.append(label, document.createElement("span"));
+        return row;
+      }
+
+      const input = document.createElement("input");
+      const send = document.createElement("button");
+      send.type = "button";
+      send.textContent = "Send";
+      if (isNumericParam(param)) {
+        input.type = "number";
+        input.value = String(param.value ?? 0);
+        input.step = String(parameterStep(param));
+        if (isReportedNumber(param.min)) input.min = String(param.min);
+        if (isReportedNumber(param.max)) input.max = String(param.max);
+      } else {
+        input.type = "text";
+        input.value = String(param.value ?? "");
+      }
+      const commit = () => sendParam(param, isNumericParam(param) ? Number(input.value) : input.value).catch(reportError);
+      send.addEventListener("click", commit);
+      input.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        commit();
+      });
+      row.append(input, send);
       return row;
     }
 
@@ -619,6 +742,62 @@
       setStatus(`Sent ${labelFor(inputPort)} to ${sent}/${selected.length}`);
     }
 
+    async function populateFields() {
+      const target = targets.find((entry) => entry.id === readSourceSelect.value);
+      if (!target) {
+        setStatus("Choose a client to read from");
+        return;
+      }
+      const availableNames = new Set((target.inputPorts || []).map((entry) => entry.name));
+      const fields = inputPorts.filter((inputPort) => availableNames.has(inputPort.name));
+      if (!fields.length) {
+        setStatus(`${target.label || target.id} reports no list fields`);
+        return;
+      }
+
+      populateButton.disabled = true;
+      setStatus(`Requesting ${fields.length} field${fields.length === 1 ? "" : "s"} from ${target.label || target.id}...`);
+      try {
+        const requests = await Promise.allSettled(fields.map((inputPort) => postOsc({
+          targets: [target.id],
+          inputPort: inputPort.name,
+          args: [-999]
+        })));
+        await delay(75);
+        const reads = await Promise.allSettled(fields.map((inputPort) => readAck(target, inputPort.name)));
+        let populated = 0;
+        for (let index = 0; index < fields.length; index += 1) {
+          if (requests[index].status !== "fulfilled" || reads[index].status !== "fulfilled") continue;
+          const input = inportsEl.querySelector(`[data-inport="${cssSelectorValue(fields[index].name)}"]`);
+          if (!input) continue;
+          input.value = formatAckValue(reads[index].value);
+          populated += 1;
+        }
+        const failed = fields.length - populated;
+        setStatus(`Populated ${populated}/${fields.length} fields from ${target.label || target.id}${failed ? `; ${failed} ACK${failed === 1 ? "" : "s"} unavailable` : ""}`);
+      } finally {
+        populateButton.disabled = targets.length === 0;
+      }
+    }
+
+    async function readAck(target, inputPortName) {
+      const host = isLoopback(target.host) ? location.hostname : target.host;
+      const path = `${target.baseAddress}/messages/out/${encodeURIComponent(inputPortName)}Ack`;
+      const response = await fetch(`${location.protocol}//${host}:5678${path}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`${inputPortName}Ack: ${response.status}`);
+      const body = await response.json();
+      return body.VALUE;
+    }
+
+    function formatAckValue(value) {
+      const values = Array.isArray(value) ? value : [value];
+      return values.filter((entry) => entry !== undefined && entry !== null).map(String).join(" ");
+    }
+
+    function delay(milliseconds) {
+      return new Promise((resolve) => setTimeout(resolve, milliseconds));
+    }
+
     async function setMask(param, mask) {
       const value = normalizeMask(mask);
       ttidState.set(param.name, value);
@@ -677,6 +856,10 @@
         const number = Number(part);
         return Number.isFinite(number) && part !== "" ? number : part;
       });
+    }
+
+    function isLoopback(host) {
+      return !host || host === "127.0.0.1" || host === "localhost" || host === "::1";
     }
 
     function createNumberObject(options) {
@@ -761,6 +944,21 @@
       return value !== undefined && value !== null && value !== "" && Number.isFinite(Number(value));
     }
 
+    function isNumericParam(param) {
+      return ["f", "i", "d"].includes(String(param.type || "").toLowerCase()) || typeof param.value === "number";
+    }
+
+    function isToggleParam(param) {
+      return isNumericParam(param) && Number(param.min) === 0 && Number(param.max) === 1;
+    }
+
+    function parameterStep(param) {
+      if (param.meta?.edit_as === "int") return 1;
+      const span = Number(param.max) - Number(param.min);
+      if (!Number.isFinite(span)) return "any";
+      return span <= 1 ? 0.01 : span <= 100 ? 0.1 : 1;
+    }
+
     function rangeText(param) {
       return isReportedNumber(param.min) && isReportedNumber(param.max) ? `${param.min} ${param.max}` : "";
     }
@@ -814,6 +1012,10 @@
 
     function cssToken(value) {
       return String(value ?? "").replace(/[^a-zA-Z0-9_-]/g, "-");
+    }
+
+    function cssSelectorValue(value) {
+      return globalThis.CSS?.escape ? CSS.escape(String(value ?? "")) : cssToken(value);
     }
 
     function setStatus(text) {

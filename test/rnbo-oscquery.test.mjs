@@ -505,6 +505,70 @@ test("extracts ListSequencer OSC control targets with message inports and TTID p
   assert.equal(targets[0].parameters.find((param) => param.name === "Scale")?.meta?.editor, "ttid");
 });
 
+test("extracts ListVelSequencer rows and pitch-map parameters", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 1234,
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.jack = {
+    CONTENTS: {
+      info: {
+        CONTENTS: {
+          ports: {
+            CONTENTS: {
+              properties: {
+                CONTENTS: {
+                  "ListVelSequencer-23:midiout1": {
+                    VALUE: "{\"rnbo-instance-id\":23,\"source\":true,\"type\":\"midi\"}"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["23"] = {
+    CONTENTS: {
+      params: {
+        CONTENTS: {
+          ...Object.fromEntries(Array.from({ length: 8 }, (_, index) => {
+            const number = index + 1;
+            return [`${number}map`, rnboParam(`/rnbo/inst/23/params/${number}map`, 35 + number, 0, 127, index)];
+          })),
+          ClockRate: rnboParam("/rnbo/inst/23/params/ClockRate", "8n", undefined, undefined, 8),
+          Clock: rnboParam("/rnbo/inst/23/params/Clock", 1, 0, 1, 9)
+        }
+      },
+      messages: {
+        CONTENTS: {
+          in: {
+            CONTENTS: Object.fromEntries(Array.from({ length: 8 }, (_, index) => {
+              const number = index + 1;
+              const name = number === 4 ? "4ow" : `${number}row`;
+              return [name, rnboInport(`/rnbo/inst/23/messages/in/${name}`)];
+            }))
+          }
+        }
+      }
+    }
+  };
+
+  const targets = extractRnboControlTargets(tree, config);
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].id, "rnbo-inst-23:listvelsequencer");
+  assert.equal(targets[0].app, "listvelsequencer");
+  assert.equal(targets[0].oscCapabilities.includes("listvelsequencer-edit"), true);
+  assert.deepEqual(targets[0].parameters.map((param) => param.name), ["1map", "2map", "3map", "4map", "5map", "6map", "7map", "8map", "ClockRate", "Clock"]);
+  assert.deepEqual(targets[0].inputPorts.map((inputPort) => inputPort.name), ["1row", "2row", "3row", "4ow", "5row", "6row", "7row", "8row"]);
+});
+
 test("extracts AnalogSequencer OSC control targets with zero-padded stage params", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

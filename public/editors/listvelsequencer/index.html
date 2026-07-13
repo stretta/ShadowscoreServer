@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ListVelSequencer Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <style>
+    body { margin: 0; min-height: 100vh; }
+    main { display: grid; gap: 12px; margin: 0 auto; padding: 16px 0 36px; width: min(1080px, calc(100vw - 28px)); }
+    .top { align-items: center; display: flex; gap: 14px; justify-content: space-between; width: 100%; }
+    h1, h2 { line-height: 1.1; margin: 0; }
+    h1 { font-size: 18px; }
+    h2 { font-size: 15px; }
+    .subtitle, .status, .meta, .detail, .empty { color: var(--ss-muted); font-size: 12px; font-weight: 750; }
+    .subtitle { margin: 4px 0 0; }
+    .status { max-width: 48vw; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+    .toolbar, .targets, .global-panel, .row-card { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); }
+    .toolbar { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; padding: 10px; }
+    .toolbar-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
+    .read-source { align-items: center; display: flex; gap: 6px; }
+    .read-source label { color: var(--ss-muted); font-size: 12px; font-weight: 800; }
+    .targets { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); padding: 10px; }
+    .target-card { align-items: start; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); display: grid; gap: 3px 8px; grid-template-columns: auto 1fr; padding: 8px; }
+    .target-card input { grid-row: 1 / span 2; margin: 2px 0 0; }
+    .target-name { color: var(--ss-text); font-weight: 800; overflow-wrap: anywhere; }
+    .detail { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
+    .global-panel { display: grid; gap: 10px; padding: 12px; }
+    .parameters { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+    .param-card { align-items: end; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); display: grid; gap: 8px; grid-template-columns: minmax(130px, 1fr) auto; padding: 10px; }
+    .param-control { align-items: center; display: flex; gap: 8px; justify-content: flex-end; }
+    .param-control input[type="number"], .param-control input[type="text"], .param-control select { min-height: 34px; min-width: 90px; }
+    .rows { display: grid; gap: 10px; }
+    .row-card { display: grid; gap: 10px; padding: 12px; }
+    .row-head { align-items: center; display: flex; gap: 10px; justify-content: space-between; }
+    .row-grid { align-items: end; display: grid; gap: 10px; grid-template-columns: 112px minmax(260px, 1fr) auto auto; }
+    .field { display: grid; gap: 5px; }
+    .field label { color: var(--ss-muted); font-size: 11px; font-weight: 850; letter-spacing: .02em; text-transform: uppercase; }
+    .field input { box-sizing: border-box; min-height: 36px; width: 100%; }
+    .velocity-list { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .map-input { font-variant-numeric: tabular-nums; text-align: right; }
+    .empty { border: 1px dashed var(--ss-border-strong); border-radius: var(--ss-radius-ui); padding: 12px; }
+    @media (max-width: 760px) {
+      .top, .toolbar, .row-head, .read-source { align-items: flex-start; flex-direction: column; }
+      .status { max-width: none; text-align: left; white-space: normal; }
+      .row-grid { grid-template-columns: 1fr; }
+      .parameters { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header class="ss-top-strip">
+    <div class="top">
+      <div>
+        <h1>ListVelSequencer Editor</h1>
+        <p class="subtitle">Eight independently looping velocity rows; 0 is a rest and 1–127 are velocities</p>
+      </div>
+      <div id="status" class="status" role="status">Loading ListVelSequencer targets...</div>
+    </div>
+  </header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
+    <a href="/">Dashboard</a>
+    <a href="/structure-editor">Structure</a>
+    <a href="/matrix-edit">Matrix</a>
+    <a href="/piano-roll">Piano Roll</a>
+    <a href="/event-list">Event List</a>
+    <a href="/editors" aria-current="page">OSC Generators</a>
+    <a href="/admin">Admin</a>
+    <a href="/transport/status">Transport</a>
+  </nav>
+  <main>
+    <section class="toolbar" aria-label="ListVelSequencer controls">
+      <div class="meta">Pitch maps send when changed; velocity rows send independently to checked targets.</div>
+      <div class="toolbar-actions">
+        <div class="read-source">
+          <label for="read-source">Get from</label>
+          <select id="read-source" aria-label="Get rows from client"></select>
+        </div>
+        <button id="refresh" type="button">Refresh</button>
+        <button id="select-all" type="button">All Targets</button>
+      </div>
+    </section>
+    <section id="targets" class="targets" aria-label="OSC targets"></section>
+    <section class="global-panel" aria-labelledby="global-parameters-heading">
+      <div>
+        <h2 id="global-parameters-heading">Global parameters</h2>
+        <div class="meta">All non-map parameters reported by the selected instances</div>
+      </div>
+      <div id="parameters" class="parameters"></div>
+    </section>
+    <section id="rows" class="rows" aria-live="polite"></section>
+  </main>
+  <script>
+    const ROW_COUNT = 8;
+    const GET_REQUEST = [-999];
+    const targetsEl = document.querySelector("#targets");
+    const rowsEl = document.querySelector("#rows");
+    const parametersEl = document.querySelector("#parameters");
+    const statusEl = document.querySelector("#status");
+    const readSourceSelect = document.querySelector("#read-source");
+    const refreshButton = document.querySelector("#refresh");
+    const selectAllButton = document.querySelector("#select-all");
+    let targets = [];
+    let rows = [];
+    let globalParams = [];
+    const mapSendTimers = new Map();
+
+    refreshButton.addEventListener("click", () => refresh().catch(reportError));
+    selectAllButton.addEventListener("click", selectAllTargets);
+    readSourceSelect.addEventListener("change", () => {
+      renderGlobalParams();
+      renderRows();
+    });
+    refresh().catch(reportError);
+
+    async function refresh() {
+      refreshButton.disabled = true;
+      try {
+        const body = await fetchJson("/osc/targets?app=listvelsequencer&status=online");
+        targets = body.targets || [];
+        rows = buildRows(targets);
+        globalParams = collectGlobalParams(targets);
+        renderTargets();
+        renderReadSources();
+        renderGlobalParams();
+        renderRows();
+        setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListVelSequencer targets");
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+
+    function buildRows(nextTargets) {
+      return Array.from({ length: ROW_COUNT }, (_, index) => {
+        const number = index + 1;
+        const portsByTarget = new Map();
+        const mapsByTarget = new Map();
+        for (const target of nextTargets) {
+          const inputPort = (target.inputPorts || []).find((entry) => rowNumber(entry.name) === number);
+          const mapParam = (target.parameters || []).find((entry) => mapNumber(entry.name) === number);
+          if (inputPort) portsByTarget.set(target.id, inputPort);
+          if (mapParam) mapsByTarget.set(target.id, mapParam);
+        }
+        return { number, portsByTarget, mapsByTarget };
+      });
+    }
+
+    function rowNumber(name) {
+      const match = String(name || "").toLowerCase().match(/^([1-8])(?:r)?ow$/);
+      return match ? Number(match[1]) : 0;
+    }
+
+    function mapNumber(name) {
+      const match = String(name || "").toLowerCase().match(/^([1-8])map$/);
+      return match ? Number(match[1]) : 0;
+    }
+
+    function collectGlobalParams(nextTargets) {
+      const byName = new Map();
+      for (const target of nextTargets) {
+        for (const param of target.parameters || []) {
+          if (mapNumber(param.name)) continue;
+          if (!byName.has(param.name)) byName.set(param.name, { name: param.name, paramsByTarget: new Map() });
+          byName.get(param.name).paramsByTarget.set(target.id, param);
+        }
+      }
+      return Array.from(byName.values()).sort((a, b) => {
+        const aParam = Array.from(a.paramsByTarget.values())[0];
+        const bParam = Array.from(b.paramsByTarget.values())[0];
+        return (aParam?.index ?? 9999) - (bParam?.index ?? 9999) || a.name.localeCompare(b.name);
+      });
+    }
+
+    function renderTargets() {
+      const cards = targets.map((target) => {
+        const label = document.createElement("label");
+        label.className = "target-card";
+        label.innerHTML = `
+          <input type="checkbox" checked data-target="${escapeHtml(target.id)}">
+          <span class="target-name">${escapeHtml(target.label || target.id)}</span>
+          <span class="detail">${escapeHtml(target.unitId || "")} ${escapeHtml(target.baseAddress || "")}</span>
+        `;
+        return label;
+      });
+      targetsEl.replaceChildren(...cards);
+      if (!cards.length) targetsEl.innerHTML = `<div class="empty">No online ListVelSequencer targets.</div>`;
+    }
+
+    function renderReadSources() {
+      const previous = readSourceSelect.value;
+      const options = targets.map((target) => {
+        const option = document.createElement("option");
+        option.value = target.id;
+        option.textContent = `${target.label || target.id}${target.unitId ? ` (${target.unitId})` : ""}`;
+        return option;
+      });
+      readSourceSelect.replaceChildren(...options);
+      if (targets.some((target) => target.id === previous)) readSourceSelect.value = previous;
+      readSourceSelect.disabled = targets.length === 0;
+    }
+
+    function renderRows() {
+      if (!targets.length) {
+        rowsEl.innerHTML = `<div class="empty">Start a ListVelSequencer instance and refresh to edit its rows.</div>`;
+        return;
+      }
+      rowsEl.replaceChildren(...rows.map(renderRow));
+    }
+
+    function renderGlobalParams() {
+      if (!globalParams.length) {
+        parametersEl.innerHTML = `<div class="empty">No non-map parameters reported.</div>`;
+        return;
+      }
+      parametersEl.replaceChildren(...globalParams.map(renderGlobalParam));
+    }
+
+    function renderGlobalParam(entry) {
+      const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
+      const param = entry.paramsByTarget.get(source?.id) || Array.from(entry.paramsByTarget.values())[0];
+      const card = document.createElement("article");
+      card.className = "param-card";
+      card.innerHTML = `
+        <div>
+          <div class="target-name">${escapeHtml(param.displayName || param.name)}</div>
+          <div class="detail">${escapeHtml(param.name)}${rangeText(param) ? ` · ${escapeHtml(rangeText(param))}` : ""}</div>
+        </div>
+      `;
+      const control = document.createElement("div");
+      control.className = "param-control";
+
+      if (Array.isArray(param.values) && param.values.length) {
+        const select = document.createElement("select");
+        select.setAttribute("aria-label", param.displayName || param.name);
+        for (const value of param.values) {
+          const option = document.createElement("option");
+          option.value = String(value);
+          option.textContent = String(value);
+          select.append(option);
+        }
+        select.value = String(param.value ?? param.values[0]);
+        select.addEventListener("change", () => sendGlobalParam(entry, select.value).catch(reportError));
+        control.append(select);
+      } else if (isToggleParam(param)) {
+        const label = document.createElement("label");
+        label.className = "meta";
+        const toggle = document.createElement("input");
+        toggle.type = "checkbox";
+        toggle.checked = Boolean(Number(param.value));
+        toggle.setAttribute("aria-label", param.displayName || param.name);
+        toggle.addEventListener("change", () => sendGlobalParam(entry, toggle.checked ? 1 : 0).catch(reportError));
+        label.append(toggle, document.createTextNode(" Enabled"));
+        control.append(label);
+      } else {
+        const input = document.createElement("input");
+        const send = document.createElement("button");
+        const numeric = param.type !== "s" && (Number.isFinite(Number(param.min)) || Number.isFinite(Number(param.max)) || typeof param.value === "number");
+        input.type = numeric ? "number" : "text";
+        input.value = String(param.value ?? "");
+        input.setAttribute("aria-label", param.displayName || param.name);
+        if (numeric) {
+          if (Number.isFinite(Number(param.min))) input.min = String(param.min);
+          if (Number.isFinite(Number(param.max))) input.max = String(param.max);
+          input.step = "any";
+        }
+        send.type = "button";
+        send.textContent = "Send";
+        const commit = () => sendGlobalParam(entry, numeric ? Number(input.value) : input.value).catch(reportError);
+        send.addEventListener("click", commit);
+        input.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          commit();
+        });
+        control.append(input, send);
+      }
+      card.append(control);
+      return card;
+    }
+
+    async function sendGlobalParam(entry, value) {
+      const selected = selectedTargetIds().filter((id) => entry.paramsByTarget.has(id));
+      if (!selected.length) throw new Error(`No checked target exposes ${entry.name}`);
+      const results = await Promise.allSettled(selected.map((targetId) => {
+        const param = entry.paramsByTarget.get(targetId);
+        return postOsc({ targets: [targetId], param: param.name, args: [value] });
+      }));
+      const sent = results.filter((result) => result.status === "fulfilled").length;
+      setStatus(`Sent ${entry.name} ${value} to ${sent}/${selected.length}`);
+      if (sent !== selected.length) throw new Error(`${entry.name} failed on ${selected.length - sent} target${selected.length - sent === 1 ? "" : "s"}`);
+    }
+
+    function renderRow(row) {
+      const card = document.createElement("article");
+      card.className = "row-card";
+      const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
+      const mapParam = row.mapsByTarget.get(source?.id) || Array.from(row.mapsByTarget.values())[0];
+      card.innerHTML = `
+        <div class="row-head">
+          <div>
+            <h2>Row ${row.number}</h2>
+            <div class="detail">${row.number}row · loops independently</div>
+          </div>
+          <div class="meta">0 = rest · 1–127 = velocity</div>
+        </div>
+        <div class="row-grid">
+          <div class="field">
+            <label for="row-${row.number}-map">Pitch map · auto</label>
+            <input id="row-${row.number}-map" class="map-input" type="number" min="${reported(mapParam?.min, 0)}" max="${reported(mapParam?.max, 127)}" step="1" value="${reported(mapParam?.value, 0)}" data-row-map="${row.number}">
+          </div>
+          <div class="field">
+            <label for="row-${row.number}-values">Velocity sequence</label>
+            <input id="row-${row.number}-values" class="velocity-list" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="127 96 0 72" data-row-values="${row.number}">
+          </div>
+          <button type="button" data-get-row="${row.number}">Get Row</button>
+          <button class="primary" type="button" data-send-row="${row.number}">Send Row</button>
+        </div>
+      `;
+      card.querySelector("[data-get-row]").addEventListener("click", () => getRow(row).catch(reportError));
+      card.querySelector("[data-send-row]").addEventListener("click", () => sendRow(row).catch(reportError));
+      const mapInput = card.querySelector("[data-row-map]");
+      mapInput.addEventListener("input", () => schedulePitchMap(row, mapInput.value));
+      mapInput.addEventListener("change", () => flushPitchMap(row, mapInput.value).catch(reportError));
+      mapInput.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        flushPitchMap(row, mapInput.value).catch(reportError);
+      });
+      card.querySelector("[data-row-values]").addEventListener("keydown", (event) => {
+        if (event.key !== "Enter") return;
+        event.preventDefault();
+        sendRow(row).catch(reportError);
+      });
+      return card;
+    }
+
+    async function getRow(row) {
+      const target = targets.find((entry) => entry.id === readSourceSelect.value);
+      const inputPort = row.portsByTarget.get(target?.id);
+      const mapParam = row.mapsByTarget.get(target?.id);
+      if (!target || !inputPort) throw new Error(`Row ${row.number} is unavailable on the selected source`);
+      setStatus(`Requesting row ${row.number} from ${target.label || target.id}...`);
+      await postOsc({ targets: [target.id], inputPort: inputPort.name, args: GET_REQUEST });
+      await delay(75);
+      const [ack, mapValue] = await Promise.all([
+        readTargetValue(target, `${target.baseAddress}/messages/out/${row.number}rowAck`),
+        mapParam ? readTargetValue(target, mapParam.address) : Promise.resolve(undefined)
+      ]);
+      rowsEl.querySelector(`[data-row-values="${row.number}"]`).value = formatList(ack);
+      if (mapValue !== undefined) rowsEl.querySelector(`[data-row-map="${row.number}"]`).value = String(scalarValue(mapValue));
+      setStatus(`Loaded row ${row.number} from ${target.label || target.id}`);
+    }
+
+    async function sendRow(row) {
+      const values = parseVelocityList(rowsEl.querySelector(`[data-row-values="${row.number}"]`).value);
+      const selected = selectedTargetIds().filter((id) => row.portsByTarget.has(id));
+      if (!selected.length) throw new Error(`No checked target exposes row ${row.number}`);
+      setStatus(`Sending row ${row.number} to ${selected.length} target${selected.length === 1 ? "" : "s"}...`);
+      const results = await Promise.allSettled(selected.map((targetId) => {
+        const inputPort = row.portsByTarget.get(targetId);
+        return postOsc({ targets: [targetId], inputPort: inputPort.name, args: values });
+      }));
+      const sent = results.filter((result) => result.status === "fulfilled").length;
+      setStatus(`Sent row ${row.number} to ${sent}/${selected.length}`);
+      if (sent !== selected.length) throw new Error(`Row ${row.number} failed on ${selected.length - sent} target${selected.length - sent === 1 ? "" : "s"}`);
+    }
+
+    async function sendPitchMap(row, rawValue) {
+      const pitch = parsePitchMap(rawValue);
+      const selected = selectedTargetIds().filter((id) => row.mapsByTarget.has(id));
+      if (!selected.length) throw new Error(`No checked target exposes ${row.number}map`);
+      const results = await Promise.allSettled(selected.map((targetId) => {
+        const mapParam = row.mapsByTarget.get(targetId);
+        return postOsc({ targets: [targetId], param: mapParam.name, args: [pitch] });
+      }));
+      const sent = results.filter((result) => result.status === "fulfilled").length;
+      setStatus(`Sent row ${row.number} pitch ${pitch} to ${sent}/${selected.length}`);
+      if (sent !== selected.length) throw new Error(`${row.number}map failed on ${selected.length - sent} target${selected.length - sent === 1 ? "" : "s"}`);
+    }
+
+    function schedulePitchMap(row, rawValue) {
+      clearTimeout(mapSendTimers.get(row.number));
+      const pitch = Number(rawValue);
+      if (!Number.isInteger(pitch) || pitch < 0 || pitch > 127) return;
+      mapSendTimers.set(row.number, setTimeout(() => {
+        mapSendTimers.delete(row.number);
+        sendPitchMap(row, pitch).catch(reportError);
+      }, 160));
+    }
+
+    function flushPitchMap(row, rawValue) {
+      clearTimeout(mapSendTimers.get(row.number));
+      mapSendTimers.delete(row.number);
+      return sendPitchMap(row, rawValue);
+    }
+
+    function parseVelocityList(text) {
+      const parts = String(text || "").trim().split(/[\s,]+/g).filter(Boolean);
+      if (!parts.length) throw new Error("Enter at least one velocity value");
+      const values = parts.map(Number);
+      if (values.some((value) => !Number.isInteger(value) || value < 0 || value > 127)) {
+        throw new Error("Velocity rows accept integers from 0 through 127");
+      }
+      return values;
+    }
+
+    function parsePitchMap(value) {
+      const pitch = Number(value);
+      if (!Number.isInteger(pitch) || pitch < 0 || pitch > 127) throw new Error("Pitch map must be an integer from 0 through 127");
+      return pitch;
+    }
+
+    async function readTargetValue(target, path) {
+      const host = isLoopback(target.host) ? location.hostname : target.host;
+      const response = await fetch(`${location.protocol}//${host}:5678${path}`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`${path}: ${response.status}`);
+      const body = await response.json();
+      return body.VALUE;
+    }
+
+    async function postOsc(payload) {
+      const response = await fetch("/osc/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload)
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) throw new Error(body.error || `OSC send failed: ${response.status}`);
+      return body;
+    }
+
+    async function fetchJson(url) {
+      const response = await fetch(url, { cache: "no-store" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) throw new Error(body.error || `${url}: ${response.status}`);
+      return body;
+    }
+
+    function selectedTargetIds() {
+      return Array.from(document.querySelectorAll("[data-target]:checked"), (input) => input.dataset.target).filter(Boolean);
+    }
+
+    function selectAllTargets() {
+      for (const input of document.querySelectorAll("[data-target]")) input.checked = true;
+    }
+
+    function formatList(value) {
+      const values = Array.isArray(value) ? value : [value];
+      return values.filter((entry) => entry !== undefined && entry !== null).map(String).join(" ");
+    }
+
+    function scalarValue(value) { return Array.isArray(value) ? value[0] : value; }
+    function rangeText(param) {
+      if (Array.isArray(param?.values) && param.values.length) return param.values.join(" / ");
+      if (Number.isFinite(Number(param?.min)) && Number.isFinite(Number(param?.max))) return `${param.min}–${param.max}`;
+      return "";
+    }
+    function isToggleParam(param) {
+      return Number(param?.min) === 0 && Number(param?.max) === 1;
+    }
+    function reported(value, fallback) { return Number.isFinite(Number(value)) ? Number(value) : fallback; }
+    function isLoopback(host) { return ["", "127.0.0.1", "localhost", "::1"].includes(String(host || "").toLowerCase()); }
+    function delay(milliseconds) { return new Promise((resolve) => setTimeout(resolve, milliseconds)); }
+    function setStatus(message) { statusEl.textContent = message; }
+    function reportError(error) { setStatus(error?.message || String(error)); }
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#039;" }[character]));
+    }
+  </script>
+</body>
+</html>

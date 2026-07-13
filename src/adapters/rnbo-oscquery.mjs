@@ -346,6 +346,9 @@ function inferLegacyControlApp(parameters, inputPorts = []) {
   if (hasAtLeastParameters(loweredParameterNames, ["lowpass", "filtervel", "filterkeytracking", "attack", "decay", "sustain", "release"], 4)) {
     return "softpiano";
   }
+  if (hasNumberedControls(loweredParameterNames, /^([1-8])map$/) >= 4 && hasNumberedControls(loweredInputPortNames, /^([1-8])(?:r)?ow$/) >= 4) {
+    return "listvelsequencer";
+  }
   if (hasAtLeastParameters(loweredInputPortNames, ["steps", "primaryrotation", "secondaryrotation", "velocity", "duration"], 3)) {
     return "listsequencer";
   }
@@ -385,6 +388,10 @@ function isTtidParameter(param) {
 
 function hasAtLeastParameters(parameterNames, candidates, threshold) {
   return candidates.filter((candidate) => parameterNames.has(candidate)).length >= threshold;
+}
+
+function hasNumberedControls(names, pattern) {
+  return new Set(Array.from(names, (name) => String(name).match(pattern)?.[1]).filter(Boolean)).size;
 }
 
 function hasNumberedStageParameters(parameterNames, suffix) {

@@ -2362,7 +2362,7 @@ test("editor manifest route lists registered instrument editors", async () => {
   const context = createRouteContext();
   const response = await requestJson(context, "GET", "/editors/manifest");
 
-  assert.equal(response.editors.length, 6);
+  assert.equal(response.editors.length, 7);
   assert.deepEqual(response.editors, [
     {
       id: "poland",
@@ -2402,6 +2402,14 @@ test("editor manifest route lists registered instrument editors", async () => {
       route: "/editors/listsequencer",
       targetFilter: {
         app: "listsequencer"
+      }
+    },
+    {
+      id: "listvelsequencer",
+      label: "ListVelSequencer",
+      route: "/editors/listvelsequencer",
+      targetFilter: {
+        app: "listvelsequencer"
       }
     },
     {
@@ -2656,6 +2664,33 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /args: \[-999\]/);
   assert.match(response.body, /messages\/out\/\$\{encodeURIComponent\(inputPortName\)\}Ack/);
   assert.match(response.body, /formatAckValue/);
+});
+
+test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/listvelsequencer");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /ListVelSequencer Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=listvelsequencer/);
+  assert.match(response.body, /ROW_COUNT = 8/);
+  assert.match(response.body, /0 = rest/);
+  assert.match(response.body, /Pitch map · auto/);
+  assert.match(response.body, />Send Row</);
+  assert.match(response.body, /args: GET_REQUEST/);
+  assert.match(response.body, /messages\/out\/\$\{row\.number\}rowAck/);
+  assert.match(response.body, /inputPort: inputPort\.name/);
+  assert.match(response.body, /param: mapParam\.name/);
+  assert.match(response.body, /sendPitchMap/);
+  assert.match(response.body, /schedulePitchMap/);
+  assert.match(response.body, /flushPitchMap/);
+  assert.match(response.body, /parseVelocityList/);
+  assert.match(response.body, /collectGlobalParams/);
+  assert.match(response.body, /renderGlobalParams/);
+  assert.match(response.body, /param\.values/);
+  assert.match(response.body, /isToggleParam/);
+  assert.match(response.body, /sendGlobalParam/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {

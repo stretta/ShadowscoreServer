@@ -335,6 +335,9 @@
         <select id="param-select"></select>
       </div>
       <div class="toolbar-actions">
+        <label for="read-source">Get state from</label>
+        <select id="read-source" aria-label="Instance to get state from"></select>
+        <button id="get-state" type="button">Get State</button>
         <button id="refresh" type="button">Refresh</button>
         <button id="select-all" type="button">All Targets</button>
       </div>
@@ -378,6 +381,8 @@
     const refreshButton = document.querySelector("#refresh");
     const selectAllButton = document.querySelector("#select-all");
     const paramSelect = document.querySelector("#param-select");
+    const readSourceSelect = document.querySelector("#read-source");
+    const getStateButton = document.querySelector("#get-state");
     let targets = [];
     let ttidParams = [];
     let paramState = new Map();
@@ -386,6 +391,7 @@
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     selectAllButton.addEventListener("click", selectAllTargets);
     paramSelect.addEventListener("change", renderEditors);
+    getStateButton.addEventListener("click", () => getState().catch(reportError));
 
     refresh().catch(reportError);
 
@@ -400,6 +406,7 @@
       ttidParams = collectTtidParams(targets);
       paramState = mergeParamState(ttidParams);
       renderTargets();
+      renderReadSourceSelect();
       renderParamSelect();
       renderEditors();
       setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online TTID targets");
@@ -440,6 +447,20 @@
       });
       targetsEl.replaceChildren(...cards);
       if (!cards.length) targetsEl.innerHTML = `<div class="empty-state">No online TTID targets.</div>`;
+    }
+
+    function renderReadSourceSelect() {
+      const selected = readSourceSelect.value;
+      const options = targets.map((target) => {
+        const option = document.createElement("option");
+        option.value = target.id;
+        option.textContent = `${target.label || target.id} · ${target.baseAddress || target.id}`;
+        return option;
+      });
+      readSourceSelect.replaceChildren(...options);
+      readSourceSelect.value = targets.some((target) => target.id === selected) ? selected : (targets[0]?.id || "");
+      readSourceSelect.disabled = targets.length === 0;
+      getStateButton.disabled = targets.length === 0;
     }
 
     function renderParamSelect() {
@@ -569,7 +590,9 @@
     function companionParam(ttidParam, name) {
       const targetIds = [];
       let found;
-      for (const target of targets) {
+      const preferredId = readSourceSelect.value;
+      const orderedTargets = [...targets].sort((a, b) => Number(b.id === preferredId) - Number(a.id === preferredId));
+      for (const target of orderedTargets) {
         if (!ttidParam.targetIds.includes(target.id)) continue;
         const param = (target.parameters || []).find((entry) => entry.name === name);
         if (!param) continue;
@@ -628,6 +651,52 @@
         return "polygon(25% 0, 75% 0, 75% 60%, 100% 60%, 100% 100%, 0 100%, 0 60%, 25% 60%)";
       }
       return "polygon(30% 0, 100% 0, 100% 100%, 0 100%, 0 60%, 30% 60%)";
+    }
+
+    async function getState() {
+      const target = targets.find((entry) => entry.id === readSourceSelect.value);
+      if (!target) {
+        setStatus("Choose an instance to get state from");
+        return;
+      }
+
+      getStateButton.disabled = true;
+      setStatus(`Getting state from ${target.label || target.id}...`);
+      try {
+        const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`);
+        const body = await response.json();
+        const nodes = body.CONTENTS || {};
+        let populated = 0;
+        target.parameters = (target.parameters || []).map((param) => {
+          const node = nodes[param.name];
+          if (!node || node.VALUE === undefined) return param;
+          const value = scalarValue(node.VALUE);
+          populated += 1;
+          if (String(param.meta?.editor || "").trim().toLowerCase() === "ttid") {
+            paramState.set(param.name, normalizeMask(value));
+          }
+          return { ...param, value };
+        });
+        ttidParams = collectTtidParams([target, ...targets.filter((entry) => entry.id !== target.id)]);
+        renderParamSelect();
+        renderEditors();
+        setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
+      } finally {
+        getStateButton.disabled = targets.length === 0;
+      }
+    }
+
+    function oscQueryHost(target) {
+      return isLoopback(target.host) ? location.hostname : target.host;
+    }
+
+    function isLoopback(host) {
+      return !host || host === "127.0.0.1" || host === "localhost" || host === "::1";
+    }
+
+    function scalarValue(value) {
+      return Array.isArray(value) ? value[0] : value;
     }
 
     async function setMask(param, mask) {

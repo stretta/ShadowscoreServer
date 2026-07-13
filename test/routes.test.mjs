@@ -2592,6 +2592,10 @@ test("TTID editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /SCALES/);
   assert.match(response.body, /ionian/);
   assert.match(response.body, /formatMask/);
+  assert.match(response.body, /Get state from/);
+  assert.match(response.body, /id="get-state"/);
+  assert.match(response.body, /async function getState/);
+  assert.match(response.body, /OSCQuery parameter read failed/);
 });
 
 test("Plate editor route serves the OSC target integration page", async () => {

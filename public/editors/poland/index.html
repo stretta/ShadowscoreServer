@@ -350,6 +350,7 @@
     const refreshButton = document.querySelector("#refresh");
     let targets = [];
     let paramState = new Map();
+    const pendingSends = new Map();
 
     refreshButton.addEventListener("click", () => {
       refresh().catch(reportError);
@@ -462,7 +463,8 @@
       input.step = String(stepFor(param, min, max));
       input.value = String(clamp(finiteNumber(valueFor(param), min), min, max));
       input.dataset.param = param.name;
-      input.addEventListener("change", () => sendParam(param.name, Number(input.value)));
+      input.addEventListener("input", () => scheduleParamSend(param.name, Number(input.value)));
+      input.addEventListener("change", () => flushParamSend(param.name, Number(input.value)));
       return input;
     }
 
@@ -490,6 +492,22 @@
         wrap.append(button);
       }
       return wrap;
+    }
+
+    function scheduleParamSend(param, value) {
+      if (pendingSends.has(param)) clearTimeout(pendingSends.get(param));
+      pendingSends.set(param, setTimeout(() => {
+        pendingSends.delete(param);
+        sendParam(param, value).catch(reportError);
+      }, 90));
+    }
+
+    function flushParamSend(param, value) {
+      if (pendingSends.has(param)) {
+        clearTimeout(pendingSends.get(param));
+        pendingSends.delete(param);
+      }
+      sendParam(param, value).catch(reportError);
     }
 
     async function sendParam(param, value) {

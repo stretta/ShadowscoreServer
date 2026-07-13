@@ -2546,6 +2546,8 @@ test("Poland editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /data-group="oscillator-a"/);
   assert.match(response.body, /VolA/);
   assert.match(response.body, /FilterKeyTracking/);
+  assert.match(response.body, /addEventListener\("input", \(\) => scheduleParamSend/);
+  assert.match(response.body, /addEventListener\("change", \(\) => flushParamSend/);
 });
 
 test("TTID editor route serves the OSC target integration page", async () => {

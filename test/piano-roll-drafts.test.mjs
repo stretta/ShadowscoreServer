@@ -41,6 +41,16 @@ test("same-clip server changes mark a dirty draft stale", () => {
   assert.equal(store.get("a").baseVersion, 2);
 });
 
+test("draft store reports which clips have unsaved drafts", () => {
+  const store = createClipDraftStore(structuredClone);
+  store.open("a", clip(60), 1);
+  store.open("b", clip(72), 1);
+
+  store.markDirty("b");
+
+  assert.deepEqual(store.dirtyClipIds(), ["b"]);
+});
+
 test("revert and save clear clip-specific conflict state", () => {
   const store = createClipDraftStore();
   const entry = store.open("a", clip(60), 1);

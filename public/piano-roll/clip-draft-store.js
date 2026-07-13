@@ -63,6 +63,7 @@ export function createClipDraftStore(clone = structuredClone) {
     saved,
     reconcile,
     dirtyCount: () => [...entries.values()].filter((entry) => entry.dirty).length,
+    dirtyClipIds: () => [...entries.entries()].filter(([, entry]) => entry.dirty).map(([clipId]) => clipId),
     staleCount: () => [...entries.values()].filter((entry) => entry.stale).length,
     hasDirty: () => [...entries.values()].some((entry) => entry.dirty)
   };

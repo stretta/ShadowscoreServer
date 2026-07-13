@@ -453,16 +453,18 @@
     function renderSlider(param) {
       const min = finiteNumber(param.min, 0);
       const max = finiteNumber(param.max, 1);
+      const curved = shouldCurve(param, min, max);
       const input = document.createElement("input");
       input.className = "vertical-slider";
       input.type = "range";
-      input.min = String(min);
-      input.max = String(max);
-      input.step = String(stepFor(param, min, max));
-      input.value = String(clamp(finiteNumber(valueFor(param), min), min, max));
+      input.min = curved ? "0" : String(min);
+      input.max = curved ? "1" : String(max);
+      input.step = curved ? "0.001" : String(stepFor(param, min, max));
+      input.value = String(curved ? valueToSliderPosition(param, valueFor(param), min, max) : clamp(finiteNumber(valueFor(param), min), min, max));
+      input.dataset.curved = String(curved);
       input.dataset.param = param.name;
-      input.addEventListener("input", () => scheduleParamSend(param.name, Number(input.value)));
-      input.addEventListener("change", () => flushParamSend(param.name, Number(input.value)));
+      input.addEventListener("input", () => scheduleParamSend(param.name, sliderValue(param, input, min, max)));
+      input.addEventListener("change", () => flushParamSend(param.name, sliderValue(param, input, min, max)));
       return input;
     }
 
@@ -550,7 +552,8 @@
 
     function controlValue(control) {
       if (control.classList.contains("choice-options")) return control.dataset.value;
-      return Number(control.value);
+      const param = paramState.get(control.dataset.param);
+      return sliderValue(param, control, finiteNumber(param?.min, 0), finiteNumber(param?.max, 1));
     }
 
     function parseChoiceValue(value) {
@@ -579,6 +582,37 @@
       if (range > 64) return 1;
       if (range > 8) return 0.1;
       return 0.01;
+    }
+
+    function shouldCurve(param, min, max) {
+      const name = String(param.name || "");
+      const unit = String(param.unit || param.meta?.unit || "").toLowerCase();
+      return /(?:attack|decay|release|env.*time)/i.test(name) || (unit === "ms" && Math.abs(max - min) >= 1000);
+    }
+
+    function curveExponent(param, min, max) {
+      if (finiteNumber(param?._curveExponent, NaN) > 0) return param._curveExponent;
+      const explicit = finiteNumber(param.exponent ?? param.meta?.exponent, NaN);
+      if (explicit > 0) return (param._curveExponent = explicit);
+      const normalized = finiteNumber(param.normalized, NaN);
+      const linear = (finiteNumber(valueFor(param), min) - min) / (max - min);
+      if (linear > 0.0001 && linear < 0.9999 && normalized > 0.0001 && normalized < 0.9999) {
+        const inferred = Math.log(linear) / Math.log(normalized);
+        if (inferred >= 0.5 && inferred <= 8) return (param._curveExponent = inferred);
+      }
+      return (param._curveExponent = /release/i.test(String(param.name || "")) ? 5 : 3);
+    }
+
+    function valueToSliderPosition(param, value, min, max) {
+      const normalized = clamp((finiteNumber(value, min) - min) / (max - min), 0, 1);
+      return Math.pow(normalized, 1 / curveExponent(param, min, max));
+    }
+
+    function sliderValue(param, input, min, max) {
+      if (input.dataset.curved !== "true") return Number(input.value);
+      const value = min + ((max - min) * Math.pow(clamp(Number(input.value), 0, 1), curveExponent(param, min, max)));
+      const step = stepFor(param, min, max);
+      return clamp(min + (Math.round((value - min) / step) * step), min, max);
     }
 
     function formatValue(value, unit) {

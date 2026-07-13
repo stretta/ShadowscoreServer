@@ -50,10 +50,10 @@
     const SOFTPIANO_GROUPS = [
       { title: "Output", controls: ["Volume"] },
       { title: "MIDI", controls: ["TransposeSoftPiano"] },
-      { title: "Tone", controls: ["LowPass", "FilterVel", "FilterKeyTracking", "Spread"] },
+      { title: "Tone", controls: ["HPFFreq", "LowPass", "FilterVel", "FilterKeyTracking", "Spread"] },
       { title: "Amp Env", controls: ["Attack", "Decay", "Sustain", "Release"] }
     ];
-    const LABELS = { Volume: "Volume", TransposeSoftPiano: "Transpose", LowPass: "Low Pass", FilterVel: "Filter Velocity", FilterKeyTracking: "Key Tracking" };
+    const LABELS = { Volume: "Volume", TransposeSoftPiano: "Transpose", HPFFreq: "High Pass", LowPass: "Low Pass", FilterVel: "Filter Velocity", FilterKeyTracking: "Key Tracking" };
     const targetsEl = document.querySelector("#targets");
     const panelsEl = document.querySelector("#panels");
     const statusEl = document.querySelector("#status");
@@ -119,9 +119,10 @@
       const head = document.createElement("div"); head.className = "control-head";
       const label = document.createElement("label"); label.htmlFor = `param-${cssSafe(param.name)}`; label.textContent = LABELS[param.name] || splitCamel(param.displayName || param.name);
       const output = document.createElement("output"); output.textContent = format(value, param.unit);
-      const input = document.createElement("input"); input.id = label.htmlFor; input.type = "range"; input.min = min; input.max = max; input.step = stepFor(param, min, max); input.value = value;
-      input.addEventListener("input", () => { output.textContent = format(Number(input.value), param.unit); scheduleSend(param.name, Number(input.value)); });
-      input.addEventListener("change", () => flushSend(param.name, Number(input.value)));
+      const curved = shouldCurve(param, min, max);
+      const input = document.createElement("input"); input.id = label.htmlFor; input.type = "range"; input.min = curved ? 0 : min; input.max = curved ? 1 : max; input.step = curved ? .001 : stepFor(param, min, max); input.value = curved ? valueToSliderPosition(param, value, min, max) : value;
+      input.addEventListener("input", () => { const next = sliderValue(param, input, min, max, curved); output.textContent = format(next, param.unit); scheduleSend(param.name, next); });
+      input.addEventListener("change", () => flushSend(param.name, sliderValue(param, input, min, max, curved)));
       head.replaceChildren(label, output); wrap.replaceChildren(head, input); return wrap;
     }
 
@@ -149,6 +150,10 @@
 
     function byIndex(a, b) { return (a.index ?? 9999) - (b.index ?? 9999); }
     function stepFor(param, min, max) { const step = finite(param.meta?.edit_step, NaN); if (step > 0) return step; const range = Math.abs(max - min); return range > 64 ? 1 : range > 8 ? .1 : .01; }
+    function shouldCurve(param, min, max) { const name = String(param.name || ""); const unit = String(param.unit || param.meta?.unit || "").toLowerCase(); return /(?:attack|decay|release|env.*time)/i.test(name) || (unit === "ms" && Math.abs(max - min) >= 1000); }
+    function curveExponent(param, min, max) { if (finite(param?._curveExponent, NaN) > 0) return param._curveExponent; const explicit = finite(param.exponent ?? param.meta?.exponent, NaN); if (explicit > 0) return (param._curveExponent = explicit); const normalized = finite(param.normalized, NaN); const linear = (finite(param.value, min) - min) / (max - min); if (linear > .0001 && linear < .9999 && normalized > .0001 && normalized < .9999) { const inferred = Math.log(linear) / Math.log(normalized); if (inferred >= .5 && inferred <= 8) return (param._curveExponent = inferred); } return (param._curveExponent = /release/i.test(String(param.name || "")) ? 5 : 3); }
+    function valueToSliderPosition(param, value, min, max) { return Math.pow(clamp((finite(value, min) - min) / (max - min), 0, 1), 1 / curveExponent(param, min, max)); }
+    function sliderValue(param, input, min, max, curved) { if (!curved) return Number(input.value); const value = min + ((max - min) * Math.pow(clamp(Number(input.value), 0, 1), curveExponent(param, min, max))); const step = stepFor(param, min, max); return clamp(min + (Math.round((value - min) / step) * step), min, max); }
     function format(value, unit) { const number = Number(value); const text = Number.isInteger(number) ? String(number) : number.toFixed(Math.abs(number) >= 10 ? 1 : 2).replace(/\.?0+$/, ""); return `${text}${unit ? ` ${unit}` : ""}`; }
     function finite(value, fallback) { const number = Number(value); return Number.isFinite(number) ? number : fallback; }
     function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }

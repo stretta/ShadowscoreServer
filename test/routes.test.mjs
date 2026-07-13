@@ -2542,10 +2542,17 @@ test("Poland editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /\/osc\/targets\?app=poland/);
   assert.match(response.body, /param/);
   assert.match(response.body, /POLAND_GROUPS/);
-  assert.match(response.body, /Oscillator A/);
+  assert.match(response.body, /title: "OSC A"/);
   assert.match(response.body, /data-group="oscillator-a"/);
   assert.match(response.body, /VolA/);
   assert.match(response.body, /FilterKeyTracking/);
+  assert.match(response.body, /HPFFreq: "High Pass"/);
+  assert.match(response.body, /Portamento: "Glide"/);
+  assert.match(response.body, /FilterAttack: "Attack"/);
+  assert.match(response.body, /FilterRelease: "Release"/);
+  assert.match(response.body, /WavetableA: "Wave"/);
+  assert.match(response.body, /function shouldCurve/);
+  assert.match(response.body, /function valueToSliderPosition/);
   assert.match(response.body, /addEventListener\("input", \(\) => scheduleParamSend/);
   assert.match(response.body, /addEventListener\("change", \(\) => flushParamSend/);
 });
@@ -2578,6 +2585,8 @@ test("Plate editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /PLATE_GROUPS/);
   assert.match(response.body, /data-group="time"/);
   assert.match(response.body, /PreDelay/);
+  assert.match(response.body, /function shouldCurve/);
+  assert.match(response.body, /function valueToSliderPosition/);
   assert.match(response.body, /plate-choice/);
   assert.match(response.body, /scheduleParamSend/);
   assert.match(response.body, /flushParamSend/);
@@ -2595,7 +2604,10 @@ test("SoftPiano editor route serves the compact OSC control panel", async () => 
   assert.match(response.body, /TransposeSoftPiano/);
   assert.match(response.body, /title: "Output", controls: \["Volume"\]/);
   assert.match(response.body, /FilterKeyTracking/);
+  assert.match(response.body, /HPFFreq: "High Pass"/);
   assert.match(response.body, /Amp Env/);
+  assert.match(response.body, /function shouldCurve/);
+  assert.match(response.body, /function valueToSliderPosition/);
   assert.match(response.body, /scheduleSend/);
   assert.match(response.body, /flushSend/);
   assert.match(response.body, /renderChoice/);
@@ -2652,6 +2664,8 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /Return to Zero/);
   assert.match(response.body, /messages\/in\/rtz/);
   assert.match(response.body, /renderParameters/);
+  assert.match(response.body, /function shouldCurve/);
+  assert.match(response.body, /function valueToSliderPosition/);
   assert.match(response.body, /applyMaxCount/);
   assert.match(response.body, /\.stage\.unused/);
 });

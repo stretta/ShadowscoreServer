@@ -2668,6 +2668,13 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /function valueToSliderPosition/);
   assert.match(response.body, /applyMaxCount/);
   assert.match(response.body, /\.stage\.unused/);
+  assert.match(response.body, /type="radio"/);
+  assert.match(response.body, /focusedTargetId/);
+  assert.match(response.body, /hydrateFocusedTarget/);
+  assert.match(response.body, /\/params/);
+  assert.match(response.body, /isToggleParam/);
+  assert.match(response.body, /parameter-toggle/);
+  assert.doesNotMatch(response.body, /type="checkbox" data-target/);
 });
 
 test("OSC volume tool route serves target selection and trim controls", async () => {

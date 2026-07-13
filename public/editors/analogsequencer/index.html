@@ -17,7 +17,8 @@
     .toolbar { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 10px; }
     .toolbar-actions { align-items: center; display: flex; gap: 8px; }
     .targets { display: flex; gap: 8px; overflow-x: auto; padding: 10px; }
-    .target { align-items: start; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); display: grid; flex: 0 0 210px; gap: 3px 8px; grid-template-columns: auto 1fr; padding: 8px; }
+    .target { align-items: start; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); cursor: pointer; display: grid; flex: 0 0 210px; gap: 3px 8px; grid-template-columns: auto 1fr; padding: 8px; }
+    .target.focused { border-color: var(--ss-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-accent) 28%, transparent); }
     .target input { grid-row: 1 / span 2; margin-top: 2px; }
     .target strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .sequencer { min-width: 0; overflow-x: auto; padding: 14px; }
@@ -43,6 +44,8 @@
     .parameter-name { font-size: 12px; font-weight: 850; overflow-wrap: anywhere; }
     .parameter-value { color: var(--ss-accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 850; }
     .parameter input, .parameter select { min-width: 0; width: 100%; }
+    .parameter-toggle { align-items: center; cursor: pointer; display: flex; gap: 9px; width: max-content; }
+    .parameter-toggle input { height: 22px; margin: 0; width: 22px; }
     @media (max-width: 700px) { .top, .toolbar { align-items: flex-start; flex-direction: column; } .status { max-width: none; text-align: left; white-space: normal; } }
   </style>
 </head>
@@ -50,7 +53,7 @@
   <header class="ss-top-strip"><div class="top"><div><h1>AnalogSequencer Editor</h1><p class="subtitle">16-stage pitch and step controls</p></div><div id="status" class="status" role="status">Loading targets...</div></div></header>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes"><a href="/">Dashboard</a><a href="/structure-editor">Structure</a><a href="/matrix-edit">Matrix</a><a href="/piano-roll">Piano Roll</a><a href="/event-list">Event List</a><a href="/editors" aria-current="page">OSC Generators</a><a href="/admin">Admin</a></nav>
   <main>
-    <section class="toolbar"><strong>Live targets</strong><div class="toolbar-actions"><button id="rtz" class="primary" type="button">Return to Zero</button><button id="refresh" type="button">Refresh</button></div></section>
+    <section class="toolbar"><strong>Available clients · choose one to edit</strong><div class="toolbar-actions"><button id="rtz" class="primary" type="button">Return to Zero</button><button id="refresh" type="button">Refresh</button></div></section>
     <section id="targets" class="targets" aria-live="polite"></section>
     <section class="sequencer"><div id="stages" class="stages"></div></section>
     <section class="parameters"><h2>Sequence Parameters</h2><div id="parameters" class="parameter-grid"></div></section>
@@ -62,6 +65,7 @@
     const statusEl = document.querySelector("#status");
     const pending = new Map();
     let targets = [];
+    let focusedTargetId = "";
     let stagePollTimer;
 
     document.querySelector("#refresh").addEventListener("click", () => refresh().catch(reportError));
@@ -73,19 +77,21 @@
       const response = await fetch("/osc/targets?app=analogsequencer&status=online", { cache: "no-store" });
       if (!response.ok) throw new Error(`Target discovery failed (${response.status})`);
       targets = (await response.json()).targets || [];
+      if (!targets.some(target => target.id === focusedTargetId)) focusedTargetId = targets[0]?.id || "";
       renderTargets();
-      renderStages();
-      renderParameters();
-      statusEl.textContent = targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No AnalogSequencer target online";
+      if (focusedTargetId) await hydrateFocusedTarget();
+      else { renderStages(); renderParameters(); }
+      statusEl.textContent = targets.length ? `${targets.length} client${targets.length === 1 ? "" : "s"} online · editing ${focusedTarget()?.label || focusedTargetId}` : "No AnalogSequencer client online";
       startStagePolling();
     }
 
     function renderTargets() {
-      targetsEl.innerHTML = targets.length ? targets.map((target, index) => `<label class="target"><input type="checkbox" data-target="${escapeHtml(target.id)}" ${index === 0 ? "checked" : ""}><strong>${escapeHtml(target.label || target.id)}</strong><span class="detail">${escapeHtml(target.deviceId || target.unitId || target.host || "")}</span></label>`).join("") : `<span class="empty">No live target found. The editor will populate when AnalogSequencer is instantiated and discovered.</span>`;
+      targetsEl.innerHTML = targets.length ? targets.map(target => `<label class="target${target.id === focusedTargetId ? " focused" : ""}"><input type="radio" name="focused-target" data-target="${escapeHtml(target.id)}" ${target.id === focusedTargetId ? "checked" : ""}><strong>${escapeHtml(target.label || target.id)}</strong><span class="detail">${escapeHtml(target.deviceId || target.unitId || target.host || "")}</span></label>`).join("") : `<span class="empty">No live client found. The editor will populate when AnalogSequencer is instantiated and discovered.</span>`;
+      for (const input of targetsEl.querySelectorAll("[data-target]")) input.addEventListener("change", () => focusTarget(input.dataset.target).catch(reportError));
     }
 
     function renderStages() {
-      const source = targets[0] || { parameters: [] };
+      const source = focusedTarget() || { parameters: [] };
       const values = indexedParams(source.parameters, /^(?:(\d+)StageValue|StageValue[_ -]?(\d+))$/i);
       const steps = indexedParams(source.parameters, /^(?:(\d+)StageStep|StageStep[_ -]?(\d+))$/i);
       stagesEl.replaceChildren(...Array.from({ length: 16 }, (_, offset) => createStage(offset + 1, values.get(offset + 1), steps.get(offset + 1))));
@@ -93,7 +99,7 @@
     }
 
     function renderParameters() {
-      const source = targets[0] || { parameters: [] };
+      const source = focusedTarget() || { parameters: [] };
       const params = (source.parameters || []).filter(param => !/Stage(?:Value|Step)/i.test(param.name));
       parametersEl.replaceChildren(...params.map(createParameterControl));
       if (!params.length) parametersEl.innerHTML = `<span class="empty">No additional parameters reported.</span>`;
@@ -109,6 +115,12 @@
         const select = document.createElement("select");
         for (const value of param.values) { const option = document.createElement("option"); option.value = String(value); option.textContent = String(value); select.append(option); }
         select.value = String(param.value); select.addEventListener("change", () => { param.value = select.value; readout.textContent = select.value; sendParam(param.name, select.value).catch(reportError); }); card.append(select);
+      } else if (isToggleParam(param)) {
+        const toggleLabel = document.createElement("span"); toggleLabel.className = "parameter-toggle";
+        const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = Boolean(Number(param.value)); toggle.setAttribute("aria-label", param.displayName || param.name);
+        const state = document.createElement("span"); state.textContent = toggle.checked ? "On" : "Off";
+        toggle.addEventListener("change", () => { const value = toggle.checked ? 1 : 0; param.value = value; state.textContent = toggle.checked ? "On" : "Off"; readout.textContent = String(value); sendParam(param.name, value).catch(reportError); });
+        toggleLabel.append(toggle, state); card.append(toggleLabel);
       } else {
         const min = Number(param.min ?? 0); const max = Number(param.max ?? 1); const curved = shouldCurve(param, min, max);
         const input = document.createElement("input"); input.type = "range"; input.min = curved ? "0" : String(min); input.max = curved ? "1" : String(max); input.step = curved ? "0.001" : String(parameterStep(param)); input.value = String(curved ? valueToSliderPosition(param, param.value, min, max) : (param.value ?? min));
@@ -139,17 +151,24 @@
     }
 
     function indexedParams(parameters, pattern) { const result = new Map(); for (const param of parameters || []) { const match = String(param.name || "").match(pattern); if (match) result.set(Number(match[1] || match[2]), param); } return result; }
-    function scheduleSend(param, value) { if (!param) return; if (pending.has(param)) clearTimeout(pending.get(param)); pending.set(param, setTimeout(() => { pending.delete(param); sendParam(param, value).catch(reportError); }, 75)); }
-    function flushSend(param, value) { if (!param) return; if (pending.has(param)) { clearTimeout(pending.get(param)); pending.delete(param); } sendParam(param, value).catch(reportError); }
-    async function sendParam(param, value) { const selected = Array.from(document.querySelectorAll("[data-target]:checked"), input => input.dataset.target); if (!selected.length) { statusEl.textContent = "No targets selected"; return; } const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: selected, param, args: [value] }) }); const body = await response.json().catch(() => ({})); const sent = (body.results || []).filter(result => result.ok).length; statusEl.textContent = response.ok && body.ok !== false ? `Sent ${param} = ${value} to ${sent}/${selected.length}` : `Failed ${param} (${sent}/${selected.length})`; }
-    async function returnToZero() { const selected = selectedTargetEntries(); if (!selected.length) { statusEl.textContent = "No targets selected"; return; } const results = await Promise.all(selected.map(async target => { const port = (target.inputPorts || []).find(entry => String(entry.name).toLowerCase() === "rtz"); const address = port?.address || `${target.baseAddress}/messages/in/rtz`; const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: [target.id], address, args: [1] }) }); return response.json().catch(() => ({ ok: false })); })); const sent = results.filter(result => result.ok !== false).length; statusEl.textContent = sent === selected.length ? `Return to Zero queued on ${sent}/${selected.length}` : `Return to Zero failed (${sent}/${selected.length})`; }
+    function scheduleSend(param, value) { const targetId = focusedTargetId; if (!param || !targetId) return; const key = `${targetId}:${param}`; if (pending.has(key)) clearTimeout(pending.get(key)); pending.set(key, setTimeout(() => { pending.delete(key); sendParam(param, value, targetId).catch(reportError); }, 75)); }
+    function flushSend(param, value) { const targetId = focusedTargetId; if (!param || !targetId) return; const key = `${targetId}:${param}`; if (pending.has(key)) { clearTimeout(pending.get(key)); pending.delete(key); } sendParam(param, value, targetId).catch(reportError); }
+    async function sendParam(param, value, targetId = focusedTargetId) { const target = targets.find(entry => entry.id === targetId); if (!target) { statusEl.textContent = "No client in focus"; return; } const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: [target.id], param, args: [value] }) }); const body = await response.json().catch(() => ({})); const sent = (body.results || []).filter(result => result.ok).length; statusEl.textContent = response.ok && body.ok !== false ? `Sent ${param} = ${value} to ${target.label || target.id}` : `Failed ${param} (${sent}/1)`; }
+    async function returnToZero() { const target = focusedTarget(); if (!target) { statusEl.textContent = "No client in focus"; return; } const port = (target.inputPorts || []).find(entry => String(entry.name).toLowerCase() === "rtz"); const address = port?.address || `${target.baseAddress}/messages/in/rtz`; const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: [target.id], address, args: [1] }) }); const body = await response.json().catch(() => ({ ok: false })); statusEl.textContent = response.ok && body.ok !== false ? `Return to Zero queued on ${target.label || target.id}` : `Return to Zero failed on ${target.label || target.id}`; }
     function startStagePolling() { clearTimeout(stagePollTimer); if (!targets.length) { setPlayingStage(); return; } pollCurrentStage(); }
-    async function pollCurrentStage() { try { const target = selectedTarget() || targets[0]; const host = isLoopback(target.host) ? location.hostname : target.host; const path = `${target.baseAddress}/messages/out/current_stage`; const response = await fetch(`${location.protocol}//${host}:5678${path}`, { cache: "no-store" }); if (!response.ok) throw new Error(`current_stage ${response.status}`); const body = await response.json(); setPlayingStage(integerValue(Array.isArray(body.VALUE) ? body.VALUE[0] : body.VALUE, 0)); } catch { setPlayingStage(); } finally { stagePollTimer = setTimeout(pollCurrentStage, 125); } }
-    function selectedTarget() { const id = document.querySelector("[data-target]:checked")?.dataset.target; return targets.find(target => target.id === id); }
-    function selectedTargetEntries() { const ids = new Set(Array.from(document.querySelectorAll("[data-target]:checked"), input => input.dataset.target)); return targets.filter(target => ids.has(target.id)); }
+    async function pollCurrentStage() { try { const target = focusedTarget(); if (!target) throw new Error("No client in focus"); const host = oscQueryHost(target); const path = `${target.baseAddress}/messages/out/current_stage`; const response = await fetch(`${location.protocol}//${host}:5678${path}`, { cache: "no-store" }); if (!response.ok) throw new Error(`current_stage ${response.status}`); const body = await response.json(); setPlayingStage(integerValue(Array.isArray(body.VALUE) ? body.VALUE[0] : body.VALUE, 0)); } catch { setPlayingStage(); } finally { stagePollTimer = setTimeout(pollCurrentStage, 125); } }
+    async function focusTarget(targetId) { if (!targets.some(target => target.id === targetId) || targetId === focusedTargetId) return; focusedTargetId = targetId; renderTargets(); statusEl.textContent = `Reading ${focusedTarget()?.label || targetId} from OSCQuery...`; await hydrateFocusedTarget(); statusEl.textContent = `${targets.length} client${targets.length === 1 ? "" : "s"} online · editing ${focusedTarget()?.label || targetId}`; startStagePolling(); }
+    async function hydrateFocusedTarget() { const target = focusedTarget(); if (!target) return; const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" }); if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`); const body = await response.json(); const nodes = body.CONTENTS || {};
+      target.parameters = (target.parameters || []).map(param => { const node = nodes[param.name]; if (!node) return param; const range = Array.isArray(node.RANGE) ? node.RANGE : []; return { ...param, value: node.VALUE, min: firstDefined(range.map(entry => entry.MIN), param.min), max: firstDefined(range.map(entry => entry.MAX), param.max), values: firstDefined(range.map(entry => entry.VALS), param.values), normalized: node.CONTENTS?.normalized?.VALUE ?? param.normalized }; });
+      renderStages(); renderParameters();
+    }
+    function focusedTarget() { return targets.find(target => target.id === focusedTargetId); }
+    function oscQueryHost(target) { return isLoopback(target.host) ? location.hostname : target.host; }
+    function firstDefined(values, fallback) { return values.find(value => value !== undefined && value !== null) ?? fallback; }
     function setPlayingStage(number) { for (const stage of stagesEl.querySelectorAll(".stage")) { const playing = Number(stage.dataset.stage) === number; stage.classList.toggle("playing", playing); if (playing) stage.setAttribute("aria-current", "step"); else stage.removeAttribute("aria-current"); } }
     function applyMaxCount(maxCount) { for (const stage of stagesEl.querySelectorAll(".stage")) { const unused = Number(stage.dataset.stage) > maxCount; stage.classList.toggle("unused", unused); for (const input of stage.querySelectorAll("input")) input.disabled = unused || stage.classList.contains("missing"); } }
     function maxCountValue(target) { const param = (target.parameters || []).find(entry => String(entry.name).toLowerCase() === "maxcount"); return clamp(integerValue(param?.value, 16), 1, 16); }
+    function isToggleParam(param) { return String(param.name || "").toLowerCase() === "clock" && Number(param.min) === 0 && Number(param.max) === 1; }
     function parameterStep(param) { if (String(param.name).toLowerCase() === "maxcount" || param.meta?.edit_as === "int") return 1; const span = Number(param.max) - Number(param.min); return span <= 1 ? 0.01 : span <= 100 ? 0.1 : 1; }
     function shouldCurve(param, min, max) { const name = String(param.name || ""); const unit = String(param.unit || param.meta?.unit || "").toLowerCase(); return /(?:attack|decay|release|env.*time)/i.test(name) || (unit === "ms" && Math.abs(max - min) >= 1000); }
     function curveExponent(param, min, max) { if (Number(param._curveExponent) > 0) return param._curveExponent; const explicit = Number(param.exponent ?? param.meta?.exponent); if (explicit > 0) return (param._curveExponent = explicit); const normalized = Number(param.normalized); const linear = (Number(param.value) - min) / (max - min); if (linear > .0001 && linear < .9999 && normalized > .0001 && normalized < .9999) { const inferred = Math.log(linear) / Math.log(normalized); if (inferred >= .5 && inferred <= 8) return (param._curveExponent = inferred); } return (param._curveExponent = /release/i.test(String(param.name || "")) ? 5 : 3); }

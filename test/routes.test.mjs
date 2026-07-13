@@ -2343,6 +2343,11 @@ test("root route serves view index", async () => {
   assert.match(response.body, /\/editors/);
   assert.match(response.body, /ShadowScore Editors/);
   assert.match(response.body, /OSC Generators/);
+  assert.match(response.body, /href="\/tools\/osc-volume"/);
+  assert.match(response.body, /href="\/tools\/osc-macros"/);
+  const rootNav = response.body.match(/<nav class="ss-route-tabs"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+  assert.doesNotMatch(rootNav, /\/tools\/osc-volume/);
+  assert.doesNotMatch(rootNav, /\/tools\/osc-macros/);
   assert.match(response.body, /\/structure-editor/);
   assert.match(response.body, /\/matrix-edit/);
   assert.match(response.body, /<a href="\/piano-roll">Piano Roll<\/a>/);
@@ -2452,6 +2457,11 @@ test("editor index route serves registered editor browser", async () => {
   assert.match(response.body, /\/editors\/manifest/);
   assert.match(response.body, /\/osc\/targets/);
   assert.match(response.body, /filterText/);
+  assert.match(response.body, /href="\/tools\/osc-volume"/);
+  assert.match(response.body, /href="\/tools\/osc-macros"/);
+  const editorNav = response.body.match(/<nav class="ss-route-tabs"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+  assert.doesNotMatch(editorNav, /\/tools\/osc-volume/);
+  assert.doesNotMatch(editorNav, /\/tools\/osc-macros/);
 });
 
 test("event list route serves server-bundled editor html", async () => {
@@ -2694,6 +2704,8 @@ test("OSC volume tool route serves target selection and trim controls", async ()
   assert.match(response.body, /mappedValue/);
   assert.match(response.body, /data-trim/);
   assert.match(response.body, /Zero Trims/);
+  assert.match(response.body, /<a href="\/tools\/osc-volume" aria-current="page">OSC Volume<\/a>/);
+  assert.match(response.body, /<a href="\/tools\/osc-macros">OSC Macros<\/a>/);
 });
 
 test("OSC macro tool route serves builder and validation controls", async () => {
@@ -2709,6 +2721,8 @@ test("OSC macro tool route serves builder and validation controls", async () => 
   assert.match(response.body, /id="step-param"/);
   assert.match(response.body, /Dry Run/);
   assert.match(response.body, /validation-row/);
+  assert.match(response.body, /<a href="\/tools\/osc-volume">OSC Volume<\/a>/);
+  assert.match(response.body, /<a href="\/tools\/osc-macros" aria-current="page">OSC Macros<\/a>/);
 });
 
 test("shared client state module is served as a static asset", async () => {

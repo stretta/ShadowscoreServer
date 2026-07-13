@@ -194,7 +194,20 @@
           <span class="meta">${escapeHtml(filterText(editor.targetFilter))}</span>
           <span class="target-count">${targetCounts.get(editor.id) ?? 0} online</span>
         </a>
-      `).join("");
+      `).join("") + `
+        <a class="card" href="/tools/osc-volume">
+          <span class="card-title">OSC Volume</span>
+          <span class="card-path">/tools/osc-volume</span>
+          <span class="meta">Master level and per-target trims</span>
+          <span class="target-count">Control tool</span>
+        </a>
+        <a class="card" href="/tools/osc-macros">
+          <span class="card-title">OSC Macros</span>
+          <span class="card-path">/tools/osc-macros</span>
+          <span class="meta">Reusable ordered OSC actions</span>
+          <span class="target-count">Control tool</span>
+        </a>
+      `;
     }
 
     function queryFor(filter = {}) {

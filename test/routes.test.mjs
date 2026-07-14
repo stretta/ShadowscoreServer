@@ -2722,7 +2722,14 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /isCurrentStagePoll/);
   assert.match(response.body, /\.stage\.playing/);
   assert.match(response.body, /Return to Zero/);
+  assert.match(response.body, /RTZ All Clients/);
+  assert.match(response.body, /Clock All Off/);
+  assert.match(response.body, /Clock All On/);
   assert.match(response.body, /messages\/in\/rtz/);
+  assert.match(response.body, /returnAllToZero/);
+  assert.match(response.body, /inputPort: "rtz"/);
+  assert.match(response.body, /setAllClocks/);
+  assert.match(response.body, /param: "Clock"/);
   assert.match(response.body, /renderParameters/);
   assert.match(response.body, /function shouldCurve/);
   assert.match(response.body, /function valueToSliderPosition/);
@@ -3139,6 +3146,49 @@ test("OSC send route resolves named input ports per target", async () => {
     "/rnbo/inst/14/messages/in/Steps",
     "/rnbo/inst/15/messages/in/Steps"
   ]);
+});
+
+test("OSC send route dispatches multi-target writes concurrently", async () => {
+  const sends = [];
+  let releaseSends;
+  const sendGate = new Promise((resolve) => { releaseSends = resolve; });
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  for (const [id, host, instanceId] of [["heron", "192.168.68.101", "14"], ["raven", "192.168.68.103", "15"]]) {
+    registry.register({
+      id,
+      advertisedName: id,
+      oscTargets: [{
+        id: `rnbo-inst-${instanceId}:analogsequencer`,
+        label: `AnalogSequencer ${instanceId}`,
+        host,
+        port: 1234,
+        baseAddress: `/rnbo/inst/${instanceId}`,
+        app: "analogsequencer",
+        instance: "main",
+        parameters: [{ name: "Clock", address: `/rnbo/inst/${instanceId}/params/Clock` }]
+      }]
+    }, { remoteAddress: host });
+  }
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: registry,
+      oscSender: async (send) => { sends.push(send); await sendGate; }
+    }
+  });
+
+  const requestPromise = requestJson(context, "POST", "/osc/send", {
+    targets: ["heron:analogsequencer:main", "raven:analogsequencer:main"],
+    param: "Clock",
+    args: [1]
+  });
+  for (let attempt = 0; attempt < 10 && sends.length < 2; attempt += 1) await new Promise((resolve) => setImmediate(resolve));
+  const sendsBeforeRelease = sends.length;
+  releaseSends();
+  const result = await requestPromise;
+
+  assert.equal(sendsBeforeRelease, 2);
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.results.map((entry) => entry.targetId), ["heron:analogsequencer:main", "raven:analogsequencer:main"]);
 });
 
 test("OSC broadcast route expands live targets by query", async () => {

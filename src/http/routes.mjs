@@ -1008,27 +1008,26 @@ async function sendOscToResolvedTargets(targets, runtime, body) {
   if (!param && !inputPort && !address.startsWith("/")) {
     throw new Error("OSC address must start with /");
   }
-  const results = [];
-  for (const target of targets) {
+  const results = await Promise.all(targets.map(async (target) => {
     try {
       const targetAddress = param
         ? parameterAddressForTarget(target, param)
         : inputPort
           ? inputPortAddressForTarget(target, inputPort)
           : address;
-      results.push(await sendOscMessage(target, targetAddress, body.args ?? [], {
+      return await sendOscMessage(target, targetAddress, body.args ?? [], {
         sender: runtime.oscSender,
         allowUnavailable: body.allowUnavailable === true
-      }));
+      });
     } catch (error) {
-      results.push({
+      return {
         ok: false,
         targetId: target.id ?? "",
         status: target.status ?? "unavailable",
         error: messageForError(error)
-      });
+      };
     }
-  }
+  }));
   return {
     ok: results.every((result) => result.ok),
     address: param || inputPort ? "" : address,

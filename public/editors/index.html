@@ -17,30 +17,11 @@
       width: min(1040px, calc(100vw - 32px));
     }
 
-    .top {
-      align-items: center;
-      display: flex;
-      gap: 16px;
-      justify-content: space-between;
-      width: 100%;
-    }
-
-    h1 {
-      font-size: 18px;
-      line-height: 1.1;
-      margin: 0;
-    }
-
-    .subtitle,
     .status,
     .meta {
       color: var(--ss-muted);
       font-size: 12px;
       font-weight: 750;
-    }
-
-    .subtitle {
-      margin: 4px 0 0;
     }
 
     .status {
@@ -116,11 +97,6 @@
         padding-top: 24px;
       }
 
-      .top {
-        align-items: flex-start;
-        flex-direction: column;
-      }
-
       .status {
         max-width: none;
         text-align: left;
@@ -130,15 +106,6 @@
   </style>
 </head>
 <body>
-  <header class="ss-top-strip">
-    <div class="top">
-      <div>
-        <h1>OSC Generators</h1>
-        <p class="subtitle">Parameter-driven generators and their live OSC targets</p>
-      </div>
-      <div id="status" class="status" role="status">Loading editors...</div>
-    </div>
-  </header>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes">
     <a href="/">Dashboard</a>
     <a href="/structure-editor">Structure</a>
@@ -150,6 +117,7 @@
     <a href="/transport/status">Transport</a>
   </nav>
   <main>
+    <div id="status" class="status" role="status">Loading editors...</div>
     <section id="editors" class="grid" aria-live="polite"></section>
   </main>
   <script>

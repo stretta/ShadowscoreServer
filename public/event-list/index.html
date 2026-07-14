@@ -27,18 +27,6 @@
       font-size: 14px;
     }
 
-    header {
-      justify-content: space-between;
-    }
-
-    h1 {
-      font-size: 18px;
-      font-weight: 700;
-      line-height: 1.1;
-      margin: 0;
-      white-space: nowrap;
-    }
-
     main {
       display: grid;
       gap: 14px;
@@ -53,7 +41,7 @@
     }
 
     .server-toolbar {
-      grid-template-columns: minmax(180px, 260px) auto minmax(220px, 1fr);
+      grid-template-columns: minmax(180px, 260px) auto minmax(220px, 1fr) minmax(160px, 1fr);
     }
 
     .clip-toolbar {
@@ -266,11 +254,6 @@
     }
 
     @media (max-width: 980px) {
-      header {
-        align-items: flex-start;
-        display: grid;
-      }
-
       .status {
         text-align: left;
         white-space: normal;
@@ -297,10 +280,6 @@
   </style>
 </head>
 <body>
-  <header>
-    <h1>ShadowScore Event List</h1>
-    <div class="status" id="status">Loading session...</div>
-  </header>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes">
     <a href="/">Dashboard</a>
     <a href="/structure-editor">Structure</a>
@@ -320,6 +299,7 @@
       <label>Custom server
         <input id="server" value="" placeholder="http://pt5.local:8790">
       </label>
+      <div class="status" id="status">Loading session...</div>
     </section>
     <section class="toolbar clip-toolbar" aria-label="Clip selection">
       <label>Clip

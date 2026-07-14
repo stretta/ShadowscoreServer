@@ -72,6 +72,7 @@ test("admin page is served as html", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /Shadowscore Lab Admin/);
+  assert.doesNotMatch(response.body, /<header(?:\s|>)/);
   assert.match(response.body, /Session link/);
   assert.match(response.body, /Download backup/);
   assert.match(response.body, /Saved scores/);
@@ -349,6 +350,7 @@ test("transport status page exposes host transport controls", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /Shadowscore Transport/);
+  assert.doesNotMatch(response.body, /<header(?:\s|>)/);
   assert.match(response.body, /id="start-jack"/);
   assert.match(response.body, /id="start-timer"/);
   assert.match(response.body, /id="reanchor"/);
@@ -2340,6 +2342,7 @@ test("root route serves view index", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore Views/);
+  assert.doesNotMatch(response.body, /<header(?:\s|>)/);
   assert.match(response.body, /\/editors/);
   assert.match(response.body, /ShadowScore Editors/);
   assert.match(response.body, /OSC Generators/);
@@ -2461,6 +2464,7 @@ test("editor index route serves registered editor browser", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore OSC Generators/);
+  assert.doesNotMatch(response.body, /<header(?:\s|>)/);
   assert.match(response.body, /OSC Generators/);
   assert.match(response.body, /\/editors\/manifest/);
   assert.match(response.body, /\/osc\/targets/);
@@ -2479,6 +2483,7 @@ test("event list route serves server-bundled editor html", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore Event List/);
+  assert.doesNotMatch(response.body, /<header(?:\s|>)/);
   assert.match(response.body, /id="clip"/);
   assert.match(response.body, /id="new-clip"/);
   assert.match(response.body, /id="rename-clip"/);
@@ -2512,6 +2517,7 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore Structure Editor/);
+  assert.doesNotMatch(response.body, /<header(?:\s|>)/);
   assert.match(response.body, /Block Assignments/);
   assert.match(response.body, /Assigned Clip/);
   assert.match(response.body, /Duplicate Block/);

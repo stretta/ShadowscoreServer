@@ -28,19 +28,7 @@
       font-size: 14px;
     }
 
-    header {
-      justify-content: space-between;
-    }
-
-    h1 {
-      font-size: 18px;
-      line-height: 1.1;
-      margin: 0;
-      white-space: nowrap;
-    }
-
     .status {
-      flex: 1;
       overflow: hidden;
       text-align: right;
       text-overflow: ellipsis;
@@ -61,7 +49,7 @@
       align-items: end;
       display: grid;
       gap: 12px;
-      grid-template-columns: minmax(180px, 260px) auto minmax(220px, 1fr);
+      grid-template-columns: minmax(180px, 260px) auto minmax(220px, 1fr) minmax(160px, 1fr);
     }
 
     .workspace {
@@ -321,11 +309,6 @@
     }
 
     @media (max-width: 720px) {
-      header {
-        align-items: flex-start;
-        display: grid;
-      }
-
       .status {
         text-align: left;
         white-space: normal;
@@ -340,10 +323,6 @@
   </style>
 </head>
 <body>
-  <header>
-    <h1>ShadowScore Structure Editor</h1>
-    <div class="status" id="status">Loading session...</div>
-  </header>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes">
     <a href="/">Dashboard</a>
     <a href="/structure-editor" aria-current="page">Structure</a>
@@ -363,6 +342,7 @@
       <label>Custom server
         <input id="server" placeholder="http://pt5.local:8790">
       </label>
+      <div class="status" id="status">Loading session...</div>
     </section>
 
     <div class="workspace">

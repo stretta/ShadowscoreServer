@@ -12,11 +12,9 @@ export function adminPage() {
       color: var(--ss-text);
     }
     body { margin: 0; }
-    header {
-      justify-content: space-between;
-    }
     main { margin: 0 auto; max-width: 1120px; padding: 24px clamp(16px, 4vw, 40px) 40px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
+    .toolbar .status { align-self: center; margin-left: auto; }
     .session-tools, .scores, .targets, .oscquery-devices, .hardware {
       margin-bottom: 18px;
       padding: 14px;
@@ -156,7 +154,6 @@ export function adminPage() {
       width: 100%;
     }
     @media (max-width: 760px) {
-      header { align-items: flex-start; flex-direction: column; }
       table, thead, tbody, th, td, tr { display: block; }
       thead { display: none; }
       tr { border-bottom: 1px solid #d5d8dc; padding: 12px; }
@@ -168,10 +165,6 @@ export function adminPage() {
   </style>
 </head>
 <body>
-  <header>
-    <h1>Shadowscore Lab Admin</h1>
-    <div class="status" id="status">Loading score...</div>
-  </header>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes">
     <a href="/">Dashboard</a>
     <a href="/structure-editor">Structure</a>
@@ -188,6 +181,7 @@ export function adminPage() {
       <button id="reconcile-assignments" type="button">Refresh routing</button>
       <button class="danger" id="clear-notes" type="button">Clear all notes</button>
       <button class="danger" id="clear-assignments" type="button">Clear assignments</button>
+      <div class="status" id="status">Loading score...</div>
     </div>
     <section class="session-tools">
       <h2>Session link</h2>

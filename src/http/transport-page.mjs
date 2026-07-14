@@ -12,9 +12,6 @@ export function transportPage() {
       color: var(--ss-text);
     }
     body { margin: 0; }
-    header {
-      justify-content: space-between;
-    }
     main { margin: 0 auto; max-width: 1120px; padding: 22px clamp(16px, 4vw, 40px) 40px; }
     .toolbar {
       display: flex;
@@ -24,6 +21,7 @@ export function transportPage() {
       max-width: 100%;
       min-width: 0;
     }
+    .toolbar .status { align-self: center; margin-left: auto; }
     details.toolbar-details { margin-bottom: 18px; }
     details.toolbar-details summary {
       color: var(--ss-muted);
@@ -119,16 +117,11 @@ export function transportPage() {
       .toolbar button { flex: 1 1 150px; }
     }
     @media (max-width: 700px) {
-      header { align-items: flex-start; flex-direction: column; }
       .toolbar button { flex: 1 1 160px; justify-content: center; }
     }
   </style>
 </head>
 <body>
-  <header>
-    <h1>Shadowscore Transport</h1>
-    <div class="status" id="status">Loading...</div>
-  </header>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes">
     <a href="/">Dashboard</a>
     <a href="/structure-editor">Structure</a>
@@ -146,6 +139,7 @@ export function transportPage() {
       <button id="reset" type="button">Return to Start</button>
       <button id="advance" type="button">Next Section</button>
       <button id="reanchor" type="button">Re-sync</button>
+      <div class="status" id="status">Loading...</div>
     </div>
     <details class="toolbar-details">
       <summary>Diagnostics controls</summary>

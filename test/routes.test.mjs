@@ -2712,6 +2712,8 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /type = "checkbox"/);
   assert.match(response.body, /messages\/out\/current_stage/);
   assert.match(response.body, /setPlayingStage/);
+  assert.match(response.body, /stagePollGeneration/);
+  assert.match(response.body, /isCurrentStagePoll/);
   assert.match(response.body, /\.stage\.playing/);
   assert.match(response.body, /Return to Zero/);
   assert.match(response.body, /messages\/in\/rtz/);
@@ -2719,6 +2721,11 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /function shouldCurve/);
   assert.match(response.body, /function valueToSliderPosition/);
   assert.match(response.body, /applyMaxCount/);
+  assert.match(response.body, /isMaxCountParam/);
+  assert.match(response.body, /maxcnt/);
+  assert.match(response.body, /maxCountParamValue/);
+  assert.match(response.body, /uniqueParameterValues/);
+  assert.match(response.body, /Max Count/);
   assert.match(response.body, /\.stage\.unused/);
   assert.match(response.body, /type="radio"/);
   assert.match(response.body, /focusedTargetId/);

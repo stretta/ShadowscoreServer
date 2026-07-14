@@ -67,6 +67,7 @@
     let targets = [];
     let focusedTargetId = "";
     let stagePollTimer;
+    let stagePollGeneration = 0;
 
     document.querySelector("#refresh").addEventListener("click", () => refresh().catch(reportError));
     document.querySelector("#rtz").addEventListener("click", () => returnToZero().catch(reportError));
@@ -108,13 +109,13 @@
     function createParameterControl(param) {
       const card = document.createElement("label"); card.className = "parameter";
       const head = document.createElement("span"); head.className = "parameter-head";
-      const name = document.createElement("span"); name.className = "parameter-name"; name.textContent = param.displayName || param.name;
+      const name = document.createElement("span"); name.className = "parameter-name"; name.textContent = isMaxCountParam(param) ? "Max Count" : (param.displayName || param.name);
       const readout = document.createElement("output"); readout.className = "parameter-value"; readout.textContent = formatParameterValue(param.value);
       head.append(name, readout); card.append(head);
       if (Array.isArray(param.values) && param.values.length) {
         const select = document.createElement("select");
-        for (const value of param.values) { const option = document.createElement("option"); option.value = String(value); option.textContent = String(value); select.append(option); }
-        select.value = String(param.value); select.addEventListener("change", () => { param.value = select.value; readout.textContent = select.value; sendParam(param.name, select.value).catch(reportError); }); card.append(select);
+        for (const value of uniqueParameterValues(param.values)) { const option = document.createElement("option"); option.value = value; option.textContent = value; select.append(option); }
+        select.value = String(param.value); select.addEventListener("change", () => { param.value = select.value; readout.textContent = select.value; if (isMaxCountParam(param)) applyMaxCount(maxCountParamValue(param)); sendParam(param.name, select.value).catch(reportError); }); card.append(select);
       } else if (isToggleParam(param)) {
         const toggleLabel = document.createElement("span"); toggleLabel.className = "parameter-toggle";
         const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = Boolean(Number(param.value)); toggle.setAttribute("aria-label", param.displayName || param.name);
@@ -124,7 +125,7 @@
       } else {
         const min = Number(param.min ?? 0); const max = Number(param.max ?? 1); const curved = shouldCurve(param, min, max);
         const input = document.createElement("input"); input.type = "range"; input.min = curved ? "0" : String(min); input.max = curved ? "1" : String(max); input.step = curved ? "0.001" : String(parameterStep(param)); input.value = String(curved ? valueToSliderPosition(param, param.value, min, max) : (param.value ?? min));
-        input.addEventListener("input", () => { const value = sliderValue(param, input, min, max, curved); param.value = value; readout.textContent = formatParameterValue(value); if (param.name.toLowerCase() === "maxcount") applyMaxCount(Math.round(value)); scheduleSend(param.name, value); });
+        input.addEventListener("input", () => { const value = sliderValue(param, input, min, max, curved); param.value = value; readout.textContent = formatParameterValue(value); if (isMaxCountParam(param)) applyMaxCount(Math.round(value)); scheduleSend(param.name, value); });
         input.addEventListener("change", () => flushSend(param.name, sliderValue(param, input, min, max, curved))); card.append(input);
       }
       return card;
@@ -155,8 +156,9 @@
     function flushSend(param, value) { const targetId = focusedTargetId; if (!param || !targetId) return; const key = `${targetId}:${param}`; if (pending.has(key)) { clearTimeout(pending.get(key)); pending.delete(key); } sendParam(param, value, targetId).catch(reportError); }
     async function sendParam(param, value, targetId = focusedTargetId) { const target = targets.find(entry => entry.id === targetId); if (!target) { statusEl.textContent = "No client in focus"; return; } const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: [target.id], param, args: [value] }) }); const body = await response.json().catch(() => ({})); const sent = (body.results || []).filter(result => result.ok).length; statusEl.textContent = response.ok && body.ok !== false ? `Sent ${param} = ${value} to ${target.label || target.id}` : `Failed ${param} (${sent}/1)`; }
     async function returnToZero() { const target = focusedTarget(); if (!target) { statusEl.textContent = "No client in focus"; return; } const port = (target.inputPorts || []).find(entry => String(entry.name).toLowerCase() === "rtz"); const address = port?.address || `${target.baseAddress}/messages/in/rtz`; const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: [target.id], address, args: [1] }) }); const body = await response.json().catch(() => ({ ok: false })); statusEl.textContent = response.ok && body.ok !== false ? `Return to Zero queued on ${target.label || target.id}` : `Return to Zero failed on ${target.label || target.id}`; }
-    function startStagePolling() { clearTimeout(stagePollTimer); if (!targets.length) { setPlayingStage(); return; } pollCurrentStage(); }
-    async function pollCurrentStage() { try { const target = focusedTarget(); if (!target) throw new Error("No client in focus"); const host = oscQueryHost(target); const path = `${target.baseAddress}/messages/out/current_stage`; const response = await fetch(`${location.protocol}//${host}:5678${path}`, { cache: "no-store" }); if (!response.ok) throw new Error(`current_stage ${response.status}`); const body = await response.json(); setPlayingStage(integerValue(Array.isArray(body.VALUE) ? body.VALUE[0] : body.VALUE, 0)); } catch { setPlayingStage(); } finally { stagePollTimer = setTimeout(pollCurrentStage, 125); } }
+    function startStagePolling() { clearTimeout(stagePollTimer); const generation = ++stagePollGeneration; if (!focusedTarget()) { setPlayingStage(); return; } pollCurrentStage(generation); }
+    async function pollCurrentStage(generation) { const targetId = focusedTargetId; try { const target = targets.find(entry => entry.id === targetId); if (!target) throw new Error("No client in focus"); const host = oscQueryHost(target); const path = `${target.baseAddress}/messages/out/current_stage`; const response = await fetch(`${location.protocol}//${host}:5678${path}`, { cache: "no-store" }); if (!response.ok) throw new Error(`current_stage ${response.status}`); const body = await response.json(); if (!isCurrentStagePoll(generation, targetId)) return; setPlayingStage(integerValue(Array.isArray(body.VALUE) ? body.VALUE[0] : body.VALUE, 0)); } catch { if (isCurrentStagePoll(generation, targetId)) setPlayingStage(); } finally { if (isCurrentStagePoll(generation, targetId)) stagePollTimer = setTimeout(() => pollCurrentStage(generation), 125); } }
+    function isCurrentStagePoll(generation, targetId) { return generation === stagePollGeneration && targetId === focusedTargetId; }
     async function focusTarget(targetId) { if (!targets.some(target => target.id === targetId) || targetId === focusedTargetId) return; focusedTargetId = targetId; renderTargets(); statusEl.textContent = `Reading ${focusedTarget()?.label || targetId} from OSCQuery...`; await hydrateFocusedTarget(); statusEl.textContent = `${targets.length} client${targets.length === 1 ? "" : "s"} online · editing ${focusedTarget()?.label || targetId}`; startStagePolling(); }
     async function hydrateFocusedTarget() { const target = focusedTarget(); if (!target) return; const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" }); if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`); const body = await response.json(); const nodes = body.CONTENTS || {};
       target.parameters = (target.parameters || []).map(param => { const node = nodes[param.name]; if (!node) return param; const range = Array.isArray(node.RANGE) ? node.RANGE : []; return { ...param, value: node.VALUE, min: firstDefined(range.map(entry => entry.MIN), param.min), max: firstDefined(range.map(entry => entry.MAX), param.max), values: firstDefined(range.map(entry => entry.VALS), param.values), normalized: node.CONTENTS?.normalized?.VALUE ?? param.normalized }; });
@@ -167,9 +169,12 @@
     function firstDefined(values, fallback) { return values.find(value => value !== undefined && value !== null) ?? fallback; }
     function setPlayingStage(number) { for (const stage of stagesEl.querySelectorAll(".stage")) { const playing = Number(stage.dataset.stage) === number; stage.classList.toggle("playing", playing); if (playing) stage.setAttribute("aria-current", "step"); else stage.removeAttribute("aria-current"); } }
     function applyMaxCount(maxCount) { for (const stage of stagesEl.querySelectorAll(".stage")) { const unused = Number(stage.dataset.stage) > maxCount; stage.classList.toggle("unused", unused); for (const input of stage.querySelectorAll("input")) input.disabled = unused || stage.classList.contains("missing"); } }
-    function maxCountValue(target) { const param = (target.parameters || []).find(entry => String(entry.name).toLowerCase() === "maxcount"); return clamp(integerValue(param?.value, 16), 1, 16); }
+    function maxCountValue(target) { return maxCountParamValue((target.parameters || []).find(isMaxCountParam)); }
+    function maxCountParamValue(param) { return clamp(integerValue(param?.value, 16), 1, 16); }
+    function isMaxCountParam(param) { return /^(?:maxcount|maxcnt)$/i.test(String(param?.name || "")); }
+    function uniqueParameterValues(values) { return [...new Set((values || []).map(value => String(value)))]; }
     function isToggleParam(param) { return String(param.name || "").toLowerCase() === "clock" && Number(param.min) === 0 && Number(param.max) === 1; }
-    function parameterStep(param) { if (String(param.name).toLowerCase() === "maxcount" || param.meta?.edit_as === "int") return 1; const span = Number(param.max) - Number(param.min); return span <= 1 ? 0.01 : span <= 100 ? 0.1 : 1; }
+    function parameterStep(param) { if (isMaxCountParam(param) || param.meta?.edit_as === "int") return 1; const span = Number(param.max) - Number(param.min); return span <= 1 ? 0.01 : span <= 100 ? 0.1 : 1; }
     function shouldCurve(param, min, max) { const name = String(param.name || ""); const unit = String(param.unit || param.meta?.unit || "").toLowerCase(); return /(?:attack|decay|release|env.*time)/i.test(name) || (unit === "ms" && Math.abs(max - min) >= 1000); }
     function curveExponent(param, min, max) { if (Number(param._curveExponent) > 0) return param._curveExponent; const explicit = Number(param.exponent ?? param.meta?.exponent); if (explicit > 0) return (param._curveExponent = explicit); const normalized = Number(param.normalized); const linear = (Number(param.value) - min) / (max - min); if (linear > .0001 && linear < .9999 && normalized > .0001 && normalized < .9999) { const inferred = Math.log(linear) / Math.log(normalized); if (inferred >= .5 && inferred <= 8) return (param._curveExponent = inferred); } return (param._curveExponent = /release/i.test(String(param.name || "")) ? 5 : 3); }
     function valueToSliderPosition(param, value, min, max) { return Math.pow(clamp((Number(value) - min) / (max - min), 0, 1), 1 / curveExponent(param, min, max)); }

@@ -552,6 +552,7 @@ export async function routeRequest(request, response, store, config, runtime = {
         voices: Boolean(body.voices),
         assignments: Boolean(body.assignments),
         oscAssignments: Boolean(body.oscAssignments),
+        oscClips: Boolean(body.oscClips),
         structure: Boolean(body.structure),
         notes: Boolean(body.notes)
       }));
@@ -850,19 +851,56 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
-  const mesoSnapshotsMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/osc-snapshots$/);
-  if (request.method === "GET" && mesoSnapshotsMatch) {
-    const blockId = decodeURIComponent(mesoSnapshotsMatch[1]);
-    const block = store.getScore().mesostructure?.[blockId];
-    if (!block) {
-      writeJson(response, 404, { ok: false, error: `unknown mesostructural block '${blockId}'` });
-    } else {
-      writeJson(response, 200, block.oscSnapshots ?? {});
+  if (request.method === "GET" && url.pathname === "/osc/clips") {
+    writeJson(response, 200, store.getScore().oscClips ?? {});
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/osc/clips") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 201, store.addOscClip(body.clipId ?? body.id, body.clip ?? body.document ?? withoutControlFields(body, ["clipId", "id", ...REVISION_CONTROL_FIELDS]), revisionOptions(body)));
+    } catch (error) {
+      writeError(response, error);
     }
     return;
   }
 
-  const mesoSnapshotRecallMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/osc-snapshots\/recall$/);
+  const oscClipMatch = url.pathname.match(/^\/osc\/clips\/([^/]+)$/);
+  if (oscClipMatch) {
+    const clipId = decodeURIComponent(oscClipMatch[1]);
+    try {
+      if (request.method === "GET") {
+        const clip = store.getScore().oscClips?.[clipId];
+        if (!clip) throw new Error(`unknown OSC clip '${clipId}'`);
+        writeJson(response, 200, clip);
+      } else if (request.method === "PUT") {
+        const body = await readJson(request);
+        writeJson(response, 200, store.replaceOscClip(clipId, body.clip ?? body.document ?? withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body)));
+      } else if (request.method === "DELETE") {
+        writeJson(response, 200, store.removeOscClip(clipId, revisionOptions(url.searchParams)));
+      } else {
+        writeJson(response, 405, { ok: false, error: "method not allowed" });
+      }
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
+  const mesoLayersMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/osc-layers$/);
+  if (request.method === "GET" && mesoLayersMatch) {
+    const blockId = decodeURIComponent(mesoLayersMatch[1]);
+    const block = store.getScore().mesostructure?.[blockId];
+    if (!block) {
+      writeJson(response, 404, { ok: false, error: `unknown mesostructural block '${blockId}'` });
+    } else {
+      writeJson(response, 200, block.oscLayers ?? {});
+    }
+    return;
+  }
+
+  const mesoSnapshotRecallMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/osc-layers\/recall$/);
   if (mesoSnapshotRecallMatch && (request.method === "POST" || request.method === "GET")) {
     const blockId = decodeURIComponent(mesoSnapshotRecallMatch[1]);
     try {
@@ -882,15 +920,15 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
-  const mesoSnapshotRoleMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/osc-snapshots\/([^/]+)$/);
+  const mesoSnapshotRoleMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/osc-layers\/([^/]+)$/);
   if (mesoSnapshotRoleMatch && (request.method === "PUT" || request.method === "DELETE")) {
     try {
       const blockId = decodeURIComponent(mesoSnapshotRoleMatch[1]);
       const roleId = decodeURIComponent(mesoSnapshotRoleMatch[2]);
       const body = request.method === "PUT" ? await readJson(request) : url.searchParams;
       const score = request.method === "PUT"
-        ? store.replaceOscSnapshot(blockId, roleId, body.snapshot ?? body.document ?? withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body))
-        : store.removeOscSnapshot(blockId, roleId, revisionOptions(body));
+        ? store.assignOscLayer(blockId, roleId, body.clipId ?? body.layer?.clipId ?? body.document?.clipId, revisionOptions(body))
+        : store.removeOscLayer(blockId, roleId, revisionOptions(body));
       writeJson(response, 200, score);
     } catch (error) {
       writeError(response, error);

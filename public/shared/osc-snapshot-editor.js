@@ -90,8 +90,8 @@ export function createOscSnapshotEditorClient(options) {
       ? previousBlock
       : blockIds.includes(score?.structureState?.activeBlockId) ? score.structureState.activeBlockId : blockIds[0] ?? "";
 
-    const savedRoles = Object.values(score?.mesostructure ?? {}).flatMap((block) => Object.entries(block.oscSnapshots ?? {}))
-      .filter(([, snapshot]) => cleanToken(snapshot.app) === app)
+    const savedRoles = Object.values(score?.mesostructure ?? {}).flatMap((block) => Object.entries(block.oscLayers ?? {}))
+      .filter(([, layer]) => cleanToken(score?.oscClips?.[layer?.clipId]?.app) === app)
       .map(([roleId]) => roleId);
     const roleIds = Array.from(new Set([
       ...Object.entries(assignments).filter(([, assignment]) => cleanToken(assignment.app) === app).map(([roleId]) => roleId),
@@ -131,10 +131,21 @@ export function createOscSnapshotEditorClient(options) {
     const blockId = elements.blockSelect.value;
     const roleId = elements.roleSelect.value;
     const snapshot = normalizeEditorSnapshot(options.serializeDraft(), app);
+    const currentLayer = score?.mesostructure?.[blockId]?.oscLayers?.[roleId];
+    const clipId = currentLayer?.clipId || `${blockId.toLowerCase()}-${roleId}`;
     elements.saveButton.disabled = true;
-    score = await fetchJson(`/mesostructure/${encodeURIComponent(blockId)}/osc-snapshots/${encodeURIComponent(roleId)}`, {
+    score = await fetchJson(currentLayer ? `/osc/clips/${encodeURIComponent(clipId)}` : "/osc/clips", {
+      method: currentLayer ? "PUT" : "POST",
+      body: JSON.stringify({
+        expectedStructureRevision: score?.structureRevision ?? 0,
+        ...(currentLayer ? {} : { clipId }),
+        name: `${blockId} · ${assignments[roleId]?.label || roleId}`,
+        ...snapshot
+      })
+    });
+    if (!currentLayer) score = await fetchJson(`/mesostructure/${encodeURIComponent(blockId)}/osc-layers/${encodeURIComponent(roleId)}`, {
       method: "PUT",
-      body: JSON.stringify({ expectedStructureRevision: score?.structureRevision ?? 0, ...snapshot })
+      body: JSON.stringify({ expectedStructureRevision: score.structureRevision, clipId })
     });
     renderContext();
     options.setStatus?.(`Saved ${roleId} form draft to block ${blockId}; no OSC was sent`);
@@ -155,7 +166,7 @@ export function createOscSnapshotEditorClient(options) {
     if (!saved) throw new Error("No saved snapshot exists for this block and role");
     elements.recallButton.disabled = true;
     try {
-      const result = await fetchJson(`/mesostructure/${encodeURIComponent(blockId)}/osc-snapshots/recall`, {
+      const result = await fetchJson(`/mesostructure/${encodeURIComponent(blockId)}/osc-layers/recall`, {
         method: "POST",
         body: JSON.stringify({ roles: [roleId] })
       });
@@ -190,7 +201,7 @@ export function createOscSnapshotEditorClient(options) {
       elements.lastRecall.textContent = "No recall recorded";
       return;
     }
-    const status = await fetchJson(`/mesostructure/${encodeURIComponent(blockId)}/osc-snapshots/recall`);
+    const status = await fetchJson(`/mesostructure/${encodeURIComponent(blockId)}/osc-layers/recall`);
     elements.lastRecall.textContent = oscRecallSummary(status.last);
   }
 
@@ -205,7 +216,8 @@ export function createOscSnapshotEditorClient(options) {
       if (event.type.startsWith("osc.assignment.")) refreshAssignments().catch(reportError);
     };
     for (const eventName of [
-      "snapshot", "mesostructure.oscSnapshot.replaced", "mesostructure.oscSnapshot.removed",
+      "snapshot", "osc.clip.added", "osc.clip.replaced", "osc.clip.removed",
+      "mesostructure.oscLayer.assigned", "mesostructure.oscLayer.removed",
       "structure.playhead.updated", "osc.assignment.replaced", "osc.assignment.removed",
       "osc.assignment.reconciled", "admin.reset", "admin.score.created", "admin.restore"
     ]) events.addEventListener(eventName, updateScore);
@@ -219,7 +231,8 @@ export function createOscSnapshotEditorClient(options) {
   }
 
   function selectedSnapshot() {
-    return score?.mesostructure?.[elements.blockSelect.value]?.oscSnapshots?.[elements.roleSelect.value] ?? null;
+    const layer = score?.mesostructure?.[elements.blockSelect.value]?.oscLayers?.[elements.roleSelect.value];
+    return layer?.clipId ? score?.oscClips?.[layer.clipId] ?? null : null;
   }
 
   function snapshotState() {

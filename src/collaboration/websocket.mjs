@@ -108,19 +108,42 @@ export function createCollaborationHub(store, config = {}) {
             sourceClientId: client.id
           }));
           break;
-        case "mesostructure.oscSnapshot.replace":
-          ack(client, requestId, store.replaceOscSnapshot(
-            requireString(payload.blockId, "blockId"),
-            requireString(payload.roleId, "roleId"),
-            payload.snapshot ?? payload.document ?? {},
+        case "osc.clip.add":
+          ack(client, requestId, store.addOscClip(
+            requireString(payload.clipId ?? payload.id, "clipId"),
+            payload.clip ?? payload.document ?? {},
             {
               ...revisionOptions(payload),
               sourceClientId: client.id
             }
           ));
           break;
-        case "mesostructure.oscSnapshot.remove":
-          ack(client, requestId, store.removeOscSnapshot(
+        case "osc.clip.replace":
+          ack(client, requestId, store.replaceOscClip(
+            requireString(payload.clipId ?? payload.id, "clipId"),
+            payload.clip ?? payload.document ?? {},
+            {
+              ...revisionOptions(payload),
+              sourceClientId: client.id
+            }
+          ));
+          break;
+        case "osc.clip.remove":
+          ack(client, requestId, store.removeOscClip(
+            requireString(payload.clipId ?? payload.id, "clipId"),
+            { ...revisionOptions(payload), sourceClientId: client.id }
+          ));
+          break;
+        case "mesostructure.oscLayer.assign":
+          ack(client, requestId, store.assignOscLayer(
+            requireString(payload.blockId, "blockId"),
+            requireString(payload.roleId, "roleId"),
+            requireString(payload.clipId ?? payload.layer?.clipId, "clipId"),
+            { ...revisionOptions(payload), sourceClientId: client.id }
+          ));
+          break;
+        case "mesostructure.oscLayer.remove":
+          ack(client, requestId, store.removeOscLayer(
             requireString(payload.blockId, "blockId"),
             requireString(payload.roleId, "roleId"),
             {

@@ -1,6 +1,6 @@
 import { EventEmitter } from "node:events";
 import { reconcileOscAssignments as reconcileOscRoleAssignments } from "../osc/assignments.mjs";
-import { normalizeOscSnapshot } from "../osc/snapshot-contract.mjs";
+import { normalizeOscClip } from "../osc/snapshot-contract.mjs";
 
 export function createInitialScore(config) {
   const voices = {};
@@ -26,6 +26,7 @@ export function createInitialScore(config) {
     structureState: createDefaultStructureState(),
     assignments,
     oscAssignments: {},
+    oscClips: {},
     voices
   };
 }
@@ -101,6 +102,7 @@ export function createScoreStore(initialScore, options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
       assertExpectedRevisions(score, options);
       const block = normalizeMesoBlock(blockDocument);
+      assertOscBlockReferences(id, block, score.oscAssignments, score.oscClips);
       score = {
         ...score,
         ...nextRevisionFields(score, { structure: true }),
@@ -112,56 +114,82 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "mesostructure.block.replaced", score, { blockId: id, block }, options);
       return structuredClone(score);
     },
-    replaceOscSnapshot(blockId, roleId, snapshotDocument, options = {}) {
-      const id = normalizeBlockId(blockId);
-      const role = normalizeOscRoleId(roleId);
-      const block = score.mesostructure[id];
-      if (!block) {
-        throw new Error(`unknown mesostructural block '${id}'`);
-      }
+    addOscClip(clipId, clipDocument, options = {}) {
+      const id = normalizeOscClipId(clipId);
+      if (score.oscClips?.[id]) throw new Error(`OSC clip '${id}' already exists`);
       assertExpectedScoreVersion(score, options.expectedVersion);
       assertExpectedRevisions(score, options);
-      const snapshot = normalizeOscSnapshot(snapshotDocument);
+      const clip = normalizeOscClip(clipDocument);
       score = {
         ...score,
         ...nextRevisionFields(score, { structure: true }),
-        mesostructure: {
-          ...score.mesostructure,
-          [id]: {
-            ...block,
-            oscSnapshots: {
-              ...(block.oscSnapshots ?? {}),
-              [role]: snapshot
-            }
-          }
-        }
+        oscClips: { ...(score.oscClips ?? {}), [id]: clip }
       };
-      emitChange(events, "mesostructure.oscSnapshot.replaced", score, { blockId: id, roleId: role, snapshot }, options);
+      emitChange(events, "osc.clip.added", score, { clipId: id, clip }, options);
       return structuredClone(score);
     },
-    removeOscSnapshot(blockId, roleId, options = {}) {
-      const id = normalizeBlockId(blockId);
-      const role = normalizeOscRoleId(roleId);
-      const block = score.mesostructure[id];
-      if (!block) {
-        throw new Error(`unknown mesostructural block '${id}'`);
-      }
-      if (!block.oscSnapshots?.[role]) {
-        throw new Error(`unknown OSC snapshot role '${role}' in block '${id}'`);
+    replaceOscClip(clipId, clipDocument, options = {}) {
+      const id = normalizeOscClipId(clipId);
+      if (!score.oscClips?.[id]) throw new Error(`unknown OSC clip '${id}'`);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const clip = normalizeOscClip(clipDocument);
+      assertOscClipCompatibleWithReferences(id, clip, score.mesostructure, score.oscAssignments);
+      score = { ...score, ...nextRevisionFields(score, { structure: true }), oscClips: { ...score.oscClips, [id]: clip } };
+      emitChange(events, "osc.clip.replaced", score, { clipId: id, clip }, options);
+      return structuredClone(score);
+    },
+    removeOscClip(clipId, options = {}) {
+      const id = normalizeOscClipId(clipId);
+      if (!score.oscClips?.[id]) throw new Error(`unknown OSC clip '${id}'`);
+      const references = oscClipReferences(score.mesostructure, id);
+      if (references.length) {
+        const error = new Error(`OSC clip '${id}' is assigned in ${references.map(({ blockId, roleId }) => `${blockId}/${roleId}`).join(", ")}`);
+        error.code = "OSC_CLIP_REFERENCED";
+        error.references = references;
+        throw error;
       }
       assertExpectedScoreVersion(score, options.expectedVersion);
       assertExpectedRevisions(score, options);
-      const oscSnapshots = { ...block.oscSnapshots };
-      delete oscSnapshots[role];
+      const oscClips = { ...score.oscClips };
+      delete oscClips[id];
+      score = { ...score, ...nextRevisionFields(score, { structure: true }), oscClips };
+      emitChange(events, "osc.clip.removed", score, { clipId: id }, options);
+      return structuredClone(score);
+    },
+    assignOscLayer(blockId, roleId, clipId, options = {}) {
+      const id = normalizeBlockId(blockId);
+      const role = normalizeOscRoleId(roleId);
+      const clip = normalizeOscClipId(clipId);
+      const block = score.mesostructure[id];
+      if (!block) throw new Error(`unknown mesostructural block '${id}'`);
+      if (!score.oscAssignments?.[role]) throw new Error(`unknown OSC assignment role '${role}'`);
+      if (!score.oscClips?.[clip]) throw new Error(`unknown OSC clip '${clip}'`);
+      const roleApp = score.oscAssignments[role].app;
+      const clipApp = score.oscClips[clip].app;
+      if (roleApp && roleApp !== clipApp) throw new Error(`OSC clip '${clip}' app '${clipApp}' is incompatible with role '${role}' app '${roleApp}'`);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
       score = {
         ...score,
         ...nextRevisionFields(score, { structure: true }),
-        mesostructure: {
-          ...score.mesostructure,
-          [id]: { ...block, oscSnapshots }
-        }
+        mesostructure: { ...score.mesostructure, [id]: { ...block, oscLayers: { ...(block.oscLayers ?? {}), [role]: { clipId: clip } } } }
       };
-      emitChange(events, "mesostructure.oscSnapshot.removed", score, { blockId: id, roleId: role }, options);
+      emitChange(events, "mesostructure.oscLayer.assigned", score, { blockId: id, roleId: role, clipId: clip }, options);
+      return structuredClone(score);
+    },
+    removeOscLayer(blockId, roleId, options = {}) {
+      const id = normalizeBlockId(blockId);
+      const role = normalizeOscRoleId(roleId);
+      const block = score.mesostructure[id];
+      if (!block) throw new Error(`unknown mesostructural block '${id}'`);
+      if (!block.oscLayers?.[role]) throw new Error(`unknown OSC layer role '${role}' in block '${id}'`);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const oscLayers = { ...block.oscLayers };
+      delete oscLayers[role];
+      score = { ...score, ...nextRevisionFields(score, { structure: true }), mesostructure: { ...score.mesostructure, [id]: { ...block, oscLayers } } };
+      emitChange(events, "mesostructure.oscLayer.removed", score, { blockId: id, roleId: role }, options);
       return structuredClone(score);
     },
     removeMesoBlock(blockId, options = {}) {
@@ -488,6 +516,7 @@ export function createScoreStore(initialScore, options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
       assertExpectedRevisions(score, options);
       const assignment = normalizeOscAssignment(assignmentDocument);
+      assertOscRoleCompatibleWithLayers(role, assignment, score.mesostructure, score.oscClips);
       score = {
         ...score,
         ...nextRevisionFields(score),
@@ -675,8 +704,8 @@ export function createScoreStore(initialScore, options = {}) {
       return structuredClone(score);
     },
     reset(options = {}) {
-      if (!options.context && !options.voices && !options.assignments && !options.oscAssignments && !options.structure && !options.notes) {
-        throw new Error("reset must include at least one of context, voices, assignments, oscAssignments, structure, or notes");
+      if (!options.context && !options.voices && !options.assignments && !options.oscAssignments && !options.oscClips && !options.structure && !options.notes) {
+        throw new Error("reset must include at least one of context, voices, assignments, oscAssignments, oscClips, structure, or notes");
       }
       const voices = options.voices || options.notes ? resetVoices(score.voices) : score.voices;
       const assignments = options.assignments ? resetAssignments(score.voices, assignmentDefaults) : ensureAssignments(score, assignmentDefaults);
@@ -691,6 +720,7 @@ export function createScoreStore(initialScore, options = {}) {
         structureState: options.structure ? createDefaultStructureState() : score.structureState,
         assignments,
         oscAssignments: options.oscAssignments ? {} : score.oscAssignments,
+        oscClips: options.oscClips || options.structure ? {} : score.oscClips,
         voices
       };
       emitChange(events, "admin.reset", score, {
@@ -698,6 +728,7 @@ export function createScoreStore(initialScore, options = {}) {
         voices: Boolean(options.voices),
         assignments: Boolean(options.assignments),
         oscAssignments: Boolean(options.oscAssignments),
+        oscClips: Boolean(options.oscClips || options.structure),
         structure: Boolean(options.structure),
         notes: Boolean(options.notes)
       }, options);
@@ -749,13 +780,16 @@ function nextRevisionFields(score, options = {}) {
 }
 
 function withRevisionDefaults(score) {
-  return {
+  const normalized = {
     ...score,
     scoreRevision: scoreRevisionFor(score),
     structureRevision: structureRevisionFor(score),
     mesostructure: normalizeMesostructure(score.mesostructure ?? {}),
-    oscAssignments: normalizeOscAssignments(score.oscAssignments ?? {})
+    oscAssignments: normalizeOscAssignments(score.oscAssignments ?? {}),
+    oscClips: normalizeOscClips(score.oscClips ?? {})
   };
+  assertOscReferences(normalized.mesostructure, normalized.oscAssignments, normalized.oscClips);
+  return normalized;
 }
 
 function scoreRevisionFor(score) {
@@ -819,7 +853,7 @@ function createDefaultMesostructure(voiceIds = []) {
       {
         duration: { bars: 4 },
         scale: {},
-        oscSnapshots: {},
+        oscLayers: {},
         players: Object.fromEntries(
           voiceIds.map((voiceId) => [voiceId, { clipId: defaultClipId(blockId, voiceId) }])
         )
@@ -940,6 +974,9 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
   if (scoreDocument.oscAssignments !== undefined && !isPlainObject(scoreDocument.oscAssignments)) {
     throw new Error("score snapshot oscAssignments must be an object");
   }
+  if (scoreDocument.oscClips !== undefined && !isPlainObject(scoreDocument.oscClips)) {
+    throw new Error("score snapshot oscClips must be an object");
+  }
   if (!isPlainObject(scoreDocument.voices)) {
     throw new Error("score snapshot voices must be an object");
   }
@@ -974,7 +1011,7 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
   }
   const mesostructure = normalizeMesostructure(scoreDocument.mesostructure ?? fallbackScore?.mesostructure ?? createDefaultMesostructure());
   const macrostructure = normalizeMacrostructure(scoreDocument.macrostructure ?? fallbackScore?.macrostructure ?? createDefaultMacrostructure());
-  return {
+  const normalized = {
     ensembleId: stringField(scoreDocument.ensembleId),
     version: Number.isFinite(scoreDocument.version) ? scoreDocument.version : 0,
     scoreRevision: scoreRevisionFor(scoreDocument),
@@ -986,8 +1023,11 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
     structureState: normalizeStructureState(scoreDocument.structureState ?? fallbackScore?.structureState ?? createDefaultStructureState(), mesostructure, macrostructure),
     assignments,
     oscAssignments: normalizeOscAssignments(scoreDocument.oscAssignments ?? {}),
+    oscClips: normalizeOscClips(scoreDocument.oscClips ?? {}),
     voices
   };
+  assertOscReferences(normalized.mesostructure, normalized.oscAssignments, normalized.oscClips);
+  return normalized;
 }
 
 function normalizeClips(clipsDocument) {
@@ -1000,6 +1040,11 @@ function normalizeClips(clipsDocument) {
       normalizeClipDocument(clip)
     ])
   );
+}
+
+function normalizeOscClips(clipsDocument) {
+  if (!isPlainObject(clipsDocument)) throw new Error("oscClips must be an object");
+  return Object.fromEntries(Object.entries(clipsDocument).map(([clipId, clip]) => [normalizeOscClipId(clipId), normalizeOscClip(clip)]));
 }
 
 function normalizeClipDocument(clipDocument = {}) {
@@ -1126,22 +1171,63 @@ function normalizeMesoBlock(blockDocument) {
     throw new Error("mesostructural block scale must be an object");
   }
   return {
-    ...structuredClone(blockDocument),
     duration: structuredClone(blockDocument.duration),
     scale: structuredClone(blockDocument.scale ?? {}),
-    oscSnapshots: normalizeOscSnapshots(blockDocument.oscSnapshots ?? {}),
+    oscLayers: normalizeOscLayers(blockDocument.oscLayers ?? {}),
     players: normalizeMesoBlockPlayers(blockDocument.players ?? {})
   };
 }
 
-function normalizeOscSnapshots(snapshotsDocument) {
-  if (!isPlainObject(snapshotsDocument)) {
-    throw new Error("mesostructural block oscSnapshots must be an object");
+function normalizeOscLayers(layersDocument) {
+  if (!isPlainObject(layersDocument)) {
+    throw new Error("mesostructural block oscLayers must be an object");
   }
-  return Object.fromEntries(Object.entries(snapshotsDocument).map(([roleId, snapshot]) => [
+  return Object.fromEntries(Object.entries(layersDocument).map(([roleId, layer]) => [
     normalizeOscRoleId(roleId),
-    normalizeOscSnapshot(snapshot)
+    normalizeOscLayer(layer)
   ]));
+}
+
+function normalizeOscLayer(document) {
+  if (!isPlainObject(document)) throw new Error("OSC layer must be an object");
+  return { clipId: normalizeOscClipId(document.clipId) };
+}
+
+function oscClipReferences(mesostructure, clipId) {
+  return Object.entries(mesostructure ?? {}).flatMap(([blockId, block]) =>
+    Object.entries(block.oscLayers ?? {}).flatMap(([roleId, layer]) => layer?.clipId === clipId ? [{ blockId, roleId }] : [])
+  );
+}
+
+function assertOscReferences(mesostructure, assignments, clips) {
+  for (const [blockId, block] of Object.entries(mesostructure ?? {})) {
+    assertOscBlockReferences(blockId, block, assignments, clips);
+  }
+}
+
+function assertOscBlockReferences(blockId, block, assignments, clips) {
+  for (const [roleId, layer] of Object.entries(block.oscLayers ?? {})) {
+    if (!assignments?.[roleId]) throw new Error(`OSC layer '${blockId}/${roleId}' references unknown role '${roleId}'`);
+    const clip = clips?.[layer.clipId];
+    if (!clip) throw new Error(`OSC layer '${blockId}/${roleId}' references unknown clip '${layer.clipId}'`);
+    const roleApp = assignments[roleId].app;
+    if (roleApp && roleApp !== clip.app) throw new Error(`OSC layer '${blockId}/${roleId}' assigns clip app '${clip.app}' to incompatible role app '${roleApp}'`);
+  }
+}
+
+function assertOscClipCompatibleWithReferences(clipId, clip, mesostructure, assignments) {
+  for (const { blockId, roleId } of oscClipReferences(mesostructure, clipId)) {
+    const roleApp = assignments?.[roleId]?.app;
+    if (roleApp && roleApp !== clip.app) throw new Error(`OSC clip '${clipId}' app '${clip.app}' is incompatible with referenced role '${blockId}/${roleId}' app '${roleApp}'`);
+  }
+}
+
+function assertOscRoleCompatibleWithLayers(roleId, assignment, mesostructure, clips) {
+  for (const [blockId, block] of Object.entries(mesostructure ?? {})) {
+    const clipId = block.oscLayers?.[roleId]?.clipId;
+    const clipApp = clips?.[clipId]?.app;
+    if (clipApp && assignment.app && clipApp !== assignment.app) throw new Error(`OSC role '${roleId}' app '${assignment.app}' is incompatible with clip '${clipId}' app '${clipApp}' in block '${blockId}'`);
+  }
 }
 
 function normalizeMesoBlockPlayers(players) {
@@ -1298,6 +1384,13 @@ function normalizeClipId(clipId) {
   if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(id)) {
     throw new Error("clipId must start with a letter or number and contain only letters, numbers, '.', '_', ':', or '-'");
   }
+  return id;
+}
+
+function normalizeOscClipId(clipId) {
+  const id = stringField(clipId);
+  if (!id) throw new Error("OSC clip id is required");
+  if (!/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(id)) throw new Error("OSC clip id must contain only letters, numbers, dots, dashes, and underscores");
   return id;
 }
 

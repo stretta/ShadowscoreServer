@@ -77,7 +77,7 @@ test("OSC assignment routes manage logical roles separately with revision checks
   assert.deepEqual(removed.oscAssignments, {});
 });
 
-test("OSC assignment status and reconciliation resolve returning instances without changing snapshots", async () => {
+test("OSC assignment status and reconciliation resolve returning instances without changing clips or layers", async () => {
   const controlTarget = {
     id: "rnbo-inst-42:plate",
     localId: "rnbo-inst-42:plate",
@@ -106,7 +106,7 @@ test("OSC assignment status and reconciliation resolve returning instances witho
     deviceId: "heron",
     oscTargetId: "heron:plate:old"
   });
-  await requestJson(context, "PUT", "/mesostructure/A/osc-snapshots/plate-a", {
+  await createOscClipLayer(context, "A", "plate-a", "plate-opening", {
     app: "plate",
     params: { Decay: 0.5 },
     inputPorts: {}
@@ -121,7 +121,8 @@ test("OSC assignment status and reconciliation resolve returning instances witho
   assert.equal(reconciled.changed, true);
   assert.equal(reconciled.assignments["plate-a"].oscTargetId, "heron:plate:main");
   assert.equal(reconciled.resolutions["plate-a"].sendable, true);
-  assert.equal(reconciled.score.mesostructure.A.oscSnapshots["plate-a"].params.Decay, 0.5);
+  assert.equal(reconciled.score.mesostructure.A.oscLayers["plate-a"].clipId, "plate-opening");
+  assert.equal(reconciled.score.oscClips["plate-opening"].params.Decay, 0.5);
 
   const unchanged = await requestJson(context, "POST", "/osc/assignments/reconcile");
   assert.equal(unchanged.changed, false);
@@ -629,36 +630,44 @@ test("structure routes reject stale expected structure revisions", async () => {
   assert.match(rejected.body, /"currentStructureRevision":1/);
 });
 
-test("block OSC snapshot routes create, list, replace, and delete semantic state", async () => {
+test("OSC clip and block layer routes create, reuse, replace, and safely delete state", async () => {
   const context = createRouteContext();
+  await requestJson(context, "PUT", "/osc/assignments/list-a", { app: "listsequencer", deviceId: "finch" });
 
-  const saved = await requestJson(context, "PUT", "/mesostructure/F/osc-snapshots/list-a", {
-    expectedScoreRevision: 0,
-    expectedStructureRevision: 0,
+  const clipped = await requestJson(context, "POST", "/osc/clips", {
+    clipId: "list-opening",
     schemaVersion: 1,
     app: "listsequencer",
     params: { ClockRate: 2, Clock: 0 },
     inputPorts: { Steps: [1, 0, 1, 0] }
   });
-  assert.equal(saved.mesostructure.F.oscSnapshots["list-a"].params.Clock, 0);
-  assert.equal(saved.structureRevision, 1);
+  assert.equal(clipped.oscClips["list-opening"].params.Clock, 0);
+  const saved = await requestJson(context, "PUT", "/mesostructure/F/osc-layers/list-a", { clipId: "list-opening" });
+  assert.equal(saved.mesostructure.F.oscLayers["list-a"].clipId, "list-opening");
 
-  const snapshots = await requestJson(context, "GET", "/mesostructure/F/osc-snapshots");
-  assert.deepEqual(snapshots["list-a"].inputPorts.Steps, [1, 0, 1, 0]);
+  const clips = await requestJson(context, "GET", "/osc/clips");
+  assert.deepEqual(clips["list-opening"].inputPorts.Steps, [1, 0, 1, 0]);
+  const layers = await requestJson(context, "GET", "/mesostructure/F/osc-layers");
+  assert.equal(layers["list-a"].clipId, "list-opening");
 
-  const stale = await request(context, "PUT", "/mesostructure/F/osc-snapshots/list-a", {
+  const stale = await request(context, "PUT", "/osc/clips/list-opening", {
     expectedStructureRevision: 0,
     app: "listsequencer",
     params: { Clock: 1 },
     inputPorts: {}
   });
   assert.equal(stale.status, 400);
-  assert.match(stale.body, /stale structure revision 0; current structure revision is 1/);
+  assert.match(stale.body, /stale structure revision 0; current structure revision is/);
 
-  const removed = await requestJson(context, "DELETE", "/mesostructure/F/osc-snapshots/list-a?expectedStructureRevision=1");
-  assert.deepEqual(removed.mesostructure.F.oscSnapshots, {});
+  const referenced = await request(context, "DELETE", "/osc/clips/list-opening");
+  assert.equal(referenced.status, 400);
+  assert.match(referenced.body, /assigned in F\/list-a/);
+  const removed = await requestJson(context, "DELETE", "/mesostructure/F/osc-layers/list-a");
+  assert.deepEqual(removed.mesostructure.F.oscLayers, {});
+  const clipRemoved = await requestJson(context, "DELETE", "/osc/clips/list-opening");
+  assert.deepEqual(clipRemoved.oscClips, {});
 
-  const missing = await request(context, "GET", "/mesostructure/missing/osc-snapshots");
+  const missing = await request(context, "GET", "/mesostructure/missing/osc-layers");
   assert.equal(missing.status, 404);
 });
 
@@ -706,19 +715,19 @@ test("block OSC recall route dry-runs and dispatches ordered semantic writes wit
     deviceId: "raven",
     oscTargetId: "raven:plate:main"
   });
-  await requestJson(context, "PUT", "/mesostructure/F/osc-snapshots/list-a", {
+  await createOscClipLayer(context, "F", "list-a", "list-opening", {
     app: "listsequencer",
     params: { Clock: 0, GateTime: 0.45, FutureMode: 1 },
     inputPorts: { Steps: [1, 0, 1, 0], rtz: [1] }
   });
-  await requestJson(context, "PUT", "/mesostructure/F/osc-snapshots/plate-offline", {
+  await createOscClipLayer(context, "F", "plate-offline", "plate-offline-state", {
     app: "plate",
     params: { Decay: 0.5 },
     inputPorts: {}
   });
   const versionBeforeRecall = context.store.getScore().version;
 
-  const dryRun = await requestJson(context, "POST", "/mesostructure/F/osc-snapshots/recall", {
+  const dryRun = await requestJson(context, "POST", "/mesostructure/F/osc-layers/recall", {
     roles: ["list-a"],
     dryRun: true
   });
@@ -730,7 +739,7 @@ test("block OSC recall route dry-runs and dispatches ordered semantic writes wit
   assert.deepEqual(dryRun.roles[0].excludedControls, [{ kind: "inputPort", name: "rtz", reason: "momentary-control" }]);
   assert.deepEqual(sends, []);
 
-  const recalled = await requestJson(context, "POST", "/mesostructure/F/osc-snapshots/recall", {});
+  const recalled = await requestJson(context, "POST", "/mesostructure/F/osc-layers/recall", {});
   assert.equal(recalled.ok, true);
   assert.equal(recalled.attemptedWriteCount, 3);
   assert.equal(recalled.skippedRoleCount, 1);
@@ -742,7 +751,7 @@ test("block OSC recall route dry-runs and dispatches ordered semantic writes wit
   ]);
   assert.equal(context.store.getScore().version, versionBeforeRecall);
 
-  const blockStatus = await requestJson(context, "GET", "/mesostructure/F/osc-snapshots/recall");
+  const blockStatus = await requestJson(context, "GET", "/mesostructure/F/osc-layers/recall");
   assert.equal(blockStatus.last.id, recalled.id);
   assert.equal(blockStatus.history.length, 2);
   const globalStatus = await requestJson(context, "GET", "/osc/recalls");
@@ -752,11 +761,11 @@ test("block OSC recall route dry-runs and dispatches ordered semantic writes wit
 
 test("block OSC recall validates role filters and unknown blocks", async () => {
   const context = createRouteContext();
-  const invalidRoles = await request(context, "POST", "/mesostructure/A/osc-snapshots/recall", { roles: "all", dryRun: true });
+  const invalidRoles = await request(context, "POST", "/mesostructure/A/osc-layers/recall", { roles: "all", dryRun: true });
   assert.equal(invalidRoles.status, 400);
   assert.match(invalidRoles.body, /roles must be an array/);
 
-  const missingBlock = await request(context, "POST", "/mesostructure/missing/osc-snapshots/recall", { dryRun: true });
+  const missingBlock = await request(context, "POST", "/mesostructure/missing/osc-layers/recall", { dryRun: true });
   assert.equal(missingBlock.status, 400);
   assert.match(missingBlock.body, /unknown mesostructural block 'missing'/);
 });
@@ -797,7 +806,7 @@ test("active block route changes automatically recall snapshots once and expose 
     deviceId: "heron",
     oscTargetId: "heron:listsequencer:main"
   });
-  await requestJson(context, "PUT", "/mesostructure/B/osc-snapshots/list-a", {
+  await createOscClipLayer(context, "B", "list-a", "list-b-state", {
     app: "listsequencer",
     params: { GateTime: 0.25, Clock: 1 },
     inputPorts: { Steps: [1, 0, 1, 0] }
@@ -1680,7 +1689,7 @@ test("admin backup downloads and restore replaces score snapshot", async () => {
   const context = createRouteContext();
   await requestJson(context, "POST", "/voices/player-1/notes", [{ pitch: 60 }]);
   await requestJson(context, "PUT", "/osc/assignments/list-a", { app: "listsequencer", deviceId: "finch" });
-  await requestJson(context, "PUT", "/mesostructure/F/osc-snapshots/list-a", {
+  await createOscClipLayer(context, "F", "list-a", "list-opening", {
     app: "listsequencer",
     params: { Clock: 1 },
     inputPorts: { Steps: [1, 0, 1, 0] }
@@ -1691,14 +1700,15 @@ test("admin backup downloads and restore replaces score snapshot", async () => {
   assert.match(backup.headers["Content-Disposition"], /shadowscore-berklee-b51/);
   const snapshot = JSON.parse(backup.body);
   assert.equal(snapshot.oscAssignments["list-a"].deviceId, "finch");
-  assert.deepEqual(snapshot.mesostructure.F.oscSnapshots["list-a"].inputPorts.Steps, [1, 0, 1, 0]);
+  assert.equal(snapshot.mesostructure.F.oscLayers["list-a"].clipId, "list-opening");
+  assert.deepEqual(snapshot.oscClips["list-opening"].inputPorts.Steps, [1, 0, 1, 0]);
   snapshot.voices["player-1"].notes = [{ pitch: 72 }];
 
   const restored = await requestJson(context, "POST", "/admin/restore", snapshot);
   assert.deepEqual(restored.voices["player-1"].notes, [{ pitch: 72 }]);
   assert.equal(restored.ensembleId, "berklee-b51");
   assert.equal(restored.oscAssignments["list-a"].deviceId, "finch");
-  assert.equal(restored.mesostructure.F.oscSnapshots["list-a"].params.Clock, 1);
+  assert.equal(restored.oscClips["list-opening"].params.Clock, 1);
   assert.equal(restored.version > snapshot.version, true);
 });
 
@@ -1802,7 +1812,7 @@ test("hardware registration automatically reconciles returning OSC control roles
     deviceId: "heron",
     oscTargetId: "heron:plate:old"
   });
-  await requestJson(context, "PUT", "/mesostructure/A/osc-snapshots/plate-a", {
+  await createOscClipLayer(context, "A", "plate-a", "plate-opening", {
     app: "plate",
     params: { Decay: 0.65 },
     inputPorts: {}
@@ -1825,7 +1835,7 @@ test("hardware registration automatically reconciles returning OSC control roles
 
   assert.equal(registered.oscAssignmentReconciliation.changed, true);
   assert.equal(registered.oscAssignmentReconciliation.assignments["plate-a"].oscTargetId, "heron:plate:main");
-  assert.equal(registered.oscAssignmentReconciliation.score.mesostructure.A.oscSnapshots["plate-a"].params.Decay, 0.65);
+  assert.equal(registered.oscAssignmentReconciliation.score.oscClips["plate-opening"].params.Decay, 0.65);
 });
 
 test("RNBO targets route exposes resend queue and per-target commit status", async () => {
@@ -3872,6 +3882,11 @@ function createRouteContext(options = {}) {
     config,
     runtime: options.runtime ?? {}
   };
+}
+
+async function createOscClipLayer(context, blockId, roleId, clipId, clip) {
+  await requestJson(context, "POST", "/osc/clips", { clipId, ...clip });
+  return requestJson(context, "PUT", `/mesostructure/${encodeURIComponent(blockId)}/osc-layers/${encodeURIComponent(roleId)}`, { clipId });
 }
 
 async function requestJson(context, method, url, body) {

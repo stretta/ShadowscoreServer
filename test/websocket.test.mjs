@@ -140,7 +140,7 @@ test("collaboration can remove mesostructural blocks", () => {
   assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack"]);
 });
 
-test("collaboration can manage OSC assignments and block snapshots with explicit events", () => {
+test("collaboration can manage OSC assignments, clips, and block layers with explicit events", () => {
   const { hub, store } = createContext();
   const client = createClient("client-a");
   hub.addClient(client);
@@ -153,26 +153,36 @@ test("collaboration can manage OSC assignments and block snapshots with explicit
     assignment: { app: "listsequencer", deviceId: "finch" }
   });
   client.onMessage({
-    type: "mesostructure.oscSnapshot.replace",
-    requestId: "req-snapshot",
-    blockId: "F",
-    roleId: "list-a",
-    snapshot: {
+    type: "osc.clip.add",
+    requestId: "req-clip",
+    clipId: "list-opening",
+    clip: {
       app: "listsequencer",
       params: { Clock: 1 },
       inputPorts: { Steps: [1, 0, 1, 0] }
     }
   });
+  client.onMessage({
+    type: "mesostructure.oscLayer.assign",
+    requestId: "req-layer",
+    blockId: "F",
+    roleId: "list-a",
+    clipId: "list-opening"
+  });
 
   assert.equal(store.getScore().oscAssignments["list-a"].deviceId, "finch");
-  assert.deepEqual(store.getScore().mesostructure.F.oscSnapshots["list-a"].inputPorts.Steps, [1, 0, 1, 0]);
-  assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack", "score.changed", "ack"]);
+  assert.deepEqual(store.getScore().oscClips["list-opening"].inputPorts.Steps, [1, 0, 1, 0]);
+  assert.equal(store.getScore().mesostructure.F.oscLayers["list-a"].clipId, "list-opening");
+  assert.deepEqual(client.messages.map((message) => message.type), ["score.changed", "ack", "score.changed", "ack", "score.changed", "ack"]);
   assert.equal(client.messages[0].event.type, "osc.assignment.replaced");
-  assert.equal(client.messages[2].event.type, "mesostructure.oscSnapshot.replaced");
+  assert.equal(client.messages[2].event.type, "osc.clip.added");
+  assert.equal(client.messages[4].event.type, "mesostructure.oscLayer.assigned");
 
-  client.onMessage({ type: "mesostructure.oscSnapshot.remove", requestId: "req-remove-snapshot", blockId: "F", roleId: "list-a" });
+  client.onMessage({ type: "mesostructure.oscLayer.remove", requestId: "req-remove-layer", blockId: "F", roleId: "list-a" });
+  client.onMessage({ type: "osc.clip.remove", requestId: "req-remove-clip", clipId: "list-opening" });
   client.onMessage({ type: "osc.assignment.remove", requestId: "req-remove-assignment", roleId: "list-a" });
-  assert.deepEqual(store.getScore().mesostructure.F.oscSnapshots, {});
+  assert.deepEqual(store.getScore().mesostructure.F.oscLayers, {});
+  assert.deepEqual(store.getScore().oscClips, {});
   assert.deepEqual(store.getScore().oscAssignments, {});
 });
 

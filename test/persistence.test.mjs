@@ -90,7 +90,7 @@ test("store persistence saves debounced changes on flush", async () => {
   assert.equal(saved.context.scale.scale_name, "Aeolian");
 });
 
-test("OSC assignments and block snapshots survive persistence and old scores normalize empty collections", async () => {
+test("OSC assignments, clips, and layers survive persistence", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-persist-"));
   const config = configFor(directory, { debounceMs: 10000 });
   const fallback = createInitialScore(config);
@@ -98,22 +98,26 @@ test("OSC assignments and block snapshots survive persistence and old scores nor
   const persistence = createScorePersistence(store, config);
 
   store.replaceOscAssignment("list-a", { app: "listsequencer", deviceId: "finch", oscTargetId: "finch:listsequencer:main" });
-  store.replaceOscSnapshot("F", "list-a", {
+  store.addOscClip("list-opening", {
     app: "listsequencer",
     params: { Clock: 1 },
     inputPorts: { Steps: [1, 0, 1, 0] }
   });
+  store.assignOscLayer("F", "list-a", "list-opening");
   await persistence.flush();
 
   const loaded = await loadPersistedScore(config, fallback);
   assert.equal(loaded.oscAssignments["list-a"].deviceId, "finch");
-  assert.deepEqual(loaded.mesostructure.F.oscSnapshots["list-a"].inputPorts.Steps, [1, 0, 1, 0]);
+  assert.equal(loaded.mesostructure.F.oscLayers["list-a"].clipId, "list-opening");
+  assert.deepEqual(loaded.oscClips["list-opening"].inputPorts.Steps, [1, 0, 1, 0]);
 
   const legacy = structuredClone(fallback);
   delete legacy.oscAssignments;
-  for (const block of Object.values(legacy.mesostructure)) delete block.oscSnapshots;
+  delete legacy.oscClips;
+  for (const block of Object.values(legacy.mesostructure)) delete block.oscLayers;
   assert.deepEqual(reconcileScore(config, fallback, legacy).oscAssignments, {});
-  assert.deepEqual(reconcileScore(config, fallback, legacy).mesostructure.A.oscSnapshots, {});
+  assert.deepEqual(reconcileScore(config, fallback, legacy).oscClips, {});
+  assert.deepEqual(reconcileScore(config, fallback, legacy).mesostructure.A.oscLayers, {});
 });
 
 function configFor(directory, persistence = {}) {

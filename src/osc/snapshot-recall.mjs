@@ -55,12 +55,12 @@ export function compileOscBlockRecall(score, blockId, targets, options = {}) {
   if (!block) {
     throw new Error(`unknown mesostructural block '${blockId}'`);
   }
-  const snapshots = block.oscSnapshots ?? {};
-  const roleIds = normalizeRequestedRoles(options.roles, snapshots);
+  const layers = block.oscLayers ?? {};
+  const roleIds = normalizeRequestedRoles(options.roles, layers);
   return {
     blockId,
     roleIds,
-    roles: roleIds.map((roleId) => compileRole(score, blockId, roleId, snapshots[roleId], targets))
+    roles: roleIds.map((roleId) => compileRole(score, blockId, roleId, layers[roleId], targets))
   };
 }
 
@@ -148,29 +148,35 @@ export function createOscSnapshotRecallService(options = {}) {
   };
 }
 
-function compileRole(score, blockId, roleId, snapshot, targets) {
+function compileRole(score, blockId, roleId, layer, targets) {
   const assignment = score.oscAssignments?.[roleId] ?? {};
-  if (!snapshot) {
-    return skippedRole(blockId, roleId, assignment, "missing-snapshot", "No snapshot is saved for this role.");
+  if (!layer?.clipId) {
+    return skippedRole(blockId, roleId, assignment, "missing-layer", "No OSC clip is assigned to this role in the block.");
+  }
+  const clip = score.oscClips?.[layer.clipId];
+  if (!clip) {
+    return { ...skippedRole(blockId, roleId, assignment, "missing-clip", `OSC clip '${layer.clipId}' does not exist.`), clipId: layer.clipId };
   }
   const resolution = resolveOscAssignment(roleId, assignment, targets);
   if (resolution.status !== "online" || !resolution.target) {
-    return skippedRole(blockId, roleId, assignment, resolution.status, resolution.message, resolution);
+    return { ...skippedRole(blockId, roleId, assignment, resolution.status, resolution.message, resolution), clipId: layer.clipId };
   }
-  if (!targetSupportsApp(resolution.target, snapshot.app)) {
+  if (!targetSupportsApp(resolution.target, clip.app)) {
     return skippedRole(blockId, roleId, assignment, "app-mismatch",
-      `Resolved target '${resolution.target.id}' does not support snapshot app '${snapshot.app}'.`, resolution);
+      `Resolved target '${resolution.target.id}' does not support OSC clip app '${clip.app}'.`, resolution);
   }
-  const compiled = compileOscSnapshot(snapshot, resolution.target, { blockId, roleId, targetId: resolution.target.id });
+  const compiled = compileOscSnapshot(clip, resolution.target, { blockId, roleId, targetId: resolution.target.id });
   if (compiled.writes.length === 0) {
     return {
       ...skippedRole(blockId, roleId, assignment, "no-supported-controls", "No saved controls are supported by the resolved target.", resolution),
+      clipId: layer.clipId,
       ...compiled
     };
   }
   return {
     blockId,
     roleId,
+    clipId: layer.clipId,
     targetId: resolution.target.id,
     routingStatus: resolution.status,
     target: resolution.target,

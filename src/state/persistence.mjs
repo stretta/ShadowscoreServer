@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { normalizeOscSnapshot } from "../osc/snapshot-contract.mjs";
+import { normalizeOscClip } from "../osc/snapshot-contract.mjs";
 
 export async function loadPersistedScore(config, fallbackScore) {
   if (!config.persistence?.enabled) {
@@ -182,6 +182,7 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
     structureState: normalizePersistedStructureState(persistedScore.structureState ?? fallbackScore.structureState ?? {}, persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}, persistedScore.macrostructure ?? fallbackScore.macrostructure ?? {}),
     assignments,
     oscAssignments: normalizePersistedOscAssignments(persistedScore.oscAssignments ?? {}),
+    oscClips: normalizePersistedOscClips(persistedScore.oscClips ?? {}),
     voices
   };
 }
@@ -234,6 +235,9 @@ export function assertScoreShape(score) {
   if (score.oscAssignments !== undefined && !isPlainObject(score.oscAssignments)) {
     throw new Error("score.oscAssignments must be an object");
   }
+  if (score.oscClips !== undefined && !isPlainObject(score.oscClips)) {
+    throw new Error("score.oscClips must be an object");
+  }
   for (const [voiceId, assignment] of Object.entries(score.assignments ?? {})) {
     if (!isPlainObject(assignment)) {
       throw new Error(`assignment ${voiceId} must be an object`);
@@ -278,15 +282,35 @@ export function assertScoreShape(score) {
       throw new Error(`OSC assignment ${roleId} must be an object`);
     }
   }
+  for (const [clipId, clip] of Object.entries(score.oscClips ?? {})) {
+    try {
+      normalizeOscClip(clip);
+    } catch (error) {
+      throw new Error(`OSC clip ${clipId}: ${messageForError(error)}`);
+    }
+  }
   for (const [blockId, block] of Object.entries(score.mesostructure ?? {})) {
     if (!isPlainObject(block)) {
       throw new Error(`mesostructural block ${blockId} must be an object`);
     }
-    if (block.oscSnapshots !== undefined && !isPlainObject(block.oscSnapshots)) {
-      throw new Error(`mesostructural block ${blockId}.oscSnapshots must be an object`);
+    if (block.oscLayers !== undefined && !isPlainObject(block.oscLayers)) {
+      throw new Error(`mesostructural block ${blockId}.oscLayers must be an object`);
     }
-    for (const snapshot of Object.values(block.oscSnapshots ?? {})) {
-      normalizeOscSnapshot(snapshot);
+    for (const [roleId, layer] of Object.entries(block.oscLayers ?? {})) {
+      if (!isPlainObject(layer) || typeof layer.clipId !== "string" || !layer.clipId.trim()) {
+        throw new Error(`mesostructural block ${blockId}.oscLayers.${roleId} must contain clipId`);
+      }
+      if (!score.oscAssignments?.[roleId]) {
+        throw new Error(`mesostructural block ${blockId}.oscLayers.${roleId} references unknown OSC role`);
+      }
+      const clip = score.oscClips?.[layer.clipId];
+      if (!clip) {
+        throw new Error(`mesostructural block ${blockId}.oscLayers.${roleId} references unknown OSC clip '${layer.clipId}'`);
+      }
+      const roleApp = cleanToken(score.oscAssignments[roleId].app);
+      if (roleApp && roleApp !== clip.app) {
+        throw new Error(`mesostructural block ${blockId}.oscLayers.${roleId} has incompatible role and clip apps`);
+      }
     }
   }
 }
@@ -369,13 +393,20 @@ function normalizePersistedMesostructure(mesostructure) {
   return Object.fromEntries(Object.entries(mesostructure).map(([blockId, block]) => [
     blockId,
     {
-      ...structuredClone(block),
-      oscSnapshots: Object.fromEntries(Object.entries(block?.oscSnapshots ?? {}).map(([roleId, snapshot]) => [
+      duration: isPlainObject(block?.duration) ? structuredClone(block.duration) : {},
+      scale: isPlainObject(block?.scale) ? structuredClone(block.scale) : {},
+      players: isPlainObject(block?.players) ? structuredClone(block.players) : {},
+      oscLayers: Object.fromEntries(Object.entries(block?.oscLayers ?? {}).map(([roleId, layer]) => [
         roleId,
-        normalizeOscSnapshot(snapshot)
+        { clipId: stringField(layer?.clipId) }
       ]))
     }
   ]));
+}
+
+function normalizePersistedOscClips(clips) {
+  if (!isPlainObject(clips)) return {};
+  return Object.fromEntries(Object.entries(clips).map(([clipId, clip]) => [clipId, normalizeOscClip(clip)]));
 }
 
 function normalizePersistedOscAssignments(assignments) {

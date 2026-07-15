@@ -74,7 +74,8 @@ test("block and snapshot edits do not recall when the active entry is unchanged"
 
   store.replaceMesoBlock("A", { duration: { bars: 8 }, players: {} });
   store.replaceOscAssignment("list-a", { app: "listsequencer", deviceId: "heron" });
-  store.replaceOscSnapshot("A", "list-a", { app: "listsequencer", params: { Clock: 0 }, inputPorts: {} });
+  store.addOscClip("list-a-opening", { app: "listsequencer", params: { Clock: 0 }, inputPorts: {} });
+  store.assignOscLayer("A", "list-a", "list-a-opening");
   await automatic.flush();
 
   assert.deepEqual(calls, []);

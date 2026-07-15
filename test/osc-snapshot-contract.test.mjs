@@ -4,7 +4,8 @@ import test from "node:test";
 
 import {
   OSC_ASSIGNMENTS_COLLECTION,
-  OSC_SNAPSHOTS_COLLECTION,
+  OSC_CLIPS_COLLECTION,
+  OSC_LAYERS_COLLECTION,
   OSC_SNAPSHOT_SCHEMA_VERSION,
   normalizeOscSnapshot,
   snapshotControlDisposition
@@ -14,7 +15,8 @@ const fixtureUrl = new URL("./fixtures/osc-snapshot-contract.json", import.meta.
 
 test("Phase 1 collection and schema names are stable", () => {
   assert.equal(OSC_ASSIGNMENTS_COLLECTION, "oscAssignments");
-  assert.equal(OSC_SNAPSHOTS_COLLECTION, "oscSnapshots");
+  assert.equal(OSC_CLIPS_COLLECTION, "oscClips");
+  assert.equal(OSC_LAYERS_COLLECTION, "oscLayers");
   assert.equal(OSC_SNAPSHOT_SCHEMA_VERSION, 1);
 });
 

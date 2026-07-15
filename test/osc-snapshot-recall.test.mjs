@@ -213,8 +213,10 @@ test("recall service keeps bounded diagnostic history and block filters", async 
 });
 
 function scoreWithRoles(snapshots, assignments) {
+  const oscClips = Object.fromEntries(Object.entries(snapshots).map(([roleId, document]) => [`clip-${roleId}`, { name: roleId, ...document, capture: {} }]));
   return {
-    mesostructure: { A: { duration: { bars: 4 }, players: {}, oscSnapshots: snapshots } },
+    mesostructure: { A: { duration: { bars: 4 }, players: {}, oscLayers: Object.fromEntries(Object.keys(snapshots).map((roleId) => [roleId, { clipId: `clip-${roleId}` }])) } },
+    oscClips,
     oscAssignments: assignments
   };
 }

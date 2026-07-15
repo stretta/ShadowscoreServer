@@ -219,11 +219,14 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /mesostructure/:blockId`: add or replace one mesostructural block.
 - `POST /mesostructure/:blockId/duplicate`: duplicate one mesostructural block, using `blockId` or `id` in the request body for the new block ID.
 - `DELETE /mesostructure/:blockId`: remove one mesostructural block and delete its appearances from the macro chain.
-- `GET /mesostructure/:blockId/osc-snapshots`: list the semantic OSC snapshots owned by one block.
-- `PUT /mesostructure/:blockId/osc-snapshots/:roleId`: create or replace one role snapshot using `schemaVersion`, `app`, numeric `params`, and numeric-list `inputPorts`.
-- `DELETE /mesostructure/:blockId/osc-snapshots/:roleId`: remove one saved role snapshot from a block.
-- `POST /mesostructure/:blockId/osc-snapshots/recall`: compile and best-effort dispatch a block's saved semantic OSC state. Optional `roles` scopes logical roles and `dryRun` returns the complete plan without sending.
-- `GET /mesostructure/:blockId/osc-snapshots/recall`: bounded recall diagnostics for one block.
+- `GET /osc/clips`: list reusable, composition-owned OSC clips.
+- `POST /osc/clips`: create an OSC clip with a stable `clipId` and semantic state.
+- `GET|PUT|DELETE /osc/clips/:clipId`: read, replace, or remove one OSC clip. Referenced clips cannot be removed.
+- `GET /mesostructure/:blockId/osc-layers`: list the block's logical-role to OSC-clip assignments.
+- `PUT /mesostructure/:blockId/osc-layers/:roleId`: assign an existing compatible `clipId` to a role in the block.
+- `DELETE /mesostructure/:blockId/osc-layers/:roleId`: remove one block layer without deleting its OSC clip.
+- `POST /mesostructure/:blockId/osc-layers/recall`: compile and best-effort dispatch the clips assigned to a block. Optional `roles` scopes logical roles and `dryRun` returns the complete plan without sending.
+- `GET /mesostructure/:blockId/osc-layers/recall`: bounded recall diagnostics for one block.
 - `POST /macrostructure`: merge macrostructure fields such as `{ "tempo": 120, "blocks": ["A", "B"] }`; use `?replace=1` to replace the macrostructure document.
 - `POST /structure/playhead`: select the active mesostructural block.
 - `POST /macrostructure/advance`: advance the active block to the next macro chain entry.
@@ -277,8 +280,8 @@ Client command messages are JSON objects:
 - `context.update`: update shared context with `context`, optional `replace`, and optional `expectedVersion`.
 - `mesostructure.block.replace`: add or replace one mesostructural block with `blockId` and `block`.
 - `mesostructure.block.remove`: remove one mesostructural block with `blockId`.
-- `mesostructure.oscSnapshot.replace`: create or replace block-owned OSC state with `blockId`, `roleId`, and `snapshot`.
-- `mesostructure.oscSnapshot.remove`: remove block-owned OSC state with `blockId` and `roleId`.
+- `osc.clip.add`, `osc.clip.replace`, `osc.clip.remove`: manage reusable OSC clips.
+- `mesostructure.oscLayer.assign`, `mesostructure.oscLayer.remove`: manage block role-to-clip layers.
 - `macrostructure.update`: update macrostructure with `macrostructure`, optional `replace`, and optional `expectedVersion`.
 - `structure.playhead.update`: select the active mesostructural block with `structureState` or `playhead`.
 - `macrostructure.advance`: advance the active block to the next macro chain entry.

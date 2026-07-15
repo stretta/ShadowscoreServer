@@ -1,6 +1,25 @@
 export const OSC_ASSIGNMENTS_COLLECTION = "oscAssignments";
-export const OSC_SNAPSHOTS_COLLECTION = "oscSnapshots";
+export const OSC_CLIPS_COLLECTION = "oscClips";
+export const OSC_LAYERS_COLLECTION = "oscLayers";
 export const OSC_SNAPSHOT_SCHEMA_VERSION = 1;
+
+export function normalizeOscClip(document) {
+  if (!isPlainObject(document)) {
+    throw new Error("OSC clip must be an object");
+  }
+  const snapshot = normalizeOscSnapshot({
+    schemaVersion: document.schemaVersion,
+    app: document.app,
+    params: document.params,
+    inputPorts: document.inputPorts
+  });
+  rejectUnknownFields(document, new Set(["name", "schemaVersion", "app", "params", "inputPorts", "capture"]), "OSC clip");
+  return {
+    name: stringField(document.name),
+    ...snapshot,
+    capture: normalizeCapture(document.capture)
+  };
+}
 
 const MOMENTARY_INPUT_PORTS = new Set([
   "get",
@@ -77,6 +96,17 @@ function normalizeInputPorts(document) {
     }
     return [semanticName, values.map(Number)];
   }));
+}
+
+function normalizeCapture(document) {
+  if (document === undefined) return {};
+  if (!isPlainObject(document)) throw new Error("OSC clip capture must be an object");
+  rejectUnknownFields(document, new Set(["deviceId", "targetId", "capturedAt"]), "OSC clip capture");
+  return {
+    deviceId: stringField(document.deviceId),
+    targetId: stringField(document.targetId),
+    capturedAt: stringField(document.capturedAt)
+  };
 }
 
 function normalizeControlName(value, label) {

@@ -357,6 +357,12 @@ deprecated routes.
 
 ### Phase A: Replace The Prototype Schema
 
+Status: implemented in the first replacement-schema pass. The score now owns
+top-level `oscClips`; blocks own `oscLayers`; prototype mutations, routes, and
+collaboration events have been removed; persistence and restore reject broken
+layer references; and recall resolves layers through clips. The full local test
+suite passes against the replacement schema.
+
 - Add top-level `oscClips: {}` to initial score creation and normalization.
 - Replace every block's `oscSnapshots` collection with `oscLayers: {}`.
 - Remove `replaceOscSnapshot` / `removeOscSnapshot` store mutations and add
@@ -373,6 +379,11 @@ contains `oscClips` and per-block `oscLayers`, and the full suite passes against
 the replacement schema.
 
 ### Phase B: OSC Clip And Layer APIs
+
+Status: started. The initial clip CRUD and block-layer HTTP/WebSocket surfaces,
+app compatibility checks, referenced-clip deletion guard, and reference-aware
+tests landed as part of the Phase A replacement. Reference inspection and any
+remaining UI-facing API refinements stay in this phase.
 
 - Implement OSC clip list/create/read/replace/delete routes.
 - Implement block OSC-layer list/assign/remove routes.

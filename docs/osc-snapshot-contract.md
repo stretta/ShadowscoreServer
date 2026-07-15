@@ -1,12 +1,13 @@
 # OSC Snapshot Contract
 
-Status: Phase 1 contract, schema version 1.
+Status: OSC clip payload contract, schema version 1.
 
 ## Durable Names And Identity
 
 - The top-level logical-role assignment collection is `oscAssignments`.
-- Each mesostructural block stores role-keyed state in `oscSnapshots`.
-- A snapshot uses `schemaVersion: 1` and an `app` semantic identifier.
+- Reusable OSC state lives in the top-level `oscClips` collection.
+- Each mesostructural block maps roles to clip ids in `oscLayers`.
+- An OSC clip uses `schemaVersion: 1` and an `app` semantic identifier.
 - Snapshot keys are semantic RNBO parameter or message-inport names. OSC paths,
   hosts, ports, RNBO instance numbers, and `oscTargetId` values are never stored
   in a snapshot.
@@ -20,16 +21,21 @@ compatible online targets are ambiguous and never chosen silently. A locked
 role never retargets. `ignoreRecall` does not prevent safe routing refresh, but
 the resolved role remains non-sendable for snapshot recall.
 
-The version 1 snapshot shape is deliberately small:
+The version 1 OSC clip shape is deliberately small:
 
 ```json
 {
+  "name": "List opening",
   "schemaVersion": 1,
   "app": "listsequencer",
   "params": { "ClockRate": 2, "Clock": 1 },
-  "inputPorts": { "Steps": [1, 0, 1, 0] }
+  "inputPorts": { "Steps": [1, 0, 1, 0] },
+  "capture": {}
 }
 ```
+
+A block layer contains only `{ "clipId": "list-opening" }`. Live routing
+continues to come from the corresponding logical role in `oscAssignments`.
 
 Parameter values are finite numbers. RNBO enum parameters are stored as their
 zero-based option index; at recall time the compiler resolves that index

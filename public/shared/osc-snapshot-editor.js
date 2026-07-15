@@ -197,9 +197,15 @@ export function createOscSnapshotEditorClient(options) {
     const sourceId = elements.sourceSelect?.value;
     const source = targets.find((target) => target.id === sourceId);
     const written = Boolean(layerClip);
+    const writeAvailability = oscWriteAvailability({
+      running: playback?.running,
+      chase,
+      blockId,
+      playingBlockId: playingBlockId()
+    });
     elements.captureButton.textContent = oscWriteActionLabel({ blockId, written });
     elements.recallButton.textContent = `Recall ${blockId || "—"} Now`;
-    elements.captureButton.disabled = Boolean(playback?.running) || !(blockId && roleId && sourceId);
+    elements.captureButton.disabled = !writeAvailability.allowed || !(blockId && roleId && sourceId);
     elements.loadButton.disabled = !layerClip;
     elements.assignButton.disabled = !(blockId && roleId && selected);
     elements.duplicateButton.disabled = !(selected && elements.clipIdInput?.value.trim());
@@ -209,13 +215,14 @@ export function createOscSnapshotEditorClient(options) {
     if (!blockId) return setState("No mesostructural blocks available");
     if (!sourceId) return setState(`No online ${options.roleLabel || app} instance is focused`);
     if (!roleId) return setState(`${source?.label || sourceId} is not mapped to the score; assign it in Admin`);
-    if (playback?.running) return setState(`PLAYING ${playingBlockId()}. Stop playback before writing ${blockId}; recall may otherwise overwrite live edits.`);
+    if (!writeAvailability.allowed) return setState(writeAvailability.reason);
     const routing = resolution?.status ? ` · role ${resolution.status}` : "";
-    if (!layerClip) return setState(`${blockId} is Unspecified for ${source?.label || assignment?.label || roleId}. Playback leaves this instance unchanged.${routing}`);
+    const playbackNote = playback?.running ? ` · PLAYING ${playingBlockId()}; writing affects ${blockId}'s next entry` : "";
+    if (!layerClip) return setState(`${blockId} is Unspecified for ${source?.label || assignment?.label || roleId}. Playback leaves this instance unchanged.${routing}${playbackNote}`);
     const capture = oscClipCaptureSummary(layerClip);
     try {
       const dirty = !sameOscSnapshot(options.serializeDraft(), layerClip);
-      setState(`${blockId} is Written for ${source?.label || assignment?.label || roleId}${routing}${capture ? ` · ${capture}` : ""}${dirty ? " · live state differs" : ""}`);
+      setState(`${blockId} is Written for ${source?.label || assignment?.label || roleId}${routing}${capture ? ` · ${capture}` : ""}${dirty ? " · live state differs" : ""}${playbackNote}`);
     } catch (error) {
       setState(`Draft invalid: ${error.message}`);
     }
@@ -223,8 +230,14 @@ export function createOscSnapshotEditorClient(options) {
 
   async function capture() {
     await refreshPlayback();
-    if (playback?.running) throw new Error(`Stop playback before writing ${elements.blockSelect.value}`);
     const blockId = elements.blockSelect.value;
+    const writeAvailability = oscWriteAvailability({
+      running: playback?.running,
+      chase,
+      blockId,
+      playingBlockId: playingBlockId()
+    });
+    if (!writeAvailability.allowed) throw new Error(writeAvailability.reason);
     const roleId = synchronizeFocusedRole();
     const targetId = elements.sourceSelect.value;
     const layer = selectedLayer();
@@ -334,7 +347,7 @@ export function createOscSnapshotEditorClient(options) {
       await loadLastRecall();
       return;
     }
-    if (previousRunning !== Boolean(playback?.running)) renderStatus();
+    if (previousRunning !== Boolean(playback?.running) || previousPlaying !== playingBlockId()) renderStatus();
     renderPlayback();
   }
 
@@ -483,6 +496,19 @@ export function oscBlockSlotState(score, blockId, roleId) {
 export function oscWriteActionLabel({ blockId, written } = {}) {
   if (!blockId) return "Write to —";
   return written ? `Replace ${blockId} State` : `Write to ${blockId}`;
+}
+
+export function oscWriteAvailability({ running = false, chase = false, blockId = "", playingBlockId = "" } = {}) {
+  if (!running) return { allowed: true, reason: "" };
+  if (chase) return {
+    allowed: false,
+    reason: `PLAYING ${playingBlockId || "—"}. Turn CHASE off to write another block while playback continues.`
+  };
+  if (blockId && playingBlockId && blockId === playingBlockId) return {
+    allowed: false,
+    reason: `PLAYING ${playingBlockId}. Choose a different EDITING block before writing.`
+  };
+  return { allowed: true, reason: "" };
 }
 
 function generatedClipId(blockId, roleId) {

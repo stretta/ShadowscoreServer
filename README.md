@@ -155,9 +155,12 @@ focused instance determines the score role, PLAYING and EDITING identify the
 transport and write destinations, and CHASE optionally keeps them together.
 Every structural block is shown as Written or Unspecified; unspecified state
 is a no-op during recall, distinct from explicitly written silence or empty
-lists. Checked immediate-send targets remain independent from focused-instance
-state capture. Utility tools for live OSC target volume trims and
-macro building are served at `/tools/osc-volume` and `/tools/osc-macros`.
+lists. While playback runs, CHASE disables writing; turning CHASE off permits
+writing to any block other than PLAYING, so upcoming state can be prepared
+without colliding with automatic recall. Checked immediate-send targets remain
+independent from focused-instance state capture. Utility tools for live OSC
+target volume trims and macro building are served at `/tools/osc-volume` and
+`/tools/osc-macros`.
 
 By default, the active score persists to `data/score.json`, the previous
 snapshot is kept at `data/score.previous.json`, and named saved scores are

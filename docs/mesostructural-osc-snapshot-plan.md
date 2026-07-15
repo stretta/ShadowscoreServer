@@ -458,9 +458,10 @@ EDITING blocks, optional chase, focused-instance routing, and one Written or
 Unspecified slot per structural block. A first write creates the focused
 instance's clip/layer and a later write replaces it; missing layers remain
 unspecified no-ops rather than implicit empty state. Multi-instance live sends
-remain independent, playback blocks capture to prevent recall races, and clip
-bookkeeping is available only under advanced tools. Browser and rig acceptance
-of the streamlined presentation remain pending.
+remain independent, capture safety follows the CHASE and PLAYING distinction,
+and clip bookkeeping is available only under advanced tools. Browser and rig
+acceptance of the streamlined presentation passed against the live wren and
+finch setup.
 
 - Remove **Write snapshot to** and any path that serializes the editor's local
   draft directly into score state.
@@ -468,8 +469,9 @@ of the streamlined presentation remain pending.
   logical role rather than exposing role selection in the normal workflow.
 - Present PLAYING, EDITING, and CHASE controls plus one Written or Unspecified
   state slot for every available structural block.
-- Add **Write to block** with create-versus-replace labeling and prevent writes
-  while macro playback can overwrite the live source.
+- Add **Write to block** with create-versus-replace labeling. While playback
+  runs, CHASE prevents writing; with CHASE off, permit writing only when
+  EDITING is different from PLAYING.
 - Keep **Get state from** and **Send data to** as separate live-editor features;
   checked write targets must not influence capture.
 - Keep clip browsing, assignment, and duplication available as advanced tools;

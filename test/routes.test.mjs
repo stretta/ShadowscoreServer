@@ -3441,7 +3441,8 @@ test("shared OSC snapshot editor client is served as a static asset", async () =
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /oscClockRecallNotice/);
   assert.match(response.body, /expectedStructureRevision/);
-  assert.match(response.body, /Stop playback before writing/);
+  assert.match(response.body, /Turn CHASE off to write another block/);
+  assert.match(response.body, /Choose a different EDITING block before writing/);
   assert.match(response.body, /resolveFocusedOscRole/);
   assert.match(response.body, /oscBlockSlotState/);
   assert.match(response.body, /roles: \[roleId\]/);

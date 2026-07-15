@@ -7,6 +7,7 @@ import {
   oscEditorParamValue,
   oscRecallSummary,
   oscWriteActionLabel,
+  oscWriteAvailability,
   resolveFocusedOscRole,
   sameOscSnapshot
 } from "../public/shared/osc-snapshot-editor.js";
@@ -22,6 +23,19 @@ test("shared OSC editor snapshot core normalizes parameter and list drafts", () 
     params: { "01StageValue": 64, Clock: 0 },
     inputPorts: { Steps: [1, 0, 1] }
   });
+});
+
+test("writing follows playback and chase safety rules", () => {
+  assert.deepEqual(oscWriteAvailability({ running: false, chase: true, blockId: "A", playingBlockId: "A" }), { allowed: true, reason: "" });
+  assert.deepEqual(oscWriteAvailability({ running: true, chase: true, blockId: "A", playingBlockId: "A" }), {
+    allowed: false,
+    reason: "PLAYING A. Turn CHASE off to write another block while playback continues."
+  });
+  assert.deepEqual(oscWriteAvailability({ running: true, chase: false, blockId: "A", playingBlockId: "A" }), {
+    allowed: false,
+    reason: "PLAYING A. Choose a different EDITING block before writing."
+  });
+  assert.deepEqual(oscWriteAvailability({ running: true, chase: false, blockId: "B", playingBlockId: "A" }), { allowed: true, reason: "" });
 });
 
 test("shared OSC editor snapshot core stores string enums as numeric option indexes", () => {

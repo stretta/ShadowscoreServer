@@ -4,23 +4,33 @@ export function mountOscSnapshotPanel(parent, options = {}) {
   if (!parent) throw new Error("OSC snapshot panel requires a parent element");
   const section = document.createElement("section");
   section.className = "ss-osc-snapshot-panel";
-  section.setAttribute("aria-label", "Mesostructural OSC snapshot");
+  section.setAttribute("aria-label", "Mesostructural OSC clips");
   section.innerHTML = `
-    <div class="ss-osc-snapshot-head"><div><h2>Mesostructural Snapshot</h2><div class="ss-osc-snapshot-detail">Save this form draft to the score, or recall it through the assigned logical role.</div></div><div data-snapshot-active class="ss-osc-snapshot-detail">Active block: —</div></div>
+    <div class="ss-osc-snapshot-head"><div><h2>Mesostructural OSC Clips</h2><div class="ss-osc-snapshot-detail">Capture one live instance into score state. Immediate write targets remain independent.</div></div><div data-snapshot-active class="ss-osc-snapshot-detail">Active block: —</div></div>
     <div class="ss-osc-snapshot-fields">
-      <label><span>Write snapshot to</span><select data-snapshot-block></select></label>
+      <label><span>Capture state from</span><select data-snapshot-source></select></label>
+      <label><span>Clip name</span><input data-snapshot-clip-name type="text" placeholder="Opening state"></label>
+      <label><span>Clip id</span><input data-snapshot-clip-id type="text" placeholder="list-opening"></label>
+      <label><span>Assign clip to block</span><select data-snapshot-block></select></label>
       <label><span>Logical role</span><select data-snapshot-role></select></label>
+      <label><span>OSC clip browser</span><select data-snapshot-clip></select></label>
     </div>
-    <div class="ss-osc-snapshot-actions"><div><button data-snapshot-save class="primary" type="button">Save Snapshot</button><button data-snapshot-load type="button">Load Saved Snapshot</button><button data-snapshot-recall type="button">Recall Now</button></div><label class="ss-osc-snapshot-ignore"><input data-snapshot-ignore type="checkbox"> Ignore Shadowscore recall</label></div>
-    <div class="ss-osc-snapshot-status"><div data-snapshot-state class="ss-osc-snapshot-state" role="status">Loading score snapshot state…</div><div data-snapshot-last class="ss-osc-snapshot-detail">No recall recorded</div></div>
+    <div class="ss-osc-snapshot-actions"><div><button data-snapshot-capture class="primary" type="button">Capture as OSC Clip</button><button data-snapshot-load type="button">Load Clip into Editor</button><button data-snapshot-assign type="button">Assign Existing Clip</button><button data-snapshot-duplicate type="button">Duplicate Clip</button><button data-snapshot-recall type="button">Recall Layer Now</button></div><label class="ss-osc-snapshot-ignore"><input data-snapshot-ignore type="checkbox"> Ignore Shadowscore recall</label></div>
+    <div class="ss-osc-snapshot-status"><div data-snapshot-state class="ss-osc-snapshot-state" role="status">Loading OSC clip state…</div><div data-snapshot-last class="ss-osc-snapshot-detail">No recall recorded</div></div>
   `;
   parent.insertBefore(section, options.before ?? null);
   return {
     panel: section,
+    sourceSelect: section.querySelector("[data-snapshot-source]"),
+    clipNameInput: section.querySelector("[data-snapshot-clip-name]"),
+    clipIdInput: section.querySelector("[data-snapshot-clip-id]"),
+    clipSelect: section.querySelector("[data-snapshot-clip]"),
     blockSelect: section.querySelector("[data-snapshot-block]"),
     roleSelect: section.querySelector("[data-snapshot-role]"),
-    saveButton: section.querySelector("[data-snapshot-save]"),
+    captureButton: section.querySelector("[data-snapshot-capture]"),
     loadButton: section.querySelector("[data-snapshot-load]"),
+    assignButton: section.querySelector("[data-snapshot-assign]"),
+    duplicateButton: section.querySelector("[data-snapshot-duplicate]"),
     recallButton: section.querySelector("[data-snapshot-recall]"),
     ignoreInput: section.querySelector("[data-snapshot-ignore]"),
     activeBlock: section.querySelector("[data-snapshot-active]"),
@@ -38,6 +48,7 @@ export function createOscSnapshotEditorClient(options) {
   let score = null;
   let assignments = {};
   let resolutions = {};
+  let targets = [];
   let events = null;
 
   bindEvents();
@@ -59,24 +70,33 @@ export function createOscSnapshotEditorClient(options) {
 
   function bindEvents() {
     elements.blockSelect?.addEventListener("change", () => {
+      selectLayerClip();
       renderStatus();
       loadLastRecall().catch(reportError);
     });
-    elements.roleSelect?.addEventListener("change", renderStatus);
-    elements.saveButton?.addEventListener("click", () => save().catch(reportError));
+    elements.roleSelect?.addEventListener("change", () => { selectLayerClip(); renderStatus(); });
+    elements.sourceSelect?.addEventListener("change", suggestClipIdentity);
+    elements.clipSelect?.addEventListener("change", renderStatus);
+    elements.clipIdInput?.addEventListener("input", renderStatus);
+    elements.clipNameInput?.addEventListener("input", renderStatus);
+    elements.captureButton?.addEventListener("click", () => capture().catch(reportError));
     elements.loadButton?.addEventListener("click", () => load().catch(reportError));
+    elements.assignButton?.addEventListener("click", () => assign().catch(reportError));
+    elements.duplicateButton?.addEventListener("click", () => duplicate().catch(reportError));
     elements.recallButton?.addEventListener("click", () => recall().catch(reportError));
     elements.ignoreInput?.addEventListener("change", () => saveIgnoreRecall().catch(reportError));
   }
 
   async function refreshContext() {
-    const [nextScore, assignmentStatus] = await Promise.all([
+    const [nextScore, assignmentStatus, targetStatus] = await Promise.all([
       fetchJson("/score"),
-      fetchJson("/osc/assignments?resolved=1")
+      fetchJson("/osc/assignments?resolved=1"),
+      fetchJson(`/osc/targets?app=${encodeURIComponent(app)}&status=online`)
     ]);
     score = nextScore;
     assignments = assignmentStatus.assignments ?? {};
     resolutions = assignmentStatus.resolutions ?? {};
+    targets = targetStatus.targets ?? [];
     renderContext();
     await loadLastRecall();
   }
@@ -84,6 +104,8 @@ export function createOscSnapshotEditorClient(options) {
   function renderContext() {
     const previousBlock = elements.blockSelect.value;
     const previousRole = elements.roleSelect.value;
+    const previousSource = elements.sourceSelect?.value;
+    const previousClip = elements.clipSelect?.value;
     const blockIds = Object.keys(score?.mesostructure ?? {});
     elements.blockSelect.replaceChildren(...blockIds.map((blockId) => optionFor(blockId, blockId)));
     elements.blockSelect.value = blockIds.includes(previousBlock)
@@ -100,6 +122,14 @@ export function createOscSnapshotEditorClient(options) {
     elements.roleSelect.replaceChildren(...roleIds.map((roleId) => optionFor(roleId, assignments[roleId]?.label || roleId)));
     if (roleIds.includes(previousRole)) elements.roleSelect.value = previousRole;
 
+    elements.sourceSelect?.replaceChildren(...targets.map((target) => optionFor(target.id, target.label || target.id)));
+    if (targets.some((target) => target.id === previousSource)) elements.sourceSelect.value = previousSource;
+    const clips = compatibleClips();
+    elements.clipSelect?.replaceChildren(...clips.map(([clipId, clip]) => optionFor(clipId, clip.name || clipId)));
+    if (clips.some(([clipId]) => clipId === previousClip)) elements.clipSelect.value = previousClip;
+    else selectLayerClip();
+    suggestClipIdentity();
+
     elements.activeBlock.textContent = `Active block: ${score?.structureState?.activeBlockId || "—"}`;
     renderStatus();
   }
@@ -109,61 +139,87 @@ export function createOscSnapshotEditorClient(options) {
     const roleId = elements.roleSelect.value;
     const assignment = assignments[roleId];
     const resolution = resolutions[roleId];
-    const saved = selectedSnapshot();
-    elements.saveButton.disabled = !(blockId && roleId);
-    elements.loadButton.disabled = !saved;
-    elements.recallButton.disabled = !saved;
+    const selected = selectedClip();
+    const layerClip = selectedLayerClip();
+    const sourceId = elements.sourceSelect?.value;
+    elements.captureButton.disabled = !(blockId && roleId && sourceId && elements.clipIdInput?.value.trim());
+    elements.loadButton.disabled = !selected;
+    elements.assignButton.disabled = !(blockId && roleId && selected);
+    elements.duplicateButton.disabled = !(selected && elements.clipIdInput?.value.trim());
+    elements.recallButton.disabled = !layerClip;
     elements.ignoreInput.disabled = !assignment;
     elements.ignoreInput.checked = Boolean(assignment?.ignoreRecall);
     if (!blockId) return setState("No mesostructural blocks available");
     if (!roleId) return setState(`Create an ${options.roleLabel || app} logical role in Admin`);
     const routing = resolution?.status ? ` · role ${resolution.status}` : "";
-    if (!saved) return setState(`No snapshot saved for block ${blockId}${routing}`);
+    if (!layerClip) return setState(`No OSC clip assigned to ${blockId}/${roleId}${routing}`);
+    const capture = oscClipCaptureSummary(layerClip);
     try {
-      const dirty = !sameOscSnapshot(options.serializeDraft(), saved);
-      setState(`${dirty ? "Unsaved form changes" : "Saved form state"} · block ${blockId}${routing}`);
+      const dirty = selected ? !sameOscSnapshot(options.serializeDraft(), selected) : false;
+      setState(`${layerClip.name || selectedLayer()?.clipId} assigned to ${blockId}/${roleId}${routing}${capture ? ` · ${capture}` : ""}${dirty ? " · editor differs from selected clip" : ""}`);
     } catch (error) {
       setState(`Draft invalid: ${error.message}`);
     }
   }
 
-  async function save() {
+  async function capture() {
     const blockId = elements.blockSelect.value;
     const roleId = elements.roleSelect.value;
-    const snapshot = normalizeEditorSnapshot(options.serializeDraft(), app);
-    const currentLayer = score?.mesostructure?.[blockId]?.oscLayers?.[roleId];
-    const clipId = currentLayer?.clipId || `${blockId.toLowerCase()}-${roleId}`;
-    elements.saveButton.disabled = true;
-    score = await fetchJson(currentLayer ? `/osc/clips/${encodeURIComponent(clipId)}` : "/osc/clips", {
-      method: currentLayer ? "PUT" : "POST",
+    const targetId = elements.sourceSelect.value;
+    const clipId = elements.clipIdInput.value.trim();
+    elements.captureButton.disabled = true;
+    const result = await fetchJson("/osc/clips/capture", {
+      method: "POST",
       body: JSON.stringify({
         expectedStructureRevision: score?.structureRevision ?? 0,
-        ...(currentLayer ? {} : { clipId }),
-        name: `${blockId} · ${assignments[roleId]?.label || roleId}`,
-        ...snapshot
+        targetId, clipId, name: elements.clipNameInput.value.trim(), blockId, roleId
       })
     });
-    if (!currentLayer) score = await fetchJson(`/mesostructure/${encodeURIComponent(blockId)}/osc-layers/${encodeURIComponent(roleId)}`, {
+    score = result.score;
+    renderContext();
+    elements.clipSelect.value = clipId;
+    const diagnosticCount = result.diagnostics?.length ?? 0;
+    options.setStatus?.(`Captured ${targets.find((target) => target.id === targetId)?.label || targetId} as ${clipId} and assigned ${blockId}/${roleId} · ${result.complete ? "complete" : "incomplete"}${diagnosticCount ? ` (${diagnosticCount} diagnostic${diagnosticCount === 1 ? "" : "s"})` : ""}`);
+  }
+
+  async function load() {
+    const clip = selectedClip();
+    if (!clip) throw new Error("Choose an OSC clip to load");
+    await options.applySnapshot(structuredClone(clip));
+    renderStatus();
+    options.setStatus?.(`Loaded ${elements.clipSelect.value} into the editor; no OSC was sent`);
+  }
+
+  async function assign() {
+    const blockId = elements.blockSelect.value;
+    const roleId = elements.roleSelect.value;
+    const clipId = elements.clipSelect.value;
+    score = await fetchJson(`/mesostructure/${encodeURIComponent(blockId)}/osc-layers/${encodeURIComponent(roleId)}`, {
       method: "PUT",
       body: JSON.stringify({ expectedStructureRevision: score.structureRevision, clipId })
     });
     renderContext();
-    options.setStatus?.(`Saved ${roleId} form draft to block ${blockId}; no OSC was sent`);
+    options.setStatus?.(`Assigned ${clipId} to ${blockId}/${roleId}`);
   }
 
-  async function load() {
-    const saved = selectedSnapshot();
-    if (!saved) throw new Error("No saved snapshot exists for this block and role");
-    await options.applySnapshot(structuredClone(saved));
-    renderStatus();
-    options.setStatus?.(`Loaded block ${elements.blockSelect.value} into the form; no OSC was sent`);
+  async function duplicate() {
+    const clip = selectedClip();
+    if (!clip) throw new Error("Choose an OSC clip to duplicate");
+    const clipId = elements.clipIdInput.value.trim();
+    score = await fetchJson("/osc/clips", {
+      method: "POST",
+      body: JSON.stringify({ expectedStructureRevision: score.structureRevision, clipId, ...clip, name: elements.clipNameInput.value.trim() || `${clip.name || elements.clipSelect.value} copy` })
+    });
+    renderContext();
+    elements.clipSelect.value = clipId;
+    options.setStatus?.(`Duplicated OSC clip as ${clipId}; no layer changed`);
   }
 
   async function recall() {
     const blockId = elements.blockSelect.value;
     const roleId = elements.roleSelect.value;
-    const saved = selectedSnapshot();
-    if (!saved) throw new Error("No saved snapshot exists for this block and role");
+    const saved = selectedLayerClip();
+    if (!saved) throw new Error("No OSC clip is assigned to this block and role");
     elements.recallButton.disabled = true;
     try {
       const result = await fetchJson(`/mesostructure/${encodeURIComponent(blockId)}/osc-layers/recall`, {
@@ -231,8 +287,20 @@ export function createOscSnapshotEditorClient(options) {
   }
 
   function selectedSnapshot() {
-    const layer = score?.mesostructure?.[elements.blockSelect.value]?.oscLayers?.[elements.roleSelect.value];
-    return layer?.clipId ? score?.oscClips?.[layer.clipId] ?? null : null;
+    return selectedLayerClip();
+  }
+
+  function compatibleClips() { return Object.entries(score?.oscClips ?? {}).filter(([, clip]) => cleanToken(clip.app) === app).sort(([a], [b]) => a.localeCompare(b)); }
+  function selectedClip() { return score?.oscClips?.[elements.clipSelect?.value] ?? null; }
+  function selectedLayer() { return score?.mesostructure?.[elements.blockSelect.value]?.oscLayers?.[elements.roleSelect.value] ?? null; }
+  function selectedLayerClip() { const layer = selectedLayer(); return layer?.clipId ? score?.oscClips?.[layer.clipId] ?? null : null; }
+  function selectLayerClip() { const clipId = selectedLayer()?.clipId; if (clipId && elements.clipSelect) elements.clipSelect.value = clipId; }
+  function suggestClipIdentity() {
+    if (!elements.clipIdInput || elements.clipIdInput.value.trim()) return;
+    const role = elements.roleSelect?.value || app;
+    const block = elements.blockSelect?.value?.toLowerCase() || "clip";
+    elements.clipIdInput.value = `${block}-${role}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-");
+    if (elements.clipNameInput && !elements.clipNameInput.value.trim()) elements.clipNameInput.value = `${elements.blockSelect?.value || "OSC"} · ${assignments[role]?.label || role}`;
   }
 
   function snapshotState() {
@@ -311,6 +379,14 @@ export function oscClockRecallNotice(snapshot) {
   return Number(snapshot.params.Clock) === 0
     ? "Clock 0 suspends immediately"
     : "Clock 1 arms for the next observed shared beat";
+}
+
+export function oscClipCaptureSummary(clip) {
+  const capture = clip?.capture;
+  if (!capture) return "";
+  const source = capture.targetId || capture.deviceId || "unknown source";
+  const diagnosticCount = capture.diagnostics?.length ?? 0;
+  return `captured from ${source} · ${capture.complete === false ? "incomplete" : "complete"}${diagnosticCount ? ` · ${diagnosticCount} diagnostic${diagnosticCount === 1 ? "" : "s"}` : ""}`;
 }
 
 function normalizeEditorSnapshot(snapshot, app) {

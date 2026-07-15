@@ -3156,13 +3156,9 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /formatAckValue/);
   assert.match(response.body, /hydrateParameters/);
   assert.match(response.body, /OSCQuery parameter read failed/);
-  assert.match(response.body, /Mesostructural Snapshot/);
-  assert.match(response.body, /Write snapshot to/);
-  assert.match(response.body, /Logical role/);
-  assert.match(response.body, /Save Snapshot/);
-  assert.match(response.body, /Load Saved Snapshot/);
-  assert.match(response.body, /Recall Now/);
-  assert.match(response.body, /Ignore Shadowscore recall/);
+  assert.match(response.body, /id="snapshot-mount"/);
+  assert.match(response.body, /mountOscSnapshotPanel/);
+  assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
 });
@@ -3243,13 +3239,9 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /\/params/);
   assert.match(response.body, /isToggleParam/);
   assert.match(response.body, /parameter-toggle/);
-  assert.match(response.body, /Mesostructural Snapshot/);
-  assert.match(response.body, /Write snapshot to/);
-  assert.match(response.body, /Logical role/);
-  assert.match(response.body, /Save Snapshot/);
-  assert.match(response.body, /Load Saved Snapshot/);
-  assert.match(response.body, /Recall Now/);
-  assert.match(response.body, /Ignore Shadowscore recall/);
+  assert.match(response.body, /id="snapshot-mount"/);
+  assert.match(response.body, /mountOscSnapshotPanel/);
+  assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotDraft/);
   assert.match(response.body, /applySavedSnapshot/);
@@ -3310,10 +3302,16 @@ test("shared OSC snapshot editor client is served as a static asset", async () =
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
   assert.match(response.body, /sameOscSnapshot/);
+  assert.match(response.body, /Capture state from/);
+  assert.match(response.body, /Capture as OSC Clip/);
+  assert.match(response.body, /OSC clip browser/);
+  assert.match(response.body, /Assign Existing Clip/);
+  assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /oscClockRecallNotice/);
   assert.match(response.body, /expectedStructureRevision/);
   assert.match(response.body, /roles: \[roleId\]/);
-  assert.match(response.body, /Loaded block .* into the form; no OSC was sent/);
+  assert.match(response.body, /Loaded .* into the editor; no OSC was sent/);
+  assert.match(response.body, /captured from .*complete/);
 });
 
 test("shared ShadowScore stylesheet is served as a static asset", async () => {

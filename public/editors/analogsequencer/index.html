@@ -61,20 +61,12 @@
   <main>
     <section class="toolbar"><strong>Get from one client · send to checked clients</strong><div class="toolbar-actions"><label for="read-source">Get data from</label><select id="read-source" aria-label="Instance to get data from"></select><button id="get-data" type="button">Get Data</button><button id="clock-all-off" type="button">Clock Selected Off</button><button id="rtz" class="primary" type="button">RTZ Selected</button><button id="clock-all-on" type="button">Clock Selected On</button><button id="refresh" type="button">Refresh</button></div></section>
     <section id="targets" class="targets" aria-live="polite"></section>
-    <section class="snapshot-panel" aria-label="Mesostructural OSC snapshot">
-      <div class="snapshot-head"><div><h2>Mesostructural Snapshot</h2><div class="detail">Save this parameter draft to the score, or recall it through the assigned logical role.</div></div><div id="snapshot-active-block" class="detail">Active block: —</div></div>
-      <div class="snapshot-fields">
-        <label class="snapshot-field" for="snapshot-block"><span>Write snapshot to</span><select id="snapshot-block"></select></label>
-        <label class="snapshot-field" for="snapshot-role"><span>Logical role</span><select id="snapshot-role"></select></label>
-      </div>
-      <div class="snapshot-actions"><div class="toolbar-actions"><button id="snapshot-save" class="primary" type="button">Save Snapshot</button><button id="snapshot-load" type="button">Load Saved Snapshot</button><button id="snapshot-recall" type="button">Recall Now</button></div><label class="snapshot-ignore"><input id="snapshot-ignore" type="checkbox"> Ignore Shadowscore recall</label></div>
-      <div class="snapshot-status"><div id="snapshot-state" class="snapshot-state" role="status">Loading score snapshot state…</div><div id="snapshot-last-recall" class="detail">No recall recorded</div></div>
-    </section>
+    <div id="snapshot-mount"></div>
     <section class="sequencer"><div id="stages" class="stages"></div></section>
     <section class="parameters"><h2>Sequence Parameters</h2><div id="parameters" class="parameter-grid"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
     const targetsEl = document.querySelector("#targets");
     const stagesEl = document.querySelector("#stages");
     const parametersEl = document.querySelector("#parameters");
@@ -95,16 +87,11 @@
     document.querySelector("#clock-all-on").addEventListener("click", () => setAllClocks(1).catch(reportError));
     document.querySelector("main").addEventListener("input", (event) => { if (event.target.matches("[data-param]")) snapshotClient?.draftChanged(); });
     document.querySelector("main").addEventListener("change", (event) => { if (event.target.matches("[data-param]")) snapshotClient?.draftChanged(); });
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"));
     snapshotClient = createOscSnapshotEditorClient({
       app: "analogsequencer",
       roleLabel: "AnalogSequencer",
-      elements: {
-        blockSelect: document.querySelector("#snapshot-block"), roleSelect: document.querySelector("#snapshot-role"),
-        saveButton: document.querySelector("#snapshot-save"), loadButton: document.querySelector("#snapshot-load"),
-        recallButton: document.querySelector("#snapshot-recall"), ignoreInput: document.querySelector("#snapshot-ignore"),
-        activeBlock: document.querySelector("#snapshot-active-block"), state: document.querySelector("#snapshot-state"),
-        lastRecall: document.querySelector("#snapshot-last-recall")
-      },
+      elements: snapshotElements,
       serializeDraft: serializeSnapshotDraft,
       applySnapshot: applySavedSnapshot,
       setStatus: (text) => { statusEl.textContent = text; }

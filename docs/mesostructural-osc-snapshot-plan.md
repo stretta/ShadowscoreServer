@@ -452,6 +452,14 @@ instances, and reassigning either role changes only the runtime destination.
 
 ### Phase E: Replace Editor Snapshot UX
 
+Status: implemented locally across all seven bundled OSC editors. The shared
+panel now captures from exactly one discovered source, browses reusable OSC
+clips, loads without sending, assigns or duplicates clips, and recalls the
+selected block layer. Capture provenance and completeness, routing state,
+active block, and recall results remain visible beside the controls. Static
+route coverage and the full server suite pass; live browser and rig acceptance
+remain pending.
+
 - Remove **Write snapshot to** and any path that serializes the editor's local
   draft directly into score state.
 - Add **Capture state from** as a single-select live instance control.

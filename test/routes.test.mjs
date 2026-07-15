@@ -644,11 +644,20 @@ test("OSC clip and block layer routes create, reuse, replace, and safely delete 
   assert.equal(clipped.oscClips["list-opening"].params.Clock, 0);
   const saved = await requestJson(context, "PUT", "/mesostructure/F/osc-layers/list-a", { clipId: "list-opening" });
   assert.equal(saved.mesostructure.F.oscLayers["list-a"].clipId, "list-opening");
+  await requestJson(context, "PUT", "/mesostructure/E/osc-layers/list-a", { clipId: "list-opening" });
 
   const clips = await requestJson(context, "GET", "/osc/clips");
   assert.deepEqual(clips["list-opening"].inputPorts.Steps, [1, 0, 1, 0]);
   const layers = await requestJson(context, "GET", "/mesostructure/F/osc-layers");
   assert.equal(layers["list-a"].clipId, "list-opening");
+  const references = await requestJson(context, "GET", "/osc/clips/list-opening/references");
+  assert.deepEqual(references, {
+    clipId: "list-opening",
+    references: [{ blockId: "E", roleId: "list-a" }, { blockId: "F", roleId: "list-a" }],
+    orphan: false
+  });
+  const referenceReport = await requestJson(context, "GET", "/osc/clips/references");
+  assert.deepEqual(referenceReport.orphanClipIds, []);
 
   const stale = await request(context, "PUT", "/osc/clips/list-opening", {
     expectedStructureRevision: 0,
@@ -660,10 +669,14 @@ test("OSC clip and block layer routes create, reuse, replace, and safely delete 
   assert.match(stale.body, /stale structure revision 0; current structure revision is/);
 
   const referenced = await request(context, "DELETE", "/osc/clips/list-opening");
-  assert.equal(referenced.status, 400);
-  assert.match(referenced.body, /assigned in F\/list-a/);
+  assert.equal(referenced.status, 409);
+  assert.match(referenced.body, /F\/list-a/);
+  assert.deepEqual(JSON.parse(referenced.body).references, [{ blockId: "E", roleId: "list-a" }, { blockId: "F", roleId: "list-a" }]);
   const removed = await requestJson(context, "DELETE", "/mesostructure/F/osc-layers/list-a");
   assert.deepEqual(removed.mesostructure.F.oscLayers, {});
+  await requestJson(context, "DELETE", "/mesostructure/E/osc-layers/list-a");
+  const orphaned = await requestJson(context, "GET", "/osc/clips/references");
+  assert.deepEqual(orphaned.orphanClipIds, ["list-opening"]);
   const clipRemoved = await requestJson(context, "DELETE", "/osc/clips/list-opening");
   assert.deepEqual(clipRemoved.oscClips, {});
 

@@ -380,10 +380,12 @@ the replacement schema.
 
 ### Phase B: OSC Clip And Layer APIs
 
-Status: started. The initial clip CRUD and block-layer HTTP/WebSocket surfaces,
-app compatibility checks, referenced-clip deletion guard, and reference-aware
-tests landed as part of the Phase A replacement. Reference inspection and any
-remaining UI-facing API refinements stay in this phase.
+Status: implemented. Clip CRUD and block-layer HTTP/WebSocket surfaces keep
+payload mutation separate from layer assignment, enforce role/clip app
+compatibility, reject referenced-clip deletion with structured block/role
+references, and expose per-clip plus collection-wide reference/orphan reports.
+Tests cover reuse across blocks and replacing one layer without mutating the
+shared clip.
 
 - Implement OSC clip list/create/read/replace/delete routes.
 - Implement block OSC-layer list/assign/remove routes.

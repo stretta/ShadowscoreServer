@@ -42,6 +42,26 @@ export function createScoreStore(initialScore, options = {}) {
     getScore() {
       return structuredClone(score);
     },
+    inspectOscClipReferences(clipId) {
+      if (clipId !== undefined) {
+        const id = normalizeOscClipId(clipId);
+        if (!score.oscClips?.[id]) throw new Error(`unknown OSC clip '${id}'`);
+        const references = oscClipReferences(score.mesostructure, id);
+        return {
+          clipId: id,
+          references: structuredClone(references),
+          orphan: references.length === 0
+        };
+      }
+      const clips = Object.fromEntries(Object.keys(score.oscClips ?? {}).sort().map((id) => {
+        const references = oscClipReferences(score.mesostructure, id);
+        return [id, { references, orphan: references.length === 0 }];
+      }));
+      return {
+        clips: structuredClone(clips),
+        orphanClipIds: Object.entries(clips).filter(([, value]) => value.orphan).map(([id]) => id)
+      };
+    },
     addVoice(voiceId, assignmentDocument = {}, options = {}) {
       const id = normalizeVoiceId(voiceId);
       if (score.voices[id]) {

@@ -866,6 +866,21 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/osc/clips/references") {
+    writeJson(response, 200, store.inspectOscClipReferences());
+    return;
+  }
+
+  const oscClipReferencesMatch = url.pathname.match(/^\/osc\/clips\/([^/]+)\/references$/);
+  if (request.method === "GET" && oscClipReferencesMatch) {
+    try {
+      writeJson(response, 200, store.inspectOscClipReferences(decodeURIComponent(oscClipReferencesMatch[1])));
+    } catch (error) {
+      writeError(response, error, 404);
+    }
+    return;
+  }
+
   const oscClipMatch = url.pathname.match(/^\/osc\/clips\/([^/]+)$/);
   if (oscClipMatch) {
     const clipId = decodeURIComponent(oscClipMatch[1]);
@@ -883,7 +898,7 @@ export async function routeRequest(request, response, store, config, runtime = {
         writeJson(response, 405, { ok: false, error: "method not allowed" });
       }
     } catch (error) {
-      writeError(response, error);
+      writeError(response, error, error?.code === "OSC_CLIP_REFERENCED" ? 409 : 400);
     }
     return;
   }
@@ -1662,6 +1677,8 @@ function writeError(response, error, status = 400) {
   writeJson(response, status, {
     ok: false,
     error: messageForError(error),
+    ...(error?.code ? { code: error.code } : {}),
+    ...(Array.isArray(error?.references) ? { references: error.references } : {}),
     ...(error?.currentVersion !== undefined ? { currentVersion: error.currentVersion } : {}),
     ...(error?.currentScoreRevision !== undefined ? { currentScoreRevision: error.currentScoreRevision } : {}),
     ...(error?.currentStructureRevision !== undefined ? { currentStructureRevision: error.currentStructureRevision } : {})

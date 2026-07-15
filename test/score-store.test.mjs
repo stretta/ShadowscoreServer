@@ -60,12 +60,24 @@ test("OSC clips are reusable and block layers are revision-aware", () => {
   const duplicated = store.duplicateMesoBlock("A", "A2");
   assert.deepEqual(duplicated.mesostructure.A2.oscLayers, duplicated.mesostructure.A.oscLayers);
   assert.equal(duplicated.oscClips["analog-opening"].params.Clock, 0);
+  assert.deepEqual(store.inspectOscClipReferences("analog-opening"), {
+    clipId: "analog-opening",
+    references: [{ blockId: "A", roleId: "analog-a" }, { blockId: "A2", roleId: "analog-a" }],
+    orphan: false
+  });
+  store.addOscClip("analog-variation", { app: "analogsequencer", params: { Clock: 1 }, inputPorts: {} });
+  store.assignOscLayer("A2", "analog-a", "analog-variation");
+  assert.equal(store.getScore().mesostructure.A.oscLayers["analog-a"].clipId, "analog-opening");
+  assert.equal(store.getScore().mesostructure.A2.oscLayers["analog-a"].clipId, "analog-variation");
+  assert.equal(store.getScore().oscClips["analog-opening"].params.Clock, 0);
 
-  assert.throws(() => store.removeOscClip("analog-opening"), /assigned in A\/analog-a, A2\/analog-a/);
+  assert.throws(() => store.removeOscClip("analog-opening"), /assigned in A\/analog-a/);
   store.removeOscLayer("A", "analog-a");
   store.removeOscLayer("A2", "analog-a");
+  assert.deepEqual(store.inspectOscClipReferences().orphanClipIds, ["analog-opening", "analog-variation"]);
   const removed = store.removeOscClip("analog-opening");
-  assert.deepEqual(removed.oscClips, {});
+  assert.ok(removed.oscClips["analog-variation"]);
+  store.removeOscClip("analog-variation");
   assert.equal(events.at(-1).type, "osc.clip.removed");
 });
 
@@ -92,6 +104,22 @@ test("OSC role assignments remain separate from player assignments and emit expl
   const removed = store.removeOscAssignment("plate-a", { expectedScoreRevision: 1 });
   assert.deepEqual(removed.oscAssignments, {});
   assert.deepEqual(events, ["osc.assignment.replaced", "osc.assignment.removed"]);
+});
+
+test("OSC layer and clip replacements enforce role app compatibility", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceOscAssignment("analog-a", { app: "analogsequencer", deviceId: "wren" });
+  store.addOscClip("analog-opening", { app: "analogsequencer", params: { Clock: 1 }, inputPorts: {} });
+  store.addOscClip("plate-space", { app: "plate", params: { Decay: 0.5 }, inputPorts: {} });
+  store.assignOscLayer("A", "analog-a", "analog-opening");
+
+  assert.throws(() => store.assignOscLayer("A", "analog-a", "plate-space"), /incompatible/);
+  assert.throws(() => store.replaceOscClip("analog-opening", {
+    app: "plate",
+    params: { Decay: 0.8 },
+    inputPorts: {}
+  }), /incompatible/);
+  assert.throws(() => store.replaceOscAssignment("analog-a", { app: "plate", deviceId: "wren" }), /incompatible/);
 });
 
 test("OSC assignment reconciliation refreshes routing without modifying clips or block layers", () => {

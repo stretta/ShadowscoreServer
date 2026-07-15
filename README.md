@@ -222,6 +222,8 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /osc/clips`: list reusable, composition-owned OSC clips.
 - `POST /osc/clips`: create an OSC clip with a stable `clipId` and semantic state.
 - `GET|PUT|DELETE /osc/clips/:clipId`: read, replace, or remove one OSC clip. Referenced clips cannot be removed.
+- `GET /osc/clips/references`: report every block/role reference and all orphan clip ids.
+- `GET /osc/clips/:clipId/references`: report references and orphan status for one clip.
 - `GET /mesostructure/:blockId/osc-layers`: list the block's logical-role to OSC-clip assignments.
 - `PUT /mesostructure/:blockId/osc-layers/:roleId`: assign an existing compatible `clipId` to a role in the block.
 - `DELETE /mesostructure/:blockId/osc-layers/:roleId`: remove one block layer without deleting its OSC clip.

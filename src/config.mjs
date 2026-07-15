@@ -249,6 +249,12 @@ export const defaultConfig = Object.freeze({
   osc: {
     macros: {
       path: "data/osc-macros.json"
+    },
+    onboarding: {
+      automatic: {
+        enabled: false,
+        roles: []
+      }
     }
   },
   oscQuery: {

@@ -45,6 +45,34 @@ Use a config file to override defaults:
 npm start -- --config config/example.json
 ```
 
+Automatic OSC instance onboarding is disabled by default. A host may opt in
+with stable role templates; each template requires a role, app, and device, and
+mutates the score only when exactly one online target matches:
+
+```json
+{
+  "osc": {
+    "onboarding": {
+      "automatic": {
+        "enabled": true,
+        "roles": [
+          {
+            "roleId": "analogsequencer-a",
+            "label": "Analog Sequencer A",
+            "app": "analogsequencer",
+            "deviceId": "wren"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+Hardware registration and manual OSCQuery device save/update/refresh events run
+the enabled policy. Ambiguous, unavailable, invalid, and failed captures are
+reported without creating partial score resources.
+
 For a Shadowbox host with a machine-local config, create a local copy first:
 
 ```sh
@@ -177,6 +205,9 @@ For the session-day operator flow, see
 - `GET /rnbo/devices`: RNBO runner/graph-editor devices, including units that do not currently expose ShadowScore playback targets.
 - `GET /osc/targets`: normalized OSC-capable targets. Optional query filters include `app`, `capability`, and `status`.
 - `GET /osc/assignments`: current logical OSC control-role assignment map. Add `?resolved=1` for current normalized target resolutions and compatible targets without mutating the score.
+- `GET /osc/resources`: classify score roles and discovered OSC instances as mapped, compatible, offline, ambiguous, or unmapped.
+- `POST /osc/onboard`: capture one online target and atomically create or reuse its logical role, OSC clip, and block layer.
+- `POST /osc/onboard/automatic`: run the configured default-off automatic onboarding policy and return onboarded and skipped diagnostics.
 - `POST /osc/assignments/reconcile`: refresh unlocked role target IDs and routing diagnostics from normalized live targets by stable device identity plus app/editor capability.
 - `GET /osc/recalls`: bounded recent OSC snapshot recall diagnostics across blocks, including encoded payload bytes and monotonic per-write/dispatch timing.
 - `PUT /osc/assignments/:roleId`: create or replace one logical OSC control-role assignment.

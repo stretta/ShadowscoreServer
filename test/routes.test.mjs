@@ -804,6 +804,70 @@ test("OSC onboarding atomically creates and idempotently reuses a role, clip, an
   assert.equal(context.store.getScore().oscClips["other-clip"], undefined);
 });
 
+test("automatic OSC onboarding endpoint obeys configured stable role templates", async () => {
+  const config = mergeConfig(defaultConfig, { osc: { onboarding: { automatic: { enabled: true, roles: [
+    { roleId: "list-auto", label: "List Auto", app: "listsequencer", deviceId: "heron" }
+  ] } } } });
+  const context = createRouteContext({
+    config,
+    runtime: {
+      oscSender: async () => {},
+      oscCaptureDelay: async () => {},
+      oscCaptureFetch: async (url) => {
+        if (url.endsWith("/params")) return jsonFetchResponse({ CONTENTS: { Clock: { VALUE: 1 }, GateTime: { VALUE: 0.5 } } });
+        if (url.endsWith("/StepsAck")) return jsonFetchResponse({ VALUE: [1, 1, 0, 0] });
+        return jsonFetchResponse({}, 404);
+      },
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() { return [captureControlTarget()]; }
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/osc/onboard/automatic", {});
+  assert.equal(result.enabled, true);
+  assert.equal(result.onboarded[0].roleId, "list-auto");
+  assert.equal(result.onboarded[0].clipId, "a-list-auto");
+  assert.equal(context.store.getScore().mesostructure.A.oscLayers["list-auto"].clipId, "a-list-auto");
+});
+
+test("hardware registration triggers enabled automatic OSC onboarding", async () => {
+  const config = mergeConfig(defaultConfig, { osc: { onboarding: { automatic: { enabled: true, roles: [
+    { roleId: "analog-auto", label: "Analog Auto", app: "analogsequencer", deviceId: "heron" }
+  ] } } } });
+  const context = createRouteContext({
+    config,
+    runtime: {
+      peerRegistry: createPeerRegistry(config),
+      oscCaptureFetch: async () => jsonFetchResponse({ CONTENTS: { Clock: { VALUE: 0 }, Glide: { VALUE: 12 } } })
+    }
+  });
+
+  const registered = await requestJson(context, "POST", "/hardware/register", {
+    id: "heron",
+    advertisedName: "Heron",
+    targets: [],
+    oscTargets: [{
+      id: "analog-main",
+      label: "Analog Sequencer",
+      host: "heron.local",
+      port: 1234,
+      baseAddress: "/rnbo/inst/4",
+      app: "analogsequencer",
+      parameters: [
+        { name: "Clock", address: "/rnbo/inst/4/params/Clock" },
+        { name: "Glide", address: "/rnbo/inst/4/params/Glide" }
+      ]
+    }]
+  });
+
+  assert.equal(registered.automaticOscOnboarding.enabled, true);
+  assert.equal(registered.automaticOscOnboarding.onboarded[0].roleId, "analog-auto");
+  assert.equal(context.store.getScore().oscClips["a-analog-auto"].params.Glide, 12);
+});
+
 test("block OSC recall route dry-runs and dispatches ordered semantic writes with bounded status", async () => {
   const sends = [];
   const context = createRouteContext({

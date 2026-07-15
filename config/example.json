@@ -54,6 +54,14 @@
     "backupPath": "data/score.previous.json",
     "debounceMs": 150
   },
+  "osc": {
+    "onboarding": {
+      "automatic": {
+        "enabled": false,
+        "roles": []
+      }
+    }
+  },
   "rnbo": {
     "enabled": false,
     "host": "127.0.0.1",

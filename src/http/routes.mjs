@@ -11,6 +11,7 @@ import { captureOscTarget } from "../osc/snapshot-capture.mjs";
 import { createOscSnapshotRecallService } from "../osc/snapshot-recall.mjs";
 import { buildOscTargets } from "../osc/targets.mjs";
 import { buildOscResourceReport } from "../osc/resources.mjs";
+import { runAutomaticOscOnboarding } from "../osc/onboarding.mjs";
 import { selectBeatWitness } from "../playback/beat-witness.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
@@ -88,7 +89,8 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const device = await requireManualOscQueryDevices(runtime).save(await readJson(request));
       const oscAssignmentReconciliation = await reconcileOscAssignmentsFromRuntime(store, config, runtime);
-      writeJson(response, 200, { ok: true, device, oscAssignmentReconciliation });
+      const automaticOscOnboarding = await automaticOscOnboardingFromRuntime(store, config, runtime);
+      writeJson(response, 200, { ok: true, device, oscAssignmentReconciliation, automaticOscOnboarding });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -100,7 +102,8 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const device = await requireManualOscQueryDevices(runtime).update(decodeURIComponent(oscQueryDeviceMatch[1]), await readJson(request));
       const oscAssignmentReconciliation = await reconcileOscAssignmentsFromRuntime(store, config, runtime);
-      writeJson(response, 200, { ok: true, device, oscAssignmentReconciliation });
+      const automaticOscOnboarding = await automaticOscOnboardingFromRuntime(store, config, runtime);
+      writeJson(response, 200, { ok: true, device, oscAssignmentReconciliation, automaticOscOnboarding });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -122,7 +125,8 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const device = await requireManualOscQueryDevices(runtime).refresh(decodeURIComponent(oscQueryRefreshMatch[1]));
       const oscAssignmentReconciliation = await reconcileOscAssignmentsFromRuntime(store, config, runtime);
-      writeJson(response, 200, { ok: true, device, oscAssignmentReconciliation });
+      const automaticOscOnboarding = await automaticOscOnboardingFromRuntime(store, config, runtime);
+      writeJson(response, 200, { ok: true, device, oscAssignmentReconciliation, automaticOscOnboarding });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -194,6 +198,15 @@ export async function routeRequest(request, response, store, config, runtime = {
         ok: true, roleId, clipId, blockId, assignment: score.oscAssignments[roleId],
         clip: score.oscClips[clipId], score, complete: captured.complete, diagnostics: captured.diagnostics
       });
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/osc/onboard/automatic") {
+    try {
+      writeJson(response, 200, { ok: true, ...(await automaticOscOnboardingFromRuntime(store, config, runtime)) });
     } catch (error) {
       writeError(response, error);
     }
@@ -463,6 +476,7 @@ export async function routeRequest(request, response, store, config, runtime = {
       const unit = registry.register(await readJson(request), { remoteAddress: request.socket?.remoteAddress ?? "" });
       const reconciliation = store.reconcileRegisteredHardwareUnit(unit);
       const oscAssignmentReconciliation = await reconcileOscAssignmentsFromRuntime(store, config, runtime);
+      const automaticOscOnboarding = await automaticOscOnboardingFromRuntime(store, config, runtime);
       writeJson(response, 200, {
         ok: true,
         unit,
@@ -472,7 +486,8 @@ export async function routeRequest(request, response, store, config, runtime = {
           reconciled: reconciliation.reconciled,
           ambiguous: reconciliation.ambiguous
         },
-        oscAssignmentReconciliation
+        oscAssignmentReconciliation,
+        automaticOscOnboarding
       });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
@@ -1225,6 +1240,22 @@ async function readAllOscTargets(config, runtime) {
 
 async function reconcileOscAssignmentsFromRuntime(store, config, runtime) {
   return store.reconcileOscAssignments(buildOscTargets(await readAllOscTargets(config, runtime)));
+}
+
+async function automaticOscOnboardingFromRuntime(store, config, runtime) {
+  return runAutomaticOscOnboarding({
+    store,
+    config,
+    loadTargets: async () => buildOscTargets(await readAllOscTargets(config, runtime)),
+    captureTarget: (target, template) => captureOscTarget(target, {
+      name: template.clipName || template.label,
+      allowIncomplete: Boolean(template.allowIncomplete),
+      fetchImpl: runtime.oscCaptureFetch ?? globalThis.fetch,
+      sender: runtime.oscSender,
+      delay: runtime.oscCaptureDelay,
+      now: runtime.now
+    })
+  });
 }
 
 function oscSnapshotRecallService(runtime) {

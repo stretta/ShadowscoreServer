@@ -221,7 +221,8 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /Role ID must start with a letter or number/);
   assert.match(response.body, /Ignore Shadowscore recall/);
   assert.match(response.body, /Lock target mapping/);
-  assert.match(response.body, /\/osc\/assignments\?resolved=1/);
+  assert.match(response.body, /OSC score resources/);
+  assert.match(response.body, /\/osc\/resources/);
   assert.match(response.body, /\/osc\/assignments\/reconcile/);
   const inlineScript = response.body.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
   assert.doesNotThrow(() => new Function(inlineScript));
@@ -786,6 +787,9 @@ test("OSC onboarding atomically creates and idempotently reuses a role, clip, an
   assert.equal(Object.keys(second.score.oscAssignments).length, 1);
   assert.equal(Object.keys(second.score.oscClips).length, 1);
   assert.equal(second.clip.params.GateTime, 0.75);
+  const resources = await requestJson(context, "GET", "/osc/resources");
+  assert.equal(resources.roles[0].status, "mapped");
+  assert.equal(resources.resources[0].status, "mapped");
 
   const versionBeforeFailure = second.score.version;
   const rejected = await request(context, "POST", "/osc/onboard", {

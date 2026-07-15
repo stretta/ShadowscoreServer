@@ -476,13 +476,15 @@ draft for a saved per-instance OSC clip.
 
 ### Phase F: Resource Mapping And Instance Onboarding
 
-Status: manual onboarding core implemented locally. Admin's device-first,
-instance-second form can now **Add to current score** through one endpoint that
-captures a single online target and atomically creates or reuses its logical
-role, OSC clip, and active-block layer. Repeating the same stable device/app
-mapping replaces the existing captured clip rather than creating duplicates.
-Resource-status presentation, explicit automatic-onboarding policy, and live
-rig acceptance remain pending.
+Status: manual onboarding and resource visibility are implemented locally.
+Admin's device-first, instance-second form can now **Add to current score**
+through one endpoint that captures a single online target and atomically creates
+or reuses its logical role, OSC clip, and active-block layer. Repeating the same
+stable device/app mapping replaces the existing captured clip rather than
+creating duplicates. A normalized report and Admin view classify score roles
+and discovered instances as mapped, compatible, offline, ambiguous, or
+unmapped. Explicit automatic-onboarding policy and live rig acceptance remain
+pending.
 
 - On score load, compare required logical roles with normalized discovered OSC
   targets and present mapped, compatible, offline, ambiguous, and unmapped

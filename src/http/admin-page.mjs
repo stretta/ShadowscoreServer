@@ -15,11 +15,11 @@ export function adminPage() {
     main { margin: 0 auto; max-width: 1120px; padding: 24px clamp(16px, 4vw, 40px) 40px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
     .toolbar .status { align-self: center; margin-left: auto; }
-    .session-tools, .scores, .targets, .oscquery-devices, .osc-roles, .hardware {
+    .session-tools, .scores, .targets, .oscquery-devices, .osc-roles, .osc-resources, .hardware {
       margin-bottom: 18px;
       padding: 14px;
     }
-    .session-tools h2, .scores h2, .targets h2, .oscquery-devices h2, .osc-roles h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
+    .session-tools h2, .scores h2, .targets h2, .oscquery-devices h2, .osc-roles h2, .osc-resources h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
     .session-grid {
       align-items: start;
       display: grid;
@@ -54,7 +54,7 @@ export function adminPage() {
       font-size: 13px;
       margin-top: 6px;
     }
-    .target-list, .unit-list, .score-list, .oscquery-device-list, .osc-role-list { display: grid; gap: 8px; }
+    .target-list, .unit-list, .score-list, .oscquery-device-list, .osc-role-list, .osc-resource-list { display: grid; gap: 8px; }
     .oscquery-device-form {
       align-items: end;
       display: grid;
@@ -91,7 +91,7 @@ export function adminPage() {
       font-size: 12px;
       line-height: 1.35;
     }
-    .target, .unit, .score-item, .oscquery-device, .osc-role {
+    .target, .unit, .score-item, .oscquery-device, .osc-role, .osc-resource {
       align-items: center;
       background: rgba(38, 51, 65, 0.46);
       border: 1px solid var(--ss-border);
@@ -101,10 +101,10 @@ export function adminPage() {
       justify-content: space-between;
       padding: 9px;
     }
-    .target, .unit, .oscquery-device, .osc-role { align-items: flex-start; }
+    .target, .unit, .oscquery-device, .osc-role, .osc-resource { align-items: flex-start; }
     .item-main { display: grid; gap: 4px; min-width: 0; }
     .score-detail { font-size: 12px; margin-top: 3px; }
-    .target code, .unit code, .oscquery-device code, .osc-role code { color: var(--ss-muted); font-size: 12px; }
+    .target code, .unit code, .oscquery-device code, .osc-role code, .osc-resource code { color: var(--ss-muted); font-size: 12px; }
     .diagnostic {
       background: rgba(251, 191, 36, 0.1);
       border: 1px solid rgba(251, 191, 36, 0.56);
@@ -132,6 +132,9 @@ export function adminPage() {
     .badge.offline { background: rgba(248, 113, 113, 0.12); border-color: rgba(248, 113, 113, 0.48); color: var(--ss-danger); }
     .badge.unassigned { background: rgba(145, 164, 178, 0.12); border-color: var(--ss-border-strong); color: var(--ss-muted); }
     .badge.ambiguous { background: rgba(251, 191, 36, 0.12); border-color: rgba(251, 191, 36, 0.5); color: var(--ss-warn); }
+    .badge.mapped { background: rgba(143, 236, 121, 0.12); border-color: rgba(143, 236, 121, 0.42); color: var(--ss-accent); }
+    .badge.compatible { background: rgba(96, 165, 250, 0.12); border-color: rgba(96, 165, 250, 0.5); color: #93c5fd; }
+    .badge.unmapped { background: rgba(145, 164, 178, 0.12); border-color: var(--ss-border-strong); color: var(--ss-muted); }
     .routing-state { display: grid; gap: 4px; min-width: 120px; }
     .routing-detail { font-size: 12px; line-height: 1.25; }
     button {
@@ -287,6 +290,11 @@ export function adminPage() {
       <div class="hint">Roles are score-owned mappings for OSC Editors. Saved block snapshots remain intact when a role is offline, unassigned, ambiguous, or ignored.</div>
       <div class="osc-role-list" id="osc-roles"></div>
     </section>
+    <section class="osc-resources">
+      <h2>OSC score resources</h2>
+      <div class="hint">Discovered instances classified against the current score before onboarding.</div>
+      <div class="osc-resource-list" id="osc-resources"></div>
+    </section>
     <section class="hardware">
       <h2>Hardware units</h2>
       <div class="unit-list" id="hardware-units"></div>
@@ -326,6 +334,7 @@ export function adminPage() {
     const saveOscQueryDeviceEl = document.querySelector("#save-oscquery-device");
     const cancelOscQueryDeviceEl = document.querySelector("#cancel-oscquery-device");
     const oscRolesEl = document.querySelector("#osc-roles");
+    const oscResourcesEl = document.querySelector("#osc-resources");
     const oscRoleFormEl = document.querySelector("#osc-role-form");
     const oscRoleIdEl = document.querySelector("#osc-role-id");
     const oscRoleLabelEl = document.querySelector("#osc-role-label");
@@ -355,6 +364,7 @@ export function adminPage() {
     let oscControlTargets = [];
     let oscRoleAssignments = {};
     let oscRoleResolutions = {};
+    let oscResourceReport = { roles: [], resources: [] };
     let editingOscRoleId = "";
     let suggestedOscRoleFields = {};
     let currentScore = null;
@@ -1040,7 +1050,7 @@ export function adminPage() {
     }
 
     async function loadOscRoles() {
-      const response = await fetch("/osc/assignments?resolved=1");
+      const response = await fetch("/osc/resources");
       const body = await response.json();
       if (!response.ok || body.ok === false) {
         setStatus(body.error || "OSC role load failed.");
@@ -1049,7 +1059,44 @@ export function adminPage() {
       oscRoleAssignments = body.assignments ?? {};
       oscRoleResolutions = body.resolutions ?? {};
       oscControlTargets = body.targets ?? [];
+      oscResourceReport = body;
       renderOscRoles();
+      renderOscResources();
+    }
+
+    function renderOscResources() {
+      oscResourcesEl.textContent = "";
+      const entries = [...(oscResourceReport.roles ?? []).map((role) => ({
+        kind: "Required role", id: role.roleId, label: role.label, app: role.app,
+        detail: role.message, status: role.status
+      })), ...(oscResourceReport.resources ?? []).map((resource) => ({
+        kind: "Discovered instance", id: resource.targetId, label: resource.label, app: resource.app,
+        detail: [resource.deviceId, resource.instance, resource.mappedRoleIds?.length ? "role " + resource.mappedRoleIds.join(", ") : "", resource.compatibleRoleIds?.length ? "compatible with " + resource.compatibleRoleIds.join(", ") : ""].filter(Boolean).join(" · "),
+        status: resource.status
+      }))];
+      if (!entries.length) {
+        const empty = document.createElement("div");
+        empty.className = "osc-resource";
+        empty.textContent = "No OSC roles or discovered control instances.";
+        oscResourcesEl.append(empty);
+        return;
+      }
+      for (const entry of entries) {
+        const row = document.createElement("div");
+        row.className = "osc-resource";
+        const main = document.createElement("div");
+        main.className = "item-main";
+        const label = document.createElement("strong");
+        label.textContent = entry.kind + " · " + entry.label;
+        const id = document.createElement("code");
+        id.textContent = entry.id + (entry.app ? " · app " + entry.app : "");
+        const detail = document.createElement("div");
+        detail.className = "send-detail";
+        detail.textContent = entry.detail || "No compatible live resource.";
+        main.append(label, id, detail);
+        row.append(main, statusBadge(entry.status));
+        oscResourcesEl.append(row);
+      }
     }
 
     async function saveOscRole(event) {

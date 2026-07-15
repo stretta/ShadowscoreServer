@@ -10,6 +10,7 @@ import { sendOscMessage } from "../osc/send.mjs";
 import { captureOscTarget } from "../osc/snapshot-capture.mjs";
 import { createOscSnapshotRecallService } from "../osc/snapshot-recall.mjs";
 import { buildOscTargets } from "../osc/targets.mjs";
+import { buildOscResourceReport } from "../osc/resources.mjs";
 import { selectBeatWitness } from "../playback/beat-witness.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
@@ -147,6 +148,13 @@ export async function routeRequest(request, response, store, config, runtime = {
     } else {
       writeJson(response, 200, assignments);
     }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/osc/resources") {
+    const assignments = store.getScore().oscAssignments ?? {};
+    const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+    writeJson(response, 200, buildOscResourceReport(assignments, targets));
     return;
   }
 

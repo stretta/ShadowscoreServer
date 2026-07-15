@@ -335,9 +335,9 @@
         <select id="param-select"></select>
       </div>
       <div class="toolbar-actions">
-        <label for="read-source">Get state from</label>
-        <select id="read-source" aria-label="Instance to get state from"></select>
-        <button id="get-state" type="button">Get State</button>
+        <label for="read-source">Get data from</label>
+        <select id="read-source" aria-label="Instance to get data from"></select>
+        <button id="get-state" type="button">Get Data</button>
         <button id="refresh" type="button">Refresh</button>
         <button id="select-all" type="button">All Targets</button>
       </div>
@@ -656,12 +656,12 @@
     async function getState() {
       const target = targets.find((entry) => entry.id === readSourceSelect.value);
       if (!target) {
-        setStatus("Choose an instance to get state from");
+        setStatus("Choose an instance to get data from");
         return;
       }
 
       getStateButton.disabled = true;
-      setStatus(`Getting state from ${target.label || target.id}...`);
+      setStatus(`Getting data from ${target.label || target.id}...`);
       try {
         const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" });
         if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`);

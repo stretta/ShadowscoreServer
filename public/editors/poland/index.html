@@ -293,6 +293,9 @@
     <header class="editor-header">
       <h1>Poland Editor</h1>
       <div class="actions">
+        <label for="read-source">Get data from</label>
+        <select id="read-source" aria-label="Instance to get data from"></select>
+        <button id="get-data" type="button">Get Data</button>
         <button id="refresh" type="button">Refresh</button>
         <span id="status" class="status" role="status"></span>
       </div>
@@ -356,6 +359,8 @@
     const controlsEl = document.querySelector("#controls");
     const statusEl = document.querySelector("#status");
     const refreshButton = document.querySelector("#refresh");
+    const readSourceSelect = document.querySelector("#read-source");
+    const getDataButton = document.querySelector("#get-data");
     let targets = [];
     let paramState = new Map();
     const pendingSends = new Map();
@@ -363,6 +368,7 @@
     refreshButton.addEventListener("click", () => {
       refresh().catch(reportError);
     });
+    getDataButton.addEventListener("click", () => getData().catch(reportError));
 
     async function refresh() {
       refreshButton.disabled = true;
@@ -374,6 +380,7 @@
       targets = body.targets || [];
       paramState = mergeParamState(targets);
       renderTargets();
+      renderReadSources();
       renderControls();
       setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online Poland targets");
       refreshButton.disabled = false;
@@ -405,6 +412,50 @@
       });
       targetsEl.replaceChildren(...cards);
       if (cards.length === 0) targetsEl.textContent = "";
+    }
+
+    function renderReadSources() {
+      const previous = readSourceSelect.value;
+      readSourceSelect.replaceChildren(...targets.map((target) => {
+        const option = document.createElement("option");
+        option.value = target.id;
+        option.textContent = target.label || target.id;
+        return option;
+      }));
+      readSourceSelect.value = targets.some((target) => target.id === previous) ? previous : (targets[0]?.id || "");
+      readSourceSelect.disabled = targets.length === 0;
+      getDataButton.disabled = targets.length === 0;
+    }
+
+    async function getData() {
+      const target = targets.find((entry) => entry.id === readSourceSelect.value);
+      if (!target) return setStatus("Choose an instance to get data from");
+      getDataButton.disabled = true;
+      setStatus(`Getting data from ${target.label || target.id}...`);
+      try {
+        const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`);
+        const nodes = (await response.json()).CONTENTS || {};
+        let populated = 0;
+        for (const param of target.parameters || []) {
+          const node = nodes[param.name];
+          if (!node || node.VALUE === undefined || !paramState.has(param.name)) continue;
+          paramState.get(param.name).value = scalarValue(node.VALUE);
+          populated += 1;
+        }
+        renderControls();
+        setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
+      } finally {
+        getDataButton.disabled = targets.length === 0;
+      }
+    }
+
+    function oscQueryHost(target) {
+      return !target.host || ["127.0.0.1", "localhost", "::1"].includes(target.host) ? location.hostname : target.host;
+    }
+
+    function scalarValue(value) {
+      return Array.isArray(value) ? value[0] : value;
     }
 
     function renderControls() {

@@ -325,12 +325,12 @@
   </nav>
   <main>
     <section class="toolbar" aria-label="ListSequencer controls">
-      <div class="meta">Send values to selected live targets</div>
+      <div class="meta">Send data to checked instances</div>
       <div class="toolbar-actions">
         <div class="readback-controls">
-          <label for="read-source">Read from</label>
-          <select id="read-source" aria-label="Read list values from client"></select>
-          <button id="populate" type="button">Populate Fields</button>
+          <label for="read-source">Get data from</label>
+          <select id="read-source" aria-label="Instance to get data from"></select>
+          <button id="populate" type="button">Get Data</button>
         </div>
         <button id="refresh" type="button">Refresh</button>
         <button id="select-all" type="button">All Targets</button>
@@ -745,19 +745,16 @@
     async function populateFields() {
       const target = targets.find((entry) => entry.id === readSourceSelect.value);
       if (!target) {
-        setStatus("Choose a client to read from");
+        setStatus("Choose an instance to get data from");
         return;
       }
       const availableNames = new Set((target.inputPorts || []).map((entry) => entry.name));
       const fields = inputPorts.filter((inputPort) => availableNames.has(inputPort.name));
-      if (!fields.length) {
-        setStatus(`${target.label || target.id} reports no list fields`);
-        return;
-      }
 
       populateButton.disabled = true;
-      setStatus(`Requesting ${fields.length} field${fields.length === 1 ? "" : "s"} from ${target.label || target.id}...`);
+      setStatus(`Getting parameters and ${fields.length} OSC field${fields.length === 1 ? "" : "s"} from ${target.label || target.id}...`);
       try {
+        const populatedParams = await hydrateParameters(target);
         const requests = await Promise.allSettled(fields.map((inputPort) => postOsc({
           targets: [target.id],
           inputPort: inputPort.name,
@@ -774,10 +771,42 @@
           populated += 1;
         }
         const failed = fields.length - populated;
-        setStatus(`Populated ${populated}/${fields.length} fields from ${target.label || target.id}${failed ? `; ${failed} ACK${failed === 1 ? "" : "s"} unavailable` : ""}`);
+        setStatus(`Got ${populatedParams} parameter${populatedParams === 1 ? "" : "s"} and ${populated}/${fields.length} OSC field${fields.length === 1 ? "" : "s"} from ${target.label || target.id}${failed ? `; ${failed} ACK${failed === 1 ? "" : "s"} unavailable` : ""}`);
       } finally {
         populateButton.disabled = targets.length === 0;
       }
+    }
+
+    async function hydrateParameters(target) {
+      const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" });
+      if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`);
+      const nodes = (await response.json()).CONTENTS || {};
+      let populated = 0;
+      target.parameters = (target.parameters || []).map((param) => {
+        const node = nodes[param.name];
+        if (!node || node.VALUE === undefined) return param;
+        populated += 1;
+        return { ...param, value: scalarValue(node.VALUE) };
+      });
+      const orderedTargets = [target, ...targets.filter((entry) => entry.id !== target.id)];
+      transposeParams = collectTransposeParams(orderedTargets);
+      rootParams = collectNamedParams(orderedTargets, new Set(["root"]));
+      ttidParams = collectTtidParams(orderedTargets);
+      genericParams = collectGenericParams(orderedTargets);
+      ttidState = new Map();
+      scaleState = new Map();
+      ttidState = mergeTtidState(ttidParams);
+      renderInports();
+      renderTtid();
+      return populated;
+    }
+
+    function oscQueryHost(target) {
+      return isLoopback(target.host) ? location.hostname : target.host;
+    }
+
+    function scalarValue(value) {
+      return Array.isArray(value) ? value[0] : value;
     }
 
     async function readAck(target, inputPortName) {

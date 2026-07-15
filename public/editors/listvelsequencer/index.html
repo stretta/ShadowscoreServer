@@ -70,12 +70,13 @@
   </nav>
   <main>
     <section class="toolbar" aria-label="ListVelSequencer controls">
-      <div class="meta">Pitch maps send when changed; velocity rows send independently to checked targets.</div>
+      <div class="meta">Send data to checked instances; pitch maps and velocity rows remain independent.</div>
       <div class="toolbar-actions">
         <div class="read-source">
-          <label for="read-source">Get from</label>
-          <select id="read-source" aria-label="Get rows from client"></select>
+          <label for="read-source">Get data from</label>
+          <select id="read-source" aria-label="Instance to get data from"></select>
         </div>
+        <button id="get-data" type="button">Get Data</button>
         <button id="refresh" type="button">Refresh</button>
         <button id="select-all" type="button">All Targets</button>
       </div>
@@ -100,6 +101,7 @@
     const readSourceSelect = document.querySelector("#read-source");
     const refreshButton = document.querySelector("#refresh");
     const selectAllButton = document.querySelector("#select-all");
+    const getDataButton = document.querySelector("#get-data");
     let targets = [];
     let rows = [];
     let globalParams = [];
@@ -107,6 +109,7 @@
 
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     selectAllButton.addEventListener("click", selectAllTargets);
+    getDataButton.addEventListener("click", () => getData().catch(reportError));
     readSourceSelect.addEventListener("change", () => {
       renderGlobalParams();
       renderRows();
@@ -197,6 +200,7 @@
       readSourceSelect.replaceChildren(...options);
       if (targets.some((target) => target.id === previous)) readSourceSelect.value = previous;
       readSourceSelect.disabled = targets.length === 0;
+      getDataButton.disabled = targets.length === 0;
     }
 
     function renderRows() {
@@ -351,6 +355,47 @@
       setStatus(`Loaded row ${row.number} from ${target.label || target.id}`);
     }
 
+    async function getData() {
+      const target = targets.find((entry) => entry.id === readSourceSelect.value);
+      if (!target) throw new Error("Choose an instance to get data from");
+      getDataButton.disabled = true;
+      setStatus(`Getting parameters and OSC rows from ${target.label || target.id}...`);
+      try {
+        const paramsResponse = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" });
+        if (!paramsResponse.ok) throw new Error(`OSCQuery parameter read failed (${paramsResponse.status})`);
+        const nodes = (await paramsResponse.json()).CONTENTS || {};
+        let populatedParams = 0;
+        target.parameters = (target.parameters || []).map((param) => {
+          const node = nodes[param.name];
+          if (!node || node.VALUE === undefined) return param;
+          populatedParams += 1;
+          return { ...param, value: scalarValue(node.VALUE) };
+        });
+        rows = buildRows(targets);
+        globalParams = collectGlobalParams(targets);
+        renderGlobalParams();
+        renderRows();
+
+        const availableRows = rows.filter((row) => row.portsByTarget.has(target.id));
+        const requests = await Promise.allSettled(availableRows.map((row) => postOsc({
+          targets: [target.id],
+          inputPort: row.portsByTarget.get(target.id).name,
+          args: GET_REQUEST
+        })));
+        await delay(75);
+        const reads = await Promise.allSettled(availableRows.map((row) => readTargetValue(target, `${target.baseAddress}/messages/out/${row.number}rowAck`)));
+        let populatedRows = 0;
+        for (let index = 0; index < availableRows.length; index += 1) {
+          if (requests[index].status !== "fulfilled" || reads[index].status !== "fulfilled") continue;
+          rowsEl.querySelector(`[data-row-values="${availableRows[index].number}"]`).value = formatList(reads[index].value);
+          populatedRows += 1;
+        }
+        setStatus(`Got ${populatedParams} parameter${populatedParams === 1 ? "" : "s"} and ${populatedRows}/${availableRows.length} OSC row${availableRows.length === 1 ? "" : "s"} from ${target.label || target.id}`);
+      } finally {
+        getDataButton.disabled = targets.length === 0;
+      }
+    }
+
     async function sendRow(row) {
       const values = parseVelocityList(rowsEl.querySelector(`[data-row-values="${row.number}"]`).value);
       const selected = selectedTargetIds().filter((id) => row.portsByTarget.has(id));
@@ -416,6 +461,10 @@
       if (!response.ok) throw new Error(`${path}: ${response.status}`);
       const body = await response.json();
       return body.VALUE;
+    }
+
+    function oscQueryHost(target) {
+      return isLoopback(target.host) ? location.hostname : target.host;
     }
 
     async function postOsc(payload) {

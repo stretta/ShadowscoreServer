@@ -2582,6 +2582,9 @@ test("Poland editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /function valueToSliderPosition/);
   assert.match(response.body, /addEventListener\("input", \(\) => scheduleParamSend/);
   assert.match(response.body, /addEventListener\("change", \(\) => flushParamSend/);
+  assert.match(response.body, /Get data from/);
+  assert.match(response.body, /async function getData/);
+  assert.match(response.body, /OSCQuery parameter read failed/);
 });
 
 test("TTID editor route serves the OSC target integration page", async () => {
@@ -2598,7 +2601,8 @@ test("TTID editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /SCALES/);
   assert.match(response.body, /ionian/);
   assert.match(response.body, /formatMask/);
-  assert.match(response.body, /Get state from/);
+  assert.match(response.body, /Get data from/);
+  assert.match(response.body, />Get Data</);
   assert.match(response.body, /id="get-state"/);
   assert.match(response.body, /async function getState/);
   assert.match(response.body, /OSCQuery parameter read failed/);
@@ -2621,6 +2625,9 @@ test("Plate editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /plate-choice/);
   assert.match(response.body, /scheduleParamSend/);
   assert.match(response.body, /flushParamSend/);
+  assert.match(response.body, /Get data from/);
+  assert.match(response.body, /async function getData/);
+  assert.match(response.body, /OSCQuery parameter read failed/);
 });
 
 test("SoftPiano editor route serves the compact OSC control panel", async () => {
@@ -2642,6 +2649,9 @@ test("SoftPiano editor route serves the compact OSC control panel", async () => 
   assert.match(response.body, /scheduleSend/);
   assert.match(response.body, /flushSend/);
   assert.match(response.body, /renderChoice/);
+  assert.match(response.body, /Get data from/);
+  assert.match(response.body, /async function getData/);
+  assert.match(response.body, /OSCQuery parameter read failed/);
 });
 
 test("ListSequencer editor route serves the OSC target integration page", async () => {
@@ -2669,11 +2679,13 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /renderGenericParam/);
   assert.match(response.body, /param\.values/);
   assert.match(response.body, /isToggleParam/);
-  assert.match(response.body, /Read from/);
-  assert.match(response.body, /Populate Fields/);
+  assert.match(response.body, /Get data from/);
+  assert.match(response.body, />Get Data</);
   assert.match(response.body, /args: \[-999\]/);
   assert.match(response.body, /messages\/out\/\$\{encodeURIComponent\(inputPortName\)\}Ack/);
   assert.match(response.body, /formatAckValue/);
+  assert.match(response.body, /hydrateParameters/);
+  assert.match(response.body, /OSCQuery parameter read failed/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -2701,6 +2713,9 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /param\.values/);
   assert.match(response.body, /isToggleParam/);
   assert.match(response.body, /sendGlobalParam/);
+  assert.match(response.body, /Get data from/);
+  assert.match(response.body, /async function getData/);
+  assert.match(response.body, /OSCQuery parameter read failed/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -2721,12 +2736,9 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /stagePollGeneration/);
   assert.match(response.body, /isCurrentStagePoll/);
   assert.match(response.body, /\.stage\.playing/);
-  assert.match(response.body, /Return to Zero/);
-  assert.match(response.body, /RTZ All Clients/);
-  assert.match(response.body, /Clock All Off/);
-  assert.match(response.body, /Clock All On/);
-  assert.match(response.body, /messages\/in\/rtz/);
-  assert.match(response.body, /returnAllToZero/);
+  assert.match(response.body, /RTZ Selected/);
+  assert.match(response.body, /Clock Selected Off/);
+  assert.match(response.body, /Clock Selected On/);
   assert.match(response.body, /inputPort: "rtz"/);
   assert.match(response.body, /setAllClocks/);
   assert.match(response.body, /param: "Clock"/);
@@ -2740,13 +2752,14 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /uniqueParameterValues/);
   assert.match(response.body, /Max Count/);
   assert.match(response.body, /\.stage\.unused/);
-  assert.match(response.body, /type="radio"/);
-  assert.match(response.body, /focusedTargetId/);
-  assert.match(response.body, /hydrateFocusedTarget/);
+  assert.match(response.body, /Get data from/);
+  assert.match(response.body, /type="checkbox"/);
+  assert.match(response.body, /selectedTargetIds/);
+  assert.match(response.body, /readSourceId/);
+  assert.match(response.body, /hydrateReadSource/);
   assert.match(response.body, /\/params/);
   assert.match(response.body, /isToggleParam/);
   assert.match(response.body, /parameter-toggle/);
-  assert.doesNotMatch(response.body, /type="checkbox" data-target/);
 });
 
 test("OSC volume tool route serves target selection and trim controls", async () => {

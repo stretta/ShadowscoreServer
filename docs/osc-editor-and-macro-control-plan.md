@@ -36,6 +36,33 @@ Each editor should keep its own UI language and parameter semantics. For
 Poland, this means preserving the existing Poland UI and adding only the target
 selection and transport adapter needed to talk to live local instances.
 
+#### Editor Data Model
+
+Every Shadowscore OSC editor follows the same read/write contract while
+retaining its instrument-specific controls:
+
+- RNBO parameters are the preferred scalar control type. RNBOOSCQuery exposes
+  their current values, so an editor can hydrate them directly from a running
+  instance.
+- RNBO parameters do not carry lists. Instruments that need list-valued state
+  use OSC message inports to set the list and paired OSC message outports to
+  acknowledge or query it. RNBOOSCQuery does not remember that list state as a
+  parameter, so the patch must implement the query/ACK behavior.
+- RNBO's Graph editor is useful for arbitrary parameter editing on one local
+  RNBO instance. Shadowscore's OSC editors add ensemble routing: the same edit
+  can be sent to selected instances across devices.
+
+The UI keeps reads and writes independent:
+
+- **Get data from** selects exactly one discovered instance. **Get Data** fills
+  every displayed parameter from that instance's OSCQuery parameter tree and,
+  when present, fills OSC-list fields through their paired ACK outports.
+- **Send data to** uses independent target checkboxes. Parameter changes and
+  OSC-field sends fan out to one or more checked instances.
+
+Choosing a read source never changes the write targets, and selecting write
+targets never changes the read source.
+
 ### OSC Utility Tools
 
 OSC utilities are cross-instrument performance and operations tools.

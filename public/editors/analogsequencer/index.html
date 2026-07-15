@@ -59,14 +59,14 @@
   <header class="ss-top-strip"><div class="top"><div><h1>AnalogSequencer Editor</h1><p class="subtitle">16-stage pitch and step controls</p></div><div id="status" class="status" role="status">Loading targets...</div></div></header>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes"><a href="/">Dashboard</a><a href="/structure-editor">Structure</a><a href="/matrix-edit">Matrix</a><a href="/piano-roll">Piano Roll</a><a href="/event-list">Event List</a><a href="/editors" aria-current="page">OSC Generators</a><a href="/admin">Admin</a></nav>
   <main>
-    <section class="toolbar"><strong>Get from one client · send to checked clients</strong><div class="toolbar-actions"><label for="read-source">Get data from</label><select id="read-source" aria-label="Instance to get data from"></select><button id="get-data" type="button">Get Data</button><button id="clock-all-off" type="button">Clock Selected Off</button><button id="rtz" class="primary" type="button">RTZ Selected</button><button id="clock-all-on" type="button">Clock Selected On</button><button id="refresh" type="button">Refresh</button></div></section>
+    <section class="toolbar"><strong>Focus one instance · send to checked instances</strong><div class="toolbar-actions"><label for="read-source">Instance focus</label><select id="read-source" aria-label="Instance focus"></select><button id="get-data" type="button">Read Instance</button><button id="clock-all-off" type="button">Clock Selected Off</button><button id="rtz" class="primary" type="button">RTZ Selected</button><button id="clock-all-on" type="button">Clock Selected On</button><button id="refresh" type="button">Refresh</button></div></section>
     <section id="targets" class="targets" aria-live="polite"></section>
     <div id="snapshot-mount"></div>
     <section class="sequencer"><div id="stages" class="stages"></div></section>
     <section class="parameters"><h2>Sequence Parameters</h2><div id="parameters" class="parameter-grid"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715-ui1";
     const targetsEl = document.querySelector("#targets");
     const stagesEl = document.querySelector("#stages");
     const parametersEl = document.querySelector("#parameters");
@@ -87,7 +87,7 @@
     document.querySelector("#clock-all-on").addEventListener("click", () => setAllClocks(1).catch(reportError));
     document.querySelector("main").addEventListener("input", (event) => { if (event.target.matches("[data-param]")) snapshotClient?.draftChanged(); });
     document.querySelector("main").addEventListener("change", (event) => { if (event.target.matches("[data-param]")) snapshotClient?.draftChanged(); });
-    const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"));
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
     snapshotClient = createOscSnapshotEditorClient({
       app: "analogsequencer",
       roleLabel: "AnalogSequencer",

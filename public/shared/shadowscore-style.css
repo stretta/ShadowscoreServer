@@ -266,6 +266,108 @@ td,
   margin: 0;
 }
 
+.ss-osc-snapshot-focus {
+  color: var(--ss-text);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.ss-osc-snapshot-transport {
+  align-items: stretch;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(120px, 0.7fr) minmax(160px, 1fr) auto;
+}
+
+.ss-osc-snapshot-transport-card,
+.ss-osc-snapshot-editing,
+.ss-osc-snapshot-chase {
+  background: var(--ss-surface);
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius-control);
+  display: grid;
+  gap: 3px;
+  padding: 8px 10px;
+}
+
+.ss-osc-snapshot-transport-card span,
+.ss-osc-snapshot-editing span {
+  color: var(--ss-muted);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.09em;
+}
+
+.ss-osc-snapshot-transport-card strong {
+  color: var(--ss-accent);
+  font-size: 22px;
+  line-height: 1;
+}
+
+.ss-osc-snapshot-transport-card small {
+  color: var(--ss-muted);
+  font-weight: 750;
+}
+
+.ss-osc-snapshot-editing select {
+  min-width: 0;
+  width: 100%;
+}
+
+.ss-osc-snapshot-chase {
+  align-items: center;
+  cursor: pointer;
+  display: flex;
+  font-size: 12px;
+  font-weight: 900;
+  justify-content: center;
+}
+
+.ss-osc-snapshot-slots {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.ss-osc-snapshot-slot {
+  align-items: flex-start;
+  background: var(--ss-surface);
+  border-color: var(--ss-border);
+  display: grid;
+  flex: 0 0 92px;
+  gap: 2px;
+  justify-items: start;
+  min-height: 48px;
+  padding: 7px 9px;
+}
+
+.ss-osc-snapshot-slot strong {
+  color: var(--ss-text);
+  font-size: 15px;
+}
+
+.ss-osc-snapshot-slot span {
+  color: var(--ss-muted);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+.ss-osc-snapshot-slot.written span {
+  color: var(--ss-accent);
+}
+
+.ss-osc-snapshot-slot.editing {
+  border-color: var(--ss-accent);
+  box-shadow: 0 0 0 1px var(--ss-accent);
+}
+
+.ss-osc-snapshot-slot.playing strong::after {
+  color: var(--ss-accent-secondary);
+  content: "  ▶";
+  font-size: 10px;
+}
+
 .ss-osc-snapshot-fields {
   display: grid;
   gap: 8px;
@@ -298,6 +400,23 @@ td,
   font-weight: 850;
 }
 
+.ss-osc-snapshot-advanced {
+  border-top: 1px solid var(--ss-border);
+  padding-top: 8px;
+}
+
+.ss-osc-snapshot-advanced summary {
+  color: var(--ss-muted);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.ss-osc-snapshot-advanced[open] {
+  display: grid;
+  gap: 8px;
+}
+
 @media (max-width: 720px) {
   .ss-osc-snapshot-head,
   .ss-osc-snapshot-actions,
@@ -308,5 +427,13 @@ td,
 
   .ss-osc-snapshot-fields {
     grid-template-columns: 1fr;
+  }
+
+  .ss-osc-snapshot-transport {
+    grid-template-columns: 1fr;
+  }
+
+  .ss-osc-snapshot-chase {
+    justify-content: flex-start;
   }
 }

@@ -41,13 +41,13 @@
   <main>
     <header>
       <div><h1>SoftPiano Editor</h1><p class="subtitle">Tone and envelope controls</p></div>
-      <div class="actions"><label for="read-source">Get data from</label><select id="read-source" aria-label="Instance to get data from"></select><button id="get-data" type="button">Get Data</button><button id="refresh" type="button">Refresh</button><span id="status" class="status" role="status"></span></div>
+      <div class="actions"><label for="read-source">Instance focus</label><select id="read-source" aria-label="Instance focus"></select><button id="get-data" type="button">Read Instance</button><button id="refresh" type="button">Refresh</button><span id="status" class="status" role="status"></span></div>
     </header>
     <section id="targets" class="targets" aria-label="SoftPiano targets"></section>
     <div id="panels"></div>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715-ui1";
     const SOFTPIANO_GROUPS = [
       { title: "Output", controls: ["Volume"] },
       { title: "MIDI", controls: ["TransposeSoftPiano"] },
@@ -68,7 +68,7 @@
 
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     getDataButton.addEventListener("click", () => getData().catch(reportError));
-    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: panelsEl });
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: panelsEl, sourceSelect: readSourceSelect });
     snapshotClient = createOscSnapshotEditorClient({ app: "softpiano", roleLabel: "SoftPiano", elements: snapshotElements, serializeDraft: serializeSnapshotDraft, applySnapshot: applySavedSnapshot, setStatus });
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 

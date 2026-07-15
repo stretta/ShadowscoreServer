@@ -293,9 +293,9 @@
     <header class="editor-header">
       <h1>Poland Editor</h1>
       <div class="actions">
-        <label for="read-source">Get data from</label>
-        <select id="read-source" aria-label="Instance to get data from"></select>
-        <button id="get-data" type="button">Get Data</button>
+        <label for="read-source">Instance focus</label>
+        <select id="read-source" aria-label="Instance focus"></select>
+        <button id="get-data" type="button">Read Instance</button>
         <button id="refresh" type="button">Refresh</button>
         <span id="status" class="status" role="status"></span>
       </div>
@@ -306,7 +306,7 @@
     </section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715-ui1";
     const POLAND_GROUPS = [
       { title: "MIDI", key: "midi", controls: ["TransposePoland"] },
       { title: "OSC A", key: "oscillator-a", controls: ["VolA", "PitchBiasCoarseA", "PitchBiasFineA", "WavetableA", "WaveBiasA", "WaveModVelA", "WaveModVelRandA", "WaveEnvModDistanceA", "WaveEnvModTimeA"] },
@@ -721,7 +721,7 @@
       }[char]));
     }
 
-    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: document.querySelector(".synth-param-panel") });
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: document.querySelector(".synth-param-panel"), sourceSelect: readSourceSelect });
     snapshotClient = createOscSnapshotEditorClient({ app: "poland", roleLabel: "Poland", elements: snapshotElements, serializeDraft: serializeSnapshotDraft, applySnapshot: applySavedSnapshot, setStatus });
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
   </script>

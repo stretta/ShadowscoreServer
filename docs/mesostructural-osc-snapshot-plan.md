@@ -452,22 +452,28 @@ instances, and reassigning either role changes only the runtime destination.
 
 ### Phase E: Replace Editor Snapshot UX
 
-Status: implemented locally across all seven bundled OSC editors. The shared
-panel now captures from exactly one discovered source, browses reusable OSC
-clips, loads without sending, assigns or duplicates clips, and recalls the
-selected block layer. Capture provenance and completeness, routing state,
-active block, and recall results remain visible beside the controls. Static
-route coverage and the full server suite pass; live browser and rig acceptance
-remain pending.
+Status: streamlined locally across all seven bundled OSC editors after live rig
+testing exposed capture ambiguity. The shared panel now presents PLAYING and
+EDITING blocks, optional chase, focused-instance routing, and one Written or
+Unspecified slot per structural block. A first write creates the focused
+instance's clip/layer and a later write replaces it; missing layers remain
+unspecified no-ops rather than implicit empty state. Multi-instance live sends
+remain independent, playback blocks capture to prevent recall races, and clip
+bookkeeping is available only under advanced tools. Browser and rig acceptance
+of the streamlined presentation remain pending.
 
 - Remove **Write snapshot to** and any path that serializes the editor's local
   draft directly into score state.
-- Add **Capture state from** as a single-select live instance control.
-- Add clip name/id, block, and role controls plus **Capture as OSC clip**.
+- Reuse the editor's single focused instance as the state source and derive its
+  logical role rather than exposing role selection in the normal workflow.
+- Present PLAYING, EDITING, and CHASE controls plus one Written or Unspecified
+  state slot for every available structural block.
+- Add **Write to block** with create-versus-replace labeling and prevent writes
+  while macro playback can overwrite the live source.
 - Keep **Get state from** and **Send data to** as separate live-editor features;
   checked write targets must not influence capture.
-- Add an OSC clip browser that can load a clip into the draft without sending,
-  assign an existing clip to a block/role, duplicate a clip, and recall a layer.
+- Keep clip browsing, assignment, and duplication available as advanced tools;
+  normal editing addresses state by focused instance and structural block.
 - Show capture completeness, source identity, routing, active block, and recall
   results close to the initiating control.
 

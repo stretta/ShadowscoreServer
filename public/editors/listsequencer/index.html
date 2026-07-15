@@ -375,9 +375,9 @@
       <div class="meta"><strong>Immediate write targets:</strong> send data to checked instances</div>
       <div class="toolbar-actions">
         <div class="readback-controls">
-          <label for="read-source">Get data from</label>
-          <select id="read-source" aria-label="Instance to get data from"></select>
-          <button id="populate" type="button">Get Data</button>
+          <label for="read-source">Instance focus</label>
+          <select id="read-source" aria-label="Instance focus"></select>
+          <button id="populate" type="button">Read Instance</button>
         </div>
         <button id="refresh" type="button">Refresh</button>
         <button id="select-all" type="button">All Targets</button>
@@ -389,7 +389,7 @@
     <section id="ttid" class="ttid-grid" aria-live="polite"></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715-ui1";
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
     const SCALES = Object.freeze({
@@ -442,7 +442,7 @@
     document.querySelector("main").addEventListener("change", (event) => {
       if (event.target.matches("[data-param], [data-inport]")) snapshotClient?.draftChanged();
     });
-    const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"));
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
     snapshotClient = createOscSnapshotEditorClient({
       app: "listsequencer",
       roleLabel: "ListSequencer",

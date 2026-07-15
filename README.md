@@ -150,11 +150,13 @@ without changing the Matrix Edit or Event List surfaces.
 The `/editors` route serves the registered OSC-generator index from
 `public/editors`, and `/editors/manifest` exposes the generator manifest JSON.
 The bundled ListSequencer, ListVelSequencer, AnalogSequencer, Plate, Poland,
-SoftPiano, and TTID editors share the mesostructural OSC snapshot workflow.
-Each form can save to or load from a block without sending, then recall
-explicitly through a separately selected logical role. Live read sources,
-checked immediate-send targets, block destinations, and runtime roles remain
-independent. Utility tools for live OSC target volume trims and
+SoftPiano, and TTID editors share the mesostructural OSC state workflow. Their
+focused instance determines the score role, PLAYING and EDITING identify the
+transport and write destinations, and CHASE optionally keeps them together.
+Every structural block is shown as Written or Unspecified; unspecified state
+is a no-op during recall, distinct from explicitly written silence or empty
+lists. Checked immediate-send targets remain independent from focused-instance
+state capture. Utility tools for live OSC target volume trims and
 macro building are served at `/tools/osc-volume` and `/tools/osc-macros`.
 
 By default, the active score persists to `data/score.json`, the previous

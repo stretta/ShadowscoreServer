@@ -73,10 +73,10 @@
       <div class="meta">Send data to checked instances; pitch maps and velocity rows remain independent.</div>
       <div class="toolbar-actions">
         <div class="read-source">
-          <label for="read-source">Get data from</label>
-          <select id="read-source" aria-label="Instance to get data from"></select>
+          <label for="read-source">Instance focus</label>
+          <select id="read-source" aria-label="Instance focus"></select>
         </div>
-        <button id="get-data" type="button">Get Data</button>
+        <button id="get-data" type="button">Read Instance</button>
         <button id="refresh" type="button">Refresh</button>
         <button id="select-all" type="button">All Targets</button>
       </div>
@@ -92,7 +92,7 @@
     <section id="rows" class="rows" aria-live="polite"></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715-ui1";
 
     const ROW_COUNT = 8;
     const GET_REQUEST = [-999];
@@ -113,7 +113,8 @@
     let snapshotClient;
 
     const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), {
-      before: document.querySelector(".toolbar")
+      before: document.querySelector(".toolbar"),
+      sourceSelect: readSourceSelect
     });
 
     refreshButton.addEventListener("click", () => refresh().catch(reportError));

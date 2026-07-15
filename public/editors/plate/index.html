@@ -294,9 +294,9 @@
     <header class="editor-header">
       <h1>Plate Editor</h1>
       <div class="actions">
-        <label for="read-source">Get data from</label>
-        <select id="read-source" aria-label="Instance to get data from"></select>
-        <button id="get-data" type="button">Get Data</button>
+        <label for="read-source">Instance focus</label>
+        <select id="read-source" aria-label="Instance focus"></select>
+        <button id="get-data" type="button">Read Instance</button>
         <button id="refresh" type="button">Refresh</button>
         <span id="status" class="status" role="status"></span>
       </div>
@@ -307,7 +307,7 @@
     </section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715-ui1";
     const PLATE_GROUPS = [
       { title: "Time", key: "time", match: ["decay", "time", "size", "predelay", "pre-delay", "delay"] },
       { title: "Tone", key: "tone", match: ["damp", "damping", "diffusion", "diffuse", "brightness", "color", "tone", "low", "high", "cut", "filter"] },
@@ -343,7 +343,7 @@
     });
     getDataButton.addEventListener("click", () => getData().catch(reportError));
 
-    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: document.querySelector(".reverb-param-panel") });
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: document.querySelector(".reverb-param-panel"), sourceSelect: readSourceSelect });
     snapshotClient = createOscSnapshotEditorClient({
       app: "plate",
       roleLabel: "Plate",

@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createOscEditorSnapshot, oscClockRecallNotice, oscEditorParamValue, oscRecallSummary, sameOscSnapshot } from "../public/shared/osc-snapshot-editor.js";
+import {
+  createOscEditorSnapshot,
+  oscBlockSlotState,
+  oscClockRecallNotice,
+  oscEditorParamValue,
+  oscRecallSummary,
+  oscWriteActionLabel,
+  resolveFocusedOscRole,
+  sameOscSnapshot
+} from "../public/shared/osc-snapshot-editor.js";
 
 test("shared OSC editor snapshot core normalizes parameter and list drafts", () => {
   assert.deepEqual(createOscEditorSnapshot({
@@ -36,4 +45,32 @@ test("shared OSC editor recall notice follows the saved Clock contract", () => {
   assert.equal(oscClockRecallNotice({ params: { Clock: 0 } }), "Clock 0 suspends immediately");
   assert.equal(oscClockRecallNotice({ params: { Clock: 1 } }), "Clock 1 arms for the next observed shared beat");
   assert.equal(oscClockRecallNotice({ params: { Tempo: 120 } }), "");
+});
+
+test("focused live instances resolve their score role without exposing role selection", () => {
+  const assignments = {
+    "analog-a": { app: "analogsequencer", deviceId: "wren", oscTargetId: "wren:analogsequencer:5" },
+    "analog-b": { app: "analogsequencer", deviceId: "wren", oscTargetId: "wren:analogsequencer:11" }
+  };
+  const targets = [
+    { id: "wren:analogsequencer:5", app: "analogsequencer", deviceId: "wren" },
+    { id: "wren:analogsequencer:11", app: "analogsequencer", deviceId: "wren" }
+  ];
+  assert.equal(resolveFocusedOscRole({ app: "analogsequencer", targetId: targets[1].id, targets, assignments }), "analog-b");
+  assert.equal(resolveFocusedOscRole({ app: "analogsequencer", targetId: "missing", targets, assignments }), "");
+});
+
+test("block slots distinguish unspecified state from explicitly written empty data", () => {
+  const emptyClip = { schemaVersion: 1, app: "listsequencer", params: { Clock: 0 }, inputPorts: { Steps: [] } };
+  const score = {
+    oscClips: { "a-list": emptyClip },
+    mesostructure: {
+      A: { oscLayers: { "list-a": { clipId: "a-list" } } },
+      B: { oscLayers: {} }
+    }
+  };
+  assert.deepEqual(oscBlockSlotState(score, "A", "list-a"), { status: "Written", clipId: "a-list", clip: emptyClip });
+  assert.deepEqual(oscBlockSlotState(score, "B", "list-a"), { status: "Unspecified", clipId: "", clip: null });
+  assert.equal(oscWriteActionLabel({ blockId: "A", written: true }), "Replace A State");
+  assert.equal(oscWriteActionLabel({ blockId: "B", written: false }), "Write to B");
 });

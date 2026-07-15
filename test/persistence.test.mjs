@@ -62,6 +62,26 @@ test("reconciles persisted voices with configured voices", () => {
   assert.deepEqual(reconciled.clips.oneShot.duration, { beats: 2 });
 });
 
+test("declaratively initialized exact players survive persistence reconciliation", () => {
+  const config = mergeConfig(defaultConfig, {
+    ensemble: { voices: ["player-1", "player-2", "player-3", "player-4", "player-5", "player-6"] }
+  });
+  const fallback = createInitialScore(config);
+  const playerIds = ["player-1", "player-2", "player-3", "player-4"];
+  const persisted = {
+    ...structuredClone(fallback),
+    scoreInitialization: { schemaVersion: 1, name: "Quartet", exactPlayers: true },
+    voices: Object.fromEntries(playerIds.map((id) => [id, { version: 0, notes: [] }])),
+    assignments: Object.fromEntries(playerIds.map((id) => [id, fallback.assignments[id]]))
+  };
+
+  const reconciled = reconcileScore(config, fallback, persisted);
+
+  assert.deepEqual(Object.keys(reconciled.voices), playerIds);
+  assert.equal(reconciled.assignments["player-5"], undefined);
+  assert.deepEqual(reconciled.scoreInitialization, { schemaVersion: 1, name: "Quartet", exactPlayers: true });
+});
+
 test("writes score snapshots and keeps previous backup", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-persist-"));
   const scorePath = path.join(directory, "score.json");

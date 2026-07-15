@@ -105,7 +105,8 @@ export function createShadowScoreClientState({ serverUrl = "" } = {}) {
         "structure.playhead.updated",
         "admin.reset",
         "admin.restore",
-        "admin.score.created"
+        "admin.score.created",
+        "admin.score.initialized"
       ].forEach((type) => eventSource.addEventListener(type, handleEvent));
       return eventSource;
     },
@@ -250,7 +251,7 @@ function applyDraft(score, draft) {
 }
 
 function eventTouchesResource(event, key, previousScore, nextScore) {
-  if (event.type === "admin.reset" || event.type === "admin.restore" || event.type === "admin.score.created") {
+  if (event.type === "admin.reset" || event.type === "admin.restore" || event.type === "admin.score.created" || event.type === "admin.score.initialized") {
     return true;
   }
   const [kind, id] = key.split(":");

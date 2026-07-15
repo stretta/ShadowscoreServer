@@ -726,6 +726,34 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/admin/scores/initialize/preview") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, {
+        ok: true,
+        dryRun: true,
+        ...store.previewScoreInitialization(withoutControlFields(body, REVISION_CONTROL_FIELDS))
+      });
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/admin/scores/initialize") {
+    try {
+      const body = await readJson(request);
+      writeJson(response, 200, {
+        ok: true,
+        dryRun: false,
+        ...store.initializeScore(withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body))
+      });
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/admin/import-legacy-voice-notes") {
     try {
       const body = await readJson(request);

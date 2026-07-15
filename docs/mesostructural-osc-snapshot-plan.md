@@ -518,6 +518,15 @@ without losing its logical role or block layer.
 
 ### Phase G: Score Initialization Workflow
 
+Status: the API checkpoint is implemented. A declarative request document is
+validated into an exact device-free score skeleton, previewed without mutation,
+and applied in one revision-checked store swap. The plan reports players, note
+clips, blocks, macro entries, OSC roles, and implicit Unspecified block/role
+slots. Live device fields are rejected so discovery and onboarding remain a
+separate phase. A four-player, six-section request document is checked in at
+`config/score-initialization.four-player.json`. An Admin form remains deferred
+until this API has been exercised in normal setup work.
+
 - Add a declarative score-initialization request that can create players,
   sections/mesostructural blocks, macro order, note clips, loop lengths, OSC
   roles, and empty OSC-layer slots in one validated transaction.

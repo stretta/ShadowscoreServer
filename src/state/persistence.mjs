@@ -156,12 +156,15 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
   assertScoreShape(persistedScore);
 
   const voices = structuredClone(persistedScore.voices);
-  const assignments = {
-    ...structuredClone(fallbackScore.assignments ?? {}),
-    ...structuredClone(persistedScore.assignments ?? {})
-  };
+  const exactPlayers = persistedScore.scoreInitialization?.exactPlayers === true;
+  const assignments = exactPlayers
+    ? structuredClone(persistedScore.assignments ?? {})
+    : {
+        ...structuredClone(fallbackScore.assignments ?? {}),
+        ...structuredClone(persistedScore.assignments ?? {})
+      };
 
-  for (const voiceId of config.ensemble.voices) {
+  for (const voiceId of exactPlayers ? [] : config.ensemble.voices) {
     if (!voices[voiceId]) {
       voices[voiceId] = structuredClone(fallbackScore.voices[voiceId] ?? { version: 0, notes: [] });
     }
@@ -175,6 +178,9 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
     version: persistedScore.version,
     scoreRevision: Number.isFinite(persistedScore.scoreRevision) ? persistedScore.scoreRevision : persistedScore.version,
     structureRevision: Number.isFinite(persistedScore.structureRevision) ? persistedScore.structureRevision : 0,
+    scoreInitialization: persistedScore.scoreInitialization === undefined
+      ? null
+      : structuredClone(persistedScore.scoreInitialization),
     context: structuredClone(persistedScore.context),
     clips: normalizePersistedClips(persistedScore.clips ?? fallbackScore.clips ?? {}),
     mesostructure: normalizePersistedMesostructure(persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}),
@@ -202,6 +208,9 @@ export function assertScoreShape(score) {
   }
   if (score.structureRevision !== undefined && !Number.isFinite(score.structureRevision)) {
     throw new Error("score.structureRevision must be numeric");
+  }
+  if (score.scoreInitialization !== undefined && score.scoreInitialization !== null && !isPlainObject(score.scoreInitialization)) {
+    throw new Error("score.scoreInitialization must be an object or null");
   }
   if (!isPlainObject(score.context)) {
     throw new Error("score.context must be an object");

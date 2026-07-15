@@ -1,6 +1,7 @@
 import { EventEmitter } from "node:events";
 import { reconcileOscAssignments as reconcileOscRoleAssignments } from "../osc/assignments.mjs";
 import { normalizeOscClip } from "../osc/snapshot-contract.mjs";
+import { createScoreInitializationPlan } from "./score-initialization.mjs";
 
 export function createInitialScore(config) {
   const voices = {};
@@ -19,6 +20,7 @@ export function createInitialScore(config) {
     version: 0,
     scoreRevision: 0,
     structureRevision: 0,
+    scoreInitialization: null,
     context: createDefaultContext(),
     clips: createDefaultClips(voiceIds),
     mesostructure: createDefaultMesostructure(voiceIds),
@@ -843,6 +845,33 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "admin.score.created", score, { previousVersion }, options);
       return structuredClone(score);
     },
+    previewScoreInitialization(request) {
+      const plan = normalizedScoreInitializationPlan(request, score.ensembleId);
+      return {
+        base: {
+          version: score.version,
+          scoreRevision: scoreRevisionFor(score),
+          structureRevision: structureRevisionFor(score)
+        },
+        summary: structuredClone(plan.summary),
+        score: structuredClone(plan.score)
+      };
+    },
+    initializeScore(request, options = {}) {
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const plan = normalizedScoreInitializationPlan(request, score.ensembleId);
+      const previousVersion = score.version;
+      score = {
+        ...plan.score,
+        ensembleId: score.ensembleId,
+        version: previousVersion + 1,
+        scoreRevision: scoreRevisionFor(score) + 1,
+        structureRevision: structureRevisionFor(score) + 1
+      };
+      emitChange(events, "admin.score.initialized", score, { previousVersion, summary: plan.summary }, options);
+      return { summary: structuredClone(plan.summary), score: structuredClone(score) };
+    },
     restore(nextScore, options = {}) {
       assertExpectedRevisions(score, options);
       const restored = normalizeScoreDocument(nextScore, assignmentDefaults, score);
@@ -857,6 +886,14 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "admin.restore", score, { previousVersion }, options);
       return structuredClone(score);
     }
+  };
+}
+
+function normalizedScoreInitializationPlan(request, ensembleId) {
+  const plan = createScoreInitializationPlan(request, { ensembleId });
+  return {
+    summary: plan.summary,
+    score: normalizeScoreDocument(plan.score, {}, null)
   };
 }
 
@@ -1114,6 +1151,7 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
     version: Number.isFinite(scoreDocument.version) ? scoreDocument.version : 0,
     scoreRevision: scoreRevisionFor(scoreDocument),
     structureRevision: structureRevisionFor(scoreDocument),
+    scoreInitialization: normalizeScoreInitialization(scoreDocument.scoreInitialization ?? fallbackScore?.scoreInitialization ?? null),
     context: structuredClone(scoreDocument.context),
     clips: normalizeClips(scoreDocument.clips ?? fallbackScore?.clips ?? {}),
     mesostructure,
@@ -1126,6 +1164,16 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
   };
   assertOscReferences(normalized.mesostructure, normalized.oscAssignments, normalized.oscClips);
   return normalized;
+}
+
+function normalizeScoreInitialization(document) {
+  if (document === null || document === undefined) return null;
+  if (!isPlainObject(document)) throw new Error("scoreInitialization must be an object or null");
+  return {
+    schemaVersion: Number.isInteger(document.schemaVersion) ? document.schemaVersion : 1,
+    name: stringField(document.name),
+    exactPlayers: Boolean(document.exactPlayers)
+  };
 }
 
 function normalizeClips(clipsDocument) {

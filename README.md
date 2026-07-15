@@ -284,6 +284,8 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /admin/scores`: list named score JSON files saved on the host.
 - `POST /admin/scores`: save the current score to the host score library with an optional `{ "name": "..." }`.
 - `POST /admin/scores/new`: replace the current score with a fresh score from the configured ensemble defaults.
+- `POST /admin/scores/initialize/preview`: validate a declarative score-initialization request without mutation and return its exact score skeleton, summary, and current revision base.
+- `POST /admin/scores/initialize`: atomically create the previewed player, clip, block, macro, and OSC-role skeleton. Include the preview's `expectedVersion`, `expectedScoreRevision`, and `expectedStructureRevision` to reject a stale apply. Live device mappings and OSC clips remain separate onboarding operations.
 - `POST /admin/scores/:scoreId/load`: restore a saved score from the host score library.
 - `DELETE /admin/scores/:scoreId`: delete a saved score JSON file from the host score library.
 - `POST /admin/assignment-preset`: apply a configured assignment preset by `{ "presetId": "..." }`.

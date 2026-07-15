@@ -416,6 +416,7 @@ export function adminPage() {
     events.addEventListener("voice.removed", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.reset", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.score.created", (event) => render(JSON.parse(event.data).score));
+    events.addEventListener("admin.score.initialized", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.restore", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.legacyVoiceNotes.imported", (event) => render(JSON.parse(event.data).score));
     events.onerror = () => setStatus("Event stream reconnecting...");

@@ -1873,6 +1873,66 @@ test("admin new score route ignores persisted boot mutations", async () => {
   assert.deepEqual(created.structureState, { activeBlockId: "A", macroIndex: 0 });
 });
 
+test("score initialization previews and atomically creates a device-free score skeleton", async () => {
+  const context = createRouteContext();
+  const requestDocument = JSON.parse(await fs.readFile(new URL("../config/score-initialization.four-player.json", import.meta.url), "utf8"));
+  const before = await requestJson(context, "GET", "/score");
+
+  const preview = await requestJson(context, "POST", "/admin/scores/initialize/preview", requestDocument);
+  assert.equal(preview.dryRun, true);
+  assert.equal(preview.summary.playerCount, 4);
+  assert.equal(preview.summary.blockCount, 6);
+  assert.equal(preview.summary.clipCount, 24);
+  assert.equal(preview.summary.oscRoleCount, 3);
+  assert.equal(preview.summary.emptyOscLayerSlotCount, 18);
+  assert.equal(preview.summary.deviceMappingCount, 0);
+  assert.deepEqual(preview.summary.macroOrder, ["A", "B", "C", "D", "E", "F"]);
+  assert.deepEqual(await requestJson(context, "GET", "/score"), before);
+
+  const initialized = await requestJson(context, "POST", "/admin/scores/initialize", {
+    ...requestDocument,
+    expectedVersion: preview.base.version,
+    expectedScoreRevision: preview.base.scoreRevision,
+    expectedStructureRevision: preview.base.structureRevision
+  });
+  assert.equal(initialized.dryRun, false);
+  assert.deepEqual(Object.keys(initialized.score.voices), ["player-1", "player-2", "player-3", "player-4"]);
+  assert.deepEqual(initialized.score.scoreInitialization, { schemaVersion: 1, name: "Four-player six-section loops", exactPlayers: true });
+  assert.deepEqual(Object.keys(initialized.score.mesostructure), ["A", "B", "C", "D", "E", "F"]);
+  assert.deepEqual(initialized.score.mesostructure.A.duration, { bars: 1 });
+  assert.equal(initialized.score.mesostructure.F.players["player-4"].clipId, "f-player-4");
+  assert.equal(initialized.score.clips["f-player-4"].playbackType, "looped");
+  assert.equal(initialized.score.oscAssignments["analog-1"].oscTargetId, "");
+  assert.deepEqual(initialized.score.mesostructure.A.oscLayers, {});
+  assert.deepEqual(initialized.score.oscClips, {});
+});
+
+test("score initialization rejects invalid and stale requests without partial mutation", async () => {
+  const context = createRouteContext();
+  const before = await requestJson(context, "GET", "/score");
+  const invalid = await request(context, "POST", "/admin/scores/initialize", {
+    players: [{ id: "player-1" }],
+    clips: [],
+    blocks: [{ id: "A", players: { "player-1": "missing" } }]
+  });
+  assert.equal(invalid.status, 400);
+  assert.match(invalid.body, /references unknown clip 'missing'/);
+  assert.deepEqual(await requestJson(context, "GET", "/score"), before);
+
+  await requestJson(context, "POST", "/context", { seed: 42 });
+  const stale = await request(context, "POST", "/admin/scores/initialize", {
+    expectedScoreRevision: before.scoreRevision,
+    players: [{ id: "player-1" }],
+    clips: [],
+    blocks: [{ id: "A", players: {} }]
+  });
+  assert.equal(stale.status, 400);
+  assert.match(stale.body, /stale score revision/);
+  const after = await requestJson(context, "GET", "/score");
+  assert.equal(after.context.seed, 42);
+  assert.equal(Object.keys(after.voices).length, Object.keys(before.voices).length);
+});
+
 test("admin assignment preset applies friendly shadowbox labels", async () => {
   const context = createRouteContext();
 

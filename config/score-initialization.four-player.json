@@ -1,0 +1,58 @@
+{
+  "name": "Four-player six-section loops",
+  "context": {
+    "clip": { "TimeSignature": { "numerator": 4, "denominator": 4 } },
+    "scale": {},
+    "grid": { "subdivision": 4 },
+    "seed": 0
+  },
+  "players": [
+    { "id": "player-1", "label": "Player 1", "color": "#6ee7b7" },
+    { "id": "player-2", "label": "Player 2", "color": "#60a5fa" },
+    { "id": "player-3", "label": "Player 3", "color": "#f59e0b" },
+    { "id": "player-4", "label": "Player 4", "color": "#f472b6" }
+  ],
+  "clips": [
+    { "id": "a-player-1", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "a-player-2", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "a-player-3", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "a-player-4", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "b-player-1", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "b-player-2", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "b-player-3", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "b-player-4", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "c-player-1", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "c-player-2", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "c-player-3", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "c-player-4", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "d-player-1", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "d-player-2", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "d-player-3", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "d-player-4", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "e-player-1", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "e-player-2", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "e-player-3", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "e-player-4", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "f-player-1", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "f-player-2", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "f-player-3", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" },
+    { "id": "f-player-4", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" }
+  ],
+  "blocks": [
+    { "id": "A", "duration": { "bars": 1 }, "players": { "player-1": "a-player-1", "player-2": "a-player-2", "player-3": "a-player-3", "player-4": "a-player-4" } },
+    { "id": "B", "duration": { "bars": 1 }, "players": { "player-1": "b-player-1", "player-2": "b-player-2", "player-3": "b-player-3", "player-4": "b-player-4" } },
+    { "id": "C", "duration": { "bars": 1 }, "players": { "player-1": "c-player-1", "player-2": "c-player-2", "player-3": "c-player-3", "player-4": "c-player-4" } },
+    { "id": "D", "duration": { "bars": 1 }, "players": { "player-1": "d-player-1", "player-2": "d-player-2", "player-3": "d-player-3", "player-4": "d-player-4" } },
+    { "id": "E", "duration": { "bars": 1 }, "players": { "player-1": "e-player-1", "player-2": "e-player-2", "player-3": "e-player-3", "player-4": "e-player-4" } },
+    { "id": "F", "duration": { "bars": 1 }, "players": { "player-1": "f-player-1", "player-2": "f-player-2", "player-3": "f-player-3", "player-4": "f-player-4" } }
+  ],
+  "macrostructure": {
+    "tempo": 120,
+    "blocks": ["A", "B", "C", "D", "E", "F"]
+  },
+  "oscRoles": [
+    { "id": "analog-1", "app": "analogsequencer", "label": "Analog 1" },
+    { "id": "analog-2", "app": "analogsequencer", "label": "Analog 2" },
+    { "id": "analog-3", "app": "analogsequencer", "label": "Analog 3" }
+  ]
+}

@@ -94,6 +94,7 @@
       elements: snapshotElements,
       serializeDraft: serializeSnapshotDraft,
       applySnapshot: applySavedSnapshot,
+      onFocusChange: getData,
       setStatus: (text) => { statusEl.textContent = text; }
     });
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);

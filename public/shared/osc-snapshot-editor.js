@@ -111,13 +111,19 @@ export function createOscSnapshotEditorClient(options) {
       renderContext();
       loadLastRecall().catch(reportError);
     });
-    elements.sourceSelect?.addEventListener("change", () => {
+    elements.sourceSelect?.addEventListener("change", async () => {
       synchronizeFocusedRole();
       selectLayerClip();
       synchronizeClipIdentity();
       renderPlayback();
       renderSlots();
       renderStatus();
+      try {
+        await options.onFocusChange?.(elements.sourceSelect.value);
+        renderStatus();
+      } catch (error) {
+        reportError(error);
+      }
     });
     elements.clipSelect?.addEventListener("change", renderStatus);
     elements.clipIdInput?.addEventListener("input", renderStatus);

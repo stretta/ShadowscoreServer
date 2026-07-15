@@ -69,7 +69,7 @@
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     getDataButton.addEventListener("click", () => getData().catch(reportError));
     const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: panelsEl, sourceSelect: readSourceSelect });
-    snapshotClient = createOscSnapshotEditorClient({ app: "softpiano", roleLabel: "SoftPiano", elements: snapshotElements, serializeDraft: serializeSnapshotDraft, applySnapshot: applySavedSnapshot, setStatus });
+    snapshotClient = createOscSnapshotEditorClient({ app: "softpiano", roleLabel: "SoftPiano", elements: snapshotElements, serializeDraft: serializeSnapshotDraft, applySnapshot: applySavedSnapshot, onFocusChange: getData, setStatus });
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
     async function refresh() {

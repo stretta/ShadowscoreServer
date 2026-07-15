@@ -108,6 +108,27 @@ export function createCollaborationHub(store, config = {}) {
             sourceClientId: client.id
           }));
           break;
+        case "mesostructure.oscSnapshot.replace":
+          ack(client, requestId, store.replaceOscSnapshot(
+            requireString(payload.blockId, "blockId"),
+            requireString(payload.roleId, "roleId"),
+            payload.snapshot ?? payload.document ?? {},
+            {
+              ...revisionOptions(payload),
+              sourceClientId: client.id
+            }
+          ));
+          break;
+        case "mesostructure.oscSnapshot.remove":
+          ack(client, requestId, store.removeOscSnapshot(
+            requireString(payload.blockId, "blockId"),
+            requireString(payload.roleId, "roleId"),
+            {
+              ...revisionOptions(payload),
+              sourceClientId: client.id
+            }
+          ));
+          break;
         case "macrostructure.update":
           ack(client, requestId, store.updateMacrostructure(payload.macrostructure ?? {}, {
             ...revisionOptions(payload),
@@ -188,9 +209,29 @@ export function createCollaborationHub(store, config = {}) {
             sourceClientId: client.id
           }));
           break;
+        case "osc.assignment.replace":
+          ack(client, requestId, store.replaceOscAssignment(
+            requireString(payload.roleId, "roleId"),
+            payload.assignment ?? payload.document ?? {},
+            {
+              ...revisionOptions(payload),
+              sourceClientId: client.id
+            }
+          ));
+          break;
+        case "osc.assignment.remove":
+          ack(client, requestId, store.removeOscAssignment(
+            requireString(payload.roleId, "roleId"),
+            {
+              ...revisionOptions(payload),
+              sourceClientId: client.id
+            }
+          ));
+          break;
         case "admin.reset":
           ack(client, requestId, store.reset({
             assignments: Boolean(payload.assignments),
+            oscAssignments: Boolean(payload.oscAssignments),
             context: Boolean(payload.context),
             structure: Boolean(payload.structure),
             sourceClientId: client.id,

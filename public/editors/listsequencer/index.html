@@ -63,6 +63,7 @@
     }
 
     .toolbar,
+    .snapshot-panel,
     .targets,
     .panel,
     .text-row,
@@ -78,6 +79,48 @@
       gap: 10px;
       justify-content: space-between;
       padding: 10px;
+    }
+
+    .snapshot-panel {
+      background: color-mix(in srgb, var(--ss-panel) 88%, var(--ss-accent-secondary));
+      border: 1px solid var(--ss-border-strong);
+      border-radius: var(--ss-radius-ui);
+      display: grid;
+      gap: 10px;
+      padding: 12px;
+    }
+
+    .snapshot-head,
+    .snapshot-actions,
+    .snapshot-status {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: space-between;
+    }
+
+    .snapshot-fields {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(2, minmax(180px, 1fr));
+    }
+
+    .snapshot-field {
+      display: grid;
+      gap: 4px;
+    }
+
+    .snapshot-field > span,
+    .snapshot-ignore {
+      color: var(--ss-muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .snapshot-state {
+      color: var(--ss-accent);
+      font-weight: 850;
     }
 
     .toolbar-actions {
@@ -285,6 +328,9 @@
       .top,
       .toolbar,
       .ttid-head,
+      .snapshot-head,
+      .snapshot-actions,
+      .snapshot-status,
       .readback-controls {
         align-items: flex-start;
         flex-direction: column;
@@ -297,6 +343,7 @@
       }
 
       .text-row,
+      .snapshot-fields,
       .scale-row {
         grid-template-columns: 1fr;
       }
@@ -325,7 +372,7 @@
   </nav>
   <main>
     <section class="toolbar" aria-label="ListSequencer controls">
-      <div class="meta">Send data to checked instances</div>
+      <div class="meta"><strong>Immediate write targets:</strong> send data to checked instances</div>
       <div class="toolbar-actions">
         <div class="readback-controls">
           <label for="read-source">Get data from</label>
@@ -337,10 +384,42 @@
       </div>
     </section>
     <section id="targets" class="targets" aria-label="OSC targets"></section>
+    <section class="snapshot-panel" aria-label="Mesostructural OSC snapshot">
+      <div class="snapshot-head">
+        <div>
+          <h2>Mesostructural Snapshot</h2>
+          <div class="meta">Save this form draft to the score, or explicitly recall it through the assigned logical role.</div>
+        </div>
+        <div id="snapshot-active-block" class="meta">Active block: —</div>
+      </div>
+      <div class="snapshot-fields">
+        <label class="snapshot-field" for="snapshot-block">
+          <span>Write snapshot to</span>
+          <select id="snapshot-block"></select>
+        </label>
+        <label class="snapshot-field" for="snapshot-role">
+          <span>Logical role</span>
+          <select id="snapshot-role"></select>
+        </label>
+      </div>
+      <div class="snapshot-actions">
+        <div class="toolbar-actions">
+          <button id="snapshot-save" class="primary" type="button">Save Snapshot</button>
+          <button id="snapshot-load" type="button">Load Saved Snapshot</button>
+          <button id="snapshot-recall" type="button">Recall Now</button>
+        </div>
+        <label class="snapshot-ignore"><input id="snapshot-ignore" type="checkbox"> Ignore Shadowscore recall</label>
+      </div>
+      <div class="snapshot-status">
+        <div id="snapshot-state" class="snapshot-state" role="status">Loading score snapshot state…</div>
+        <div id="snapshot-last-recall" class="meta">No recall recorded</div>
+      </div>
+    </section>
     <section id="inports" class="panel" aria-live="polite"></section>
     <section id="ttid" class="ttid-grid" aria-live="polite"></section>
   </main>
-  <script>
+  <script type="module">
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
     const SCALES = Object.freeze({
@@ -374,6 +453,15 @@
     const selectAllButton = document.querySelector("#select-all");
     const readSourceSelect = document.querySelector("#read-source");
     const populateButton = document.querySelector("#populate");
+    const snapshotBlockSelect = document.querySelector("#snapshot-block");
+    const snapshotRoleSelect = document.querySelector("#snapshot-role");
+    const snapshotSaveButton = document.querySelector("#snapshot-save");
+    const snapshotLoadButton = document.querySelector("#snapshot-load");
+    const snapshotRecallButton = document.querySelector("#snapshot-recall");
+    const snapshotIgnoreInput = document.querySelector("#snapshot-ignore");
+    const snapshotActiveBlockEl = document.querySelector("#snapshot-active-block");
+    const snapshotStateEl = document.querySelector("#snapshot-state");
+    const snapshotLastRecallEl = document.querySelector("#snapshot-last-recall");
     let targets = [];
     let inputPorts = [];
     let transposeParams = [];
@@ -382,12 +470,33 @@
     let ttidParams = [];
     let ttidState = new Map();
     let scaleState = new Map();
+    let snapshotClient;
 
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     selectAllButton.addEventListener("click", selectAllTargets);
     populateButton.addEventListener("click", () => populateFields().catch(reportError));
+    document.querySelector("main").addEventListener("input", (event) => {
+      if (event.target.matches("[data-param], [data-inport]")) snapshotClient?.draftChanged();
+    });
+    document.querySelector("main").addEventListener("change", (event) => {
+      if (event.target.matches("[data-param], [data-inport]")) snapshotClient?.draftChanged();
+    });
+    snapshotClient = createOscSnapshotEditorClient({
+      app: "listsequencer",
+      roleLabel: "ListSequencer",
+      elements: {
+        blockSelect: snapshotBlockSelect, roleSelect: snapshotRoleSelect,
+        saveButton: snapshotSaveButton, loadButton: snapshotLoadButton,
+        recallButton: snapshotRecallButton, ignoreInput: snapshotIgnoreInput,
+        activeBlock: snapshotActiveBlockEl, state: snapshotStateEl,
+        lastRecall: snapshotLastRecallEl
+      },
+      serializeDraft: serializeSnapshotDraft,
+      applySnapshot: applySavedSnapshot,
+      setStatus
+    });
 
-    refresh().catch(reportError);
+    Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
     async function refresh() {
       refreshButton.disabled = true;
@@ -404,16 +513,67 @@
       renderInports();
       renderTtid();
       setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListSequencer targets");
+      snapshotClient?.draftChanged();
       refreshButton.disabled = false;
     }
 
-    async function fetchJson(url) {
-      const response = await fetch(url, { cache: "no-store" });
+    async function fetchJson(url, options = {}) {
+      const response = await fetch(url, {
+        cache: "no-store",
+        ...options,
+        headers: {
+          ...(options.body ? { "Content-Type": "application/json" } : {}),
+          ...(options.headers ?? {})
+        }
+      });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || body.ok === false) {
         throw new Error(body.error || `${url}: ${response.status} ${response.statusText}`);
       }
       return body;
+    }
+
+    function serializeSnapshotDraft() {
+      const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
+      const byParamName = new Map((source?.parameters || []).map((param) => [param.name, param]));
+      const paramEntries = Array.from(document.querySelectorAll("[data-param]"))
+        .filter((control) => control.dataset.param)
+        .map((control) => ({
+          name: control.dataset.param,
+          value: control.type === "checkbox" ? (control.checked ? 1 : 0) : control.value,
+          values: byParamName.get(control.dataset.param)?.values
+        }));
+      const byInputPortName = new Map(inputPorts.map((entry) => [entry.name, entry]));
+      const inputPortEntries = Array.from(document.querySelectorAll("[data-inport]"))
+        .filter((control) => control.dataset.inport)
+        .map((control) => ({
+          name: control.dataset.inport,
+          value: control.value,
+          meta: byInputPortName.get(control.dataset.inport)?.meta
+        }));
+      return createOscEditorSnapshot({ app: "listsequencer", paramEntries, inputPortEntries });
+    }
+
+    async function applySavedSnapshot(snapshot) {
+      for (const target of targets) {
+        target.parameters = (target.parameters ?? []).map((param) => Object.hasOwn(snapshot.params ?? {}, param.name)
+          ? { ...param, value: oscEditorParamValue(param, snapshot.params[param.name]) }
+          : param);
+      }
+      for (const [name, value] of Object.entries(snapshot.params ?? {})) {
+        if (ttidParams.some((param) => param.name === name)) ttidState.set(name, normalizeMask(value));
+      }
+      transposeParams = collectTransposeParams(targets);
+      rootParams = collectNamedParams(targets, new Set(["root"]));
+      ttidParams = collectTtidParams(targets);
+      genericParams = collectGenericParams(targets);
+      renderInports();
+      renderTtid();
+      for (const [name, values] of Object.entries(snapshot.inputPorts ?? {})) {
+        const input = inportsEl.querySelector(`[data-inport="${cssSelectorValue(name)}"]`);
+        if (input) input.value = values.join(" ");
+      }
+      snapshotClient?.draftChanged();
     }
 
     function collectInputPorts(nextTargets) {
@@ -564,6 +724,7 @@
         label: transposeLabel(param.name),
         onChange: (value) => sendParam(param, value).catch(reportError)
       });
+      number.dataset.param = param.name;
       row.append(number, document.createElement("span"));
       return row;
     }
@@ -588,6 +749,7 @@
           select.append(option);
         }
         select.value = String(param.value ?? param.values[0]);
+        select.dataset.param = param.name;
         select.addEventListener("change", () => sendParam(param, select.value).catch(reportError));
         row.append(select, document.createElement("span"));
         return row;
@@ -599,6 +761,7 @@
         const toggle = document.createElement("input");
         toggle.type = "checkbox";
         toggle.checked = Boolean(Number(param.value));
+        toggle.dataset.param = param.name;
         toggle.addEventListener("change", () => sendParam(param, toggle.checked ? 1 : 0).catch(reportError));
         label.append(toggle, document.createTextNode(" Enabled"));
         row.append(label, document.createElement("span"));
@@ -619,6 +782,7 @@
         input.type = "text";
         input.value = String(param.value ?? "");
       }
+      input.dataset.param = param.name;
       const commit = () => sendParam(param, isNumericParam(param) ? Number(input.value) : input.value).catch(reportError);
       send.addEventListener("click", commit);
       input.addEventListener("keydown", (event) => {
@@ -671,6 +835,7 @@
           if (rootParam) sendParam(rootParam, value).catch(reportError);
         }
       });
+      if (rootParam) rootNumber.dataset.param = rootParam.name;
 
       const select = document.createElement("select");
       for (const name of Object.keys(SCALES).sort((a, b) => a.localeCompare(b))) {
@@ -694,7 +859,11 @@
       const row = document.createElement("div");
       row.className = "scale-row";
       row.replaceChildren(wrapControl(rootParam && rangeText(rootParam) ? `Root (${rangeText(rootParam)})` : "Root", rootNumber), wrapControl("Scale", select), load);
-      card.replaceChildren(head, keyboard, row);
+      const snapshotValue = document.createElement("input");
+      snapshotValue.type = "hidden";
+      snapshotValue.dataset.param = param.name;
+      snapshotValue.value = String(mask);
+      card.replaceChildren(head, keyboard, row, snapshotValue);
       return card;
     }
 
@@ -798,6 +967,7 @@
       ttidState = mergeTtidState(ttidParams);
       renderInports();
       renderTtid();
+      snapshotClient?.draftChanged();
       return populated;
     }
 
@@ -831,6 +1001,7 @@
       const value = normalizeMask(mask);
       ttidState.set(param.name, value);
       renderTtid();
+      snapshotClient?.draftChanged();
       const selected = selectedTargetsFor(param.targetIds);
       if (!selected.length) {
         setStatus("No targets selected");

@@ -90,6 +90,32 @@ test("store persistence saves debounced changes on flush", async () => {
   assert.equal(saved.context.scale.scale_name, "Aeolian");
 });
 
+test("OSC assignments and block snapshots survive persistence and old scores normalize empty collections", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-persist-"));
+  const config = configFor(directory, { debounceMs: 10000 });
+  const fallback = createInitialScore(config);
+  const store = createScoreStore(fallback);
+  const persistence = createScorePersistence(store, config);
+
+  store.replaceOscAssignment("list-a", { app: "listsequencer", deviceId: "finch", oscTargetId: "finch:listsequencer:main" });
+  store.replaceOscSnapshot("F", "list-a", {
+    app: "listsequencer",
+    params: { Clock: 1 },
+    inputPorts: { Steps: [1, 0, 1, 0] }
+  });
+  await persistence.flush();
+
+  const loaded = await loadPersistedScore(config, fallback);
+  assert.equal(loaded.oscAssignments["list-a"].deviceId, "finch");
+  assert.deepEqual(loaded.mesostructure.F.oscSnapshots["list-a"].inputPorts.Steps, [1, 0, 1, 0]);
+
+  const legacy = structuredClone(fallback);
+  delete legacy.oscAssignments;
+  for (const block of Object.values(legacy.mesostructure)) delete block.oscSnapshots;
+  assert.deepEqual(reconcileScore(config, fallback, legacy).oscAssignments, {});
+  assert.deepEqual(reconcileScore(config, fallback, legacy).mesostructure.A.oscSnapshots, {});
+});
+
 function configFor(directory, persistence = {}) {
   return mergeConfig(defaultConfig, {
     persistence: {

@@ -1,4 +1,6 @@
 import { EventEmitter } from "node:events";
+import { reconcileOscAssignments as reconcileOscRoleAssignments } from "../osc/assignments.mjs";
+import { normalizeOscSnapshot } from "../osc/snapshot-contract.mjs";
 
 export function createInitialScore(config) {
   const voices = {};
@@ -23,6 +25,7 @@ export function createInitialScore(config) {
     macrostructure: createDefaultMacrostructure(),
     structureState: createDefaultStructureState(),
     assignments,
+    oscAssignments: {},
     voices
   };
 }
@@ -107,6 +110,58 @@ export function createScoreStore(initialScore, options = {}) {
         }
       };
       emitChange(events, "mesostructure.block.replaced", score, { blockId: id, block }, options);
+      return structuredClone(score);
+    },
+    replaceOscSnapshot(blockId, roleId, snapshotDocument, options = {}) {
+      const id = normalizeBlockId(blockId);
+      const role = normalizeOscRoleId(roleId);
+      const block = score.mesostructure[id];
+      if (!block) {
+        throw new Error(`unknown mesostructural block '${id}'`);
+      }
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const snapshot = normalizeOscSnapshot(snapshotDocument);
+      score = {
+        ...score,
+        ...nextRevisionFields(score, { structure: true }),
+        mesostructure: {
+          ...score.mesostructure,
+          [id]: {
+            ...block,
+            oscSnapshots: {
+              ...(block.oscSnapshots ?? {}),
+              [role]: snapshot
+            }
+          }
+        }
+      };
+      emitChange(events, "mesostructure.oscSnapshot.replaced", score, { blockId: id, roleId: role, snapshot }, options);
+      return structuredClone(score);
+    },
+    removeOscSnapshot(blockId, roleId, options = {}) {
+      const id = normalizeBlockId(blockId);
+      const role = normalizeOscRoleId(roleId);
+      const block = score.mesostructure[id];
+      if (!block) {
+        throw new Error(`unknown mesostructural block '${id}'`);
+      }
+      if (!block.oscSnapshots?.[role]) {
+        throw new Error(`unknown OSC snapshot role '${role}' in block '${id}'`);
+      }
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const oscSnapshots = { ...block.oscSnapshots };
+      delete oscSnapshots[role];
+      score = {
+        ...score,
+        ...nextRevisionFields(score, { structure: true }),
+        mesostructure: {
+          ...score.mesostructure,
+          [id]: { ...block, oscSnapshots }
+        }
+      };
+      emitChange(events, "mesostructure.oscSnapshot.removed", score, { blockId: id, roleId: role }, options);
       return structuredClone(score);
     },
     removeMesoBlock(blockId, options = {}) {
@@ -428,6 +483,66 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "voice.assignment.replaced", score, { voiceId, assignment }, options);
       return structuredClone(score);
     },
+    replaceOscAssignment(roleId, assignmentDocument, options = {}) {
+      const role = normalizeOscRoleId(roleId);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const assignment = normalizeOscAssignment(assignmentDocument);
+      score = {
+        ...score,
+        ...nextRevisionFields(score),
+        oscAssignments: {
+          ...(score.oscAssignments ?? {}),
+          [role]: assignment
+        }
+      };
+      emitChange(events, "osc.assignment.replaced", score, { roleId: role, assignment }, options);
+      return structuredClone(score);
+    },
+    removeOscAssignment(roleId, options = {}) {
+      const role = normalizeOscRoleId(roleId);
+      if (!score.oscAssignments?.[role]) {
+        throw new Error(`unknown OSC assignment role '${role}'`);
+      }
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const oscAssignments = { ...score.oscAssignments };
+      delete oscAssignments[role];
+      score = {
+        ...score,
+        ...nextRevisionFields(score),
+        oscAssignments
+      };
+      emitChange(events, "osc.assignment.removed", score, { roleId: role }, options);
+      return structuredClone(score);
+    },
+    reconcileOscAssignments(targets = [], options = {}) {
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const result = reconcileOscRoleAssignments(score.oscAssignments ?? {}, targets);
+      if (result.changed.length === 0) {
+        return {
+          changed: false,
+          score: structuredClone(score),
+          assignments: structuredClone(score.oscAssignments ?? {}),
+          resolutions: structuredClone(result.resolutions),
+          changes: []
+        };
+      }
+      score = {
+        ...score,
+        ...nextRevisionFields(score),
+        oscAssignments: normalizeOscAssignments(result.assignments)
+      };
+      emitChange(events, "osc.assignment.reconciled", score, { changes: result.changed }, options);
+      return {
+        changed: true,
+        score: structuredClone(score),
+        assignments: structuredClone(score.oscAssignments),
+        resolutions: structuredClone(result.resolutions),
+        changes: structuredClone(result.changed)
+      };
+    },
     clearVoiceAssignment(voiceId, options = {}) {
       assertKnownVoice(score, voiceId);
       assertExpectedScoreVersion(score, options.expectedVersion);
@@ -560,8 +675,8 @@ export function createScoreStore(initialScore, options = {}) {
       return structuredClone(score);
     },
     reset(options = {}) {
-      if (!options.context && !options.voices && !options.assignments && !options.structure && !options.notes) {
-        throw new Error("reset must include at least one of context, voices, assignments, structure, or notes");
+      if (!options.context && !options.voices && !options.assignments && !options.oscAssignments && !options.structure && !options.notes) {
+        throw new Error("reset must include at least one of context, voices, assignments, oscAssignments, structure, or notes");
       }
       const voices = options.voices || options.notes ? resetVoices(score.voices) : score.voices;
       const assignments = options.assignments ? resetAssignments(score.voices, assignmentDefaults) : ensureAssignments(score, assignmentDefaults);
@@ -575,12 +690,14 @@ export function createScoreStore(initialScore, options = {}) {
         macrostructure: options.structure ? createDefaultMacrostructure() : score.macrostructure,
         structureState: options.structure ? createDefaultStructureState() : score.structureState,
         assignments,
+        oscAssignments: options.oscAssignments ? {} : score.oscAssignments,
         voices
       };
       emitChange(events, "admin.reset", score, {
         context: Boolean(options.context),
         voices: Boolean(options.voices),
         assignments: Boolean(options.assignments),
+        oscAssignments: Boolean(options.oscAssignments),
         structure: Boolean(options.structure),
         notes: Boolean(options.notes)
       }, options);
@@ -635,7 +752,9 @@ function withRevisionDefaults(score) {
   return {
     ...score,
     scoreRevision: scoreRevisionFor(score),
-    structureRevision: structureRevisionFor(score)
+    structureRevision: structureRevisionFor(score),
+    mesostructure: normalizeMesostructure(score.mesostructure ?? {}),
+    oscAssignments: normalizeOscAssignments(score.oscAssignments ?? {})
   };
 }
 
@@ -700,6 +819,7 @@ function createDefaultMesostructure(voiceIds = []) {
       {
         duration: { bars: 4 },
         scale: {},
+        oscSnapshots: {},
         players: Object.fromEntries(
           voiceIds.map((voiceId) => [voiceId, { clipId: defaultClipId(blockId, voiceId) }])
         )
@@ -757,6 +877,32 @@ function normalizeAssignment(assignmentDocument) {
   };
 }
 
+function normalizeOscAssignments(assignmentsDocument) {
+  if (!isPlainObject(assignmentsDocument)) {
+    throw new Error("OSC assignments must be an object");
+  }
+  return Object.fromEntries(Object.entries(assignmentsDocument).map(([roleId, assignment]) => [
+    normalizeOscRoleId(roleId),
+    normalizeOscAssignment(assignment)
+  ]));
+}
+
+function normalizeOscAssignment(assignmentDocument) {
+  if (!isPlainObject(assignmentDocument)) {
+    throw new Error("OSC assignment body must be an object");
+  }
+  return {
+    label: stringField(assignmentDocument.label),
+    app: cleanToken(assignmentDocument.app),
+    deviceId: stringField(assignmentDocument.deviceId),
+    oscTargetId: stringField(assignmentDocument.oscTargetId),
+    ignoreRecall: Boolean(assignmentDocument.ignoreRecall),
+    locked: Boolean(assignmentDocument.locked),
+    routingStatus: stringField(assignmentDocument.routingStatus),
+    routingMessage: stringField(assignmentDocument.routingMessage)
+  };
+}
+
 function assertUniqueRnboTargetAssignments(assignments) {
   const seen = new Map();
   for (const [voiceId, assignment] of Object.entries(assignments ?? {})) {
@@ -790,6 +936,9 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
   }
   if (scoreDocument.structureState !== undefined && !isPlainObject(scoreDocument.structureState)) {
     throw new Error("score snapshot structureState must be an object");
+  }
+  if (scoreDocument.oscAssignments !== undefined && !isPlainObject(scoreDocument.oscAssignments)) {
+    throw new Error("score snapshot oscAssignments must be an object");
   }
   if (!isPlainObject(scoreDocument.voices)) {
     throw new Error("score snapshot voices must be an object");
@@ -836,6 +985,7 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
     macrostructure,
     structureState: normalizeStructureState(scoreDocument.structureState ?? fallbackScore?.structureState ?? createDefaultStructureState(), mesostructure, macrostructure),
     assignments,
+    oscAssignments: normalizeOscAssignments(scoreDocument.oscAssignments ?? {}),
     voices
   };
 }
@@ -979,8 +1129,19 @@ function normalizeMesoBlock(blockDocument) {
     ...structuredClone(blockDocument),
     duration: structuredClone(blockDocument.duration),
     scale: structuredClone(blockDocument.scale ?? {}),
+    oscSnapshots: normalizeOscSnapshots(blockDocument.oscSnapshots ?? {}),
     players: normalizeMesoBlockPlayers(blockDocument.players ?? {})
   };
+}
+
+function normalizeOscSnapshots(snapshotsDocument) {
+  if (!isPlainObject(snapshotsDocument)) {
+    throw new Error("mesostructural block oscSnapshots must be an object");
+  }
+  return Object.fromEntries(Object.entries(snapshotsDocument).map(([roleId, snapshot]) => [
+    normalizeOscRoleId(roleId),
+    normalizeOscSnapshot(snapshot)
+  ]));
 }
 
 function normalizeMesoBlockPlayers(players) {
@@ -1138,6 +1299,21 @@ function normalizeClipId(clipId) {
     throw new Error("clipId must start with a letter or number and contain only letters, numbers, '.', '_', ':', or '-'");
   }
   return id;
+}
+
+function normalizeOscRoleId(roleId) {
+  const id = stringField(roleId);
+  if (!id) {
+    throw new Error("roleId is required");
+  }
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(id)) {
+    throw new Error("roleId must start with a letter or number and contain only letters, numbers, '.', '_', ':', or '-'");
+  }
+  return id;
+}
+
+function cleanToken(value) {
+  return stringField(value).toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
 function assertExpectedScoreVersion(score, expectedVersion) {

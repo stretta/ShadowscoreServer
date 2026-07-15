@@ -5,7 +5,8 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { routeRequest } from "../src/http/routes.mjs";
+import { recallOscSnapshotsForBlock, routeRequest } from "../src/http/routes.mjs";
+import { createOscSnapshotAutoRecall } from "../src/osc/snapshot-auto-recall.mjs";
 import { createMacroPlayback } from "../src/playback/macro-playback.mjs";
 import { createPeerRegistry } from "../src/registration/peer-registry.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
@@ -46,6 +47,120 @@ test("assignment route rejects duplicate RNBO targets", async () => {
 
   assert.equal(response.status, 400);
   assert.match(response.body, /RNBO target 'rnbo-inst-5:shadowscore' is already assigned to player-1/);
+});
+
+test("OSC assignment routes manage logical roles separately with revision checks", async () => {
+  const context = createRouteContext();
+
+  const saved = await requestJson(context, "PUT", "/osc/assignments/analog-a", {
+    expectedScoreRevision: 0,
+    label: "Analog A",
+    app: "analogsequencer",
+    deviceId: "heron",
+    oscTargetId: "heron:analogsequencer:main",
+    ignoreRecall: true
+  });
+  assert.equal(saved.oscAssignments["analog-a"].ignoreRecall, true);
+  assert.equal(saved.assignments["player-1"].deviceId, "");
+
+  const assignments = await requestJson(context, "GET", "/osc/assignments");
+  assert.equal(assignments["analog-a"].app, "analogsequencer");
+
+  const stale = await request(context, "PUT", "/osc/assignments/plate-a", {
+    expectedScoreRevision: 0,
+    app: "plate"
+  });
+  assert.equal(stale.status, 400);
+  assert.match(stale.body, /stale score revision 0; current score revision is 1/);
+
+  const removed = await requestJson(context, "DELETE", "/osc/assignments/analog-a?expectedScoreRevision=1");
+  assert.deepEqual(removed.oscAssignments, {});
+});
+
+test("OSC assignment status and reconciliation resolve returning instances without changing snapshots", async () => {
+  const controlTarget = {
+    id: "rnbo-inst-42:plate",
+    localId: "rnbo-inst-42:plate",
+    label: "Plate 42",
+    host: "192.168.68.101",
+    port: 1234,
+    baseAddress: "/rnbo/inst/42",
+    app: "plate",
+    instance: "main",
+    hardwareUnitId: "heron",
+    deviceId: "heron",
+    available: true,
+    parameters: [{ name: "Decay", address: "/rnbo/inst/42/params/Decay" }]
+  };
+  const context = createRouteContext({
+    runtime: {
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() { return [controlTarget]; }
+      }
+    }
+  });
+  await requestJson(context, "PUT", "/osc/assignments/plate-a", {
+    app: "plate",
+    deviceId: "heron",
+    oscTargetId: "heron:plate:old"
+  });
+  await requestJson(context, "PUT", "/mesostructure/A/osc-snapshots/plate-a", {
+    app: "plate",
+    params: { Decay: 0.5 },
+    inputPorts: {}
+  });
+
+  const status = await requestJson(context, "GET", "/osc/assignments?resolved=1");
+  assert.equal(status.assignments["plate-a"].oscTargetId, "heron:plate:old");
+  assert.equal(status.resolutions["plate-a"].status, "online");
+  assert.equal(status.resolutions["plate-a"].targetId, "heron:plate:main");
+
+  const reconciled = await requestJson(context, "POST", "/osc/assignments/reconcile");
+  assert.equal(reconciled.changed, true);
+  assert.equal(reconciled.assignments["plate-a"].oscTargetId, "heron:plate:main");
+  assert.equal(reconciled.resolutions["plate-a"].sendable, true);
+  assert.equal(reconciled.score.mesostructure.A.oscSnapshots["plate-a"].params.Decay, 0.5);
+
+  const unchanged = await requestJson(context, "POST", "/osc/assignments/reconcile");
+  assert.equal(unchanged.changed, false);
+});
+
+test("OSC assignment reconciliation reports ambiguous compatible instances without retargeting", async () => {
+  const context = createRouteContext({
+    runtime: {
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() {
+          return ["main", "aux"].map((instance, index) => ({
+            id: `rnbo-inst-${index + 1}:plate`,
+            localId: `rnbo-inst-${index + 1}:plate`,
+            host: "192.168.68.101",
+            port: 1234,
+            baseAddress: `/rnbo/inst/${index + 1}`,
+            app: "plate",
+            instance,
+            hardwareUnitId: "heron",
+            deviceId: "heron",
+            available: true,
+            parameters: [{ name: "Decay", address: `/rnbo/inst/${index + 1}/params/Decay` }]
+          }));
+        }
+      }
+    }
+  });
+  await requestJson(context, "PUT", "/osc/assignments/plate-a", {
+    app: "plate",
+    deviceId: "heron",
+    oscTargetId: "heron:plate:old"
+  });
+
+  const reconciled = await requestJson(context, "POST", "/osc/assignments/reconcile");
+  assert.equal(reconciled.resolutions["plate-a"].status, "ambiguous");
+  assert.equal(reconciled.assignments["plate-a"].oscTargetId, "heron:plate:old");
+  assert.equal(reconciled.assignments["plate-a"].routingStatus, "ambiguous");
 });
 
 test("admin reset route clears requested score sections", async () => {
@@ -92,6 +207,21 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /\/admin\/rnbo\/resend/);
   assert.match(response.body, /voice\.assignment\.reconciled/);
   assert.match(response.body, /OSCQuery Devices/);
+  assert.match(response.body, /OSC control roles/);
+  assert.match(response.body, /id="osc-role-form"/);
+  assert.match(response.body, /id="osc-role-form" novalidate/);
+  assert.match(response.body, /id="osc-role-status" role="status" aria-live="polite"/);
+  assert.match(response.body, /suggestOscRoleFromTarget/);
+  assert.match(response.body, /selectOscRoleDevice/);
+  assert.match(response.body, /Live OSC instance/);
+  assert.match(response.body, /Create role/);
+  assert.match(response.body, /Role ID must start with a letter or number/);
+  assert.match(response.body, /Ignore Shadowscore recall/);
+  assert.match(response.body, /Lock target mapping/);
+  assert.match(response.body, /\/osc\/assignments\?resolved=1/);
+  assert.match(response.body, /\/osc\/assignments\/reconcile/);
+  const inlineScript = response.body.match(/<script>([\s\S]*?)<\/script>/)?.[1] ?? "";
+  assert.doesNotThrow(() => new Function(inlineScript));
   assert.match(response.body, /Add device/);
   assert.match(response.body, /\/oscquery\/devices/);
 });
@@ -497,6 +627,203 @@ test("structure routes reject stale expected structure revisions", async () => {
   assert.match(rejected.body, /stale structure revision 0; current structure revision is 1/);
   assert.match(rejected.body, /"currentScoreRevision":1/);
   assert.match(rejected.body, /"currentStructureRevision":1/);
+});
+
+test("block OSC snapshot routes create, list, replace, and delete semantic state", async () => {
+  const context = createRouteContext();
+
+  const saved = await requestJson(context, "PUT", "/mesostructure/F/osc-snapshots/list-a", {
+    expectedScoreRevision: 0,
+    expectedStructureRevision: 0,
+    schemaVersion: 1,
+    app: "listsequencer",
+    params: { ClockRate: 2, Clock: 0 },
+    inputPorts: { Steps: [1, 0, 1, 0] }
+  });
+  assert.equal(saved.mesostructure.F.oscSnapshots["list-a"].params.Clock, 0);
+  assert.equal(saved.structureRevision, 1);
+
+  const snapshots = await requestJson(context, "GET", "/mesostructure/F/osc-snapshots");
+  assert.deepEqual(snapshots["list-a"].inputPorts.Steps, [1, 0, 1, 0]);
+
+  const stale = await request(context, "PUT", "/mesostructure/F/osc-snapshots/list-a", {
+    expectedStructureRevision: 0,
+    app: "listsequencer",
+    params: { Clock: 1 },
+    inputPorts: {}
+  });
+  assert.equal(stale.status, 400);
+  assert.match(stale.body, /stale structure revision 0; current structure revision is 1/);
+
+  const removed = await requestJson(context, "DELETE", "/mesostructure/F/osc-snapshots/list-a?expectedStructureRevision=1");
+  assert.deepEqual(removed.mesostructure.F.oscSnapshots, {});
+
+  const missing = await request(context, "GET", "/mesostructure/missing/osc-snapshots");
+  assert.equal(missing.status, 404);
+});
+
+test("block OSC recall route dry-runs and dispatches ordered semantic writes with bounded status", async () => {
+  const sends = [];
+  const context = createRouteContext({
+    runtime: {
+      oscSender: async (write) => { sends.push({ targetId: write.targetId, address: write.address, args: write.args }); },
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() {
+          return [{
+            id: "rnbo-inst-42:listsequencer",
+            localId: "rnbo-inst-42:listsequencer",
+            label: "List Sequencer 42",
+            host: "192.168.68.101",
+            port: 1234,
+            baseAddress: "/rnbo/inst/42",
+            app: "listsequencer",
+            instance: "main",
+            hardwareUnitId: "heron",
+            deviceId: "heron",
+            available: true,
+            parameters: [
+              { name: "Clock", address: "/rnbo/inst/42/params/Clock" },
+              { name: "GateTime", address: "/rnbo/inst/42/params/GateTime" }
+            ],
+            inputPorts: [
+              { name: "Steps", address: "/rnbo/inst/42/messages/in/Steps" },
+              { name: "rtz", address: "/rnbo/inst/42/messages/in/rtz" }
+            ]
+          }];
+        }
+      }
+    }
+  });
+  await requestJson(context, "PUT", "/osc/assignments/list-a", {
+    app: "listsequencer",
+    deviceId: "heron",
+    oscTargetId: "heron:listsequencer:main"
+  });
+  await requestJson(context, "PUT", "/osc/assignments/plate-offline", {
+    app: "plate",
+    deviceId: "raven",
+    oscTargetId: "raven:plate:main"
+  });
+  await requestJson(context, "PUT", "/mesostructure/F/osc-snapshots/list-a", {
+    app: "listsequencer",
+    params: { Clock: 0, GateTime: 0.45, FutureMode: 1 },
+    inputPorts: { Steps: [1, 0, 1, 0], rtz: [1] }
+  });
+  await requestJson(context, "PUT", "/mesostructure/F/osc-snapshots/plate-offline", {
+    app: "plate",
+    params: { Decay: 0.5 },
+    inputPorts: {}
+  });
+  const versionBeforeRecall = context.store.getScore().version;
+
+  const dryRun = await requestJson(context, "POST", "/mesostructure/F/osc-snapshots/recall", {
+    roles: ["list-a"],
+    dryRun: true
+  });
+  assert.equal(dryRun.dryRun, true);
+  assert.equal(dryRun.plannedWriteCount, 3);
+  assert.equal(dryRun.attemptedWriteCount, 0);
+  assert.deepEqual(dryRun.roles[0].writes.map((write) => write.name), ["GateTime", "Steps", "Clock"]);
+  assert.deepEqual(dryRun.roles[0].missingControls, [{ kind: "param", name: "FutureMode", reason: "missing-live-control" }]);
+  assert.deepEqual(dryRun.roles[0].excludedControls, [{ kind: "inputPort", name: "rtz", reason: "momentary-control" }]);
+  assert.deepEqual(sends, []);
+
+  const recalled = await requestJson(context, "POST", "/mesostructure/F/osc-snapshots/recall", {});
+  assert.equal(recalled.ok, true);
+  assert.equal(recalled.attemptedWriteCount, 3);
+  assert.equal(recalled.skippedRoleCount, 1);
+  assert.equal(recalled.roles.find((role) => role.roleId === "plate-offline").skippedReason, "offline");
+  assert.deepEqual(sends.map((write) => write.address), [
+    "/rnbo/inst/42/params/GateTime",
+    "/rnbo/inst/42/messages/in/Steps",
+    "/rnbo/inst/42/params/Clock"
+  ]);
+  assert.equal(context.store.getScore().version, versionBeforeRecall);
+
+  const blockStatus = await requestJson(context, "GET", "/mesostructure/F/osc-snapshots/recall");
+  assert.equal(blockStatus.last.id, recalled.id);
+  assert.equal(blockStatus.history.length, 2);
+  const globalStatus = await requestJson(context, "GET", "/osc/recalls");
+  assert.equal(globalStatus.last.id, recalled.id);
+  assert.equal(globalStatus.historyLimit, 20);
+});
+
+test("block OSC recall validates role filters and unknown blocks", async () => {
+  const context = createRouteContext();
+  const invalidRoles = await request(context, "POST", "/mesostructure/A/osc-snapshots/recall", { roles: "all", dryRun: true });
+  assert.equal(invalidRoles.status, 400);
+  assert.match(invalidRoles.body, /roles must be an array/);
+
+  const missingBlock = await request(context, "POST", "/mesostructure/missing/osc-snapshots/recall", { dryRun: true });
+  assert.equal(missingBlock.status, 400);
+  assert.match(missingBlock.body, /unknown mesostructural block 'missing'/);
+});
+
+test("active block route changes automatically recall snapshots once and expose playback diagnostics", async () => {
+  const sends = [];
+  const context = createRouteContext({
+    runtime: {
+      oscSender: async (write) => { sends.push(write); },
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() {
+          return [{
+            id: "rnbo-inst-42:listsequencer",
+            localId: "rnbo-inst-42:listsequencer",
+            label: "List Sequencer 42",
+            host: "192.168.68.101",
+            port: 1234,
+            baseAddress: "/rnbo/inst/42",
+            app: "listsequencer",
+            instance: "main",
+            hardwareUnitId: "heron",
+            deviceId: "heron",
+            available: true,
+            parameters: [
+              { name: "GateTime", address: "/rnbo/inst/42/params/GateTime" },
+              { name: "Clock", address: "/rnbo/inst/42/params/Clock" }
+            ],
+            inputPorts: [{ name: "Steps", address: "/rnbo/inst/42/messages/in/Steps" }]
+          }];
+        }
+      }
+    }
+  });
+  await requestJson(context, "PUT", "/osc/assignments/list-a", {
+    app: "listsequencer",
+    deviceId: "heron",
+    oscTargetId: "heron:listsequencer:main"
+  });
+  await requestJson(context, "PUT", "/mesostructure/B/osc-snapshots/list-a", {
+    app: "listsequencer",
+    params: { GateTime: 0.25, Clock: 1 },
+    inputPorts: { Steps: [1, 0, 1, 0] }
+  });
+  const automatic = createOscSnapshotAutoRecall(context.store, {
+    recall: ({ blockId }) => recallOscSnapshotsForBlock(context.store, context.config, context.runtime, blockId)
+  });
+  context.runtime.oscSnapshotAutoRecall = automatic;
+
+  await requestJson(context, "POST", "/structure/playhead", { activeBlockId: "B", macroIndex: 1 });
+  await automatic.flush();
+  assert.deepEqual(sends.map((write) => write.address), [
+    "/rnbo/inst/42/params/GateTime",
+    "/rnbo/inst/42/messages/in/Steps",
+    "/rnbo/inst/42/params/Clock"
+  ]);
+
+  await requestJson(context, "POST", "/structure/playhead", { activeBlockId: "B", macroIndex: 1 });
+  await automatic.flush();
+  assert.equal(sends.length, 3);
+
+  const playback = await requestJson(context, "GET", "/macrostructure/playback");
+  assert.equal(playback.oscSnapshotRecall.pending, false);
+  assert.equal(playback.oscSnapshotRecall.last.blockId, "B");
+  assert.equal(playback.oscSnapshotRecall.last.attemptedWriteCount, 3);
+  automatic.close();
 });
 
 test("structure playhead routes select, advance, and reset active blocks", async () => {
@@ -1352,16 +1679,26 @@ test("admin assignment preset applies friendly shadowbox labels", async () => {
 test("admin backup downloads and restore replaces score snapshot", async () => {
   const context = createRouteContext();
   await requestJson(context, "POST", "/voices/player-1/notes", [{ pitch: 60 }]);
+  await requestJson(context, "PUT", "/osc/assignments/list-a", { app: "listsequencer", deviceId: "finch" });
+  await requestJson(context, "PUT", "/mesostructure/F/osc-snapshots/list-a", {
+    app: "listsequencer",
+    params: { Clock: 1 },
+    inputPorts: { Steps: [1, 0, 1, 0] }
+  });
   const backup = await request(context, "GET", "/admin/backup");
 
   assert.equal(backup.status, 200);
   assert.match(backup.headers["Content-Disposition"], /shadowscore-berklee-b51/);
   const snapshot = JSON.parse(backup.body);
+  assert.equal(snapshot.oscAssignments["list-a"].deviceId, "finch");
+  assert.deepEqual(snapshot.mesostructure.F.oscSnapshots["list-a"].inputPorts.Steps, [1, 0, 1, 0]);
   snapshot.voices["player-1"].notes = [{ pitch: 72 }];
 
   const restored = await requestJson(context, "POST", "/admin/restore", snapshot);
   assert.deepEqual(restored.voices["player-1"].notes, [{ pitch: 72 }]);
   assert.equal(restored.ensembleId, "berklee-b51");
+  assert.equal(restored.oscAssignments["list-a"].deviceId, "finch");
+  assert.equal(restored.mesostructure.F.oscSnapshots["list-a"].params.Clock, 1);
   assert.equal(restored.version > snapshot.version, true);
 });
 
@@ -1452,6 +1789,43 @@ test("hardware registration appears in session and RNBO targets", async () => {
     active: null,
     queuedRequest: null
   });
+});
+
+test("hardware registration automatically reconciles returning OSC control roles", async () => {
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: createPeerRegistry(defaultConfig)
+    }
+  });
+  await requestJson(context, "PUT", "/osc/assignments/plate-a", {
+    app: "plate",
+    deviceId: "heron",
+    oscTargetId: "heron:plate:old"
+  });
+  await requestJson(context, "PUT", "/mesostructure/A/osc-snapshots/plate-a", {
+    app: "plate",
+    params: { Decay: 0.65 },
+    inputPorts: {}
+  });
+
+  const registered = await requestJson(context, "POST", "/hardware/register", {
+    id: "heron",
+    advertisedName: "Heron",
+    oscTargets: [{
+      id: "rnbo-inst-44:plate",
+      label: "Plate 44",
+      host: "192.168.68.101",
+      port: 1234,
+      baseAddress: "/rnbo/inst/44",
+      app: "plate",
+      instance: "main",
+      parameters: [{ name: "Decay", address: "/rnbo/inst/44/params/Decay" }]
+    }]
+  });
+
+  assert.equal(registered.oscAssignmentReconciliation.changed, true);
+  assert.equal(registered.oscAssignmentReconciliation.assignments["plate-a"].oscTargetId, "heron:plate:main");
+  assert.equal(registered.oscAssignmentReconciliation.score.mesostructure.A.oscSnapshots["plate-a"].params.Decay, 0.65);
 });
 
 test("RNBO targets route exposes resend queue and per-target commit status", async () => {
@@ -2585,6 +2959,10 @@ test("Poland editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /Get data from/);
   assert.match(response.body, /async function getData/);
   assert.match(response.body, /OSCQuery parameter read failed/);
+  assert.match(response.body, /mountOscSnapshotPanel/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotDraft/);
+  assert.match(response.body, /applySavedSnapshot/);
 });
 
 test("TTID editor route serves the OSC target integration page", async () => {
@@ -2606,6 +2984,10 @@ test("TTID editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /id="get-state"/);
   assert.match(response.body, /async function getState/);
   assert.match(response.body, /OSCQuery parameter read failed/);
+  assert.match(response.body, /mountOscSnapshotPanel/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotDraft/);
+  assert.match(response.body, /applySavedSnapshot/);
 });
 
 test("Plate editor route serves the OSC target integration page", async () => {
@@ -2628,6 +3010,10 @@ test("Plate editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /Get data from/);
   assert.match(response.body, /async function getData/);
   assert.match(response.body, /OSCQuery parameter read failed/);
+  assert.match(response.body, /mountOscSnapshotPanel/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotDraft/);
+  assert.match(response.body, /applySavedSnapshot/);
 });
 
 test("SoftPiano editor route serves the compact OSC control panel", async () => {
@@ -2652,6 +3038,10 @@ test("SoftPiano editor route serves the compact OSC control panel", async () => 
   assert.match(response.body, /Get data from/);
   assert.match(response.body, /async function getData/);
   assert.match(response.body, /OSCQuery parameter read failed/);
+  assert.match(response.body, /mountOscSnapshotPanel/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotDraft/);
+  assert.match(response.body, /applySavedSnapshot/);
 });
 
 test("ListSequencer editor route serves the OSC target integration page", async () => {
@@ -2686,6 +3076,15 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /formatAckValue/);
   assert.match(response.body, /hydrateParameters/);
   assert.match(response.body, /OSCQuery parameter read failed/);
+  assert.match(response.body, /Mesostructural Snapshot/);
+  assert.match(response.body, /Write snapshot to/);
+  assert.match(response.body, /Logical role/);
+  assert.match(response.body, /Save Snapshot/);
+  assert.match(response.body, /Load Saved Snapshot/);
+  assert.match(response.body, /Recall Now/);
+  assert.match(response.body, /Ignore Shadowscore recall/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /createOscEditorSnapshot/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -2716,6 +3115,10 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /Get data from/);
   assert.match(response.body, /async function getData/);
   assert.match(response.body, /OSCQuery parameter read failed/);
+  assert.match(response.body, /mountOscSnapshotPanel/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotDraft/);
+  assert.match(response.body, /applySavedSnapshot/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -2760,6 +3163,17 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /\/params/);
   assert.match(response.body, /isToggleParam/);
   assert.match(response.body, /parameter-toggle/);
+  assert.match(response.body, /Mesostructural Snapshot/);
+  assert.match(response.body, /Write snapshot to/);
+  assert.match(response.body, /Logical role/);
+  assert.match(response.body, /Save Snapshot/);
+  assert.match(response.body, /Load Saved Snapshot/);
+  assert.match(response.body, /Recall Now/);
+  assert.match(response.body, /Ignore Shadowscore recall/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotDraft/);
+  assert.match(response.body, /applySavedSnapshot/);
+  assert.match(response.body, /dataset\.snapshotValue/);
 });
 
 test("OSC volume tool route serves target selection and trim controls", async () => {
@@ -2805,6 +3219,21 @@ test("shared client state module is served as a static asset", async () => {
   assert.match(response.headers["Content-Type"], /text\/javascript/);
   assert.match(response.body, /createShadowScoreClientState/);
   assert.match(response.body, /effectiveScore/);
+});
+
+test("shared OSC snapshot editor client is served as a static asset", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/shared/osc-snapshot-editor.js");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/javascript/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /createOscEditorSnapshot/);
+  assert.match(response.body, /sameOscSnapshot/);
+  assert.match(response.body, /oscClockRecallNotice/);
+  assert.match(response.body, /expectedStructureRevision/);
+  assert.match(response.body, /roles: \[roleId\]/);
+  assert.match(response.body, /Loaded block .* into the form; no OSC was sent/);
 });
 
 test("shared ShadowScore stylesheet is served as a static asset", async () => {
@@ -3037,7 +3466,8 @@ test("OSC target route preserves registered ListSequencer message inports", asyn
       inputPorts: [
         { name: "Steps", address: "/rnbo/inst/14/messages/in/Steps", type: "iiii" },
         { name: "Duration", address: "/rnbo/inst/14/messages/in/Duration" }
-      ]
+      ],
+      parameters: [{ name: "Clock_1_", address: "/rnbo/inst/14/params/Clock_1_", value: 1 }]
     }]
   }, { remoteAddress: "192.168.68.101" });
   const context = createRouteContext({ runtime: { peerRegistry: registry } });
@@ -3049,6 +3479,8 @@ test("OSC target route preserves registered ListSequencer message inports", asyn
   assert.deepEqual(response.targets[0].inputPorts.map((inputPort) => inputPort.name), ["Steps", "Duration"]);
   assert.equal(response.targets[0].inputPorts[0].address, "/rnbo/inst/14/messages/in/Steps");
   assert.equal(response.targets[0].inputPorts[0].type, "iiii");
+  assert.equal(response.targets[0].parameters[0].name, "Clock");
+  assert.equal(response.targets[0].parameters[0].address, "/rnbo/inst/14/params/Clock_1_");
 });
 
 test("OSC target route exposes TTID-tagged parameters from other RNBO apps", async () => {

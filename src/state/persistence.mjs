@@ -1,6 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { normalizeOscSnapshot } from "../osc/snapshot-contract.mjs";
 
 export async function loadPersistedScore(config, fallbackScore) {
   if (!config.persistence?.enabled) {
@@ -176,10 +177,11 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
     structureRevision: Number.isFinite(persistedScore.structureRevision) ? persistedScore.structureRevision : 0,
     context: structuredClone(persistedScore.context),
     clips: normalizePersistedClips(persistedScore.clips ?? fallbackScore.clips ?? {}),
-    mesostructure: structuredClone(persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}),
+    mesostructure: normalizePersistedMesostructure(persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}),
     macrostructure: structuredClone(persistedScore.macrostructure ?? fallbackScore.macrostructure ?? {}),
     structureState: normalizePersistedStructureState(persistedScore.structureState ?? fallbackScore.structureState ?? {}, persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}, persistedScore.macrostructure ?? fallbackScore.macrostructure ?? {}),
     assignments,
+    oscAssignments: normalizePersistedOscAssignments(persistedScore.oscAssignments ?? {}),
     voices
   };
 }
@@ -229,6 +231,9 @@ export function assertScoreShape(score) {
   if (score.assignments !== undefined && !isPlainObject(score.assignments)) {
     throw new Error("score.assignments must be an object");
   }
+  if (score.oscAssignments !== undefined && !isPlainObject(score.oscAssignments)) {
+    throw new Error("score.oscAssignments must be an object");
+  }
   for (const [voiceId, assignment] of Object.entries(score.assignments ?? {})) {
     if (!isPlainObject(assignment)) {
       throw new Error(`assignment ${voiceId} must be an object`);
@@ -266,6 +271,22 @@ export function assertScoreShape(score) {
     }
     if (!Array.isArray(voice.notes)) {
       throw new Error(`voice ${voiceId}.notes must be an array`);
+    }
+  }
+  for (const [roleId, assignment] of Object.entries(score.oscAssignments ?? {})) {
+    if (!isPlainObject(assignment)) {
+      throw new Error(`OSC assignment ${roleId} must be an object`);
+    }
+  }
+  for (const [blockId, block] of Object.entries(score.mesostructure ?? {})) {
+    if (!isPlainObject(block)) {
+      throw new Error(`mesostructural block ${blockId} must be an object`);
+    }
+    if (block.oscSnapshots !== undefined && !isPlainObject(block.oscSnapshots)) {
+      throw new Error(`mesostructural block ${blockId}.oscSnapshots must be an object`);
+    }
+    for (const snapshot of Object.values(block.oscSnapshots ?? {})) {
+      normalizeOscSnapshot(snapshot);
     }
   }
 }
@@ -341,6 +362,41 @@ function normalizePersistedClips(clips) {
   );
 }
 
+function normalizePersistedMesostructure(mesostructure) {
+  if (!isPlainObject(mesostructure)) {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(mesostructure).map(([blockId, block]) => [
+    blockId,
+    {
+      ...structuredClone(block),
+      oscSnapshots: Object.fromEntries(Object.entries(block?.oscSnapshots ?? {}).map(([roleId, snapshot]) => [
+        roleId,
+        normalizeOscSnapshot(snapshot)
+      ]))
+    }
+  ]));
+}
+
+function normalizePersistedOscAssignments(assignments) {
+  if (!isPlainObject(assignments)) {
+    return {};
+  }
+  return Object.fromEntries(Object.entries(assignments).map(([roleId, assignment]) => [
+    roleId,
+    {
+      label: stringField(assignment?.label),
+      app: cleanToken(assignment?.app),
+      deviceId: stringField(assignment?.deviceId),
+      oscTargetId: stringField(assignment?.oscTargetId),
+      ignoreRecall: Boolean(assignment?.ignoreRecall),
+      locked: Boolean(assignment?.locked),
+      routingStatus: stringField(assignment?.routingStatus),
+      routingMessage: stringField(assignment?.routingMessage)
+    }
+  ]));
+}
+
 function normalizePersistedStructureState(structureState, mesostructure, macrostructure) {
   const blocks = Array.isArray(macrostructure?.blocks) ? macrostructure.blocks : [];
   const fallbackBlockId = blocks.find((blockId) => mesostructure?.[blockId]) ?? Object.keys(mesostructure ?? {})[0] ?? "";
@@ -388,6 +444,14 @@ function createEmptyAssignment() {
     routingStatus: "",
     routingMessage: ""
   };
+}
+
+function cleanToken(value) {
+  return stringField(value).toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function stringField(value) {
+  return value === undefined || value === null ? "" : String(value).trim();
 }
 
 function isPlainObject(value) {

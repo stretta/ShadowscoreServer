@@ -12,6 +12,15 @@ Start with the current guides:
 - [`deploy-pi-hardening-plan.md`](deploy-pi-hardening-plan.md):
   deploy helper restart proof, recovery, route verification, and validation
   checklist.
+- [`mesostructural-osc-snapshot-plan.md`](mesostructural-osc-snapshot-plan.md):
+  instance-captured OSC clips, mesostructural role-to-clip layers, live resource
+  mapping/onboarding, ordered recall, score initialization, timing results, and
+  the selected staging/commit direction. The OSC payload contract is in
+  [`osc-snapshot-contract.md`](osc-snapshot-contract.md), and the RNBO-side
+  transaction is in
+  [`rnbo-osc-snapshot-staging-protocol.md`](rnbo-osc-snapshot-staging-protocol.md).
+  The stopped-transport live baseline is repeatable with
+  `tools/measure-osc-snapshot.mjs`.
 
 Design and implementation notes:
 
@@ -46,6 +55,12 @@ Design and implementation notes:
   proposed shared revision/draft framework for editor clients.
 - [`osc-editor-and-macro-control-plan.md`](osc-editor-and-macro-control-plan.md):
   OSC instrument editor, live target, broadcast volume, and macro-control plan.
+- [`mesostructural-osc-snapshot-plan.md`](mesostructural-osc-snapshot-plan.md):
+  clean replacement plan for instance-captured OSC clips, block OSC layers,
+  logical instance routing, onboarding, recall, and beat-aware transitions.
+- [`osc-snapshot-contract.md`](osc-snapshot-contract.md): finalized version 1
+  semantic snapshot schema, persistent-control rules, and sequencer Clock
+  behavior.
 - [`implementation-plan.md`](implementation-plan.md): implementation milestone
   history and model notes.
 

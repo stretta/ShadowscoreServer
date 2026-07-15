@@ -566,7 +566,8 @@ test("extracts ListVelSequencer rows and pitch-map parameters", () => {
   assert.equal(targets[0].app, "listvelsequencer");
   assert.equal(targets[0].oscCapabilities.includes("listvelsequencer-edit"), true);
   assert.deepEqual(targets[0].parameters.map((param) => param.name), ["1map", "2map", "3map", "4map", "5map", "6map", "7map", "8map", "ClockRate", "Clock"]);
-  assert.deepEqual(targets[0].inputPorts.map((inputPort) => inputPort.name), ["1row", "2row", "3row", "4ow", "5row", "6row", "7row", "8row"]);
+  assert.deepEqual(targets[0].inputPorts.map((inputPort) => inputPort.name), ["1row", "2row", "3row", "4row", "5row", "6row", "7row", "8row"]);
+  assert.equal(targets[0].inputPorts[3].address, "/rnbo/inst/23/messages/in/4ow");
 });
 
 test("extracts AnalogSequencer OSC control targets with zero-padded stage params", () => {

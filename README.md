@@ -121,9 +121,12 @@ without changing the Matrix Edit or Event List surfaces.
 
 The `/editors` route serves the registered OSC-generator index from
 `public/editors`, and `/editors/manifest` exposes the generator manifest JSON.
-The bundled Poland, TTID, Plate, and ListSequencer editors are served at
-`/editors/poland`, `/editors/ttid`, `/editors/plate`, and
-`/editors/listsequencer`. Utility tools for live OSC target volume trims and
+The bundled ListSequencer, ListVelSequencer, AnalogSequencer, Plate, Poland,
+SoftPiano, and TTID editors share the mesostructural OSC snapshot workflow.
+Each form can save to or load from a block without sending, then recall
+explicitly through a separately selected logical role. Live read sources,
+checked immediate-send targets, block destinations, and runtime roles remain
+independent. Utility tools for live OSC target volume trims and
 macro building are served at `/tools/osc-volume` and `/tools/osc-macros`.
 
 By default, the active score persists to `data/score.json`, the previous
@@ -136,6 +139,12 @@ configured RNBO inport address. RNBO compilation follows the active
 mesostructural block: each assignment-bound target receives that player's
 resolved clip material for the current block. Looped clips repeat across the
 containing block duration; one-shot clips play once.
+
+Active macro entry changes also enqueue composition-owned OSC snapshot recall.
+The entry key includes macro index and block id, so repeated observations do
+not resend while separate occurrences of the same block still recall. Playback
+status reports this queue separately from ShadowScore note delivery and
+`SetStage` phase alignment.
 
 ## Editing Model
 
@@ -167,6 +176,11 @@ For the session-day operator flow, see
 - `GET /rnbo/targets`: local and registered RNBO targets with availability state and latest RNBO score send status when available.
 - `GET /rnbo/devices`: RNBO runner/graph-editor devices, including units that do not currently expose ShadowScore playback targets.
 - `GET /osc/targets`: normalized OSC-capable targets. Optional query filters include `app`, `capability`, and `status`.
+- `GET /osc/assignments`: current logical OSC control-role assignment map. Add `?resolved=1` for current normalized target resolutions and compatible targets without mutating the score.
+- `POST /osc/assignments/reconcile`: refresh unlocked role target IDs and routing diagnostics from normalized live targets by stable device identity plus app/editor capability.
+- `GET /osc/recalls`: bounded recent OSC snapshot recall diagnostics across blocks, including encoded payload bytes and monotonic per-write/dispatch timing.
+- `PUT /osc/assignments/:roleId`: create or replace one logical OSC control-role assignment.
+- `DELETE /osc/assignments/:roleId`: remove one logical OSC control-role assignment without changing any saved block snapshots.
 - `POST /osc/send`: send one OSC message or named parameter write to selected target IDs.
 - `POST /osc/broadcast`: expand filtered OSC targets at request time and send one OSC message or named parameter write to each resolved target.
 - `GET /osc/macros`: list saved OSC macros from the host macro library.
@@ -205,6 +219,11 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /mesostructure/:blockId`: add or replace one mesostructural block.
 - `POST /mesostructure/:blockId/duplicate`: duplicate one mesostructural block, using `blockId` or `id` in the request body for the new block ID.
 - `DELETE /mesostructure/:blockId`: remove one mesostructural block and delete its appearances from the macro chain.
+- `GET /mesostructure/:blockId/osc-snapshots`: list the semantic OSC snapshots owned by one block.
+- `PUT /mesostructure/:blockId/osc-snapshots/:roleId`: create or replace one role snapshot using `schemaVersion`, `app`, numeric `params`, and numeric-list `inputPorts`.
+- `DELETE /mesostructure/:blockId/osc-snapshots/:roleId`: remove one saved role snapshot from a block.
+- `POST /mesostructure/:blockId/osc-snapshots/recall`: compile and best-effort dispatch a block's saved semantic OSC state. Optional `roles` scopes logical roles and `dryRun` returns the complete plan without sending.
+- `GET /mesostructure/:blockId/osc-snapshots/recall`: bounded recall diagnostics for one block.
 - `POST /macrostructure`: merge macrostructure fields such as `{ "tempo": 120, "blocks": ["A", "B"] }`; use `?replace=1` to replace the macrostructure document.
 - `POST /structure/playhead`: select the active mesostructural block.
 - `POST /macrostructure/advance`: advance the active block to the next macro chain entry.
@@ -217,7 +236,7 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /voices/:voiceId/assignment`: assign a voice to a player, device, or client.
 - `DELETE /voices/:voiceId/assignment`: clear one voice assignment.
 - `POST /voices/:voiceId/notes`: replace a voice's ShadowScore notes document.
-- `POST /admin/reset`: clear selected score sections with a JSON body containing `context`, `notes`, `voices`, `assignments`, and/or `structure` booleans.
+- `POST /admin/reset`: clear selected score sections with a JSON body containing `context`, `notes`, `voices`, `assignments`, `oscAssignments`, and/or `structure` booleans.
 - `GET /admin/backup`: download the current score snapshot as JSON.
 - `POST /admin/restore`: restore a score snapshot JSON body through the normal score normalization path.
 - `GET /admin/scores`: list named score JSON files saved on the host.
@@ -227,13 +246,16 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `DELETE /admin/scores/:scoreId`: delete a saved score JSON file from the host score library.
 - `POST /admin/assignment-preset`: apply a configured assignment preset by `{ "presetId": "..." }`.
 - `POST /admin/import-legacy-voice-notes`: copy non-empty `voices[player].notes` into looped clips such as `player-1-main` and assign them to block `A` by default. This leaves voice notes intact and does not overwrite existing clips unless `overwriteClips` is true.
-- `GET /admin`: simple lab admin page for voice assignments and basic resets.
+- `GET /admin`: lab administration for player assignments, logical OSC control roles, OSCQuery devices, saved scores, and resets.
 - `GET /`: ShadowScore view index with editor and RNBO graph-editor links.
 - `GET /editors`: registered instrument-editor browser.
-- `GET /editors/poland`: bundled Poland OSC editor.
-- `GET /editors/ttid`: bundled TTID OSC editor.
-- `GET /editors/plate`: bundled Plate reverb OSC editor.
-- `GET /editors/listsequencer`: bundled ListSequencer OSC editor.
+- `GET /editors/listsequencer`: bundled ListSequencer OSC editor with block snapshot save, load, routing-policy, and recall controls.
+- `GET /editors/listvelsequencer`: bundled eight-row velocity sequencer OSC editor with the shared snapshot workflow.
+- `GET /editors/analogsequencer`: bundled 16-stage analog sequencer OSC editor with the shared snapshot workflow.
+- `GET /editors/plate`: bundled Plate reverb OSC editor with the shared snapshot workflow.
+- `GET /editors/poland`: bundled Poland OSC editor with the shared snapshot workflow.
+- `GET /editors/softpiano`: bundled SoftPiano OSC editor with the shared snapshot workflow.
+- `GET /editors/ttid`: bundled TTID mask and transpose OSC editor with the shared snapshot workflow.
 - `GET /tools/osc-volume`: OSC target volume trim tool.
 - `GET /tools/osc-macros`: OSC macro builder and validator.
 - `GET /event-list`: canonical clip attribute and note-event editor.
@@ -255,6 +277,8 @@ Client command messages are JSON objects:
 - `context.update`: update shared context with `context`, optional `replace`, and optional `expectedVersion`.
 - `mesostructure.block.replace`: add or replace one mesostructural block with `blockId` and `block`.
 - `mesostructure.block.remove`: remove one mesostructural block with `blockId`.
+- `mesostructure.oscSnapshot.replace`: create or replace block-owned OSC state with `blockId`, `roleId`, and `snapshot`.
+- `mesostructure.oscSnapshot.remove`: remove block-owned OSC state with `blockId` and `roleId`.
 - `macrostructure.update`: update macrostructure with `macrostructure`, optional `replace`, and optional `expectedVersion`.
 - `structure.playhead.update`: select the active mesostructural block with `structureState` or `playhead`.
 - `macrostructure.advance`: advance the active block to the next macro chain entry.
@@ -268,7 +292,9 @@ Client command messages are JSON objects:
 - `voice.notes.replace`: replace one voice with `voiceId`, `notes` or `document`, and optional `expectedVoiceVersion`.
 - `voice.assignment.replace`: replace assignment metadata with `voiceId` and `assignment`.
 - `voice.assignment.clear`: clear one assignment with `voiceId`.
-- `admin.reset`: clear selected sections with `context`, `notes`, `voices`, `assignments`, and/or `structure`.
+- `osc.assignment.replace`: create or replace a logical OSC control-role assignment with `roleId` and `assignment`.
+- `osc.assignment.remove`: remove a logical OSC control-role assignment with `roleId`.
+- `admin.reset`: clear selected sections with `context`, `notes`, `voices`, `assignments`, `oscAssignments`, and/or `structure`.
 - `admin.importLegacyVoiceNotes`: copy legacy voice notes into clips and assign them into a mesostructural block.
 
 Successful write commands receive an `ack` with the updated score. Stale guarded

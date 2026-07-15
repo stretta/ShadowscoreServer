@@ -10,6 +10,7 @@ test("initial score creates configured voices", () => {
   assert.equal(score.structureRevision, 0);
   assert.deepEqual(Object.keys(score.voices), defaultConfig.ensemble.voices);
   assert.deepEqual(Object.keys(score.assignments), defaultConfig.ensemble.voices);
+  assert.deepEqual(score.oscAssignments, {});
   assert.deepEqual(Object.keys(score.mesostructure), ["A", "B", "C", "D", "E", "F"]);
   assert.deepEqual(score.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
   assert.equal(Object.keys(score.clips).length, 36);
@@ -24,12 +25,163 @@ test("initial score creates configured voices", () => {
   assert.equal(score.clips["a-player-1"].playbackType, "looped");
   for (const block of Object.values(score.mesostructure)) {
     assert.deepEqual(block.duration, { bars: 4 });
+    assert.deepEqual(block.oscSnapshots, {});
     assert.equal(Object.keys(block.players).length, 6);
     for (const assignment of Object.values(block.players)) {
       assert.ok(score.clips[assignment.clipId]);
       assert.ok(score.clips[assignment.clipId].notes.length > 0);
     }
   }
+});
+
+test("OSC snapshots are block-owned, revision-aware, and copied independently with duplicated blocks", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const events = [];
+  store.events.on("change", (event) => events.push(event));
+
+  const saved = store.replaceOscSnapshot("A", "analog-a", {
+    schemaVersion: 1,
+    app: "analogsequencer",
+    params: { GateTime: 0.45, Clock: 0 },
+    inputPorts: {}
+  }, { expectedScoreRevision: 0, expectedStructureRevision: 0 });
+
+  assert.equal(saved.scoreRevision, 1);
+  assert.equal(saved.structureRevision, 1);
+  assert.equal(saved.mesostructure.A.oscSnapshots["analog-a"].params.Clock, 0);
+  assert.equal(events[0].type, "mesostructure.oscSnapshot.replaced");
+
+  const duplicated = store.duplicateMesoBlock("A", "A2");
+  assert.deepEqual(duplicated.mesostructure.A2.oscSnapshots, duplicated.mesostructure.A.oscSnapshots);
+  store.replaceOscSnapshot("A2", "analog-a", {
+    app: "analogsequencer",
+    params: { Clock: 1 },
+    inputPorts: {}
+  });
+  assert.equal(store.getScore().mesostructure.A.oscSnapshots["analog-a"].params.Clock, 0);
+
+  const removed = store.removeOscSnapshot("A", "analog-a");
+  assert.deepEqual(removed.mesostructure.A.oscSnapshots, {});
+  assert.equal(events.at(-1).type, "mesostructure.oscSnapshot.removed");
+});
+
+test("OSC role assignments remain separate from player assignments and emit explicit events", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const events = [];
+  store.events.on("change", (event) => events.push(event.type));
+
+  const assigned = store.replaceOscAssignment("plate-a", {
+    label: "Plate A",
+    app: "Plate",
+    deviceId: "heron",
+    oscTargetId: "heron:plate:main",
+    ignoreRecall: true,
+    locked: true
+  }, { expectedScoreRevision: 0 });
+
+  assert.equal(assigned.oscAssignments["plate-a"].app, "plate");
+  assert.equal(assigned.oscAssignments["plate-a"].ignoreRecall, true);
+  assert.equal(assigned.assignments["player-1"].deviceId, "");
+  assert.equal(assigned.structureRevision, 0);
+  assert.deepEqual(events, ["osc.assignment.replaced"]);
+
+  const removed = store.removeOscAssignment("plate-a", { expectedScoreRevision: 1 });
+  assert.deepEqual(removed.oscAssignments, {});
+  assert.deepEqual(events, ["osc.assignment.replaced", "osc.assignment.removed"]);
+});
+
+test("OSC assignment reconciliation refreshes routing without modifying block snapshots", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceOscAssignment("plate-a", {
+    app: "plate",
+    deviceId: "heron",
+    oscTargetId: "heron:plate:old"
+  });
+  store.replaceOscSnapshot("A", "plate-a", {
+    app: "plate",
+    params: { Decay: 0.5 },
+    inputPorts: {}
+  });
+  const snapshotBefore = store.getScore().mesostructure.A.oscSnapshots["plate-a"];
+  const events = [];
+  store.events.on("change", (event) => events.push(event.type));
+
+  const reconciled = store.reconcileOscAssignments([{
+    id: "heron:plate:new",
+    deviceId: "heron",
+    unitId: "heron",
+    app: "plate",
+    status: "online",
+    sendable: true,
+    capabilities: ["osc", "plate-edit"]
+  }]);
+
+  assert.equal(reconciled.changed, true);
+  assert.equal(reconciled.assignments["plate-a"].oscTargetId, "heron:plate:new");
+  assert.equal(reconciled.assignments["plate-a"].routingStatus, "");
+  assert.deepEqual(store.getScore().mesostructure.A.oscSnapshots["plate-a"], snapshotBefore);
+  assert.deepEqual(events, ["osc.assignment.reconciled"]);
+
+  const unchanged = store.reconcileOscAssignments([{
+    id: "heron:plate:new",
+    deviceId: "heron",
+    unitId: "heron",
+    app: "plate",
+    status: "online",
+    sendable: true,
+    capabilities: ["osc", "plate-edit"]
+  }]);
+  assert.equal(unchanged.changed, false);
+  assert.deepEqual(events, ["osc.assignment.reconciled"]);
+});
+
+test("old scores normalize empty OSC collections and restore preserves snapshot state", () => {
+  const current = createInitialScore(defaultConfig);
+  const oldScore = structuredClone(current);
+  delete oldScore.oscAssignments;
+  for (const block of Object.values(oldScore.mesostructure)) delete block.oscSnapshots;
+  const oldStore = createScoreStore(oldScore);
+  assert.deepEqual(oldStore.getScore().oscAssignments, {});
+  assert.deepEqual(oldStore.getScore().mesostructure.A.oscSnapshots, {});
+
+  const source = createScoreStore(current);
+  source.replaceOscAssignment("list-a", { app: "listsequencer", deviceId: "finch" });
+  source.replaceOscSnapshot("B", "list-a", {
+    app: "listsequencer",
+    params: { Clock: 1 },
+    inputPorts: { Steps: [1, 0, 1, 0] }
+  });
+  const restored = oldStore.restore(source.getScore());
+  assert.equal(restored.oscAssignments["list-a"].deviceId, "finch");
+  assert.deepEqual(restored.mesostructure.B.oscSnapshots["list-a"].inputPorts.Steps, [1, 0, 1, 0]);
+});
+
+test("structure and OSC assignment resets clear their own snapshot collections", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceOscAssignment("plate-a", { app: "plate", deviceId: "heron" });
+  store.replaceOscSnapshot("A", "plate-a", { app: "plate", params: { Decay: 0.5 }, inputPorts: {} });
+
+  const playerReset = store.reset({ assignments: true });
+  assert.ok(playerReset.oscAssignments["plate-a"]);
+  assert.ok(playerReset.mesostructure.A.oscSnapshots["plate-a"]);
+
+  const roleReset = store.reset({ oscAssignments: true });
+  assert.deepEqual(roleReset.oscAssignments, {});
+  assert.ok(roleReset.mesostructure.A.oscSnapshots["plate-a"]);
+
+  const structureReset = store.reset({ structure: true });
+  assert.deepEqual(structureReset.mesostructure.A.oscSnapshots, {});
+});
+
+test("New Score restores configured empty OSC state after runtime mutations", () => {
+  const defaults = createInitialScore(defaultConfig);
+  const store = createScoreStore(defaults, { defaultScore: defaults });
+  store.replaceOscAssignment("plate-a", { app: "plate", deviceId: "heron" });
+  store.replaceOscSnapshot("A", "plate-a", { app: "plate", params: { Decay: 0.5 }, inputPorts: {} });
+
+  const created = store.createNewScore();
+  assert.deepEqual(created.oscAssignments, {});
+  assert.deepEqual(created.mesostructure.A.oscSnapshots, {});
 });
 
 test("context updates merge into shared score context", () => {

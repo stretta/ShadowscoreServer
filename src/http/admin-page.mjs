@@ -15,11 +15,11 @@ export function adminPage() {
     main { margin: 0 auto; max-width: 1120px; padding: 24px clamp(16px, 4vw, 40px) 40px; }
     .toolbar { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 18px; }
     .toolbar .status { align-self: center; margin-left: auto; }
-    .session-tools, .scores, .targets, .oscquery-devices, .hardware {
+    .session-tools, .scores, .targets, .oscquery-devices, .osc-roles, .hardware {
       margin-bottom: 18px;
       padding: 14px;
     }
-    .session-tools h2, .scores h2, .targets h2, .oscquery-devices h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
+    .session-tools h2, .scores h2, .targets h2, .oscquery-devices h2, .osc-roles h2, .hardware h2 { font-size: 16px; margin: 0 0 10px; }
     .session-grid {
       align-items: start;
       display: grid;
@@ -54,7 +54,7 @@ export function adminPage() {
       font-size: 13px;
       margin-top: 6px;
     }
-    .target-list, .unit-list, .score-list, .oscquery-device-list { display: grid; gap: 8px; }
+    .target-list, .unit-list, .score-list, .oscquery-device-list, .osc-role-list { display: grid; gap: 8px; }
     .oscquery-device-form {
       align-items: end;
       display: grid;
@@ -63,6 +63,18 @@ export function adminPage() {
       margin-bottom: 10px;
     }
     .oscquery-device-form label { color: var(--ss-muted); display: grid; font-size: 12px; gap: 4px; }
+    .osc-role-form {
+      align-items: end;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(130px, 0.7fr) minmax(150px, 0.8fr) minmax(130px, 0.7fr) minmax(130px, 0.7fr) minmax(240px, 1.4fr);
+      margin-bottom: 10px;
+    }
+    .osc-role-form label { color: var(--ss-muted); display: grid; font-size: 12px; gap: 4px; }
+    .osc-role-options { align-items: center; display: flex; flex-wrap: wrap; gap: 12px; grid-column: 1 / -1; }
+    .osc-role-options label { align-items: center; display: flex; flex-direction: row; gap: 6px; }
+    .osc-role-status { grid-column: 1 / -1; margin-top: 0; min-height: 18px; }
+    .osc-role-status.error { color: var(--ss-danger-text, #fca5a5); }
     .oscquery-device-actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .rnbo-send-state {
       background: rgba(38, 51, 65, 0.46);
@@ -79,7 +91,7 @@ export function adminPage() {
       font-size: 12px;
       line-height: 1.35;
     }
-    .target, .unit, .score-item, .oscquery-device {
+    .target, .unit, .score-item, .oscquery-device, .osc-role {
       align-items: center;
       background: rgba(38, 51, 65, 0.46);
       border: 1px solid var(--ss-border);
@@ -89,10 +101,10 @@ export function adminPage() {
       justify-content: space-between;
       padding: 9px;
     }
-    .target, .unit, .oscquery-device { align-items: flex-start; }
+    .target, .unit, .oscquery-device, .osc-role { align-items: flex-start; }
     .item-main { display: grid; gap: 4px; min-width: 0; }
     .score-detail { font-size: 12px; margin-top: 3px; }
-    .target code, .unit code, .oscquery-device code { color: var(--ss-muted); font-size: 12px; }
+    .target code, .unit code, .oscquery-device code, .osc-role code { color: var(--ss-muted); font-size: 12px; }
     .diagnostic {
       background: rgba(251, 191, 36, 0.1);
       border: 1px solid rgba(251, 191, 36, 0.56);
@@ -161,6 +173,8 @@ export function adminPage() {
       td::before { color: #66717d; content: attr(data-label); display: block; font-size: 12px; font-weight: 700; margin-bottom: 4px; text-transform: uppercase; }
       .actions { flex-wrap: wrap; }
       .oscquery-device-form { grid-template-columns: 1fr; }
+      .osc-role-form { grid-template-columns: 1fr; }
+      .osc-role-options { grid-column: auto; }
     }
   </style>
 </head>
@@ -242,6 +256,36 @@ export function adminPage() {
       <div class="hint">Add a device that exposes OSCQuery even when it does not run the Shadowscore registration agent. The server will probe it before saving.</div>
       <div class="oscquery-device-list" id="oscquery-devices"></div>
     </section>
+    <section class="osc-roles">
+      <h2>OSC control roles</h2>
+      <form class="osc-role-form" id="osc-role-form" novalidate>
+        <label>Role ID
+          <input id="osc-role-id" autocomplete="off" required placeholder="analog-sequencer-a">
+        </label>
+        <label>Label
+          <input id="osc-role-label" autocomplete="off" placeholder="Analog Sequencer A">
+        </label>
+        <label>App
+          <input id="osc-role-app" autocomplete="off" placeholder="analogsequencer">
+        </label>
+        <label>Device
+          <select id="osc-role-device"><option value="">Select a device</option></select>
+        </label>
+        <label>Live OSC instance
+          <select id="osc-role-target"><option value="">Select a device first</option></select>
+        </label>
+        <div class="osc-role-options">
+          <label><input id="osc-role-ignore" type="checkbox"> Ignore Shadowscore recall</label>
+          <label><input id="osc-role-locked" type="checkbox"> Lock target mapping</label>
+          <button class="primary" id="save-osc-role" type="submit">Create role</button>
+          <button id="cancel-osc-role" type="button" hidden>Cancel</button>
+          <button id="reconcile-osc-roles" type="button">Reconcile roles</button>
+        </div>
+        <div class="hint osc-role-status" id="osc-role-status" role="status" aria-live="polite"></div>
+      </form>
+      <div class="hint">Roles are score-owned mappings for OSC Editors. Saved block snapshots remain intact when a role is offline, unassigned, ambiguous, or ignored.</div>
+      <div class="osc-role-list" id="osc-roles"></div>
+    </section>
     <section class="hardware">
       <h2>Hardware units</h2>
       <div class="unit-list" id="hardware-units"></div>
@@ -280,6 +324,18 @@ export function adminPage() {
     const oscQueryDevicePortEl = document.querySelector("#oscquery-device-port");
     const saveOscQueryDeviceEl = document.querySelector("#save-oscquery-device");
     const cancelOscQueryDeviceEl = document.querySelector("#cancel-oscquery-device");
+    const oscRolesEl = document.querySelector("#osc-roles");
+    const oscRoleFormEl = document.querySelector("#osc-role-form");
+    const oscRoleIdEl = document.querySelector("#osc-role-id");
+    const oscRoleLabelEl = document.querySelector("#osc-role-label");
+    const oscRoleAppEl = document.querySelector("#osc-role-app");
+    const oscRoleDeviceEl = document.querySelector("#osc-role-device");
+    const oscRoleTargetEl = document.querySelector("#osc-role-target");
+    const oscRoleIgnoreEl = document.querySelector("#osc-role-ignore");
+    const oscRoleLockedEl = document.querySelector("#osc-role-locked");
+    const saveOscRoleEl = document.querySelector("#save-osc-role");
+    const cancelOscRoleEl = document.querySelector("#cancel-osc-role");
+    const oscRoleStatusEl = document.querySelector("#osc-role-status");
     const hardwareUnitsEl = document.querySelector("#hardware-units");
     const shareUrlEl = document.querySelector("#share-url");
     const qrCodeEl = document.querySelector("#qr-code");
@@ -294,6 +350,11 @@ export function adminPage() {
     let hardwareUnits = [];
     let oscQueryDevices = [];
     let editingOscQueryDeviceId = "";
+    let oscControlTargets = [];
+    let oscRoleAssignments = {};
+    let oscRoleResolutions = {};
+    let editingOscRoleId = "";
+    let suggestedOscRoleFields = {};
     let rnboSendQueue = {
       inProgress: false,
       queued: false,
@@ -317,6 +378,11 @@ export function adminPage() {
     document.querySelector("#new-score").addEventListener("click", createNewScore);
     oscQueryDeviceFormEl.addEventListener("submit", saveOscQueryDevice);
     cancelOscQueryDeviceEl.addEventListener("click", resetOscQueryDeviceForm);
+    oscRoleFormEl.addEventListener("submit", saveOscRole);
+    oscRoleDeviceEl.addEventListener("change", selectOscRoleDevice);
+    oscRoleTargetEl.addEventListener("change", suggestOscRoleFromTarget);
+    cancelOscRoleEl.addEventListener("click", resetOscRoleForm);
+    document.querySelector("#reconcile-osc-roles").addEventListener("click", reconcileOscRoles);
     restoreFileEl.addEventListener("change", restoreBackup);
 
     loadSession();
@@ -326,6 +392,9 @@ export function adminPage() {
     events.addEventListener("voice.assignment.cleared", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.assignment.preset.applied", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.assignment.reconciled", (event) => render(JSON.parse(event.data).score));
+    events.addEventListener("osc.assignment.replaced", (event) => { render(JSON.parse(event.data).score); loadOscRoles(); });
+    events.addEventListener("osc.assignment.removed", (event) => { render(JSON.parse(event.data).score); loadOscRoles(); });
+    events.addEventListener("osc.assignment.reconciled", (event) => { render(JSON.parse(event.data).score); loadOscRoles(); });
     events.addEventListener("voice.added", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.removed", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.reset", (event) => render(JSON.parse(event.data).score));
@@ -335,6 +404,7 @@ export function adminPage() {
     events.onerror = () => setStatus("Event stream reconnecting...");
     window.setInterval(refreshRnboTargets, 2000);
     window.setInterval(loadOscQueryDevices, 5000);
+    window.setInterval(loadOscRoles, 5000);
 
     async function loadSession() {
       const response = await fetch("/session");
@@ -345,6 +415,7 @@ export function adminPage() {
       renderSessionTools(session);
       await refreshRnboTargets();
       await loadOscQueryDevices();
+      await loadOscRoles();
       renderHardwareUnits(hardwareUnits);
       await loadSavedScores();
       const scoreResponse = await fetch("/score");
@@ -447,6 +518,104 @@ export function adminPage() {
         row.append(main, controls);
         oscQueryDevicesEl.append(row);
       }
+    }
+
+    function renderOscRoles() {
+      oscRolesEl.textContent = "";
+      renderOscRoleDeviceOptions();
+      renderOscRoleTargetOptions();
+      const roleIds = Object.keys(oscRoleAssignments).sort();
+      if (roleIds.length === 0) {
+        const empty = document.createElement("div");
+        empty.className = "osc-role";
+        empty.textContent = "No logical OSC control roles configured.";
+        oscRolesEl.append(empty);
+        return;
+      }
+      for (const roleId of roleIds) {
+        const assignment = oscRoleAssignments[roleId] ?? {};
+        const resolution = oscRoleResolutions[roleId] ?? { status: assignment.routingStatus || "unassigned", message: assignment.routingMessage || "Not resolved." };
+        const row = document.createElement("div");
+        row.className = "osc-role";
+        const main = document.createElement("div");
+        main.className = "item-main";
+        const label = document.createElement("strong");
+        label.textContent = assignment.label || roleId;
+        const id = document.createElement("code");
+        id.textContent = roleId;
+        const route = document.createElement("div");
+        route.className = "send-detail";
+        route.textContent = [
+          assignment.app ? "app " + assignment.app : "app unassigned",
+          assignment.deviceId ? "device " + assignment.deviceId : "device unassigned",
+          assignment.oscTargetId || "target unassigned",
+          assignment.locked ? "locked" : "",
+          assignment.ignoreRecall ? "recall ignored" : ""
+        ].filter(Boolean).join(" · ");
+        const detail = document.createElement("div");
+        detail.className = "send-detail";
+        detail.textContent = resolution.message || assignment.routingMessage || "";
+        main.append(label, id, route, detail);
+
+        const controls = document.createElement("div");
+        controls.className = "oscquery-device-actions";
+        const configure = document.createElement("button");
+        configure.type = "button";
+        configure.textContent = "Configure";
+        configure.addEventListener("click", () => configureOscRole(roleId));
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "danger";
+        remove.textContent = "Remove";
+        remove.addEventListener("click", () => removeOscRole(roleId));
+        controls.append(statusBadge(resolution.status || "unassigned"), configure, remove);
+        row.append(main, controls);
+        oscRolesEl.append(row);
+      }
+    }
+
+    function renderOscRoleTargetOptions() {
+      const selected = oscRoleTargetEl.value;
+      oscRoleTargetEl.textContent = "";
+      const deviceId = oscRoleDeviceEl.value;
+      oscRoleTargetEl.append(new Option(deviceId ? "Select an instance" : "Select a device first", ""));
+      for (const target of oscControlTargets.filter((candidate) => targetDeviceId(candidate) === deviceId)) {
+        const suffix = target.status === "online" ? "" : " · " + target.status;
+        const instance = target.instance && target.instance !== "main" ? " · instance " + target.instance : "";
+        const option = new Option((target.label || target.id) + instance + suffix, target.id);
+        option.dataset.target = JSON.stringify(target);
+        option.disabled = target.status !== "online";
+        oscRoleTargetEl.append(option);
+      }
+      const currentAssignment = oscRoleAssignments[editingOscRoleId] ?? {};
+      const current = currentAssignment.oscTargetId || selected;
+      if (current && !oscControlTargets.some((target) => target.id === current)) {
+        const offline = new Option("Assigned target offline · " + current, current);
+        offline.dataset.target = JSON.stringify({
+          id: current,
+          app: currentAssignment.app || "",
+          deviceId: currentAssignment.deviceId || "",
+          status: "offline"
+        });
+        oscRoleTargetEl.append(offline);
+      }
+      oscRoleTargetEl.value = current || "";
+    }
+
+    function renderOscRoleDeviceOptions() {
+      const selected = oscRoleDeviceEl.value;
+      const currentAssignment = oscRoleAssignments[editingOscRoleId] ?? {};
+      const current = currentAssignment.deviceId || selected;
+      const devices = [...new Set(oscControlTargets.map(targetDeviceId).filter(Boolean))].sort();
+      oscRoleDeviceEl.textContent = "";
+      oscRoleDeviceEl.append(new Option("Select a device", ""));
+      for (const deviceId of devices) oscRoleDeviceEl.append(new Option(deviceId, deviceId));
+      if (current && !devices.includes(current)) oscRoleDeviceEl.append(new Option(current + " · offline", current));
+      oscRoleDeviceEl.value = current;
+    }
+
+    function targetDeviceId(target) {
+      return target?.deviceId || target?.unitId || "";
     }
 
     function renderRnboSendState() {
@@ -862,6 +1031,172 @@ export function adminPage() {
       }
       oscQueryDevices = body.devices ?? [];
       renderOscQueryDevices(oscQueryDevices);
+    }
+
+    async function loadOscRoles() {
+      const response = await fetch("/osc/assignments?resolved=1");
+      const body = await response.json();
+      if (!response.ok || body.ok === false) {
+        setStatus(body.error || "OSC role load failed.");
+        return;
+      }
+      oscRoleAssignments = body.assignments ?? {};
+      oscRoleResolutions = body.resolutions ?? {};
+      oscControlTargets = body.targets ?? [];
+      renderOscRoles();
+    }
+
+    async function saveOscRole(event) {
+      event.preventDefault();
+      const roleId = oscRoleIdEl.value.trim();
+      if (!roleId) {
+        setOscRoleStatus("Enter a Role ID, or select a live target to generate one.", true);
+        oscRoleIdEl.focus();
+        return;
+      }
+      if (!/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(roleId)) {
+        setOscRoleStatus("Role ID must start with a letter or number and use only letters, numbers, '.', '_', ':', or '-'.", true);
+        oscRoleIdEl.focus();
+        return;
+      }
+      const selectedOption = oscRoleTargetEl.selectedOptions[0];
+      const target = selectedOption?.dataset.target ? JSON.parse(selectedOption.dataset.target) : null;
+      const document = {
+        label: oscRoleLabelEl.value.trim(),
+        app: oscRoleAppEl.value.trim() || target?.app || "",
+        deviceId: oscRoleDeviceEl.value.trim() || target?.deviceId || target?.unitId || "",
+        oscTargetId: oscRoleTargetEl.value,
+        ignoreRecall: oscRoleIgnoreEl.checked,
+        locked: oscRoleLockedEl.checked
+      };
+      setOscRoleStatus("Saving role " + roleId + "...");
+      try {
+        const response = await fetch("/osc/assignments/" + encodeURIComponent(roleId), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(document)
+        });
+        const body = await response.json();
+        if (!response.ok || body.ok === false) {
+          const message = body.error || "OSC role save failed.";
+          setStatus(message);
+          setOscRoleStatus(message, true);
+          return;
+        }
+        resetOscRoleForm();
+        setStatus("Saved OSC control role " + roleId + ".");
+        setOscRoleStatus("Saved OSC control role " + roleId + ".");
+        await loadOscRoles();
+      } catch (error) {
+        const message = error?.message || "OSC role save failed.";
+        setStatus(message);
+        setOscRoleStatus(message, true);
+      }
+    }
+
+    function suggestOscRoleFromTarget() {
+      if (editingOscRoleId) return;
+      const option = oscRoleTargetEl.selectedOptions[0];
+      if (!option?.dataset.target) return;
+      const target = JSON.parse(option.dataset.target);
+      if (!oscRoleIdEl.value.trim() || oscRoleIdEl.value === suggestedOscRoleFields.roleId) {
+        const base = slugOscRoleId(target.app || target.id || "osc-role");
+        let suffix = 0;
+        let candidate = base + "-a";
+        while (oscRoleAssignments[candidate]) {
+          suffix += 1;
+          candidate = base + "-" + (suffix < 26 ? String.fromCharCode(97 + suffix) : suffix + 1);
+        }
+        oscRoleIdEl.value = candidate;
+        suggestedOscRoleFields.roleId = candidate;
+      }
+      suggestOscRoleField(oscRoleLabelEl, "label", target.label || oscRoleIdEl.value);
+      suggestOscRoleField(oscRoleAppEl, "app", target.app || "");
+      setOscRoleStatus("Review the suggested role fields, then choose Create role.");
+    }
+
+    function selectOscRoleDevice() {
+      if (!editingOscRoleId) clearOscRoleSuggestions();
+      oscRoleTargetEl.value = "";
+      renderOscRoleTargetOptions();
+      setOscRoleStatus(oscRoleDeviceEl.value ? "Now select a live OSC instance on " + oscRoleDeviceEl.value + "." : "Select a device to begin.");
+    }
+
+    function suggestOscRoleField(element, key, value) {
+      if (!element.value.trim() || element.value === suggestedOscRoleFields[key]) {
+        element.value = value;
+        suggestedOscRoleFields[key] = value;
+      }
+    }
+
+    function clearOscRoleSuggestions() {
+      if (oscRoleIdEl.value === suggestedOscRoleFields.roleId) oscRoleIdEl.value = "";
+      if (oscRoleLabelEl.value === suggestedOscRoleFields.label) oscRoleLabelEl.value = "";
+      if (oscRoleAppEl.value === suggestedOscRoleFields.app) oscRoleAppEl.value = "";
+      suggestedOscRoleFields = {};
+    }
+
+    function slugOscRoleId(value) {
+      return String(value).toLowerCase().replace(/[^a-z0-9._:-]+/g, "-").replace(/^-+|-+$/g, "") || "osc-role";
+    }
+
+    function setOscRoleStatus(message, isError = false) {
+      oscRoleStatusEl.textContent = message || "";
+      oscRoleStatusEl.classList.toggle("error", Boolean(isError));
+    }
+
+    function configureOscRole(roleId) {
+      const assignment = oscRoleAssignments[roleId] ?? {};
+      editingOscRoleId = roleId;
+      oscRoleIdEl.value = roleId;
+      oscRoleIdEl.disabled = true;
+      oscRoleLabelEl.value = assignment.label ?? "";
+      oscRoleAppEl.value = assignment.app ?? "";
+      oscRoleDeviceEl.value = assignment.deviceId ?? "";
+      oscRoleIgnoreEl.checked = Boolean(assignment.ignoreRecall);
+      oscRoleLockedEl.checked = Boolean(assignment.locked);
+      saveOscRoleEl.textContent = "Update role";
+      cancelOscRoleEl.hidden = false;
+      renderOscRoleDeviceOptions();
+      renderOscRoleTargetOptions();
+      setOscRoleStatus("Editing OSC control role " + roleId + ".");
+      oscRoleIdEl.focus();
+    }
+
+    function resetOscRoleForm() {
+      editingOscRoleId = "";
+      suggestedOscRoleFields = {};
+      oscRoleFormEl.reset();
+      oscRoleIdEl.disabled = false;
+      saveOscRoleEl.textContent = "Create role";
+      cancelOscRoleEl.hidden = true;
+      renderOscRoleDeviceOptions();
+      renderOscRoleTargetOptions();
+      setOscRoleStatus("");
+    }
+
+    async function removeOscRole(roleId) {
+      if (!confirm("Remove OSC control role " + roleId + "? Saved block snapshots will remain.")) return;
+      const response = await fetch("/osc/assignments/" + encodeURIComponent(roleId), { method: "DELETE" });
+      const body = await response.json();
+      if (!response.ok || body.ok === false) {
+        setStatus(body.error || "OSC role removal failed.");
+        return;
+      }
+      if (editingOscRoleId === roleId) resetOscRoleForm();
+      setStatus("Removed OSC control role " + roleId + ".");
+      await loadOscRoles();
+    }
+
+    async function reconcileOscRoles() {
+      const response = await fetch("/osc/assignments/reconcile", { method: "POST" });
+      const body = await response.json();
+      if (!response.ok || body.ok === false) {
+        setStatus(body.error || "OSC role reconciliation failed.");
+        return;
+      }
+      setStatus(body.changed ? "Reconciled " + (body.changes?.length ?? 0) + " OSC role(s)." : "OSC role routing already current.");
+      await loadOscRoles();
     }
 
     async function saveOscQueryDevice(event) {

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig } from "../src/config.mjs";
 import { createMacroPlayback, deriveMacroPosition, macroBlockDurationMs } from "../src/playback/macro-playback.mjs";
+import { createOscSnapshotAutoRecall } from "../src/osc/snapshot-auto-recall.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
 import { createJackTransportState } from "../src/transport/jack-transport-state.mjs";
 
@@ -25,6 +26,22 @@ test("macro playback advances according to the active block duration and tempo",
   const stopped = playback.stop();
   assert.equal(stopped.running, false);
   assert.equal(timers.pending.length, 0);
+  playback.close();
+});
+
+test("timer macro playback triggers one automatic snapshot recall at block entry", async () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const timers = createFakeTimers();
+  const playback = createMacroPlayback(store, defaultConfig, { timers });
+  const calls = [];
+  const automatic = createOscSnapshotAutoRecall(store, { recall: async (request) => { calls.push(request); return { ok: true }; } });
+
+  playback.start();
+  timers.fire(0);
+  await automatic.flush();
+
+  assert.deepEqual(calls.map(({ blockId, macroIndex }) => ({ blockId, macroIndex })), [{ blockId: "B", macroIndex: 1 }]);
+  automatic.close();
   playback.close();
 });
 
@@ -71,6 +88,27 @@ test("JACK macro playback advances at anchored beat boundaries", () => {
   assert.equal(playback.snapshot().activeBlockEndBeat, 108);
   assert.equal(playback.snapshot().beatsRemaining, 4);
 
+  playback.close();
+});
+
+test("JACK-derived block entry triggers one automatic snapshot recall", async () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ tempo: 120, blocks: ["A", "B"] });
+  const jackTransport = createJackTransportState(defaultConfig, { now: () => 1000 });
+  const playback = createMacroPlayback(store, defaultConfig, { jackTransport });
+  const calls = [];
+  const automatic = createOscSnapshotAutoRecall(store, { recall: async (request) => { calls.push(request); return { ok: true }; } });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack" });
+  jackTransport.update(jackSnapshot({ absoluteBeat: 104 }));
+  playback.snapshot();
+  await automatic.flush();
+
+  assert.deepEqual(calls.map(({ blockId, macroIndex }) => ({ blockId, macroIndex })), [{ blockId: "B", macroIndex: 1 }]);
+  automatic.close();
   playback.close();
 });
 

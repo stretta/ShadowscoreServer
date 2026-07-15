@@ -59,7 +59,7 @@ function normalizeParameters(parameters) {
     return [];
   }
   return parameters.map((parameter) => ({
-    name: stringField(parameter.name),
+    name: semanticParameterName(parameter.name),
     address: normalizeAddress(parameter.address),
     type: stringField(parameter.type) || undefined,
     value: parameter.value,
@@ -67,11 +67,16 @@ function normalizeParameters(parameters) {
     max: parameter.max,
     values: parameter.values,
     unit: stringField(parameter.unit) || undefined,
-    displayName: stringField(parameter.displayName) || stringField(parameter.name),
+    displayName: stringField(parameter.displayName) || semanticParameterName(parameter.name),
     index: parameter.index,
     normalized: parameter.normalized,
     meta: parameter.meta
   })).filter((parameter) => parameter.name && parameter.address);
+}
+
+function semanticParameterName(value) {
+  const name = stringField(value);
+  return /^clock_1_$/i.test(name) ? "Clock" : name;
 }
 
 function normalizeInputPorts(inputPorts) {
@@ -79,14 +84,19 @@ function normalizeInputPorts(inputPorts) {
     return [];
   }
   return inputPorts.map((inputPort) => ({
-    name: stringField(inputPort.name),
+    name: semanticInputPortName(inputPort.name),
     address: normalizeAddress(inputPort.address),
     type: stringField(inputPort.type) || undefined,
     value: inputPort.value,
-    displayName: stringField(inputPort.displayName) || stringField(inputPort.name),
+    displayName: stringField(inputPort.displayName) || semanticInputPortName(inputPort.name),
     index: inputPort.index,
     meta: inputPort.meta
   })).filter((inputPort) => inputPort.name && inputPort.address);
+}
+
+function semanticInputPortName(value) {
+  const name = stringField(value);
+  return /^4ow$/i.test(name) ? "4row" : name;
 }
 
 function stableOscTargetId(target, unitId, app, instance, localId) {

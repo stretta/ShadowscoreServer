@@ -13,7 +13,7 @@
     .subtitle, .status, .detail, .empty { color: var(--ss-muted); font-size: 12px; font-weight: 750; }
     .subtitle { margin: 4px 0 0; }
     .status { max-width: 48vw; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-    .toolbar, .targets, .sequencer { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); }
+    .toolbar, .snapshot-panel, .targets, .sequencer { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); }
     .toolbar { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 10px; }
     .toolbar-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
     .targets { display: flex; gap: 8px; overflow-x: auto; padding: 10px; }
@@ -45,7 +45,14 @@
     .parameter input, .parameter select { min-width: 0; width: 100%; }
     .parameter-toggle { align-items: center; cursor: pointer; display: flex; gap: 9px; width: max-content; }
     .parameter-toggle input { height: 22px; margin: 0; width: 22px; }
-    @media (max-width: 700px) { .top, .toolbar { align-items: flex-start; flex-direction: column; } .status { max-width: none; text-align: left; white-space: normal; } }
+    .snapshot-panel { background: color-mix(in srgb, var(--ss-panel) 88%, var(--ss-accent-secondary)); display: grid; gap: 10px; padding: 12px; }
+    .snapshot-head, .snapshot-actions, .snapshot-status { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; }
+    .snapshot-head h2 { font-size: 14px; margin: 0; }
+    .snapshot-fields { display: grid; gap: 8px; grid-template-columns: repeat(2, minmax(180px, 1fr)); }
+    .snapshot-field { display: grid; gap: 4px; }
+    .snapshot-field > span, .snapshot-ignore { color: var(--ss-muted); font-size: 12px; font-weight: 800; }
+    .snapshot-state { color: var(--ss-accent); font-size: 12px; font-weight: 850; }
+    @media (max-width: 700px) { .top, .toolbar, .snapshot-head, .snapshot-actions, .snapshot-status { align-items: flex-start; flex-direction: column; } .snapshot-fields { grid-template-columns: 1fr; } .status { max-width: none; text-align: left; white-space: normal; } }
   </style>
 </head>
 <body>
@@ -54,10 +61,20 @@
   <main>
     <section class="toolbar"><strong>Get from one client · send to checked clients</strong><div class="toolbar-actions"><label for="read-source">Get data from</label><select id="read-source" aria-label="Instance to get data from"></select><button id="get-data" type="button">Get Data</button><button id="clock-all-off" type="button">Clock Selected Off</button><button id="rtz" class="primary" type="button">RTZ Selected</button><button id="clock-all-on" type="button">Clock Selected On</button><button id="refresh" type="button">Refresh</button></div></section>
     <section id="targets" class="targets" aria-live="polite"></section>
+    <section class="snapshot-panel" aria-label="Mesostructural OSC snapshot">
+      <div class="snapshot-head"><div><h2>Mesostructural Snapshot</h2><div class="detail">Save this parameter draft to the score, or recall it through the assigned logical role.</div></div><div id="snapshot-active-block" class="detail">Active block: —</div></div>
+      <div class="snapshot-fields">
+        <label class="snapshot-field" for="snapshot-block"><span>Write snapshot to</span><select id="snapshot-block"></select></label>
+        <label class="snapshot-field" for="snapshot-role"><span>Logical role</span><select id="snapshot-role"></select></label>
+      </div>
+      <div class="snapshot-actions"><div class="toolbar-actions"><button id="snapshot-save" class="primary" type="button">Save Snapshot</button><button id="snapshot-load" type="button">Load Saved Snapshot</button><button id="snapshot-recall" type="button">Recall Now</button></div><label class="snapshot-ignore"><input id="snapshot-ignore" type="checkbox"> Ignore Shadowscore recall</label></div>
+      <div class="snapshot-status"><div id="snapshot-state" class="snapshot-state" role="status">Loading score snapshot state…</div><div id="snapshot-last-recall" class="detail">No recall recorded</div></div>
+    </section>
     <section class="sequencer"><div id="stages" class="stages"></div></section>
     <section class="parameters"><h2>Sequence Parameters</h2><div id="parameters" class="parameter-grid"></div></section>
   </main>
-  <script>
+  <script type="module">
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
     const targetsEl = document.querySelector("#targets");
     const stagesEl = document.querySelector("#stages");
     const parametersEl = document.querySelector("#parameters");
@@ -69,13 +86,30 @@
     let readSourceId = "";
     let stagePollTimer;
     let stagePollGeneration = 0;
+    let snapshotClient;
 
     document.querySelector("#refresh").addEventListener("click", () => refresh().catch(reportError));
     document.querySelector("#rtz").addEventListener("click", () => returnToZero().catch(reportError));
     getDataButton.addEventListener("click", () => getData().catch(reportError));
     document.querySelector("#clock-all-off").addEventListener("click", () => setAllClocks(0).catch(reportError));
     document.querySelector("#clock-all-on").addEventListener("click", () => setAllClocks(1).catch(reportError));
-    refresh().catch(reportError);
+    document.querySelector("main").addEventListener("input", (event) => { if (event.target.matches("[data-param]")) snapshotClient?.draftChanged(); });
+    document.querySelector("main").addEventListener("change", (event) => { if (event.target.matches("[data-param]")) snapshotClient?.draftChanged(); });
+    snapshotClient = createOscSnapshotEditorClient({
+      app: "analogsequencer",
+      roleLabel: "AnalogSequencer",
+      elements: {
+        blockSelect: document.querySelector("#snapshot-block"), roleSelect: document.querySelector("#snapshot-role"),
+        saveButton: document.querySelector("#snapshot-save"), loadButton: document.querySelector("#snapshot-load"),
+        recallButton: document.querySelector("#snapshot-recall"), ignoreInput: document.querySelector("#snapshot-ignore"),
+        activeBlock: document.querySelector("#snapshot-active-block"), state: document.querySelector("#snapshot-state"),
+        lastRecall: document.querySelector("#snapshot-last-recall")
+      },
+      serializeDraft: serializeSnapshotDraft,
+      applySnapshot: applySavedSnapshot,
+      setStatus: (text) => { statusEl.textContent = text; }
+    });
+    Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
     async function refresh() {
       statusEl.textContent = "Loading AnalogSequencer targets...";
@@ -89,6 +123,7 @@
       renderParameters();
       statusEl.textContent = targets.length ? `${targets.length} client${targets.length === 1 ? "" : "s"} online · data source ${readSourceTarget()?.label || readSourceId}` : "No AnalogSequencer client online";
       startStagePolling();
+      snapshotClient?.draftChanged();
     }
 
     function renderTargets() {
@@ -128,17 +163,17 @@
       if (Array.isArray(param.values) && param.values.length) {
         const select = document.createElement("select");
         for (const value of uniqueParameterValues(param.values)) { const option = document.createElement("option"); option.value = value; option.textContent = value; select.append(option); }
-        select.value = String(param.value); select.addEventListener("change", () => { param.value = select.value; readout.textContent = select.value; if (isMaxCountParam(param)) applyMaxCount(maxCountParamValue(param)); sendParam(param.name, select.value).catch(reportError); }); card.append(select);
+        select.value = String(param.value); select.dataset.param = param.name; select.addEventListener("change", () => { param.value = select.value; readout.textContent = select.value; if (isMaxCountParam(param)) applyMaxCount(maxCountParamValue(param)); sendParam(param.name, select.value).catch(reportError); }); card.append(select);
       } else if (isToggleParam(param)) {
         const toggleLabel = document.createElement("span"); toggleLabel.className = "parameter-toggle";
-        const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = Boolean(Number(param.value)); toggle.setAttribute("aria-label", param.displayName || param.name);
+        const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = Boolean(Number(param.value)); toggle.dataset.param = param.name; toggle.setAttribute("aria-label", param.displayName || param.name);
         const state = document.createElement("span"); state.textContent = toggle.checked ? "On" : "Off";
         toggle.addEventListener("change", () => { const value = toggle.checked ? 1 : 0; param.value = value; state.textContent = toggle.checked ? "On" : "Off"; readout.textContent = String(value); sendParam(param.name, value).catch(reportError); });
         toggleLabel.append(toggle, state); card.append(toggleLabel);
       } else {
         const min = Number(param.min ?? 0); const max = Number(param.max ?? 1); const curved = shouldCurve(param, min, max);
-        const input = document.createElement("input"); input.type = "range"; input.min = curved ? "0" : String(min); input.max = curved ? "1" : String(max); input.step = curved ? "0.001" : String(parameterStep(param)); input.value = String(curved ? valueToSliderPosition(param, param.value, min, max) : (param.value ?? min));
-        input.addEventListener("input", () => { const value = sliderValue(param, input, min, max, curved); param.value = value; readout.textContent = formatParameterValue(value); if (isMaxCountParam(param)) applyMaxCount(Math.round(value)); scheduleSend(param.name, value); });
+        const input = document.createElement("input"); input.type = "range"; input.min = curved ? "0" : String(min); input.max = curved ? "1" : String(max); input.step = curved ? "0.001" : String(parameterStep(param)); input.value = String(curved ? valueToSliderPosition(param, param.value, min, max) : (param.value ?? min)); input.dataset.param = param.name; input.dataset.snapshotValue = String(param.value ?? min);
+        input.addEventListener("input", () => { const value = sliderValue(param, input, min, max, curved); param.value = value; input.dataset.snapshotValue = String(value); readout.textContent = formatParameterValue(value); if (isMaxCountParam(param)) applyMaxCount(Math.round(value)); scheduleSend(param.name, value); });
         input.addEventListener("change", () => flushSend(param.name, sliderValue(param, input, min, max, curved))); card.append(input);
       }
       return card;
@@ -153,14 +188,14 @@
       const max = integerValue(valueParam?.max, 127);
       stage.innerHTML = `<span class="stage-number">STEP ${number}</span><span class="note">${midiNote(value)}</span>`;
       const slider = document.createElement("input");
-      slider.className = "slider"; slider.type = "range"; slider.min = String(min); slider.max = String(max); slider.step = "1"; slider.value = String(clamp(value, min, max)); slider.disabled = !valueParam;
+      slider.className = "slider"; slider.type = "range"; slider.min = String(min); slider.max = String(max); slider.step = "1"; slider.value = String(clamp(value, min, max)); slider.disabled = !valueParam; if (valueParam) slider.dataset.param = valueParam.name;
       const readout = document.createElement("span"); readout.className = "value"; readout.textContent = String(value);
       const note = stage.querySelector(".note");
-      slider.addEventListener("input", () => { const next = integerValue(slider.value, value); readout.textContent = String(next); note.textContent = midiNote(next); scheduleSend(valueParam.name, next); });
+      slider.addEventListener("input", () => { const next = integerValue(slider.value, value); valueParam.value = next; readout.textContent = String(next); note.textContent = midiNote(next); scheduleSend(valueParam.name, next); });
       slider.addEventListener("change", () => flushSend(valueParam?.name, integerValue(slider.value, value)));
       const toggleLabel = document.createElement("label"); toggleLabel.className = "step"; toggleLabel.title = `Enable step ${number}`;
-      const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = Boolean(Number(stepParam?.value)); toggle.disabled = !stepParam; toggle.setAttribute("aria-label", `Step ${number}`);
-      toggle.addEventListener("change", () => sendParam(stepParam.name, toggle.checked ? 1 : 0).catch(reportError));
+      const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = Boolean(Number(stepParam?.value)); toggle.disabled = !stepParam; if (stepParam) toggle.dataset.param = stepParam.name; toggle.setAttribute("aria-label", `Step ${number}`);
+      toggle.addEventListener("change", () => { stepParam.value = toggle.checked ? 1 : 0; sendParam(stepParam.name, stepParam.value).catch(reportError); });
       toggleLabel.append(toggle); stage.append(slider, readout, toggleLabel); return stage;
     }
 
@@ -169,15 +204,17 @@
     function flushSend(param, value) { const targetIds = selectedTargetIds(); if (!param || !targetIds.length) return; const key = param; if (pending.has(key)) { clearTimeout(pending.get(key)); pending.delete(key); } sendParam(param, value, targetIds).catch(reportError); }
     async function sendParam(param, value, targetIds = selectedTargetIds()) { if (!targetIds.length) { statusEl.textContent = "No send targets selected"; return; } const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: targetIds, param, args: [value] }) }); const body = await response.json().catch(() => ({})); const sent = (body.results || []).filter(result => result.ok).length; statusEl.textContent = response.ok && body.ok !== false ? `Sent ${param} = ${value} to ${sent}/${targetIds.length}` : `Failed ${param} (${sent}/${targetIds.length})`; }
     async function returnToZero() { const targetIds = selectedTargetIds(); if (!targetIds.length) { statusEl.textContent = "No send targets selected"; return; } const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: targetIds, inputPort: "rtz", args: [1] }) }); const body = await response.json().catch(() => ({ ok: false, results: [] })); const sent = (body.results || []).filter(result => result.ok).length; statusEl.textContent = response.ok && body.ok !== false ? `RTZ queued on ${sent}/${targetIds.length} selected clients` : `RTZ queued on ${sent}/${targetIds.length} selected clients`; }
-    async function setAllClocks(value) { const targetIds = selectedTargetIds(); if (!targetIds.length) { statusEl.textContent = "No send targets selected"; return; } const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: targetIds, param: "Clock", args: [value] }) }); const body = await response.json().catch(() => ({ ok: false, results: [] })); const successfulIds = new Set((body.results || []).filter(result => result.ok).map(result => result.targetId)); for (const target of targets) { if (!successfulIds.has(target.id)) continue; const clock = (target.parameters || []).find(param => param.name === "Clock"); if (clock) clock.value = value; } renderParameters(); const sent = successfulIds.size; const state = value ? "on" : "off"; statusEl.textContent = response.ok && body.ok !== false ? `Clock ${state} on ${sent}/${targetIds.length} selected clients` : `Clock ${state} on ${sent}/${targetIds.length} selected clients`; }
+    async function setAllClocks(value) { const targetIds = selectedTargetIds(); if (!targetIds.length) { statusEl.textContent = "No send targets selected"; return; } const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: targetIds, param: "Clock", args: [value] }) }); const body = await response.json().catch(() => ({ ok: false, results: [] })); const successfulIds = new Set((body.results || []).filter(result => result.ok).map(result => result.targetId)); for (const target of targets) { if (!successfulIds.has(target.id)) continue; const clock = (target.parameters || []).find(param => param.name === "Clock"); if (clock) clock.value = value; } renderParameters(); snapshotClient?.draftChanged(); const sent = successfulIds.size; const state = value ? "on" : "off"; statusEl.textContent = response.ok && body.ok !== false ? `Clock ${state} on ${sent}/${targetIds.length} selected clients` : `Clock ${state} on ${sent}/${targetIds.length} selected clients`; }
     function startStagePolling() { clearTimeout(stagePollTimer); const generation = ++stagePollGeneration; if (!readSourceTarget()) { setPlayingStage(); return; } pollCurrentStage(generation); }
     async function pollCurrentStage(generation) { const targetId = readSourceId; try { const target = targets.find(entry => entry.id === targetId); if (!target) throw new Error("No read source"); const host = oscQueryHost(target); const path = `${target.baseAddress}/messages/out/current_stage`; const response = await fetch(`${location.protocol}//${host}:5678${path}`, { cache: "no-store" }); if (!response.ok) throw new Error(`current_stage ${response.status}`); const body = await response.json(); if (!isCurrentStagePoll(generation, targetId)) return; setPlayingStage(integerValue(Array.isArray(body.VALUE) ? body.VALUE[0] : body.VALUE, 0)); } catch { if (isCurrentStagePoll(generation, targetId)) setPlayingStage(); } finally { if (isCurrentStagePoll(generation, targetId)) stagePollTimer = setTimeout(() => pollCurrentStage(generation), 125); } }
     function isCurrentStagePoll(generation, targetId) { return generation === stagePollGeneration && targetId === readSourceId; }
     async function getData() { const targetId = readSourceSelect.value; if (!targets.some(target => target.id === targetId)) throw new Error("Choose an instance to get data from"); readSourceId = targetId; getDataButton.disabled = true; statusEl.textContent = `Getting data from ${readSourceTarget()?.label || targetId}...`; try { await hydrateReadSource(); statusEl.textContent = `Got parameter data from ${readSourceTarget()?.label || targetId}`; startStagePolling(); } finally { getDataButton.disabled = targets.length === 0; } }
     async function hydrateReadSource() { const target = readSourceTarget(); if (!target) return; const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" }); if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`); const body = await response.json(); const nodes = body.CONTENTS || {};
       target.parameters = (target.parameters || []).map(param => { const node = nodes[param.name]; if (!node) return param; const range = Array.isArray(node.RANGE) ? node.RANGE : []; return { ...param, value: node.VALUE, min: firstDefined(range.map(entry => entry.MIN), param.min), max: firstDefined(range.map(entry => entry.MAX), param.max), values: firstDefined(range.map(entry => entry.VALS), param.values), normalized: node.CONTENTS?.normalized?.VALUE ?? param.normalized }; });
-      renderStages(); renderParameters();
+      renderStages(); renderParameters(); snapshotClient?.draftChanged();
     }
+    function serializeSnapshotDraft() { const source = readSourceTarget(); const byName = new Map((source?.parameters || []).map(param => [param.name, param])); return createOscEditorSnapshot({ app: "analogsequencer", paramEntries: Array.from(document.querySelectorAll("[data-param]"), control => ({ name: control.dataset.param, value: control.type === "checkbox" ? (control.checked ? 1 : 0) : (control.dataset.snapshotValue ?? control.value), values: byName.get(control.dataset.param)?.values })) }); }
+    function applySavedSnapshot(snapshot) { const source = readSourceTarget(); if (!source) throw new Error("A live AnalogSequencer source is required to load the form"); source.parameters = (source.parameters || []).map(param => Object.hasOwn(snapshot.params || {}, param.name) ? { ...param, value: oscEditorParamValue(param, snapshot.params[param.name]) } : param); renderStages(); renderParameters(); snapshotClient?.draftChanged(); }
     function readSourceTarget() { return targets.find(target => target.id === readSourceId); }
     function selectedTargetIds() { return Array.from(targetsEl.querySelectorAll("[data-target]:checked"), input => input.dataset.target).filter(Boolean); }
     function oscQueryHost(target) { return isLoopback(target.host) ? location.hostname : target.host; }

@@ -4,8 +4,10 @@ import { transportPage } from "./transport-page.mjs";
 import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
 import { configuredRnboTargets, discoverRnboControlTargets, discoverRnboDevices, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
 import { editorManifests } from "../editors/manifest.mjs";
+import { resolveOscAssignments } from "../osc/assignments.mjs";
 import { findOscMacro, listOscMacros, resolveMacroStepAddress, saveOscMacro, validateMacro } from "../osc/macros.mjs";
 import { sendOscMessage } from "../osc/send.mjs";
+import { createOscSnapshotRecallService } from "../osc/snapshot-recall.mjs";
 import { buildOscTargets } from "../osc/targets.mjs";
 import { selectBeatWitness } from "../playback/beat-witness.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
@@ -82,7 +84,9 @@ export async function routeRequest(request, response, store, config, runtime = {
 
   if (request.method === "POST" && url.pathname === "/oscquery/devices") {
     try {
-      writeJson(response, 200, { ok: true, device: await requireManualOscQueryDevices(runtime).save(await readJson(request)) });
+      const device = await requireManualOscQueryDevices(runtime).save(await readJson(request));
+      const oscAssignmentReconciliation = await reconcileOscAssignmentsFromRuntime(store, config, runtime);
+      writeJson(response, 200, { ok: true, device, oscAssignmentReconciliation });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -92,7 +96,9 @@ export async function routeRequest(request, response, store, config, runtime = {
   const oscQueryDeviceMatch = url.pathname.match(/^\/oscquery\/devices\/([^/]+)$/);
   if (oscQueryDeviceMatch && request.method === "PATCH") {
     try {
-      writeJson(response, 200, { ok: true, device: await requireManualOscQueryDevices(runtime).update(decodeURIComponent(oscQueryDeviceMatch[1]), await readJson(request)) });
+      const device = await requireManualOscQueryDevices(runtime).update(decodeURIComponent(oscQueryDeviceMatch[1]), await readJson(request));
+      const oscAssignmentReconciliation = await reconcileOscAssignmentsFromRuntime(store, config, runtime);
+      writeJson(response, 200, { ok: true, device, oscAssignmentReconciliation });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -100,7 +106,9 @@ export async function routeRequest(request, response, store, config, runtime = {
   }
   if (oscQueryDeviceMatch && request.method === "DELETE") {
     try {
-      writeJson(response, 200, { ok: true, device: await requireManualOscQueryDevices(runtime).remove(decodeURIComponent(oscQueryDeviceMatch[1])) });
+      const device = await requireManualOscQueryDevices(runtime).remove(decodeURIComponent(oscQueryDeviceMatch[1]));
+      const oscAssignmentReconciliation = await reconcileOscAssignmentsFromRuntime(store, config, runtime);
+      writeJson(response, 200, { ok: true, device, oscAssignmentReconciliation });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -110,7 +118,9 @@ export async function routeRequest(request, response, store, config, runtime = {
   const oscQueryRefreshMatch = url.pathname.match(/^\/oscquery\/devices\/([^/]+)\/refresh$/);
   if (oscQueryRefreshMatch && request.method === "POST") {
     try {
-      writeJson(response, 200, { ok: true, device: await requireManualOscQueryDevices(runtime).refresh(decodeURIComponent(oscQueryRefreshMatch[1])) });
+      const device = await requireManualOscQueryDevices(runtime).refresh(decodeURIComponent(oscQueryRefreshMatch[1]));
+      const oscAssignmentReconciliation = await reconcileOscAssignmentsFromRuntime(store, config, runtime);
+      writeJson(response, 200, { ok: true, device, oscAssignmentReconciliation });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -125,6 +135,47 @@ export async function routeRequest(request, response, store, config, runtime = {
         status: url.searchParams.get("status")
       })
     });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/osc/assignments") {
+    const assignments = store.getScore().oscAssignments ?? {};
+    if (url.searchParams.get("resolved") === "1" || url.searchParams.get("resolved") === "true") {
+      const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+      writeJson(response, 200, { assignments, resolutions: resolveOscAssignments(assignments, targets), targets });
+    } else {
+      writeJson(response, 200, assignments);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/osc/assignments/reconcile") {
+    try {
+      const result = await reconcileOscAssignmentsFromRuntime(store, config, runtime);
+      writeJson(response, 200, { ok: true, ...result });
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/osc/recalls") {
+    writeJson(response, 200, oscSnapshotRecallService(runtime).snapshot());
+    return;
+  }
+
+  const oscAssignmentMatch = url.pathname.match(/^\/osc\/assignments\/([^/]+)$/);
+  if (oscAssignmentMatch && (request.method === "PUT" || request.method === "DELETE")) {
+    try {
+      const roleId = decodeURIComponent(oscAssignmentMatch[1]);
+      const body = request.method === "PUT" ? await readJson(request) : url.searchParams;
+      const score = request.method === "PUT"
+        ? store.replaceOscAssignment(roleId, body.assignment ?? body.document ?? withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body))
+        : store.removeOscAssignment(roleId, revisionOptions(body));
+      writeJson(response, 200, score);
+    } catch (error) {
+      writeError(response, error);
+    }
     return;
   }
 
@@ -360,6 +411,7 @@ export async function routeRequest(request, response, store, config, runtime = {
       const registry = requirePeerRegistry(runtime);
       const unit = registry.register(await readJson(request), { remoteAddress: request.socket?.remoteAddress ?? "" });
       const reconciliation = store.reconcileRegisteredHardwareUnit(unit);
+      const oscAssignmentReconciliation = await reconcileOscAssignmentsFromRuntime(store, config, runtime);
       writeJson(response, 200, {
         ok: true,
         unit,
@@ -368,7 +420,8 @@ export async function routeRequest(request, response, store, config, runtime = {
           changed: reconciliation.changed,
           reconciled: reconciliation.reconciled,
           ambiguous: reconciliation.ambiguous
-        }
+        },
+        oscAssignmentReconciliation
       });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
@@ -498,6 +551,7 @@ export async function routeRequest(request, response, store, config, runtime = {
         context: Boolean(body.context),
         voices: Boolean(body.voices),
         assignments: Boolean(body.assignments),
+        oscAssignments: Boolean(body.oscAssignments),
         structure: Boolean(body.structure),
         notes: Boolean(body.notes)
       }));
@@ -796,6 +850,54 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  const mesoSnapshotsMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/osc-snapshots$/);
+  if (request.method === "GET" && mesoSnapshotsMatch) {
+    const blockId = decodeURIComponent(mesoSnapshotsMatch[1]);
+    const block = store.getScore().mesostructure?.[blockId];
+    if (!block) {
+      writeJson(response, 404, { ok: false, error: `unknown mesostructural block '${blockId}'` });
+    } else {
+      writeJson(response, 200, block.oscSnapshots ?? {});
+    }
+    return;
+  }
+
+  const mesoSnapshotRecallMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/osc-snapshots\/recall$/);
+  if (mesoSnapshotRecallMatch && (request.method === "POST" || request.method === "GET")) {
+    const blockId = decodeURIComponent(mesoSnapshotRecallMatch[1]);
+    try {
+      const service = oscSnapshotRecallService(runtime);
+      if (request.method === "GET") {
+        writeJson(response, 200, service.snapshot({ blockId }));
+      } else {
+        const body = await readJson(request);
+        writeJson(response, 200, await recallOscSnapshotsForBlock(store, config, runtime, blockId, {
+          roles: body.roles,
+          dryRun: Boolean(body.dryRun)
+        }));
+      }
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
+  const mesoSnapshotRoleMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/osc-snapshots\/([^/]+)$/);
+  if (mesoSnapshotRoleMatch && (request.method === "PUT" || request.method === "DELETE")) {
+    try {
+      const blockId = decodeURIComponent(mesoSnapshotRoleMatch[1]);
+      const roleId = decodeURIComponent(mesoSnapshotRoleMatch[2]);
+      const body = request.method === "PUT" ? await readJson(request) : url.searchParams;
+      const score = request.method === "PUT"
+        ? store.replaceOscSnapshot(blockId, roleId, body.snapshot ?? body.document ?? withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body))
+        : store.removeOscSnapshot(blockId, roleId, revisionOptions(body));
+      writeJson(response, 200, score);
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
   const mesoBlockDuplicateMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/duplicate$/);
   if (request.method === "POST" && mesoBlockDuplicateMatch) {
     try {
@@ -927,7 +1029,7 @@ function writeEvent(response, eventName, payload) {
 
 function setCors(response) {
   response.setHeader("Access-Control-Allow-Headers", "Content-Type");
-  response.setHeader("Access-Control-Allow-Methods", "DELETE,GET,PATCH,POST,OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "DELETE,GET,PATCH,POST,PUT,OPTIONS");
   response.setHeader("Access-Control-Allow-Origin", "*");
 }
 
@@ -986,6 +1088,28 @@ async function readAllRnboDevices(config, runtime) {
 async function readAllOscTargets(config, runtime) {
   const sessionRuntime = await readSessionRuntime(config, runtime);
   return [...sessionRuntime.rnboTargets, ...sessionRuntime.oscTargets];
+}
+
+async function reconcileOscAssignmentsFromRuntime(store, config, runtime) {
+  return store.reconcileOscAssignments(buildOscTargets(await readAllOscTargets(config, runtime)));
+}
+
+function oscSnapshotRecallService(runtime) {
+  if (!runtime.oscSnapshotRecall) {
+    runtime.oscSnapshotRecall = createOscSnapshotRecallService({ sender: runtime.oscSender });
+  }
+  return runtime.oscSnapshotRecall;
+}
+
+export async function recallOscSnapshotsForBlock(store, config, runtime, blockId, options = {}) {
+  return oscSnapshotRecallService(runtime).recall({
+    score: store.getScore(),
+    blockId,
+    targets: buildOscTargets(await readAllOscTargets(config, runtime)),
+    roles: options.roles,
+    dryRun: Boolean(options.dryRun),
+    sender: runtime.oscSender
+  });
 }
 
 async function sendOscToTargets(rnboTargets, runtime, body) {
@@ -1249,7 +1373,10 @@ function transportSnapshot(config, runtime) {
 async function macroPlaybackSnapshot(runtime, store, config) {
   if (runtime.macroPlayback?.snapshot) {
     const context = await readBeatWitnessContext(store.getScore(), config, runtime);
-    return runtime.macroPlayback.snapshot(context);
+    return {
+      ...runtime.macroPlayback.snapshot(context),
+      oscSnapshotRecall: automaticOscSnapshotRecallStatus(runtime)
+    };
   }
   const score = store.getScore();
   return {
@@ -1284,7 +1411,17 @@ async function macroPlaybackSnapshot(runtime, store, config) {
     phaseAlignment: {
       pending: false,
       last: null
-    }
+    },
+    oscSnapshotRecall: automaticOscSnapshotRecallStatus(runtime)
+  };
+}
+
+function automaticOscSnapshotRecallStatus(runtime) {
+  return runtime.oscSnapshotAutoRecall?.snapshot?.() ?? {
+    pending: false,
+    pendingCount: 0,
+    lastEntryKey: "",
+    last: null
   };
 }
 

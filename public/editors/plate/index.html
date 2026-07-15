@@ -306,7 +306,8 @@
       <div id="controls" class="reverb-param-grid"></div>
     </section>
   </main>
-  <script>
+  <script type="module">
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
     const PLATE_GROUPS = [
       { title: "Time", key: "time", match: ["decay", "time", "size", "predelay", "pre-delay", "delay"] },
       { title: "Tone", key: "tone", match: ["damp", "damping", "diffusion", "diffuse", "brightness", "color", "tone", "low", "high", "cut", "filter"] },
@@ -335,13 +336,24 @@
     let targets = [];
     let paramState = new Map();
     const pendingSends = new Map();
+    let snapshotClient;
 
     refreshButton.addEventListener("click", () => {
       refresh().catch(reportError);
     });
     getDataButton.addEventListener("click", () => getData().catch(reportError));
 
-    refresh().catch(reportError);
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: document.querySelector(".reverb-param-panel") });
+    snapshotClient = createOscSnapshotEditorClient({
+      app: "plate",
+      roleLabel: "Plate",
+      elements: snapshotElements,
+      serializeDraft: serializeSnapshotDraft,
+      applySnapshot: applySavedSnapshot,
+      setStatus
+    });
+
+    Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
     async function refresh() {
       refreshButton.disabled = true;
@@ -357,6 +369,7 @@
         renderReadSources();
         renderControls();
         setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online Plate targets");
+        snapshotClient?.draftChanged();
       } finally {
         refreshButton.disabled = false;
       }
@@ -420,6 +433,7 @@
           populated += 1;
         }
         renderControls();
+        snapshotClient?.draftChanged();
         setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
       } finally {
         getDataButton.disabled = targets.length === 0;
@@ -515,6 +529,7 @@
       input.dataset.curved = String(curved);
       input.dataset.param = param.name;
       input.addEventListener("input", () => scheduleParamSend(param.name, sliderValue(param, input, min, max)));
+      input.addEventListener("input", () => { paramState.get(param.name).value = sliderValue(param, input, min, max); snapshotClient?.draftChanged(); });
       input.addEventListener("change", () => flushParamSend(param.name, sliderValue(param, input, min, max)));
       return input;
     }
@@ -534,10 +549,12 @@
         button.dataset.active = String(String(value) === String(valueFor(param)));
         button.addEventListener("click", () => {
           wrap.dataset.value = String(value);
+          paramState.get(param.name).value = parseChoiceValue(value);
           for (const option of wrap.querySelectorAll(".choice-option")) {
             option.dataset.active = String(option.dataset.value === String(value));
           }
           wrap.dispatchEvent(new CustomEvent("plate-choice"));
+          snapshotClient?.draftChanged();
           sendParam(param.name, parseChoiceValue(value));
         });
         wrap.append(button);
@@ -599,6 +616,21 @@
 
     function valueFor(param) {
       return paramState.get(param.name)?.value ?? param.value ?? param.min ?? 0;
+    }
+
+    function serializeSnapshotDraft() {
+      return createOscEditorSnapshot({
+        app: "plate",
+        paramEntries: Array.from(paramState, ([name, param]) => ({ name, value: param.value, values: param.values }))
+      });
+    }
+
+    function applySavedSnapshot(snapshot) {
+      for (const [name, value] of Object.entries(snapshot.params ?? {})) {
+        if (paramState.has(name)) paramState.get(name).value = oscEditorParamValue(paramState.get(name), value);
+      }
+      renderControls();
+      snapshotClient?.draftChanged();
     }
 
     function controlValue(control) {

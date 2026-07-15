@@ -46,7 +46,8 @@
     <section id="targets" class="targets" aria-label="SoftPiano targets"></section>
     <div id="panels"></div>
   </main>
-  <script>
+  <script type="module">
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
     const SOFTPIANO_GROUPS = [
       { title: "Output", controls: ["Volume"] },
       { title: "MIDI", controls: ["TransposeSoftPiano"] },
@@ -63,10 +64,13 @@
     let targets = [];
     let params = new Map();
     const pending = new Map();
+    let snapshotClient;
 
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     getDataButton.addEventListener("click", () => getData().catch(reportError));
-    refresh().catch(reportError);
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: panelsEl });
+    snapshotClient = createOscSnapshotEditorClient({ app: "softpiano", roleLabel: "SoftPiano", elements: snapshotElements, serializeDraft: serializeSnapshotDraft, applySnapshot: applySavedSnapshot, setStatus });
+    Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
     async function refresh() {
       refreshButton.disabled = true;
@@ -80,6 +84,7 @@
         renderReadSources();
         renderPanels();
         setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online SoftPiano targets");
+        snapshotClient?.draftChanged();
       } finally { refreshButton.disabled = false; }
     }
 
@@ -117,7 +122,7 @@
         if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`);
         const nodes = (await response.json()).CONTENTS || {}; let populated = 0;
         for (const param of target.parameters || []) { const node = nodes[param.name]; if (!node || node.VALUE === undefined || !params.has(param.name)) continue; params.get(param.name).value = scalarValue(node.VALUE); populated += 1; }
-        renderPanels(); setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
+        renderPanels(); snapshotClient?.draftChanged(); setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
       } finally { getDataButton.disabled = targets.length === 0; }
     }
 
@@ -150,7 +155,7 @@
       const output = document.createElement("output"); output.textContent = format(value, param.unit);
       const curved = shouldCurve(param, min, max);
       const input = document.createElement("input"); input.id = label.htmlFor; input.type = "range"; input.min = curved ? 0 : min; input.max = curved ? 1 : max; input.step = curved ? .001 : stepFor(param, min, max); input.value = curved ? valueToSliderPosition(param, value, min, max) : value;
-      input.addEventListener("input", () => { const next = sliderValue(param, input, min, max, curved); output.textContent = format(next, param.unit); scheduleSend(param.name, next); });
+      input.addEventListener("input", () => { const next = sliderValue(param, input, min, max, curved); param.value = next; output.textContent = format(next, param.unit); snapshotClient?.draftChanged(); scheduleSend(param.name, next); });
       input.addEventListener("change", () => flushSend(param.name, sliderValue(param, input, min, max, curved)));
       head.replaceChildren(label, output); wrap.replaceChildren(head, input); return wrap;
     }
@@ -162,7 +167,7 @@
       const output = document.createElement("output"); output.textContent = String(param.value ?? param.values[0]);
       const select = document.createElement("select"); select.id = label.htmlFor;
       for (const value of param.values) { const option = document.createElement("option"); option.value = String(value); option.textContent = splitCamel(value); option.selected = String(value) === String(param.value); select.append(option); }
-      select.addEventListener("change", () => { output.textContent = select.value; sendParam(param.name, select.value).catch(reportError); });
+      select.addEventListener("change", () => { param.value = select.value; output.textContent = select.value; snapshotClient?.draftChanged(); sendParam(param.name, select.value).catch(reportError); });
       head.replaceChildren(label, output); wrap.replaceChildren(head, select); return wrap;
     }
 
@@ -176,6 +181,9 @@
       const body = await response.json().catch(() => ({})); const sent = (body.results || []).filter((result) => result.ok).length;
       setStatus(response.ok && body.ok !== false ? `Sent ${LABELS[param] || splitCamel(param)} to ${sent}/${selected.length}` : `Failed ${LABELS[param] || splitCamel(param)} (${sent}/${selected.length})`);
     }
+
+    function serializeSnapshotDraft() { return createOscEditorSnapshot({ app: "softpiano", paramEntries: Array.from(params, ([name, param]) => ({ name, value: param.value, values: param.values })) }); }
+    function applySavedSnapshot(snapshot) { for (const [name, value] of Object.entries(snapshot.params ?? {})) if (params.has(name)) params.get(name).value = oscEditorParamValue(params.get(name), value); renderPanels(); snapshotClient?.draftChanged(); }
 
     function byIndex(a, b) { return (a.index ?? 9999) - (b.index ?? 9999); }
     function stepFor(param, min, max) { const step = finite(param.meta?.edit_step, NaN); if (step > 0) return step; const range = Math.abs(max - min); return range > 64 ? 1 : range > 8 ? .1 : .01; }

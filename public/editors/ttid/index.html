@@ -345,7 +345,9 @@
     <section id="targets" class="targets" aria-label="OSC targets"></section>
     <section id="editors" class="editor-grid" aria-live="polite"></section>
   </main>
-  <script>
+  <script type="module">
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel } from "/shared/osc-snapshot-editor.js?v=20260715";
+
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
     const SCALES = Object.freeze({
@@ -387,13 +389,27 @@
     let ttidParams = [];
     let paramState = new Map();
     let scaleState = new Map();
+    let snapshotClient;
+
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), {
+      before: document.querySelector(".toolbar")
+    });
 
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     selectAllButton.addEventListener("click", selectAllTargets);
     paramSelect.addEventListener("change", renderEditors);
     getStateButton.addEventListener("click", () => getState().catch(reportError));
 
-    refresh().catch(reportError);
+    snapshotClient = createOscSnapshotEditorClient({
+      app: "ttid",
+      roleLabel: "TTID",
+      elements: snapshotElements,
+      serializeDraft: serializeSnapshotDraft,
+      applySnapshot: applySavedSnapshot,
+      setStatus
+    });
+
+    Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
     async function refresh() {
       refreshButton.disabled = true;
@@ -410,6 +426,7 @@
       renderParamSelect();
       renderEditors();
       setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online TTID targets");
+      snapshotClient?.draftChanged();
       refreshButton.disabled = false;
     }
 
@@ -429,7 +446,7 @@
       const next = new Map();
       for (const param of nextParams) {
         const old = paramState.get(param.name);
-        next.set(param.name, normalizeMask(old?.value ?? param.value ?? 0));
+        next.set(param.name, normalizeMask(old ?? param.value ?? 0));
       }
       return next;
     }
@@ -575,6 +592,8 @@
         input.addEventListener("change", async () => {
           const value = Number(input.value);
           if (!Number.isFinite(value)) return;
+          setDraftParamValue(param.name, value);
+          snapshotClient?.draftChanged();
           await sendParamToTargets(param, value, param.targetIds);
         });
         wrap.replaceChildren(label, input);
@@ -681,6 +700,7 @@
         ttidParams = collectTtidParams([target, ...targets.filter((entry) => entry.id !== target.id)]);
         renderParamSelect();
         renderEditors();
+        snapshotClient?.draftChanged();
         setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
       } finally {
         getStateButton.disabled = targets.length === 0;
@@ -703,7 +723,36 @@
       const value = normalizeMask(mask);
       paramState.set(param.name, value);
       renderEditors();
+      snapshotClient?.draftChanged();
       await sendParam(param.name, value);
+    }
+
+    function serializeSnapshotDraft() {
+      const preferredTarget = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
+      const paramEntries = ttidParams.map((param) => ({ name: param.name, value: valueFor(param) }));
+      for (const name of ["ChromaticTranspose", "ScalarTranspose"]) {
+        const param = preferredTarget?.parameters?.find((entry) => entry.name === name)
+          || targets.flatMap((target) => target.parameters || []).find((entry) => entry.name === name);
+        if (param) paramEntries.push({ name, value: param.value ?? 0 });
+      }
+      return createOscEditorSnapshot({ app: "ttid", paramEntries });
+    }
+
+    function applySavedSnapshot(snapshot) {
+      for (const [name, value] of Object.entries(snapshot.params ?? {})) {
+        setDraftParamValue(name, value);
+        if (ttidParams.some((param) => param.name === name)) paramState.set(name, normalizeMask(value));
+      }
+      ttidParams = collectTtidParams(targets);
+      renderParamSelect();
+      renderEditors();
+      snapshotClient?.draftChanged();
+    }
+
+    function setDraftParamValue(name, value) {
+      for (const target of targets) {
+        target.parameters = (target.parameters || []).map((param) => param.name === name ? { ...param, value } : param);
+      }
     }
 
     async function sendParam(param, value) {

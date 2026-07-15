@@ -1,0 +1,99 @@
+{
+  "cases": [
+    {
+      "id": "parameter-only-plate",
+      "category": "parameter-only",
+      "blockId": "A",
+      "roleId": "plate-a",
+      "assignment": { "deviceId": "heron", "status": "online", "ignoreRecall": false },
+      "snapshot": {
+        "schemaVersion": 1,
+        "app": "plate",
+        "params": { "Decay": 0.72, "Damping": 0.31 },
+        "inputPorts": {}
+      }
+    },
+    {
+      "id": "list-based-listsequencer",
+      "category": "list-based",
+      "blockId": "B",
+      "roleId": "list-sequencer-a",
+      "assignment": { "deviceId": "finch", "status": "online", "ignoreRecall": false },
+      "snapshot": {
+        "schemaVersion": 1,
+        "app": "listsequencer",
+        "params": { "ClockRate": 2, "Clock": 1 },
+        "inputPorts": {
+          "Steps": [1, 0, 1, 0, 1, 0, 0, 1],
+          "Velocity": [96, 0, 84, 0, 108, 0, 0, 72],
+          "Duration": [120, 120, 120, 120, 120, 120, 120, 120]
+        }
+      }
+    },
+    {
+      "id": "clock-off-analogsequencer",
+      "category": "clock-off",
+      "blockId": "C",
+      "roleId": "analog-sequencer-a",
+      "assignment": { "deviceId": "raven", "status": "online", "ignoreRecall": false },
+      "snapshot": {
+        "schemaVersion": 1,
+        "app": "analogsequencer",
+        "params": { "ClockRate": 4, "GateTime": 0.45, "Clock": 0 },
+        "inputPorts": {}
+      }
+    },
+    {
+      "id": "offline-softpiano",
+      "category": "offline",
+      "blockId": "D",
+      "roleId": "soft-piano-a",
+      "assignment": { "deviceId": "wren", "status": "offline", "ignoreRecall": false },
+      "snapshot": {
+        "schemaVersion": 1,
+        "app": "softpiano",
+        "params": { "Gain": 0.6, "Brightness": 0.4 },
+        "inputPorts": {}
+      }
+    },
+    {
+      "id": "unassigned-poland",
+      "category": "unassigned",
+      "blockId": "E",
+      "roleId": "poland-a",
+      "assignment": null,
+      "snapshot": {
+        "schemaVersion": 1,
+        "app": "poland",
+        "params": { "Density": 0.38, "Spread": 0.65 },
+        "inputPorts": {}
+      }
+    },
+    {
+      "id": "ignored-ttid",
+      "category": "ignored",
+      "blockId": "F",
+      "roleId": "ttid-a",
+      "assignment": { "deviceId": "heron", "status": "online", "ignoreRecall": true },
+      "snapshot": {
+        "schemaVersion": 1,
+        "app": "ttid",
+        "params": { "Scale": 2741, "ClockRate": 8, "Clock": 1 },
+        "inputPorts": {}
+      }
+    },
+    {
+      "id": "unknown-control-listvelsequencer",
+      "category": "unknown-control",
+      "blockId": "G",
+      "roleId": "list-velocity-a",
+      "assignment": { "deviceId": "finch", "status": "online", "ignoreRecall": false },
+      "snapshot": {
+        "schemaVersion": 1,
+        "app": "listvelsequencer",
+        "params": { "FutureAccentMode": 1, "Clock": 1 },
+        "inputPorts": { "1row": [60, 100, 120, 64, 92, 120] }
+      }
+    }
+  ]
+}

@@ -91,7 +91,9 @@
     </section>
     <section id="rows" class="rows" aria-live="polite"></section>
   </main>
-  <script>
+  <script type="module">
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260715";
+
     const ROW_COUNT = 8;
     const GET_REQUEST = [-999];
     const targetsEl = document.querySelector("#targets");
@@ -105,7 +107,14 @@
     let targets = [];
     let rows = [];
     let globalParams = [];
+    let draftParams = new Map();
+    const rowValueState = new Map();
     const mapSendTimers = new Map();
+    let snapshotClient;
+
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), {
+      before: document.querySelector(".toolbar")
+    });
 
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     selectAllButton.addEventListener("click", selectAllTargets);
@@ -114,13 +123,22 @@
       renderGlobalParams();
       renderRows();
     });
-    refresh().catch(reportError);
+    snapshotClient = createOscSnapshotEditorClient({
+      app: "listvelsequencer",
+      roleLabel: "ListVelSequencer",
+      elements: snapshotElements,
+      serializeDraft: serializeSnapshotDraft,
+      applySnapshot: applySavedSnapshot,
+      setStatus
+    });
+    Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
     async function refresh() {
       refreshButton.disabled = true;
       try {
         const body = await fetchJson("/osc/targets?app=listvelsequencer&status=online");
         targets = body.targets || [];
+        draftParams = mergeDraftParams(targets);
         rows = buildRows(targets);
         globalParams = collectGlobalParams(targets);
         renderTargets();
@@ -128,6 +146,7 @@
         renderGlobalParams();
         renderRows();
         setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListVelSequencer targets");
+        snapshotClient?.draftChanged();
       } finally {
         refreshButton.disabled = false;
       }
@@ -172,6 +191,16 @@
         const bParam = Array.from(b.paramsByTarget.values())[0];
         return (aParam?.index ?? 9999) - (bParam?.index ?? 9999) || a.name.localeCompare(b.name);
       });
+    }
+
+    function mergeDraftParams(nextTargets) {
+      const next = new Map();
+      for (const target of nextTargets) {
+        for (const param of target.parameters || []) {
+          if (!next.has(param.name)) next.set(param.name, draftParams.has(param.name) ? draftParams.get(param.name) : param.value);
+        }
+      }
+      return next;
     }
 
     function renderTargets() {
@@ -222,6 +251,7 @@
     function renderGlobalParam(entry) {
       const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
       const param = entry.paramsByTarget.get(source?.id) || Array.from(entry.paramsByTarget.values())[0];
+      const draftValue = draftParams.has(entry.name) ? draftParams.get(entry.name) : param.value;
       const card = document.createElement("article");
       card.className = "param-card";
       card.innerHTML = `
@@ -242,17 +272,26 @@
           option.textContent = String(value);
           select.append(option);
         }
-        select.value = String(param.value ?? param.values[0]);
-        select.addEventListener("change", () => sendGlobalParam(entry, select.value).catch(reportError));
+        select.value = String(draftValue ?? param.values[0]);
+        select.addEventListener("change", () => {
+          setDraftParamValue(entry.name, select.value);
+          snapshotClient?.draftChanged();
+          sendGlobalParam(entry, select.value).catch(reportError);
+        });
         control.append(select);
       } else if (isToggleParam(param)) {
         const label = document.createElement("label");
         label.className = "meta";
         const toggle = document.createElement("input");
         toggle.type = "checkbox";
-        toggle.checked = Boolean(Number(param.value));
+        toggle.checked = Boolean(Number(draftValue));
         toggle.setAttribute("aria-label", param.displayName || param.name);
-        toggle.addEventListener("change", () => sendGlobalParam(entry, toggle.checked ? 1 : 0).catch(reportError));
+        toggle.addEventListener("change", () => {
+          const value = toggle.checked ? 1 : 0;
+          setDraftParamValue(entry.name, value);
+          snapshotClient?.draftChanged();
+          sendGlobalParam(entry, value).catch(reportError);
+        });
         label.append(toggle, document.createTextNode(" Enabled"));
         control.append(label);
       } else {
@@ -260,7 +299,7 @@
         const send = document.createElement("button");
         const numeric = param.type !== "s" && (Number.isFinite(Number(param.min)) || Number.isFinite(Number(param.max)) || typeof param.value === "number");
         input.type = numeric ? "number" : "text";
-        input.value = String(param.value ?? "");
+        input.value = String(draftValue ?? "");
         input.setAttribute("aria-label", param.displayName || param.name);
         if (numeric) {
           if (Number.isFinite(Number(param.min))) input.min = String(param.min);
@@ -270,6 +309,10 @@
         send.type = "button";
         send.textContent = "Send";
         const commit = () => sendGlobalParam(entry, numeric ? Number(input.value) : input.value).catch(reportError);
+        input.addEventListener("input", () => {
+          setDraftParamValue(entry.name, numeric ? Number(input.value) : input.value);
+          snapshotClient?.draftChanged();
+        });
         send.addEventListener("click", commit);
         input.addEventListener("keydown", (event) => {
           if (event.key !== "Enter") return;
@@ -283,6 +326,8 @@
     }
 
     async function sendGlobalParam(entry, value) {
+      setDraftParamValue(entry.name, value);
+      snapshotClient?.draftChanged();
       const selected = selectedTargetIds().filter((id) => entry.paramsByTarget.has(id));
       if (!selected.length) throw new Error(`No checked target exposes ${entry.name}`);
       const results = await Promise.allSettled(selected.map((targetId) => {
@@ -299,6 +344,7 @@
       card.className = "row-card";
       const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
       const mapParam = row.mapsByTarget.get(source?.id) || Array.from(row.mapsByTarget.values())[0];
+      const mapValue = mapParam && draftParams.has(mapParam.name) ? draftParams.get(mapParam.name) : mapParam?.value;
       card.innerHTML = `
         <div class="row-head">
           <div>
@@ -310,11 +356,11 @@
         <div class="row-grid">
           <div class="field">
             <label for="row-${row.number}-map">Pitch map · auto</label>
-            <input id="row-${row.number}-map" class="map-input" type="number" min="${reported(mapParam?.min, 0)}" max="${reported(mapParam?.max, 127)}" step="1" value="${reported(mapParam?.value, 0)}" data-row-map="${row.number}">
+            <input id="row-${row.number}-map" class="map-input" type="number" min="${reported(mapParam?.min, 0)}" max="${reported(mapParam?.max, 127)}" step="1" value="${reported(mapValue, 0)}" data-row-map="${row.number}">
           </div>
           <div class="field">
             <label for="row-${row.number}-values">Velocity sequence</label>
-            <input id="row-${row.number}-values" class="velocity-list" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="127 96 0 72" data-row-values="${row.number}">
+            <input id="row-${row.number}-values" class="velocity-list" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="127 96 0 72" value="${escapeHtml(rowValueState.get(row.number) || "")}" data-row-values="${row.number}">
           </div>
           <button type="button" data-get-row="${row.number}">Get Row</button>
           <button class="primary" type="button" data-send-row="${row.number}">Send Row</button>
@@ -323,14 +369,24 @@
       card.querySelector("[data-get-row]").addEventListener("click", () => getRow(row).catch(reportError));
       card.querySelector("[data-send-row]").addEventListener("click", () => sendRow(row).catch(reportError));
       const mapInput = card.querySelector("[data-row-map]");
-      mapInput.addEventListener("input", () => schedulePitchMap(row, mapInput.value));
+      mapInput.addEventListener("input", () => {
+        const name = mapParam?.name;
+        if (name) setDraftParamValue(name, Number(mapInput.value));
+        snapshotClient?.draftChanged();
+        schedulePitchMap(row, mapInput.value);
+      });
       mapInput.addEventListener("change", () => flushPitchMap(row, mapInput.value).catch(reportError));
       mapInput.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
         flushPitchMap(row, mapInput.value).catch(reportError);
       });
-      card.querySelector("[data-row-values]").addEventListener("keydown", (event) => {
+      const rowInput = card.querySelector("[data-row-values]");
+      rowInput.addEventListener("input", () => {
+        rowValueState.set(row.number, rowInput.value);
+        snapshotClient?.draftChanged();
+      });
+      rowInput.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
         sendRow(row).catch(reportError);
@@ -350,8 +406,15 @@
         readTargetValue(target, `${target.baseAddress}/messages/out/${row.number}rowAck`),
         mapParam ? readTargetValue(target, mapParam.address) : Promise.resolve(undefined)
       ]);
-      rowsEl.querySelector(`[data-row-values="${row.number}"]`).value = formatList(ack);
-      if (mapValue !== undefined) rowsEl.querySelector(`[data-row-map="${row.number}"]`).value = String(scalarValue(mapValue));
+      const formatted = formatList(ack);
+      rowValueState.set(row.number, formatted);
+      rowsEl.querySelector(`[data-row-values="${row.number}"]`).value = formatted;
+      if (mapValue !== undefined) {
+        const value = scalarValue(mapValue);
+        rowsEl.querySelector(`[data-row-map="${row.number}"]`).value = String(value);
+        if (mapParam) setDraftParamValue(mapParam.name, value);
+      }
+      snapshotClient?.draftChanged();
       setStatus(`Loaded row ${row.number} from ${target.label || target.id}`);
     }
 
@@ -369,7 +432,9 @@
           const node = nodes[param.name];
           if (!node || node.VALUE === undefined) return param;
           populatedParams += 1;
-          return { ...param, value: scalarValue(node.VALUE) };
+          const value = scalarValue(node.VALUE);
+          draftParams.set(param.name, value);
+          return { ...param, value };
         });
         rows = buildRows(targets);
         globalParams = collectGlobalParams(targets);
@@ -387,9 +452,12 @@
         let populatedRows = 0;
         for (let index = 0; index < availableRows.length; index += 1) {
           if (requests[index].status !== "fulfilled" || reads[index].status !== "fulfilled") continue;
-          rowsEl.querySelector(`[data-row-values="${availableRows[index].number}"]`).value = formatList(reads[index].value);
+          const formatted = formatList(reads[index].value);
+          rowValueState.set(availableRows[index].number, formatted);
+          rowsEl.querySelector(`[data-row-values="${availableRows[index].number}"]`).value = formatted;
           populatedRows += 1;
         }
+        snapshotClient?.draftChanged();
         setStatus(`Got ${populatedParams} parameter${populatedParams === 1 ? "" : "s"} and ${populatedRows}/${availableRows.length} OSC row${availableRows.length === 1 ? "" : "s"} from ${target.label || target.id}`);
       } finally {
         getDataButton.disabled = targets.length === 0;
@@ -412,6 +480,9 @@
 
     async function sendPitchMap(row, rawValue) {
       const pitch = parsePitchMap(rawValue);
+      const sourceParam = Array.from(row.mapsByTarget.values())[0];
+      if (sourceParam) setDraftParamValue(sourceParam.name, pitch);
+      snapshotClient?.draftChanged();
       const selected = selectedTargetIds().filter((id) => row.mapsByTarget.has(id));
       if (!selected.length) throw new Error(`No checked target exposes ${row.number}map`);
       const results = await Promise.allSettled(selected.map((targetId) => {
@@ -437,6 +508,42 @@
       clearTimeout(mapSendTimers.get(row.number));
       mapSendTimers.delete(row.number);
       return sendPitchMap(row, rawValue);
+    }
+
+    function serializeSnapshotDraft() {
+      const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
+      const byParamName = new Map((source?.parameters || []).map((param) => [param.name, param]));
+      const paramEntries = Array.from(draftParams, ([name, value]) => ({ name, value, values: byParamName.get(name)?.values }));
+      const inputPortEntries = [];
+      for (const row of rows) {
+        const port = row.portsByTarget.get(readSourceSelect.value) || Array.from(row.portsByTarget.values())[0];
+        const value = rowValueState.get(row.number) ?? rowsEl.querySelector(`[data-row-values="${row.number}"]`)?.value ?? "";
+        if (port && String(value).trim()) inputPortEntries.push({ name: port.name, value, meta: port.meta });
+      }
+      return createOscEditorSnapshot({ app: "listvelsequencer", paramEntries, inputPortEntries });
+    }
+
+    function applySavedSnapshot(snapshot) {
+      for (const [name, value] of Object.entries(snapshot.params ?? {})) {
+        const param = targets.flatMap((target) => target.parameters || []).find((entry) => entry.name === name);
+        setDraftParamValue(name, oscEditorParamValue(param, value));
+      }
+      for (const [name, values] of Object.entries(snapshot.inputPorts ?? {})) {
+        const number = rowNumber(name);
+        if (number) rowValueState.set(number, formatList(values));
+      }
+      rows = buildRows(targets);
+      globalParams = collectGlobalParams(targets);
+      renderGlobalParams();
+      renderRows();
+      snapshotClient?.draftChanged();
+    }
+
+    function setDraftParamValue(name, value) {
+      draftParams.set(name, value);
+      for (const target of targets) {
+        target.parameters = (target.parameters || []).map((param) => param.name === name ? { ...param, value } : param);
+      }
     }
 
     function parseVelocityList(text) {

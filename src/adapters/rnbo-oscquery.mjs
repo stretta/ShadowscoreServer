@@ -285,12 +285,13 @@ function normalizeRnboInputPort(instanceId, name, node) {
     return undefined;
   }
   const meta = parseMetadata(node?.CONTENTS);
+  const semanticName = /^4ow$/i.test(name) ? "4row" : name;
   return withoutUndefined({
-    name,
+    name: semanticName,
     address,
     type: stringField(node?.TYPE) || undefined,
     value: node?.VALUE,
-    displayName: stringField(meta?.display_name ?? node?.CONTENTS?.display_name?.VALUE) || name,
+    displayName: stringField(meta?.display_name ?? node?.CONTENTS?.display_name?.VALUE) || semanticName,
     index: optionalFiniteNumber(node?.CONTENTS?.index?.VALUE),
     meta
   });

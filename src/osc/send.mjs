@@ -10,17 +10,23 @@ export async function sendOscMessage(target, address, args = [], options = {}) {
   if (!host || !Number.isFinite(port)) {
     throw new Error(`OSC target '${target?.id ?? ""}' is missing host or port`);
   }
-  const packet = encodeOscMessage(address, normalizeArgs(args));
+  const normalizedArgs = normalizeArgs(args);
+  const packet = encodeOscMessage(address, normalizedArgs);
   const sender = options.sender ?? udpSender;
-  await sender({ host, port, packet, address, args: normalizeArgs(args), targetId: target.id });
+  await sender({ host, port, packet, address, args: normalizedArgs, targetId: target.id });
   return {
     ok: true,
     targetId: target.id,
     host,
     port,
     address,
-    args: normalizeArgs(args)
+    args: normalizedArgs,
+    packetBytes: packet.byteLength
   };
+}
+
+export function oscPacketByteLength(address, args = []) {
+  return encodeOscMessage(address, normalizeArgs(args)).byteLength;
 }
 
 export function normalizeArgs(args) {

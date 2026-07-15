@@ -214,6 +214,8 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /id="osc-role-status" role="status" aria-live="polite"/);
   assert.match(response.body, /suggestOscRoleFromTarget/);
   assert.match(response.body, /selectOscRoleDevice/);
+  assert.match(response.body, /selectedOscRoleTargetId \|\| currentAssignment\.oscTargetId/);
+  assert.match(response.body, /selectedOscRoleDeviceId \|\| currentAssignment\.deviceId/);
   assert.match(response.body, /Live OSC instance/);
   assert.match(response.body, /Create role/);
   assert.match(response.body, /Add to current score/);

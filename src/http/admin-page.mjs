@@ -366,6 +366,8 @@ export function adminPage() {
     let oscRoleResolutions = {};
     let oscResourceReport = { roles: [], resources: [] };
     let editingOscRoleId = "";
+    let selectedOscRoleDeviceId = "";
+    let selectedOscRoleTargetId = "";
     let suggestedOscRoleFields = {};
     let currentScore = null;
     let rnboSendQueue = {
@@ -604,7 +606,7 @@ export function adminPage() {
         oscRoleTargetEl.append(option);
       }
       const currentAssignment = oscRoleAssignments[editingOscRoleId] ?? {};
-      const current = currentAssignment.oscTargetId || selected;
+      const current = selectedOscRoleTargetId || currentAssignment.oscTargetId || selected;
       if (current && !oscControlTargets.some((target) => target.id === current)) {
         const offline = new Option("Assigned target offline · " + current, current);
         offline.dataset.target = JSON.stringify({
@@ -621,7 +623,7 @@ export function adminPage() {
     function renderOscRoleDeviceOptions() {
       const selected = oscRoleDeviceEl.value;
       const currentAssignment = oscRoleAssignments[editingOscRoleId] ?? {};
-      const current = currentAssignment.deviceId || selected;
+      const current = selectedOscRoleDeviceId || currentAssignment.deviceId || selected;
       const devices = [...new Set(oscControlTargets.map(targetDeviceId).filter(Boolean))].sort();
       oscRoleDeviceEl.textContent = "";
       oscRoleDeviceEl.append(new Option("Select a device", ""));
@@ -1191,6 +1193,7 @@ export function adminPage() {
     }
 
     function suggestOscRoleFromTarget() {
+      selectedOscRoleTargetId = oscRoleTargetEl.value;
       if (editingOscRoleId) return;
       const option = oscRoleTargetEl.selectedOptions[0];
       if (!option?.dataset.target) return;
@@ -1215,6 +1218,8 @@ export function adminPage() {
     }
 
     function selectOscRoleDevice() {
+      selectedOscRoleDeviceId = oscRoleDeviceEl.value;
+      selectedOscRoleTargetId = "";
       if (!editingOscRoleId) clearOscRoleSuggestions();
       oscRoleTargetEl.value = "";
       renderOscRoleTargetOptions();
@@ -1247,6 +1252,8 @@ export function adminPage() {
     function configureOscRole(roleId) {
       const assignment = oscRoleAssignments[roleId] ?? {};
       editingOscRoleId = roleId;
+      selectedOscRoleDeviceId = assignment.deviceId ?? "";
+      selectedOscRoleTargetId = assignment.oscTargetId ?? "";
       oscRoleIdEl.value = roleId;
       oscRoleIdEl.disabled = true;
       oscRoleLabelEl.value = assignment.label ?? "";
@@ -1264,6 +1271,8 @@ export function adminPage() {
 
     function resetOscRoleForm() {
       editingOscRoleId = "";
+      selectedOscRoleDeviceId = "";
+      selectedOscRoleTargetId = "";
       suggestedOscRoleFields = {};
       oscRoleFormEl.reset();
       oscRoleIdEl.disabled = false;

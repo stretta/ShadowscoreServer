@@ -86,6 +86,8 @@ test("recall telemetry measures encoded payloads and the dispatch window", async
   assert.equal(dryRun.plannedPacketBytes, result.plannedPacketBytes);
   assert.equal(dryRun.attemptedPacketBytes, 0);
   assert.equal(dryRun.dispatchDurationMs, 0);
+  assert.equal(dryRun.roles[0].clipId, "clip-online");
+  assert.equal(dryRun.roles[0].assignment.deviceId, "heron");
 });
 
 test("dispatcher runs target groups concurrently and preserves all ordering within one instance", async () => {
@@ -210,6 +212,20 @@ test("recall service keeps bounded diagnostic history and block filters", async 
   assert.deepEqual(service.snapshot().history.map((entry) => entry.id), ["recall-3", "recall-2"]);
   assert.deepEqual(service.snapshot({ blockId: "B" }).history.map((entry) => entry.id), ["recall-2"]);
   assert.equal(service.snapshot({ blockId: "missing" }).last, null);
+});
+
+test("recall reports missing role and clip identities without affecting other layers", async () => {
+  const score = scoreWithRoles({ valid: snapshot("listsequencer", { Clock: 1 }) }, {
+    valid: assignment("listsequencer", "heron", "heron:listsequencer:main")
+  });
+  score.mesostructure.A.oscLayers.missingRole = { clipId: "clip-valid" };
+  score.mesostructure.A.oscLayers.missingClip = { clipId: "does-not-exist" };
+  score.oscAssignments.missingClip = assignment("listsequencer", "heron", "heron:listsequencer:main");
+  const result = await dispatchOscBlockRecall(score, "A", [oscTarget({ parameters: [param("Clock")] })], { dryRun: true });
+
+  assert.equal(result.roles.find((role) => role.roleId === "missingRole").skippedReason, "missing-role");
+  assert.equal(result.roles.find((role) => role.roleId === "missingClip").skippedReason, "missing-clip");
+  assert.equal(result.roles.find((role) => role.roleId === "valid").status, "dry-run");
 });
 
 function scoreWithRoles(snapshots, assignments) {

@@ -216,7 +216,7 @@ export function createOscSnapshotEditorClient(options) {
       if (event.type.startsWith("osc.assignment.")) refreshAssignments().catch(reportError);
     };
     for (const eventName of [
-      "snapshot", "osc.clip.added", "osc.clip.replaced", "osc.clip.removed",
+      "snapshot", "osc.clip.added", "osc.clip.captured", "osc.clip.replaced", "osc.clip.removed",
       "mesostructure.oscLayer.assigned", "mesostructure.oscLayer.removed",
       "structure.playhead.updated", "osc.assignment.replaced", "osc.assignment.removed",
       "osc.assignment.reconciled", "admin.reset", "admin.score.created", "admin.restore"

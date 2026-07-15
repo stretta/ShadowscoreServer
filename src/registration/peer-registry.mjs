@@ -284,6 +284,7 @@ function normalizeOscTargets(targets, hardwareUnitId, hardwareUnitName) {
       port: nullableNumberField(target.port),
       address,
       baseAddress: stringField(target.baseAddress) || address,
+      oscQueryUrl: stringField(target.oscQueryUrl) || undefined,
       instanceId: stringField(target.instanceId),
       app: stringField(target.app ?? target.instrument) || undefined,
       instance: stringField(target.instance ?? target.instanceName) || undefined,

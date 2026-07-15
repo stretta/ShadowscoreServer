@@ -149,7 +149,10 @@ export function createOscSnapshotRecallService(options = {}) {
 }
 
 function compileRole(score, blockId, roleId, layer, targets) {
-  const assignment = score.oscAssignments?.[roleId] ?? {};
+  const assignment = score.oscAssignments?.[roleId];
+  if (!assignment) {
+    return skippedRole(blockId, roleId, {}, "missing-role", `OSC role '${roleId}' does not exist.`);
+  }
   if (!layer?.clipId) {
     return skippedRole(blockId, roleId, assignment, "missing-layer", "No OSC clip is assigned to this role in the block.");
   }
@@ -162,8 +165,8 @@ function compileRole(score, blockId, roleId, layer, targets) {
     return { ...skippedRole(blockId, roleId, assignment, resolution.status, resolution.message, resolution), clipId: layer.clipId };
   }
   if (!targetSupportsApp(resolution.target, clip.app)) {
-    return skippedRole(blockId, roleId, assignment, "app-mismatch",
-      `Resolved target '${resolution.target.id}' does not support OSC clip app '${clip.app}'.`, resolution);
+    return { ...skippedRole(blockId, roleId, assignment, "app-mismatch",
+      `Resolved target '${resolution.target.id}' does not support OSC clip app '${clip.app}'.`, resolution), clipId: layer.clipId };
   }
   const compiled = compileOscSnapshot(clip, resolution.target, { blockId, roleId, targetId: resolution.target.id });
   if (compiled.writes.length === 0) {
@@ -179,6 +182,7 @@ function compileRole(score, blockId, roleId, layer, targets) {
     clipId: layer.clipId,
     targetId: resolution.target.id,
     routingStatus: resolution.status,
+    assignment: structuredClone(assignment),
     target: resolution.target,
     ...compiled
   };
@@ -259,6 +263,8 @@ async function dispatchRole(role, options) {
   return {
     blockId: role.blockId,
     roleId: role.roleId,
+    clipId: role.clipId,
+    assignment: structuredClone(role.assignment),
     targetId: role.targetId,
     routingStatus: role.routingStatus,
     status: options.dryRun
@@ -297,6 +303,7 @@ function skippedRole(blockId, roleId, assignment, reason, message, resolution = 
   return {
     blockId,
     roleId,
+    assignment: structuredClone(assignment),
     targetId: resolution.targetId ?? assignment.oscTargetId ?? "",
     routingStatus: resolution.status ?? assignment.routingStatus ?? "unassigned",
     skippedReason: reason,
@@ -311,6 +318,8 @@ function skippedRoleResult(role, startedMs, completedMs) {
   return {
     blockId: role.blockId,
     roleId: role.roleId,
+    clipId: role.clipId,
+    assignment: structuredClone(role.assignment),
     targetId: role.targetId,
     routingStatus: role.routingStatus,
     status: "skipped",

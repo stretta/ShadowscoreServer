@@ -684,6 +684,63 @@ test("OSC clip and block layer routes create, reuse, replace, and safely delete 
   assert.equal(missing.status, 404);
 });
 
+test("OSC capture creates and assigns one live instance atomically", async () => {
+  const sends = [];
+  const context = createRouteContext({
+    runtime: {
+      oscSender: async (write) => sends.push(write),
+      oscCaptureDelay: async () => {},
+      oscCaptureFetch: async (url) => {
+        if (url.endsWith("/params")) return jsonFetchResponse({ CONTENTS: { Clock: { VALUE: 1 }, GateTime: { VALUE: 0.4 } } });
+        if (url.endsWith("/StepsAck")) return jsonFetchResponse({ VALUE: [1, 0, 1, 0] });
+        return jsonFetchResponse({}, 404);
+      },
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() { return [captureControlTarget()]; }
+      }
+    }
+  });
+  await requestJson(context, "PUT", "/osc/assignments/list-a", { app: "listsequencer", deviceId: "heron" });
+
+  const captured = await requestJson(context, "POST", "/osc/clips/capture", {
+    targetId: "heron:listsequencer:main",
+    clipId: "list-live-opening",
+    name: "Live opening",
+    blockId: "F",
+    roleId: "list-a"
+  });
+  assert.equal(captured.complete, true);
+  assert.deepEqual(captured.clip.params, { Clock: 1, GateTime: 0.4 });
+  assert.deepEqual(captured.clip.inputPorts.Steps, [1, 0, 1, 0]);
+  assert.equal(captured.score.mesostructure.F.oscLayers["list-a"].clipId, "list-live-opening");
+  assert.deepEqual(sends.map(({ address, args }) => [address, args]), [["/rnbo/inst/2/messages/in/Steps", [-999]]]);
+
+  const versionBeforeFailure = context.store.getScore().version;
+  const rejected = await request(context, "POST", "/osc/clips/capture", {
+    targetIds: ["heron:listsequencer:main", "other"],
+    clipId: "should-not-exist"
+  });
+  assert.equal(rejected.status, 400);
+  assert.equal(context.store.getScore().version, versionBeforeFailure);
+  assert.equal(context.store.getScore().oscClips["should-not-exist"], undefined);
+
+  context.runtime.oscCaptureFetch = async (url) => url.endsWith("/params")
+    ? jsonFetchResponse({ CONTENTS: { Clock: { VALUE: 1 }, GateTime: { VALUE: 0.4 } } })
+    : jsonFetchResponse({}, 404);
+  const incomplete = await request(context, "POST", "/osc/clips/capture", {
+    targetId: "heron:listsequencer:main",
+    clipId: "incomplete-capture",
+    blockId: "F",
+    roleId: "list-a"
+  });
+  assert.equal(incomplete.status, 400);
+  assert.match(incomplete.body, /OSC_CAPTURE_INCOMPLETE/);
+  assert.equal(context.store.getScore().version, versionBeforeFailure);
+  assert.equal(context.store.getScore().oscClips["incomplete-capture"], undefined);
+});
+
 test("block OSC recall route dry-runs and dispatches ordered semantic writes with bounded status", async () => {
   const sends = [];
   const context = createRouteContext({
@@ -3884,6 +3941,34 @@ function jackSnapshot(options = {}) {
     absoluteBeat,
     observedAt: 1782580000000
   };
+}
+
+function captureControlTarget() {
+  return {
+    id: "rnbo-inst-2:listsequencer",
+    localId: "rnbo-inst-2:listsequencer",
+    label: "List Sequencer 2",
+    host: "heron.local",
+    port: 1234,
+    baseAddress: "/rnbo/inst/2",
+    app: "listsequencer",
+    instance: "main",
+    hardwareUnitId: "heron",
+    deviceId: "heron",
+    available: true,
+    parameters: [
+      { name: "Clock", address: "/rnbo/inst/2/params/Clock" },
+      { name: "GateTime", address: "/rnbo/inst/2/params/GateTime" }
+    ],
+    inputPorts: [
+      { name: "Steps", address: "/rnbo/inst/2/messages/in/Steps" },
+      { name: "rtz", address: "/rnbo/inst/2/messages/in/rtz" }
+    ]
+  };
+}
+
+function jsonFetchResponse(body, status = 200) {
+  return { ok: status >= 200 && status < 300, status, async json() { return body; } };
 }
 
 function createRouteContext(options = {}) {

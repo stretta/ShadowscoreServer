@@ -43,6 +43,7 @@ function normalizeOscTarget(target, index) {
     host,
     port,
     baseAddress: target.baseAddress ?? baseAddressFromRnboTarget(target),
+    oscQueryUrl: stringField(target.oscQueryUrl) || undefined,
     address,
     parameters: normalizeParameters(target.parameters),
     inputPorts: normalizeInputPorts(target.inputPorts),

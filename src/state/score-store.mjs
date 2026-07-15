@@ -148,6 +148,36 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "osc.clip.added", score, { clipId: id, clip }, options);
       return structuredClone(score);
     },
+    addCapturedOscClip(clipId, clipDocument, options = {}) {
+      const id = normalizeOscClipId(clipId);
+      if (score.oscClips?.[id]) throw new Error(`OSC clip '${id}' already exists`);
+      const hasBlock = options.blockId !== undefined && options.blockId !== "";
+      const hasRole = options.roleId !== undefined && options.roleId !== "";
+      if (hasBlock !== hasRole) throw new Error("captured OSC clip assignment requires both blockId and roleId");
+      const blockId = hasBlock ? normalizeBlockId(options.blockId) : "";
+      const roleId = hasRole ? normalizeOscRoleId(options.roleId) : "";
+      const block = blockId ? score.mesostructure[blockId] : null;
+      if (blockId && !block) throw new Error(`unknown mesostructural block '${blockId}'`);
+      if (roleId && !score.oscAssignments?.[roleId]) throw new Error(`unknown OSC assignment role '${roleId}'`);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const clip = normalizeOscClip(clipDocument);
+      if (roleId) {
+        const roleApp = score.oscAssignments[roleId].app;
+        if (roleApp && roleApp !== clip.app) throw new Error(`OSC clip '${id}' app '${clip.app}' is incompatible with role '${roleId}' app '${roleApp}'`);
+      }
+      score = {
+        ...score,
+        ...nextRevisionFields(score, { structure: true }),
+        oscClips: { ...(score.oscClips ?? {}), [id]: clip },
+        mesostructure: blockId ? {
+          ...score.mesostructure,
+          [blockId]: { ...block, oscLayers: { ...(block.oscLayers ?? {}), [roleId]: { clipId: id } } }
+        } : score.mesostructure
+      };
+      emitChange(events, "osc.clip.captured", score, { clipId: id, clip, blockId, roleId }, options);
+      return structuredClone(score);
+    },
     replaceOscClip(clipId, clipDocument, options = {}) {
       const id = normalizeOscClipId(clipId);
       if (!score.oscClips?.[id]) throw new Error(`unknown OSC clip '${id}'`);

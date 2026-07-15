@@ -36,6 +36,8 @@ The version 1 OSC clip shape is deliberately small:
 
 A block layer contains only `{ "clipId": "list-opening" }`. Live routing
 continues to come from the corresponding logical role in `oscAssignments`.
+Captured clips add source provenance plus `complete` and structured diagnostics
+under `capture`. Provenance never participates in destination resolution.
 
 Parameter values are finite numbers. RNBO enum parameters are stored as their
 zero-based option index; at recall time the compiler resolves that index

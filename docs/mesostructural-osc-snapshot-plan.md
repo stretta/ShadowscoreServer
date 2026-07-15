@@ -404,6 +404,14 @@ all references.
 
 ### Phase C: Capture One Live Instance
 
+Status: implemented locally. `POST /osc/clips/capture` accepts one normalized
+target, refreshes parameters from OSCQuery, uses the existing `-999` plus ACK
+readback contract for ListSequencer and ListVelSequencer lists, excludes
+momentary controls, stores enum indexes and capture diagnostics, and can create
+the clip plus block layer in one store revision. Unit and route tests cover
+ListSequencer, ListVelSequencer, AnalogSequencer, incomplete readback, and
+failure without partial score mutation. Live rig acceptance remains pending.
+
 - Add a server capture service that accepts exactly one normalized target id.
 - Read persistent RNBO params from that instance's OSCQuery tree.
 - Capture persistent list inports through the existing app-specific request/ACK
@@ -421,6 +429,12 @@ AnalogSequencer produces three independent OSC clips that match each source
 instance even if one editor was live-sending to all three.
 
 ### Phase D: Refactor Recall Around Layers
+
+Status: implemented locally. Recall resolves each block layer through its OSC
+clip and role assignment, reports block/role/clip/assignment/target identities,
+keeps per-target ordering and cross-target concurrency, and independently skips
+missing roles, missing clips, routing failures, app mismatches, and ignored
+roles. Existing automatic entry idempotence and telemetry remain intact.
 
 - Change recall compilation from `block.oscSnapshots[roleId]` to
   `block.oscLayers[roleId].clipId -> score.oscClips[clipId]`.

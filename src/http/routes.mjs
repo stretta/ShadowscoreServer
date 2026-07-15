@@ -7,6 +7,7 @@ import { editorManifests } from "../editors/manifest.mjs";
 import { resolveOscAssignments } from "../osc/assignments.mjs";
 import { findOscMacro, listOscMacros, resolveMacroStepAddress, saveOscMacro, validateMacro } from "../osc/macros.mjs";
 import { sendOscMessage } from "../osc/send.mjs";
+import { captureOscTarget } from "../osc/snapshot-capture.mjs";
 import { createOscSnapshotRecallService } from "../osc/snapshot-recall.mjs";
 import { buildOscTargets } from "../osc/targets.mjs";
 import { selectBeatWitness } from "../playback/beat-witness.mjs";
@@ -866,6 +867,35 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/osc/clips/capture") {
+    try {
+      const body = await readJson(request);
+      if (body.targetIds !== undefined || Array.isArray(body.targetId)) throw new Error("OSC capture accepts exactly one targetId");
+      const targetId = requiredString(body.targetId, "targetId");
+      const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+      const target = targets.find((entry) => entry.id === targetId || entry.rnboTargetId === targetId);
+      if (!target) throw new Error(`unknown OSC target '${targetId}'`);
+      const captured = await captureOscTarget(target, {
+        name: body.name,
+        allowIncomplete: Boolean(body.allowIncomplete),
+        fetchImpl: runtime.oscCaptureFetch ?? globalThis.fetch,
+        sender: runtime.oscSender,
+        delay: runtime.oscCaptureDelay,
+        now: runtime.now
+      });
+      const clipId = requiredString(body.clipId ?? body.id, "clipId");
+      const score = store.addCapturedOscClip(clipId, captured.clip, {
+        ...revisionOptions(body),
+        blockId: optionalString(body.blockId),
+        roleId: optionalString(body.roleId)
+      });
+      writeJson(response, 201, { ok: true, clipId, clip: score.oscClips[clipId], score, complete: captured.complete, diagnostics: captured.diagnostics });
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/osc/clips/references") {
     writeJson(response, 200, store.inspectOscClipReferences());
     return;
@@ -1679,6 +1709,7 @@ function writeError(response, error, status = 400) {
     error: messageForError(error),
     ...(error?.code ? { code: error.code } : {}),
     ...(Array.isArray(error?.references) ? { references: error.references } : {}),
+    ...(Array.isArray(error?.diagnostics) ? { diagnostics: error.diagnostics } : {}),
     ...(error?.currentVersion !== undefined ? { currentVersion: error.currentVersion } : {}),
     ...(error?.currentScoreRevision !== undefined ? { currentScoreRevision: error.currentScoreRevision } : {}),
     ...(error?.currentStructureRevision !== undefined ? { currentStructureRevision: error.currentStructureRevision } : {})
@@ -1718,6 +1749,12 @@ function optionalInteger(value, field) {
 
 function optionalString(value) {
   return value === undefined || value === null ? "" : String(value).trim();
+}
+
+function requiredString(value, field) {
+  const text = optionalString(value);
+  if (!text) throw new Error(`${field} is required`);
+  return text;
 }
 
 function revisionOptions(body) {

@@ -101,11 +101,14 @@ function normalizeInputPorts(document) {
 function normalizeCapture(document) {
   if (document === undefined) return {};
   if (!isPlainObject(document)) throw new Error("OSC clip capture must be an object");
-  rejectUnknownFields(document, new Set(["deviceId", "targetId", "capturedAt"]), "OSC clip capture");
+  rejectUnknownFields(document, new Set(["deviceId", "targetId", "capturedAt", "complete", "diagnostics"]), "OSC clip capture");
+  if (document.diagnostics !== undefined && !Array.isArray(document.diagnostics)) throw new Error("OSC clip capture diagnostics must be an array");
   return {
     deviceId: stringField(document.deviceId),
     targetId: stringField(document.targetId),
-    capturedAt: stringField(document.capturedAt)
+    capturedAt: stringField(document.capturedAt),
+    complete: document.complete === undefined ? true : Boolean(document.complete),
+    diagnostics: structuredClone(document.diagnostics ?? [])
   };
 }
 

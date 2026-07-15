@@ -178,6 +178,54 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "osc.clip.captured", score, { clipId: id, clip, blockId, roleId }, options);
       return structuredClone(score);
     },
+    onboardOscTarget(roleId, assignmentDocument, clipId, clipDocument, blockId, options = {}) {
+      const role = normalizeOscRoleId(roleId);
+      const clipIdNormalized = normalizeOscClipId(clipId);
+      const blockIdNormalized = normalizeBlockId(blockId);
+      const block = score.mesostructure[blockIdNormalized];
+      if (!block) throw new Error(`unknown mesostructural block '${blockIdNormalized}'`);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const assignment = normalizeOscAssignment(assignmentDocument);
+      const clip = normalizeOscClip(clipDocument);
+      if (assignment.app && assignment.app !== clip.app) {
+        throw new Error(`OSC clip '${clipIdNormalized}' app '${clip.app}' is incompatible with role '${role}' app '${assignment.app}'`);
+      }
+      const existingAssignment = score.oscAssignments?.[role];
+      if (existingAssignment?.app && existingAssignment.app !== assignment.app) {
+        throw new Error(`OSC role '${role}' already belongs to app '${existingAssignment.app}'`);
+      }
+      if (existingAssignment?.deviceId && assignment.deviceId && existingAssignment.deviceId !== assignment.deviceId) {
+        throw new Error(`OSC role '${role}' already belongs to device '${existingAssignment.deviceId}'`);
+      }
+      const existingClip = score.oscClips?.[clipIdNormalized];
+      if (existingClip?.app && existingClip.app !== clip.app) {
+        throw new Error(`OSC clip '${clipIdNormalized}' already belongs to app '${existingClip.app}'`);
+      }
+      score = {
+        ...score,
+        ...nextRevisionFields(score, { structure: true }),
+        oscAssignments: { ...(score.oscAssignments ?? {}), [role]: assignment },
+        oscClips: { ...(score.oscClips ?? {}), [clipIdNormalized]: clip },
+        mesostructure: {
+          ...score.mesostructure,
+          [blockIdNormalized]: {
+            ...block,
+            oscLayers: { ...(block.oscLayers ?? {}), [role]: { clipId: clipIdNormalized } }
+          }
+        }
+      };
+      emitChange(events, "osc.target.onboarded", score, {
+        roleId: role,
+        clipId: clipIdNormalized,
+        blockId: blockIdNormalized,
+        assignment,
+        clip,
+        reusedRole: Boolean(existingAssignment),
+        reusedClip: Boolean(existingClip)
+      }, options);
+      return structuredClone(score);
+    },
     replaceOscClip(clipId, clipDocument, options = {}) {
       const id = normalizeOscClipId(clipId);
       if (!score.oscClips?.[id]) throw new Error(`unknown OSC clip '${id}'`);

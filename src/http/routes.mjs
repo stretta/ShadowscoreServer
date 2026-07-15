@@ -150,6 +150,48 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/osc/onboard") {
+    try {
+      const body = await readJson(request);
+      if (body.targetIds !== undefined || Array.isArray(body.targetId)) throw new Error("OSC onboarding accepts exactly one targetId");
+      const targetId = requiredString(body.targetId, "targetId");
+      const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+      const target = targets.find((entry) => entry.id === targetId || entry.rnboTargetId === targetId);
+      if (!target) throw new Error(`unknown OSC target '${targetId}'`);
+      if (target.status !== "online" || !target.sendable) throw new Error(`OSC target '${target.id}' is not online and sendable`);
+      const roleId = requiredString(body.roleId, "roleId");
+      const clipId = requiredString(body.clipId, "clipId");
+      const currentScore = store.getScore();
+      const blockId = optionalString(body.blockId) || currentScore.structureState?.activeBlockId;
+      if (!blockId) throw new Error("blockId is required when the score has no active block");
+      if (!currentScore.mesostructure?.[blockId]) throw new Error(`unknown mesostructural block '${blockId}'`);
+      const captured = await captureOscTarget(target, {
+        name: body.clipName || body.name,
+        allowIncomplete: Boolean(body.allowIncomplete),
+        fetchImpl: runtime.oscCaptureFetch ?? globalThis.fetch,
+        sender: runtime.oscSender,
+        delay: runtime.oscCaptureDelay,
+        now: runtime.now
+      });
+      const assignment = {
+        label: body.roleLabel || target.label || roleId,
+        app: target.app,
+        deviceId: target.deviceId || target.unitId,
+        oscTargetId: target.id,
+        ignoreRecall: Boolean(body.ignoreRecall),
+        locked: Boolean(body.locked)
+      };
+      const score = store.onboardOscTarget(roleId, assignment, clipId, captured.clip, blockId, revisionOptions(body));
+      writeJson(response, 201, {
+        ok: true, roleId, clipId, blockId, assignment: score.oscAssignments[roleId],
+        clip: score.oscClips[clipId], score, complete: captured.complete, diagnostics: captured.diagnostics
+      });
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/osc/assignments/reconcile") {
     try {
       const result = await reconcileOscAssignmentsFromRuntime(store, config, runtime);

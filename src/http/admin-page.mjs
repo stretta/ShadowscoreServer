@@ -278,6 +278,7 @@ export function adminPage() {
           <label><input id="osc-role-ignore" type="checkbox"> Ignore Shadowscore recall</label>
           <label><input id="osc-role-locked" type="checkbox"> Lock target mapping</label>
           <button class="primary" id="save-osc-role" type="submit">Create role</button>
+          <button id="onboard-osc-target" type="button">Add to current score</button>
           <button id="cancel-osc-role" type="button" hidden>Cancel</button>
           <button id="reconcile-osc-roles" type="button">Reconcile roles</button>
         </div>
@@ -334,6 +335,7 @@ export function adminPage() {
     const oscRoleIgnoreEl = document.querySelector("#osc-role-ignore");
     const oscRoleLockedEl = document.querySelector("#osc-role-locked");
     const saveOscRoleEl = document.querySelector("#save-osc-role");
+    const onboardOscTargetEl = document.querySelector("#onboard-osc-target");
     const cancelOscRoleEl = document.querySelector("#cancel-osc-role");
     const oscRoleStatusEl = document.querySelector("#osc-role-status");
     const hardwareUnitsEl = document.querySelector("#hardware-units");
@@ -355,6 +357,7 @@ export function adminPage() {
     let oscRoleResolutions = {};
     let editingOscRoleId = "";
     let suggestedOscRoleFields = {};
+    let currentScore = null;
     let rnboSendQueue = {
       inProgress: false,
       queued: false,
@@ -379,6 +382,7 @@ export function adminPage() {
     oscQueryDeviceFormEl.addEventListener("submit", saveOscQueryDevice);
     cancelOscQueryDeviceEl.addEventListener("click", resetOscQueryDeviceForm);
     oscRoleFormEl.addEventListener("submit", saveOscRole);
+    onboardOscTargetEl.addEventListener("click", onboardOscTarget);
     oscRoleDeviceEl.addEventListener("change", selectOscRoleDevice);
     oscRoleTargetEl.addEventListener("change", suggestOscRoleFromTarget);
     cancelOscRoleEl.addEventListener("click", resetOscRoleForm);
@@ -395,6 +399,7 @@ export function adminPage() {
     events.addEventListener("osc.assignment.replaced", (event) => { render(JSON.parse(event.data).score); loadOscRoles(); });
     events.addEventListener("osc.assignment.removed", (event) => { render(JSON.parse(event.data).score); loadOscRoles(); });
     events.addEventListener("osc.assignment.reconciled", (event) => { render(JSON.parse(event.data).score); loadOscRoles(); });
+    events.addEventListener("osc.target.onboarded", (event) => { render(JSON.parse(event.data).score); loadOscRoles(); });
     events.addEventListener("voice.added", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("voice.removed", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.reset", (event) => render(JSON.parse(event.data).score));
@@ -423,6 +428,7 @@ export function adminPage() {
     }
 
     function render(score) {
+      currentScore = score;
       inputs.clear();
       voicesEl.textContent = "";
       const assignments = score.assignments ?? {};
@@ -1094,6 +1100,49 @@ export function adminPage() {
       }
     }
 
+    async function onboardOscTarget() {
+      const roleId = oscRoleIdEl.value.trim();
+      const targetId = oscRoleTargetEl.value;
+      const blockId = currentScore?.structureState?.activeBlockId;
+      if (!roleId || !targetId || !blockId) {
+        setOscRoleStatus("Choose a live instance and ensure the score has an active block.", true);
+        return;
+      }
+      const clipId = slugOscRoleId(blockId.toLowerCase() + "-" + roleId).replace(/:/g, "-");
+      setOscRoleStatus("Capturing " + targetId + " into " + blockId + "...");
+      onboardOscTargetEl.disabled = true;
+      try {
+        const response = await fetch("/osc/onboard", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            targetId,
+            roleId,
+            roleLabel: oscRoleLabelEl.value.trim(),
+            clipId,
+            clipName: (oscRoleLabelEl.value.trim() || roleId) + " · " + blockId,
+            blockId,
+            ignoreRecall: oscRoleIgnoreEl.checked,
+            locked: oscRoleLockedEl.checked,
+            expectedStructureRevision: currentScore.structureRevision
+          })
+        });
+        const body = await response.json();
+        if (!response.ok || body.ok === false) throw new Error(body.error || "OSC onboarding failed.");
+        currentScore = body.score;
+        render(body.score);
+        setStatus("Added " + roleId + " to block " + blockId + ".");
+        setOscRoleStatus("Captured " + body.clipId + " from " + targetId + " and assigned it to " + blockId + ".");
+        await loadOscRoles();
+      } catch (error) {
+        const message = error?.message || "OSC onboarding failed.";
+        setStatus(message);
+        setOscRoleStatus(message, true);
+      } finally {
+        onboardOscTargetEl.disabled = false;
+      }
+    }
+
     function suggestOscRoleFromTarget() {
       if (editingOscRoleId) return;
       const option = oscRoleTargetEl.selectedOptions[0];
@@ -1101,9 +1150,12 @@ export function adminPage() {
       const target = JSON.parse(option.dataset.target);
       if (!oscRoleIdEl.value.trim() || oscRoleIdEl.value === suggestedOscRoleFields.roleId) {
         const base = slugOscRoleId(target.app || target.id || "osc-role");
+        const reusable = Object.entries(oscRoleAssignments).find(([, assignment]) =>
+          assignment.app === target.app && assignment.deviceId === (target.deviceId || target.unitId)
+          && (!assignment.oscTargetId || assignment.oscTargetId === target.id));
+        let candidate = reusable?.[0] || base + "-a";
         let suffix = 0;
-        let candidate = base + "-a";
-        while (oscRoleAssignments[candidate]) {
+        while (!reusable && oscRoleAssignments[candidate]) {
           suffix += 1;
           candidate = base + "-" + (suffix < 26 ? String.fromCharCode(97 + suffix) : suffix + 1);
         }
@@ -1112,7 +1164,7 @@ export function adminPage() {
       }
       suggestOscRoleField(oscRoleLabelEl, "label", target.label || oscRoleIdEl.value);
       suggestOscRoleField(oscRoleAppEl, "app", target.app || "");
-      setOscRoleStatus("Review the suggested role fields, then choose Create role.");
+      setOscRoleStatus("Review the suggested role fields, then create the role or add it to the current score.");
     }
 
     function selectOscRoleDevice() {

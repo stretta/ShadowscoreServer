@@ -216,6 +216,8 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /selectOscRoleDevice/);
   assert.match(response.body, /Live OSC instance/);
   assert.match(response.body, /Create role/);
+  assert.match(response.body, /Add to current score/);
+  assert.match(response.body, /\/osc\/onboard/);
   assert.match(response.body, /Role ID must start with a letter or number/);
   assert.match(response.body, /Ignore Shadowscore recall/);
   assert.match(response.body, /Lock target mapping/);
@@ -739,6 +741,63 @@ test("OSC capture creates and assigns one live instance atomically", async () =>
   assert.match(incomplete.body, /OSC_CAPTURE_INCOMPLETE/);
   assert.equal(context.store.getScore().version, versionBeforeFailure);
   assert.equal(context.store.getScore().oscClips["incomplete-capture"], undefined);
+});
+
+test("OSC onboarding atomically creates and idempotently reuses a role, clip, and active-block layer", async () => {
+  let gateTime = 0.4;
+  const context = createRouteContext({
+    runtime: {
+      oscSender: async () => {},
+      oscCaptureDelay: async () => {},
+      oscCaptureFetch: async (url) => {
+        if (url.endsWith("/params")) return jsonFetchResponse({ CONTENTS: { Clock: { VALUE: 1 }, GateTime: { VALUE: gateTime } } });
+        if (url.endsWith("/StepsAck")) return jsonFetchResponse({ VALUE: [1, 0, 1, 0] });
+        return jsonFetchResponse({}, 404);
+      },
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() { return [captureControlTarget()]; }
+      }
+    }
+  });
+
+  const first = await requestJson(context, "POST", "/osc/onboard", {
+    targetId: "heron:listsequencer:main",
+    roleId: "listsequencer-a",
+    roleLabel: "List Sequencer A",
+    clipId: "a-listsequencer-a",
+    clipName: "List Sequencer A · A"
+  });
+  assert.equal(first.blockId, "A");
+  assert.equal(first.assignment.deviceId, "heron");
+  assert.equal(first.assignment.oscTargetId, "heron:listsequencer:main");
+  assert.equal(first.clip.params.GateTime, 0.4);
+  assert.equal(first.score.mesostructure.A.oscLayers["listsequencer-a"].clipId, "a-listsequencer-a");
+
+  gateTime = 0.75;
+  const second = await requestJson(context, "POST", "/osc/onboard", {
+    targetId: "heron:listsequencer:main",
+    roleId: "listsequencer-a",
+    roleLabel: "List Sequencer A",
+    clipId: "a-listsequencer-a",
+    clipName: "List Sequencer A · A"
+  });
+  assert.equal(Object.keys(second.score.oscAssignments).length, 1);
+  assert.equal(Object.keys(second.score.oscClips).length, 1);
+  assert.equal(second.clip.params.GateTime, 0.75);
+
+  const versionBeforeFailure = second.score.version;
+  const rejected = await request(context, "POST", "/osc/onboard", {
+    targetId: "heron:listsequencer:main",
+    roleId: "other-role",
+    clipId: "other-clip",
+    blockId: "missing"
+  });
+  assert.equal(rejected.status, 400);
+  assert.equal(context.store.getScore().version, versionBeforeFailure);
+  assert.equal(context.store.getScore().oscAssignments["other-role"], undefined);
+  assert.equal(context.store.getScore().oscClips["other-clip"], undefined);
 });
 
 test("block OSC recall route dry-runs and dispatches ordered semantic writes with bounded status", async () => {

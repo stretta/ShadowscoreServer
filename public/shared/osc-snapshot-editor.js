@@ -7,7 +7,7 @@ export function mountOscSnapshotPanel(parent, options = {}) {
   section.setAttribute("aria-label", "Block state");
   section.innerHTML = `
     <div class="ss-osc-snapshot-head">
-      <div><h2>Block State</h2><div class="ss-osc-snapshot-detail">Instance focus chooses what is written. Checked instances remain independent live-send targets.</div></div>
+      <div><h2>Block State</h2><div class="ss-osc-snapshot-detail">Focus chooses what is displayed and written, and makes that instance the sole live-send destination.</div></div>
       <div data-snapshot-focus class="ss-osc-snapshot-focus">Focused instance: —</div>
     </div>
     <div data-snapshot-instances class="ss-osc-snapshot-instances" aria-label="Block State instances"></div>
@@ -19,9 +19,11 @@ export function mountOscSnapshotPanel(parent, options = {}) {
     </div>
     <div data-snapshot-slots class="ss-osc-snapshot-slots" aria-label="Available block state slots"></div>
     <select data-snapshot-role hidden aria-hidden="true"></select>
-    <div class="ss-osc-snapshot-actions"><div><button data-snapshot-capture class="primary" type="button">Write — State</button><button data-snapshot-load type="button">Reload Written State</button><button data-snapshot-recall type="button">Recall — Now</button></div></div>
-    <div class="ss-osc-snapshot-copy"><label><span>Save Copy To</span><select data-snapshot-copy-target aria-label="Copy Block State to instance"></select></label><button data-snapshot-copy type="button">Save Copy</button></div>
-    <div class="ss-osc-snapshot-status"><div data-snapshot-state class="ss-osc-snapshot-state" role="status">Loading OSC clip state…</div><div data-snapshot-last class="ss-osc-snapshot-detail">No recall recorded</div></div>
+    <div class="ss-osc-snapshot-footer">
+      <div class="ss-osc-snapshot-actions"><div><button data-snapshot-capture class="primary" type="button">Write — State</button><button data-snapshot-load type="button">Reload Written State</button><button data-snapshot-recall type="button">Recall — Now</button></div></div>
+      <div class="ss-osc-snapshot-copy"><label><span>Save Copy To</span><select data-snapshot-copy-target aria-label="Copy Block State to instance"></select></label><button data-snapshot-copy type="button">Save Copy</button></div>
+      <div class="ss-osc-snapshot-status"><div data-snapshot-state class="ss-osc-snapshot-state" role="status">Loading OSC clip state…</div><div data-snapshot-last class="ss-osc-snapshot-detail">No recall recorded</div></div>
+    </div>
     <details class="ss-osc-snapshot-advanced">
       <summary>Advanced clip tools</summary>
       <div class="ss-osc-snapshot-fields">
@@ -404,7 +406,11 @@ export function createOscSnapshotEditorClient(options) {
     setChase(false);
     selectLayerClip();
     synchronizeClipIdentity();
-    await hydrateEditingContext({ readLiveWhenUnspecified: true });
+    await hydrateEditingContext({ readLiveWhenUnspecified: !options.readOnBlockChange });
+    if (options.readOnBlockChange) {
+      await options.onFocusChange?.(elements.sourceSelect?.value);
+      rememberDisplayedDraft();
+    }
     renderContext();
     await loadLastRecall();
   }
@@ -412,6 +418,7 @@ export function createOscSnapshotEditorClient(options) {
   async function changeFocusedInstance() {
     rememberDisplayedDraft();
     const roleId = synchronizeFocusedRole();
+    selectExclusiveOscTarget(options.liveTargetRoot, elements.sourceSelect?.value);
     selectLayerClip();
     synchronizeClipIdentity();
     activeDraftKey = draftKey(roleId, elements.sourceSelect?.value, elements.blockSelect?.value);
@@ -683,6 +690,21 @@ export function oscBlockDraftState({ draft = null, saved = null } = {}) {
   if (!draft) return saved ? "Written" : "Unspecified";
   if (!saved) return "Unwritten Draft";
   return sameOscSnapshot(draft, saved) ? "Saved" : "Dirty";
+}
+
+export function selectExclusiveOscTarget(root, targetId) {
+  if (!root || !targetId || typeof root.querySelectorAll !== "function") return false;
+  let matched = false;
+  for (const input of root.querySelectorAll("[data-target]")) {
+    const selected = input.dataset?.target === targetId;
+    input.checked = selected;
+    matched ||= selected;
+  }
+  return matched;
+}
+
+export function oscPlaybackWiperVisible({ editingBlockId = "", playingBlockId = "", running = false } = {}) {
+  return Boolean(running && editingBlockId && editingBlockId === playingBlockId);
 }
 
 function generatedClipId(blockId, roleId) {

@@ -301,13 +301,14 @@
         <span id="status" class="status" role="status"></span>
       </div>
     </header>
-    <section id="targets" class="target-strip" aria-label="Plate targets"></section>
     <section class="reverb-param-panel">
       <div id="controls" class="reverb-param-grid"></div>
     </section>
+    <div id="snapshot-mount"></div>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live Send Destinations</h2><span>Focus selects one. Check additional instances only when multi-output is intentional.</span></div><div id="targets" class="target-strip" aria-label="Plate targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260716-block-state2";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260716-block-state4";
     const PLATE_GROUPS = [
       { title: "Time", key: "time", match: ["decay", "time", "size", "predelay", "pre-delay", "delay"] },
       { title: "Tone", key: "tone", match: ["damp", "damping", "diffusion", "diffuse", "brightness", "color", "tone", "low", "high", "cut", "filter"] },
@@ -343,7 +344,7 @@
     });
     getDataButton.addEventListener("click", () => getData().catch(reportError));
 
-    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: document.querySelector(".reverb-param-panel"), sourceSelect: readSourceSelect });
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
     snapshotClient = createOscSnapshotEditorClient({
       app: "plate",
       roleLabel: "Plate",
@@ -351,6 +352,7 @@
       serializeDraft: serializeSnapshotDraft,
       applySnapshot: applySavedSnapshot,
       onFocusChange: getData,
+      liveTargetRoot: targetsEl,
       setStatus
     });
 
@@ -390,14 +392,18 @@
     }
 
     function renderTargets() {
+      const selected = new Set(Array.from(targetsEl.querySelectorAll("[data-target]:checked"), input => input.dataset.target));
+      const focusedId = readSourceSelect.value || targets[0]?.id || "";
+      const preserveSelection = targets.some(target => selected.has(target.id));
       const cards = targets.map((target) => {
         const label = document.createElement("label");
         label.className = "target-card";
         label.innerHTML = `
-          <input type="checkbox" checked data-target="${escapeHtml(target.id)}">
+          <input type="checkbox" data-target="${escapeHtml(target.id)}">
           <span class="target-name">${escapeHtml(target.label || target.id)}</span>
           <span class="target-detail">${escapeHtml(target.unitId || "")} ${escapeHtml(target.baseAddress || "")}</span>
         `;
+        label.querySelector("input").checked = preserveSelection ? selected.has(target.id) : target.id === focusedId;
         return label;
       });
       targetsEl.replaceChildren(...cards);

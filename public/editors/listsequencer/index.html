@@ -377,19 +377,18 @@
         <div class="readback-controls">
           <label for="read-source">Instance focus</label>
           <select id="read-source" aria-label="Instance focus"></select>
-          <button id="populate" type="button">Read Instance</button>
         </div>
         <button id="refresh" type="button">Refresh</button>
         <button id="select-all" type="button">All Targets</button>
       </div>
     </section>
-    <section id="targets" class="targets" aria-label="OSC targets"></section>
-    <div id="snapshot-mount"></div>
     <section id="inports" class="panel" aria-live="polite"></section>
     <section id="ttid" class="ttid-grid" aria-live="polite"></section>
+    <div id="snapshot-mount"></div>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live Send Destinations</h2><span>Focus selects one. Use All Targets only for intentional multi-output performance.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260716-block-state2";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260716-block-state4";
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
     const SCALES = Object.freeze({
@@ -422,7 +421,6 @@
     const refreshButton = document.querySelector("#refresh");
     const selectAllButton = document.querySelector("#select-all");
     const readSourceSelect = document.querySelector("#read-source");
-    const populateButton = document.querySelector("#populate");
     let targets = [];
     let inputPorts = [];
     let transposeParams = [];
@@ -435,7 +433,6 @@
 
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     selectAllButton.addEventListener("click", selectAllTargets);
-    populateButton.addEventListener("click", () => populateFields().catch(reportError));
     document.querySelector("main").addEventListener("input", (event) => {
       if (event.target.matches("[data-param], [data-inport]")) snapshotClient?.draftChanged();
     });
@@ -450,6 +447,8 @@
       serializeDraft: serializeSnapshotDraft,
       applySnapshot: applySavedSnapshot,
       onFocusChange: populateFields,
+      readOnBlockChange: true,
+      liveTargetRoot: targetsEl,
       setStatus
     });
 
@@ -600,14 +599,18 @@
     }
 
     function renderTargets() {
+      const selected = new Set(Array.from(targetsEl.querySelectorAll("[data-target]:checked"), input => input.dataset.target));
+      const focusedId = readSourceSelect.value || targets[0]?.id || "";
+      const preserveSelection = targets.some(target => selected.has(target.id));
       const cards = targets.map((target) => {
         const label = document.createElement("label");
         label.className = "target-card";
         label.innerHTML = `
-          <input type="checkbox" checked data-target="${escapeHtml(target.id)}">
+          <input type="checkbox" data-target="${escapeHtml(target.id)}">
           <span class="target-name">${escapeHtml(target.label || target.id)}</span>
           <span class="target-detail">${escapeHtml(target.unitId || "")} ${escapeHtml(target.baseAddress || "")}</span>
         `;
+        label.querySelector("input").checked = preserveSelection ? selected.has(target.id) : target.id === focusedId;
         return label;
       });
       targetsEl.replaceChildren(...cards);
@@ -626,7 +629,6 @@
       if (targets.some((target) => target.id === previous)) readSourceSelect.value = previous;
       const disabled = targets.length === 0;
       readSourceSelect.disabled = disabled;
-      populateButton.disabled = disabled;
     }
 
     function renderInports() {
@@ -877,30 +879,25 @@
       const availableNames = new Set((target.inputPorts || []).map((entry) => entry.name));
       const fields = inputPorts.filter((inputPort) => availableNames.has(inputPort.name));
 
-      populateButton.disabled = true;
       setStatus(`Getting parameters and ${fields.length} OSC field${fields.length === 1 ? "" : "s"} from ${target.label || target.id}...`);
-      try {
-        const populatedParams = await hydrateParameters(target);
-        const requests = await Promise.allSettled(fields.map((inputPort) => postOsc({
-          targets: [target.id],
-          inputPort: inputPort.name,
-          args: [-999]
-        })));
-        await delay(75);
-        const reads = await Promise.allSettled(fields.map((inputPort) => readAck(target, inputPort.name)));
-        let populated = 0;
-        for (let index = 0; index < fields.length; index += 1) {
-          if (requests[index].status !== "fulfilled" || reads[index].status !== "fulfilled") continue;
-          const input = inportsEl.querySelector(`[data-inport="${cssSelectorValue(fields[index].name)}"]`);
-          if (!input) continue;
-          input.value = formatAckValue(reads[index].value);
-          populated += 1;
-        }
-        const failed = fields.length - populated;
-        setStatus(`Got ${populatedParams} parameter${populatedParams === 1 ? "" : "s"} and ${populated}/${fields.length} OSC field${fields.length === 1 ? "" : "s"} from ${target.label || target.id}${failed ? `; ${failed} ACK${failed === 1 ? "" : "s"} unavailable` : ""}`);
-      } finally {
-        populateButton.disabled = targets.length === 0;
+      const populatedParams = await hydrateParameters(target);
+      const requests = await Promise.allSettled(fields.map((inputPort) => postOsc({
+        targets: [target.id],
+        inputPort: inputPort.name,
+        args: [-999]
+      })));
+      await delay(75);
+      const reads = await Promise.allSettled(fields.map((inputPort) => readAck(target, inputPort.name)));
+      let populated = 0;
+      for (let index = 0; index < fields.length; index += 1) {
+        if (requests[index].status !== "fulfilled" || reads[index].status !== "fulfilled") continue;
+        const input = inportsEl.querySelector(`[data-inport="${cssSelectorValue(fields[index].name)}"]`);
+        if (!input) continue;
+        input.value = formatAckValue(reads[index].value);
+        populated += 1;
       }
+      const failed = fields.length - populated;
+      setStatus(`Got ${populatedParams} parameter${populatedParams === 1 ? "" : "s"} and ${populated}/${fields.length} OSC field${fields.length === 1 ? "" : "s"} from ${target.label || target.id}${failed ? `; ${failed} ACK${failed === 1 ? "" : "s"} unavailable` : ""}`);
     }
 
     async function hydrateParameters(target) {

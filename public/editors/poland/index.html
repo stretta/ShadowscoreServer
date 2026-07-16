@@ -300,13 +300,14 @@
         <span id="status" class="status" role="status"></span>
       </div>
     </header>
-    <section id="targets" class="target-strip" aria-label="Poland targets"></section>
     <section class="synth-param-panel">
       <div id="controls" class="synth-param-grid"></div>
     </section>
+    <div id="snapshot-mount"></div>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live Send Destinations</h2><span>Focus selects one. Check additional instances only when multi-output is intentional.</span></div><div id="targets" class="target-strip" aria-label="Poland targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260716-block-state2";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260716-block-state4";
     const POLAND_GROUPS = [
       { title: "MIDI", key: "midi", controls: ["TransposePoland"] },
       { title: "OSC A", key: "oscillator-a", controls: ["VolA", "PitchBiasCoarseA", "PitchBiasFineA", "WavetableA", "WaveBiasA", "WaveModVelA", "WaveModVelRandA", "WaveEnvModDistanceA", "WaveEnvModTimeA"] },
@@ -403,14 +404,18 @@
     }
 
     function renderTargets() {
+      const selected = new Set(Array.from(targetsEl.querySelectorAll("[data-target]:checked"), input => input.dataset.target));
+      const focusedId = readSourceSelect.value || targets[0]?.id || "";
+      const preserveSelection = targets.some(target => selected.has(target.id));
       const cards = targets.map((target) => {
         const label = document.createElement("label");
         label.className = "target-card";
         label.innerHTML = `
-          <input type="checkbox" checked data-target="${escapeHtml(target.id)}">
+          <input type="checkbox" data-target="${escapeHtml(target.id)}">
           <span class="target-name">${escapeHtml(target.label || target.id)}</span>
           <span class="target-detail">${escapeHtml(target.unitId || "")} ${escapeHtml(target.baseAddress || "")}</span>
         `;
+        label.querySelector("input").checked = preserveSelection ? selected.has(target.id) : target.id === focusedId;
         return label;
       });
       targetsEl.replaceChildren(...cards);
@@ -721,8 +726,8 @@
       }[char]));
     }
 
-    const snapshotElements = mountOscSnapshotPanel(document.querySelector("main"), { before: document.querySelector(".synth-param-panel"), sourceSelect: readSourceSelect });
-    snapshotClient = createOscSnapshotEditorClient({ app: "poland", roleLabel: "Poland", elements: snapshotElements, serializeDraft: serializeSnapshotDraft, applySnapshot: applySavedSnapshot, onFocusChange: getData, setStatus });
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
+    snapshotClient = createOscSnapshotEditorClient({ app: "poland", roleLabel: "Poland", elements: snapshotElements, serializeDraft: serializeSnapshotDraft, applySnapshot: applySavedSnapshot, onFocusChange: getData, liveTargetRoot: targetsEl, setStatus });
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
   </script>
 </body>

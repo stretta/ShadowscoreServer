@@ -59,14 +59,14 @@
   <header class="ss-top-strip"><div class="top"><div><h1>AnalogSequencer Editor</h1><p class="subtitle">16-stage pitch and step controls</p></div><div id="status" class="status" role="status">Loading targets...</div></div></header>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes"><a href="/">Dashboard</a><a href="/structure-editor">Structure</a><a href="/matrix-edit">Matrix</a><a href="/piano-roll">Piano Roll</a><a href="/event-list">Event List</a><a href="/editors" aria-current="page">OSC Generators</a><a href="/admin">Admin</a></nav>
   <main>
-    <section class="toolbar"><strong>Focus one instance · send to checked instances</strong><div class="toolbar-actions"><label for="read-source">Instance focus</label><select id="read-source" aria-label="Instance focus"></select><button id="get-data" type="button">Read Instance</button><button id="clock-all-off" type="button">Clock Selected Off</button><button id="rtz" class="primary" type="button">RTZ Selected</button><button id="clock-all-on" type="button">Clock Selected On</button><button id="refresh" type="button">Refresh</button></div></section>
-    <section id="targets" class="targets" aria-live="polite"></section>
-    <div id="snapshot-mount"></div>
+    <section class="toolbar"><strong>Focus selects one safe live destination · multi-select below when intentional</strong><div class="toolbar-actions"><label for="read-source">Instance focus</label><select id="read-source" aria-label="Instance focus"></select><button id="get-data" type="button">Read Instance</button><button id="clock-all-off" type="button">Clock Selected Off</button><button id="rtz" class="primary" type="button">RTZ Selected</button><button id="clock-all-on" type="button">Clock Selected On</button><button id="refresh" type="button">Refresh</button></div></section>
     <section class="sequencer"><div id="stages" class="stages"></div></section>
     <section class="parameters"><h2>Sequence Parameters</h2><div id="parameters" class="parameter-grid"></div></section>
+    <div id="snapshot-mount"></div>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live Send Destinations</h2><span>Focus selects one. Check additional instances only for intentional multi-output performance.</span></div><div id="targets" class="targets" aria-live="polite"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260716-block-state2";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, oscPlaybackWiperVisible } from "/shared/osc-snapshot-editor.js?v=20260716-block-state4";
     const targetsEl = document.querySelector("#targets");
     const stagesEl = document.querySelector("#stages");
     const parametersEl = document.querySelector("#parameters");
@@ -95,6 +95,7 @@
       serializeDraft: serializeSnapshotDraft,
       applySnapshot: applySavedSnapshot,
       onFocusChange: getData,
+      liveTargetRoot: targetsEl,
       setStatus: (text) => { statusEl.textContent = text; }
     });
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
@@ -115,7 +116,10 @@
     }
 
     function renderTargets() {
-      targetsEl.innerHTML = targets.length ? targets.map(target => `<label class="target"><input type="checkbox" data-target="${escapeHtml(target.id)}" checked><strong>${escapeHtml(target.label || target.id)}</strong><span class="detail">${escapeHtml(target.deviceId || target.unitId || target.host || "")}</span></label>`).join("") : `<span class="empty">No live client found. The editor will populate when AnalogSequencer is instantiated and discovered.</span>`;
+      const selected = new Set(Array.from(targetsEl.querySelectorAll("[data-target]:checked"), input => input.dataset.target));
+      const focusedId = readSourceId || targets[0]?.id || "";
+      const preserveSelection = targets.some(target => selected.has(target.id));
+      targetsEl.innerHTML = targets.length ? targets.map(target => `<label class="target"><input type="checkbox" data-target="${escapeHtml(target.id)}"${(preserveSelection ? selected.has(target.id) : target.id === focusedId) ? " checked" : ""}><strong>${escapeHtml(target.label || target.id)}</strong><span class="detail">${escapeHtml(target.deviceId || target.unitId || target.host || "")}</span></label>`).join("") : `<span class="empty">No live client found. The editor will populate when AnalogSequencer is instantiated and discovered.</span>`;
     }
 
     function renderReadSources() {
@@ -207,7 +211,7 @@
     function selectedTargetIds() { return Array.from(targetsEl.querySelectorAll("[data-target]:checked"), input => input.dataset.target).filter(Boolean); }
     function oscQueryHost(target) { return isLoopback(target.host) ? location.hostname : target.host; }
     function firstDefined(values, fallback) { return values.find(value => value !== undefined && value !== null) ?? fallback; }
-    function setPlayingStage(number) { for (const stage of stagesEl.querySelectorAll(".stage")) { const playing = Number(stage.dataset.stage) === number; stage.classList.toggle("playing", playing); if (playing) stage.setAttribute("aria-current", "step"); else stage.removeAttribute("aria-current"); } }
+    function setPlayingStage(number) { const state = snapshotClient?.snapshotState(); const visible = oscPlaybackWiperVisible({ editingBlockId: state?.blockId, playingBlockId: state?.playingBlockId, running: state?.playback?.running }); for (const stage of stagesEl.querySelectorAll(".stage")) { const playing = visible && Number(stage.dataset.stage) === number; stage.classList.toggle("playing", playing); if (playing) stage.setAttribute("aria-current", "step"); else stage.removeAttribute("aria-current"); } }
     function applyMaxCount(maxCount) { for (const stage of stagesEl.querySelectorAll(".stage")) { const unused = Number(stage.dataset.stage) > maxCount; stage.classList.toggle("unused", unused); for (const input of stage.querySelectorAll("input")) input.disabled = unused || stage.classList.contains("missing"); } }
     function maxCountValue(target) { return maxCountParamValue((target.parameters || []).find(isMaxCountParam)); }
     function maxCountParamValue(param) { return clamp(integerValue(param?.value, 16), 1, 16); }

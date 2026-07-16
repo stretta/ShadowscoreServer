@@ -8,10 +8,12 @@ import {
   oscChaseHydration,
   oscClockRecallNotice,
   oscEditorParamValue,
+  oscPlaybackWiperVisible,
   oscRecallSummary,
   oscWriteActionLabel,
   oscWriteAvailability,
   resolveFocusedOscRole,
+  selectExclusiveOscTarget,
   sameOscSnapshot
 } from "../public/shared/osc-snapshot-editor.js";
 
@@ -75,6 +77,26 @@ test("focused live instances resolve their score role without exposing role sele
   ];
   assert.equal(resolveFocusedOscRole({ app: "analogsequencer", targetId: targets[1].id, targets, assignments }), "analog-b");
   assert.equal(resolveFocusedOscRole({ app: "analogsequencer", targetId: "missing", targets, assignments }), "");
+});
+
+test("focusing an instance makes it the sole live-send destination", () => {
+  const inputs = [
+    { checked: true, dataset: { target: "analog-5" } },
+    { checked: true, dataset: { target: "analog-11" } },
+    { checked: false, dataset: { target: "analog-17" } }
+  ];
+  const root = { querySelectorAll: () => inputs };
+  assert.equal(selectExclusiveOscTarget(root, "analog-11"), true);
+  assert.deepEqual(inputs.map(({ checked }) => checked), [false, true, false]);
+  assert.equal(selectExclusiveOscTarget(root, "missing"), false);
+  assert.deepEqual(inputs.map(({ checked }) => checked), [false, false, false]);
+});
+
+test("the playback wiper is visible only when PLAYING and EDITING match", () => {
+  assert.equal(oscPlaybackWiperVisible({ editingBlockId: "E", playingBlockId: "E", running: true }), true);
+  assert.equal(oscPlaybackWiperVisible({ editingBlockId: "A", playingBlockId: "E", running: true }), false);
+  assert.equal(oscPlaybackWiperVisible({ editingBlockId: "E", playingBlockId: "E", running: false }), false);
+  assert.equal(oscPlaybackWiperVisible({ editingBlockId: "", playingBlockId: "E", running: true }), false);
 });
 
 test("block slots distinguish unspecified state from explicitly written empty data", () => {

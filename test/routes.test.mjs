@@ -3434,7 +3434,8 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /param\.values/);
   assert.match(response.body, /isToggleParam/);
   assert.match(response.body, /Instance focus/);
-  assert.match(response.body, />Read Instance</);
+  assert.doesNotMatch(response.body, />Read Instance</);
+  assert.match(response.body, /readOnBlockChange: true/);
   assert.match(response.body, /args: \[-999\]/);
   assert.match(response.body, /messages\/out\/\$\{encodeURIComponent\(inputPortName\)\}Ack/);
   assert.match(response.body, /formatAckValue/);
@@ -3474,6 +3475,8 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /sendGlobalParam/);
   assert.match(response.body, /Instance focus/);
   assert.match(response.body, /async function getData/);
+  assert.doesNotMatch(response.body, />Read Instance</);
+  assert.match(response.body, /readOnBlockChange: true/);
   assert.match(response.body, /OSCQuery parameter read failed/);
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
@@ -3496,6 +3499,7 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /type = "checkbox"/);
   assert.match(response.body, /messages\/out\/current_stage/);
   assert.match(response.body, /setPlayingStage/);
+  assert.match(response.body, /oscPlaybackWiperVisible/);
   assert.match(response.body, /stagePollGeneration/);
   assert.match(response.body, /isCurrentStagePoll/);
   assert.match(response.body, /\.stage\.playing/);
@@ -3530,6 +3534,30 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /serializeSnapshotDraft/);
   assert.match(response.body, /applySavedSnapshot/);
   assert.match(response.body, /dataset\.snapshotValue/);
+});
+
+test("OSC editors place controls above Block State and live destinations below it", async () => {
+  const context = createRouteContext();
+  const editors = [
+    ["analogsequencer", 'id="stages"'],
+    ["listsequencer", 'id="inports"'],
+    ["listvelsequencer", 'id="parameters"'],
+    ["plate", 'id="controls"'],
+    ["poland", 'id="controls"'],
+    ["softpiano", 'id="panels"'],
+    ["ttid", 'id="editors"']
+  ];
+  for (const [editor, controlsMarker] of editors) {
+    const response = await request(context, "GET", `/editors/${editor}`);
+    assert.equal(response.status, 200);
+    const controlsIndex = response.body.indexOf(controlsMarker);
+    const blockStateIndex = response.body.indexOf('id="snapshot-mount"');
+    const targetsIndex = response.body.indexOf('id="targets"');
+    assert.ok(controlsIndex >= 0 && controlsIndex < blockStateIndex, `${editor} controls should precede Block State`);
+    assert.ok(blockStateIndex < targetsIndex, `${editor} live destinations should follow Block State`);
+    assert.match(response.body, /Live Send Destinations/);
+    assert.match(response.body, /liveTargetRoot: targetsEl/);
+  }
 });
 
 test("OSC volume tool route serves target selection and trim controls", async () => {

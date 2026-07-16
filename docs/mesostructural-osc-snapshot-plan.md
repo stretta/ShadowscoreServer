@@ -468,6 +468,12 @@ and clip bookkeeping is available only under advanced tools. Browser and rig
 acceptance of the streamlined presentation passed against the live wren and
 finch setup.
 
+The proposed next authoring refinement is separated into
+[`osc-block-state-authoring-ui-plan.md`](osc-block-state-authoring-ui-plan.md).
+It remains under workflow review and does not supersede the implemented Phase E
+behavior until its save, Unspecified-slot, focus, onboarding, and copy questions
+are resolved through prototype testing.
+
 - Remove **Write snapshot to** and any path that serializes the editor's local
   draft directly into score state.
 - Reuse the editor's single focused instance as the state source and derive its

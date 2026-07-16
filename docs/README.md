@@ -17,12 +17,16 @@ Start with the current guides:
 - [`mesostructural-osc-snapshot-plan.md`](mesostructural-osc-snapshot-plan.md):
   instance-captured OSC clips, mesostructural role-to-clip layers, live resource
   mapping/onboarding, ordered recall, score initialization, timing results, and
-  the selected staging/commit direction. The OSC payload contract is in
+  the deferred staging/commit proposal. The OSC payload contract is in
   [`osc-snapshot-contract.md`](osc-snapshot-contract.md), and the RNBO-side
   transaction is in
   [`rnbo-osc-snapshot-staging-protocol.md`](rnbo-osc-snapshot-staging-protocol.md).
   The stopped-transport live baseline is repeatable with
   `tools/measure-osc-snapshot.mjs`.
+- [`osc-block-state-authoring-ui-plan.md`](osc-block-state-authoring-ui-plan.md):
+  proposed initial-authoring workflow for instance cards, Written and
+  Unspecified block states, just-in-time onboarding, independent cross-instance
+  copying, and the prototype questions that must be tested before rollout.
 
 Design and implementation notes:
 

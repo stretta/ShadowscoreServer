@@ -121,7 +121,7 @@ export function createOscSnapshotEditorClient(options) {
       setChase(elements.chaseInput.checked);
       if (chase) selectPlayingBlock();
       renderContext();
-      if (chase) hydrateEditingContext().catch(reportError);
+      if (chase) hydrateChasedPlayingBlock("", { force: true }).catch(reportError);
       loadLastRecall().catch(reportError);
     });
     elements.sourceSelect?.addEventListener("change", () => changeFocusedInstance().catch(reportError));
@@ -361,7 +361,7 @@ export function createOscSnapshotEditorClient(options) {
       rememberDisplayedDraft();
       selectPlayingBlock();
       renderContext();
-      await hydrateEditingContext();
+      await hydrateChasedPlayingBlock(previousPlaying);
       await loadLastRecall();
       return;
     }
@@ -380,7 +380,7 @@ export function createOscSnapshotEditorClient(options) {
       if (chase) selectPlayingBlock();
       renderContext();
       if (chase && playingBlockId() !== previousPlaying) {
-        hydrateEditingContext().catch(reportError);
+        hydrateChasedPlayingBlock(previousPlaying).catch(reportError);
       }
       if (event.type.startsWith("osc.assignment.")) refreshAssignments().catch(reportError);
     };
@@ -576,6 +576,7 @@ export function createOscSnapshotEditorClient(options) {
   }
   async function hydrateChasedPlayingBlock(previousBlockId, { force = false } = {}) {
     const blockId = playingBlockId();
+    const targetId = elements.sourceSelect?.value;
     const roleId = synchronizeFocusedRole();
     const hydration = oscChaseHydration({
       score,
@@ -587,7 +588,15 @@ export function createOscSnapshotEditorClient(options) {
       force
     });
     if (hydration.status !== "Written") return hydration;
-    await options.applySnapshot(structuredClone(hydration.clip));
+    const focusedTargetId = elements.sourceSelect?.value;
+    activeDraftKey = draftKey(roleId, targetId, blockId);
+    applyingDraft = true;
+    try { await options.applySnapshot(structuredClone(hydration.clip)); } finally { applyingDraft = false; }
+    if (elements.sourceSelect?.value !== focusedTargetId) elements.sourceSelect.value = focusedTargetId;
+    const normalizedDraft = structuredClone(options.serializeDraft());
+    drafts.set(activeDraftKey, normalizedDraft);
+    savedDrafts.set(activeDraftKey, structuredClone(normalizedDraft));
+    renderContext();
     options.setStatus?.(`Chased PLAYING ${blockId} written state into the editor; no OSC was sent by the editor`);
     return hydration;
   }

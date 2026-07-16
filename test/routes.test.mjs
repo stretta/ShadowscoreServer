@@ -206,6 +206,7 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /RNBO resend in progress/);
   assert.match(response.body, /Last commit/);
   assert.match(response.body, /\/admin\/rnbo\/resend/);
+  assert.match(response.body, /previousTargetInventory !== rnboTargetInventory\(discoveredTargets\)/);
   assert.match(response.body, /voice\.assignment\.reconciled/);
   assert.match(response.body, /OSCQuery Devices/);
   assert.match(response.body, /OSC control roles/);
@@ -3446,6 +3447,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
+  assert.match(response.body, /20260716-chase-focus1/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -3482,6 +3484,7 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotDraft/);
   assert.match(response.body, /applySavedSnapshot/);
+  assert.match(response.body, /20260716-chase-focus1/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -3550,6 +3553,7 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
+    assert.match(response.body, /20260716-chase-focus1/, `${editor} should load the chase/focus-safe shared client`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');
     const targetsIndex = response.body.indexOf('id="targets"');
@@ -3630,6 +3634,8 @@ test("shared OSC snapshot editor client is served as a static asset", async () =
   assert.match(response.body, /Unwritten Draft/);
   assert.match(response.body, /resolveFocusedOscRole/);
   assert.match(response.body, /oscBlockSlotState/);
+  assert.match(response.body, /hydrateChasedPlayingBlock\(previousPlaying\)/);
+  assert.match(response.body, /elements\.sourceSelect\?\.value !== focusedTargetId/);
   assert.match(response.body, /roles: \[roleId\]/);
   assert.match(response.body, /Loaded .* into the editor; no OSC was sent/);
   assert.match(response.body, /captured from .*complete/);

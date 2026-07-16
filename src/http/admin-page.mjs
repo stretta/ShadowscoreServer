@@ -1035,10 +1035,26 @@ export function adminPage() {
     async function refreshRnboTargets() {
       const response = await fetch("/rnbo/targets");
       const body = await response.json();
+      const previousTargetInventory = rnboTargetInventory(discoveredTargets);
       discoveredTargets = body.targets ?? [];
       rnboSendQueue = body.sendQueue ?? rnboSendQueue;
       renderRnboSendState();
       renderTargets(discoveredTargets);
+      if (currentScore && previousTargetInventory !== rnboTargetInventory(discoveredTargets)) {
+        render(currentScore);
+      }
+    }
+
+    function rnboTargetInventory(targets) {
+      return JSON.stringify(targets.map((target) => [
+        target.id,
+        target.available !== false,
+        target.host,
+        target.port,
+        target.address,
+        target.name,
+        target.hardwareUnitId
+      ]));
     }
 
     async function loadOscQueryDevices(force = false) {

@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   createOscEditorSnapshot,
   oscBlockSlotState,
+  oscChaseHydration,
   oscClockRecallNotice,
   oscEditorParamValue,
   oscRecallSummary,
@@ -87,4 +88,39 @@ test("block slots distinguish unspecified state from explicitly written empty da
   assert.deepEqual(oscBlockSlotState(score, "B", "list-a"), { status: "Unspecified", clipId: "", clip: null });
   assert.equal(oscWriteActionLabel({ blockId: "A", written: true }), "Replace A State");
   assert.equal(oscWriteActionLabel({ blockId: "B", written: false }), "Write to B");
+});
+
+test("chase hydrates only a newly playing written state", () => {
+  const written = { schemaVersion: 1, app: "analogsequencer", params: { Clock: 1, GateTime: 72 }, inputPorts: {} };
+  const score = {
+    oscClips: { "b-analog": written },
+    mesostructure: {
+      A: { oscLayers: {} },
+      B: { oscLayers: { "analog-a": { clipId: "b-analog" } } }
+    }
+  };
+  assert.deepEqual(oscChaseHydration({ score, previousBlockId: "A", blockId: "B", roleId: "analog-a", chase: true }), {
+    status: "Written",
+    clip: written
+  });
+  assert.deepEqual(oscChaseHydration({ score, previousBlockId: "B", blockId: "B", roleId: "analog-a", chase: true }), {
+    status: "Unchanged",
+    clip: null
+  });
+  assert.deepEqual(oscChaseHydration({ score, previousBlockId: "A", blockId: "B", roleId: "analog-a", chase: false }), {
+    status: "Unchanged",
+    clip: null
+  });
+  assert.deepEqual(oscChaseHydration({ score, previousBlockId: "A", blockId: "B", roleId: "analog-a", chase: true, ignored: true }), {
+    status: "Unchanged",
+    clip: null
+  });
+  assert.deepEqual(oscChaseHydration({ score, previousBlockId: "B", blockId: "B", roleId: "analog-a", chase: true, force: true }), {
+    status: "Written",
+    clip: written
+  });
+  assert.deepEqual(oscChaseHydration({ score, previousBlockId: "B", blockId: "A", roleId: "analog-a", chase: true }), {
+    status: "Unspecified",
+    clip: null
+  });
 });

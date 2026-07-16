@@ -109,6 +109,7 @@ export function createOscSnapshotEditorClient(options) {
       setChase(elements.chaseInput.checked);
       if (chase) selectPlayingBlock();
       renderContext();
+      if (chase) hydrateChasedPlayingBlock("", { force: true }).catch(reportError);
       loadLastRecall().catch(reportError);
     });
     elements.sourceSelect?.addEventListener("change", async () => {
@@ -344,6 +345,7 @@ export function createOscSnapshotEditorClient(options) {
     if (chase && playingBlockId() !== previousPlaying) {
       selectPlayingBlock();
       renderContext();
+      await hydrateChasedPlayingBlock(previousPlaying);
       await loadLastRecall();
       return;
     }
@@ -354,12 +356,16 @@ export function createOscSnapshotEditorClient(options) {
   function connectEvents() {
     events = new EventSource("/events");
     const updateScore = (event) => {
+      const previousPlaying = playingBlockId();
       const payload = JSON.parse(event.data);
       if (!payload.score) return;
       score = payload.score;
       assignments = score.oscAssignments ?? {};
       if (chase) selectPlayingBlock();
       renderContext();
+      if (chase && playingBlockId() !== previousPlaying) {
+        hydrateChasedPlayingBlock(previousPlaying).catch(reportError);
+      }
       if (event.type.startsWith("osc.assignment.")) refreshAssignments().catch(reportError);
     };
     for (const eventName of [
@@ -435,6 +441,23 @@ export function createOscSnapshotEditorClient(options) {
     const blockId = playingBlockId();
     if (blockId && score?.mesostructure?.[blockId] && elements.blockSelect) elements.blockSelect.value = blockId;
   }
+  async function hydrateChasedPlayingBlock(previousBlockId, { force = false } = {}) {
+    const blockId = playingBlockId();
+    const roleId = synchronizeFocusedRole();
+    const hydration = oscChaseHydration({
+      score,
+      previousBlockId,
+      blockId,
+      roleId,
+      chase,
+      ignored: Boolean(assignments[roleId]?.ignoreRecall),
+      force
+    });
+    if (hydration.status !== "Written") return hydration;
+    await options.applySnapshot(structuredClone(hydration.clip));
+    options.setStatus?.(`Chased PLAYING ${blockId} written state into the editor; no OSC was sent by the editor`);
+    return hydration;
+  }
   function playingBlockId() {
     return score?.structureState?.activeBlockId || playback?.activeBlockId || "";
   }
@@ -491,6 +514,24 @@ export function oscBlockSlotState(score, blockId, roleId) {
   const layer = score?.mesostructure?.[blockId]?.oscLayers?.[roleId];
   const clip = layer?.clipId ? score?.oscClips?.[layer.clipId] : null;
   return clip ? { status: "Written", clipId: layer.clipId, clip } : { status: "Unspecified", clipId: "", clip: null };
+}
+
+export function oscChaseHydration({
+  score,
+  previousBlockId = "",
+  blockId = "",
+  roleId = "",
+  chase = false,
+  ignored = false,
+  force = false
+} = {}) {
+  if (!chase || ignored || !blockId || !roleId || (!force && blockId === previousBlockId)) {
+    return { status: "Unchanged", clip: null };
+  }
+  const slot = oscBlockSlotState(score, blockId, roleId);
+  return slot.status === "Written"
+    ? { status: "Written", clip: slot.clip }
+    : { status: "Unspecified", clip: null };
 }
 
 export function oscWriteActionLabel({ blockId, written } = {}) {

@@ -329,6 +329,11 @@ Provide a consistent score section without replacing instrument-specific UI:
   server and sends it to the assigned instance.
 - **Ignore Shadowscore recall**: assignment-level opt-out for the selected live
   instance.
+- With **CHASE** enabled, a playing-block change loads the focused role's
+  Written clip into the editor with Max-style `set` semantics: controls update
+  without emitting editor OSC. Unspecified slots and ignored roles leave the
+  editor controls unchanged. Playback recall remains independent across all
+  roles.
 - status: source instance, clip id/name, assigned block and role, routing state,
   active block, and last recall result.
 

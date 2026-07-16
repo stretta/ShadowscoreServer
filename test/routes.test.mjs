@@ -806,6 +806,101 @@ test("OSC onboarding atomically creates and idempotently reuses a role, clip, an
   assert.equal(context.store.getScore().oscClips["other-clip"], undefined);
 });
 
+test("Block State write onboards displayed drafts just in time and copy remains independent", async () => {
+  const firstTarget = captureControlTarget();
+  const secondTarget = {
+    ...captureControlTarget(),
+    id: "rnbo-inst-3:listsequencer",
+    localId: "rnbo-inst-3:listsequencer",
+    label: "List Sequencer 3",
+    baseAddress: "/rnbo/inst/3",
+    instance: "aux",
+    parameters: [
+      { name: "Clock", address: "/rnbo/inst/3/params/Clock" },
+      { name: "GateTime", address: "/rnbo/inst/3/params/GateTime" }
+    ]
+  };
+  const context = createRouteContext({
+    runtime: {
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() { return [firstTarget, secondTarget]; }
+      }
+    }
+  });
+  const draft = { schemaVersion: 1, app: "listsequencer", params: { Clock: 0, GateTime: 0.4 }, inputPorts: { Steps: [] } };
+
+  const written = await requestJson(context, "POST", "/osc/block-state/write", {
+    targetId: "heron:listsequencer:main",
+    blockId: "A",
+    expectedStructureRevision: 0,
+    snapshot: draft
+  });
+  assert.equal(written.createdRole, true);
+  assert.equal(written.roleId, "listsequencer-1");
+  assert.deepEqual(written.clip.params, draft.params);
+  assert.equal(written.score.oscAssignments[written.roleId].oscTargetId, "heron:listsequencer:main");
+  assert.equal(written.score.mesostructure.A.oscLayers[written.roleId].clipId, written.clipId);
+
+  const copied = await requestJson(context, "POST", "/osc/block-state/copy", {
+    targetId: "heron:listsequencer:aux",
+    blockId: "A",
+    expectedStructureRevision: written.score.structureRevision,
+    snapshot: draft
+  });
+  assert.equal(copied.roleId, "listsequencer-2");
+  assert.notEqual(copied.clipId, written.clipId);
+  assert.deepEqual(copied.clip.params, written.clip.params);
+
+  const rejected = await request(context, "POST", "/osc/block-state/copy", {
+    targetId: "heron:listsequencer:aux",
+    blockId: "A",
+    expectedStructureRevision: copied.score.structureRevision,
+    snapshot: { ...draft, params: { ...draft.params, GateTime: 0.8 } }
+  });
+  assert.equal(rejected.status, 409);
+  assert.match(rejected.body, /replacement intent is required/);
+
+  const replaced = await requestJson(context, "POST", "/osc/block-state/copy", {
+    targetId: "heron:listsequencer:aux",
+    blockId: "A",
+    expectedStructureRevision: copied.score.structureRevision,
+    replace: true,
+    snapshot: { ...draft, params: { ...draft.params, GateTime: 0.8 } }
+  });
+  assert.notEqual(replaced.clipId, copied.clipId);
+  assert.equal(replaced.clip.params.GateTime, 0.8);
+  assert.equal(replaced.score.oscClips[written.clipId].params.GateTime, 0.4);
+});
+
+test("Block State write leaves compatible unresolved roles untouched for Admin resolution", async () => {
+  const context = createRouteContext({
+    runtime: {
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() { return [captureControlTarget()]; }
+      }
+    }
+  });
+  await requestJson(context, "PUT", "/osc/assignments/list-existing", {
+    app: "listsequencer",
+    deviceId: "heron",
+    oscTargetId: "heron:listsequencer:offline"
+  });
+  const before = context.store.getScore();
+  const rejected = await request(context, "POST", "/osc/block-state/write", {
+    targetId: "heron:listsequencer:main",
+    blockId: "A",
+    expectedStructureRevision: before.structureRevision,
+    snapshot: { schemaVersion: 1, app: "listsequencer", params: { Clock: 0 }, inputPorts: { Steps: [] } }
+  });
+  assert.equal(rejected.status, 409);
+  assert.match(rejected.body, /require assignment in Admin/);
+  assert.deepEqual(context.store.getScore(), before);
+});
+
 test("automatic OSC onboarding endpoint obeys configured stable role templates", async () => {
   const config = mergeConfig(defaultConfig, { osc: { onboarding: { automatic: { enabled: true, roles: [
     { roleId: "list-auto", label: "List Auto", app: "listsequencer", deviceId: "heron" }
@@ -3494,15 +3589,17 @@ test("shared OSC snapshot editor client is served as a static asset", async () =
   assert.match(response.body, /PLAYING/);
   assert.match(response.body, /EDITING/);
   assert.match(response.body, /CHASE/);
-  assert.match(response.body, /Write to —/);
+  assert.match(response.body, /Write — State/);
   assert.match(response.body, /Unspecified/);
   assert.match(response.body, /Advanced clip tools/);
   assert.match(response.body, /Assign Selected Clip/);
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /oscClockRecallNotice/);
   assert.match(response.body, /expectedStructureRevision/);
-  assert.match(response.body, /Turn CHASE off to write another block/);
-  assert.match(response.body, /Choose a different EDITING block before writing/);
+  assert.match(response.body, /osc\/block-state\/write/);
+  assert.match(response.body, /osc\/block-state\/copy/);
+  assert.match(response.body, /Save Copy To/);
+  assert.match(response.body, /Unwritten Draft/);
   assert.match(response.body, /resolveFocusedOscRole/);
   assert.match(response.body, /oscBlockSlotState/);
   assert.match(response.body, /roles: \[roleId\]/);

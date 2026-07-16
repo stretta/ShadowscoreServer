@@ -28,8 +28,21 @@ test("OSC role resolution preserves offline and unassigned mappings", () => {
   assert.equal(unassigned.status, "unassigned");
 });
 
-test("OSC role resolution marks multiple compatible targets ambiguous", () => {
+test("OSC role resolution prefers an exact live target among multiple compatible instances", () => {
   const assignment = { app: "plate", deviceId: "heron", oscTargetId: "heron:plate:one" };
+  const targets = [
+    oscTarget({ id: "heron:plate:one", deviceId: "heron", app: "plate" }),
+    oscTarget({ id: "heron:plate:two", deviceId: "heron", app: "plate" })
+  ];
+  const resolved = resolveOscAssignment("plate-a", assignment, targets);
+
+  assert.equal(resolved.status, "online");
+  assert.equal(resolved.target.id, "heron:plate:one");
+  assert.deepEqual(resolved.compatibleTargetIds, ["heron:plate:one", "heron:plate:two"]);
+});
+
+test("OSC role resolution keeps stale assignments ambiguous across multiple compatible instances", () => {
+  const assignment = { app: "plate", deviceId: "heron", oscTargetId: "heron:plate:old" };
   const targets = [
     oscTarget({ id: "heron:plate:one", deviceId: "heron", app: "plate" }),
     oscTarget({ id: "heron:plate:two", deviceId: "heron", app: "plate" })
@@ -38,7 +51,6 @@ test("OSC role resolution marks multiple compatible targets ambiguous", () => {
 
   assert.equal(resolved.status, "ambiguous");
   assert.equal(resolved.target, undefined);
-  assert.deepEqual(resolved.compatibleTargetIds, ["heron:plate:one", "heron:plate:two"]);
 });
 
 test("locked OSC roles never retarget and ignored roles never become sendable", () => {

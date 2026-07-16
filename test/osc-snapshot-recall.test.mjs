@@ -36,19 +36,21 @@ test("snapshot compiler orders params, lists, late state, and Clock while report
 test("snapshot compiler translates numeric enum indexes to live OSCQuery string values", () => {
   const compiled = compileOscSnapshot({
     app: "analogsequencer",
-    params: { ClockRate: 2, Mode: 1, Invalid: 9 }
+    params: { ClockRate: 2, Mode: 1, MaxCnt: 16, Invalid: 9 }
   }, oscTarget({
     app: "analogsequencer",
     parameters: [
       { ...param("ClockRate"), type: "s", values: ["4n", "8nd", "8n", "16n"] },
       { ...param("Mode"), type: "s", values: ["Forward", "Backward", "Palindrome"] },
+      { ...param("MaxCnt"), type: "s", values: Array.from({ length: 16 }, (_, index) => String(index + 1)) },
       { ...param("Invalid"), type: "s", values: ["Off", "On"] }
     ]
   }));
 
   assert.deepEqual(compiled.writes.map((write) => [write.name, write.args]), [
     ["ClockRate", ["8n"]],
-    ["Mode", ["Backward"]]
+    ["Mode", ["Backward"]],
+    ["MaxCnt", ["16"]]
   ]);
   assert.deepEqual(compiled.missingControls, [{
     kind: "param", name: "Invalid", reason: "invalid-enum-index", value: 9, choiceCount: 2

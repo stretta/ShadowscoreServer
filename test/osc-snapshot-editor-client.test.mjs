@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createOscEditorSnapshot,
+  oscBlockDraftKey,
+  oscBlockDraftState,
   oscBlockSlotState,
   oscChaseHydration,
   oscClockRecallNotice,
@@ -26,17 +28,17 @@ test("shared OSC editor snapshot core normalizes parameter and list drafts", () 
   });
 });
 
-test("writing follows playback and chase safety rules", () => {
-  assert.deepEqual(oscWriteAvailability({ running: false, chase: true, blockId: "A", playingBlockId: "A" }), { allowed: true, reason: "" });
-  assert.deepEqual(oscWriteAvailability({ running: true, chase: true, blockId: "A", playingBlockId: "A" }), {
+test("writing depends on focused context, draft completeness, and semantic dirtiness", () => {
+  assert.deepEqual(oscWriteAvailability({ blockId: "A", targetId: "analog-1", complete: true, written: false, dirty: true }), { allowed: true, reason: "" });
+  assert.deepEqual(oscWriteAvailability({ blockId: "A", targetId: "analog-1", complete: true, written: true, dirty: false }), {
     allowed: false,
-    reason: "PLAYING A. Turn CHASE off to write another block while playback continues."
+    reason: "A State is saved"
   });
-  assert.deepEqual(oscWriteAvailability({ running: true, chase: false, blockId: "A", playingBlockId: "A" }), {
+  assert.deepEqual(oscWriteAvailability({ blockId: "B", targetId: "analog-1", complete: false }), {
     allowed: false,
-    reason: "PLAYING A. Choose a different EDITING block before writing."
+    reason: "Complete the displayed draft before writing"
   });
-  assert.deepEqual(oscWriteAvailability({ running: true, chase: false, blockId: "B", playingBlockId: "A" }), { allowed: true, reason: "" });
+  assert.deepEqual(oscWriteAvailability({ blockId: "B", complete: true }), { allowed: false, reason: "Focus an online instance" });
 });
 
 test("shared OSC editor snapshot core stores string enums as numeric option indexes", () => {
@@ -87,7 +89,17 @@ test("block slots distinguish unspecified state from explicitly written empty da
   assert.deepEqual(oscBlockSlotState(score, "A", "list-a"), { status: "Written", clipId: "a-list", clip: emptyClip });
   assert.deepEqual(oscBlockSlotState(score, "B", "list-a"), { status: "Unspecified", clipId: "", clip: null });
   assert.equal(oscWriteActionLabel({ blockId: "A", written: true }), "Replace A State");
-  assert.equal(oscWriteActionLabel({ blockId: "B", written: false }), "Write to B");
+  assert.equal(oscWriteActionLabel({ blockId: "B", written: false }), "Write B State");
+});
+
+test("draft state is keyed independently by role and block and distinguishes dirty from provisional", () => {
+  const saved = { schemaVersion: 1, app: "plate", params: { Decay: 0.5 }, inputPorts: {} };
+  assert.equal(oscBlockDraftKey({ roleId: "plate-1", targetId: "live", blockId: "B" }), "role:plate-1|B");
+  assert.equal(oscBlockDraftKey({ targetId: "live", blockId: "B" }), "target:live|B");
+  assert.equal(oscBlockDraftState({ draft: null, saved }), "Written");
+  assert.equal(oscBlockDraftState({ draft: saved, saved }), "Saved");
+  assert.equal(oscBlockDraftState({ draft: { ...saved, params: { Decay: 0.7 } }, saved }), "Dirty");
+  assert.equal(oscBlockDraftState({ draft: saved, saved: null }), "Unwritten Draft");
 });
 
 test("chase hydrates only a newly playing written state", () => {

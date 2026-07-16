@@ -224,6 +224,8 @@ function liveParameterArgs(control, args, missingControls, name) {
   const choices = Array.from(new Set(control.values.map(String)));
   const index = Number(args[0]);
   if (!Number.isInteger(index) || index < 0 || index >= choices.length) {
+    const legacyChoice = choices.find((choice) => choice === String(args[0]));
+    if (legacyChoice !== undefined) return [legacyChoice];
     missingControls.push({ kind: "param", name, reason: "invalid-enum-index", value: args[0], choiceCount: choices.length });
     return null;
   }

@@ -204,6 +204,56 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && (url.pathname === "/osc/block-state/write" || url.pathname === "/osc/block-state/copy")) {
+    try {
+      const body = await readJson(request);
+      const targetId = requiredString(body.targetId, "targetId");
+      const blockId = requiredString(body.blockId, "blockId");
+      const currentScore = store.getScore();
+      if (!currentScore.mesostructure?.[blockId]) throw new Error(`unknown mesostructural block '${blockId}'`);
+      const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+      const target = targets.find((entry) => entry.id === targetId || entry.rnboTargetId === targetId);
+      if (!target) throw new Error(`unknown OSC target '${targetId}'`);
+      if (target.status !== "online" || !target.sendable) throw new Error(`OSC target '${target.id}' is not online and sendable`);
+      const role = blockStateRoleForTarget(currentScore, target, targets);
+      const roleId = role.roleId;
+      const existingLayer = currentScore.mesostructure[blockId].oscLayers?.[roleId];
+      const copying = url.pathname.endsWith("/copy");
+      const replace = Boolean(body.replace);
+      if (existingLayer?.clipId && !replace) {
+        const error = new Error(`${blockId} is already Written for '${roleId}'; replacement intent is required`);
+        error.code = "OSC_BLOCK_STATE_WRITTEN";
+        throw error;
+      }
+      const baseClipId = `${blockId}-${roleId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+      const clipId = copying
+        ? uniqueOscClipId(currentScore, `${baseClipId}-copy`)
+        : existingLayer?.clipId || uniqueOscClipId(currentScore, baseClipId);
+      const snapshot = body.snapshot ?? body.draft ?? body.clip;
+      if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) throw new Error("snapshot is required");
+      const label = role.assignment.label || target.label || roleId;
+      const clip = { ...snapshot, name: optionalString(body.name) || `${blockId} · ${label}` };
+      const score = store.writeOscBlockState(roleId, role.assignment, clipId, clip, blockId, {
+        ...revisionOptions(body),
+        replace
+      });
+      writeJson(response, existingLayer ? 200 : 201, {
+        ok: true,
+        blockId,
+        roleId,
+        clipId,
+        createdRole: role.created,
+        copied: copying,
+        assignment: score.oscAssignments[roleId],
+        clip: score.oscClips[clipId],
+        score
+      });
+    } catch (error) {
+      writeError(response, error, error?.code === "OSC_BLOCK_STATE_WRITTEN" || error?.code === "OSC_ROLE_ASSIGNMENT_REQUIRED" ? 409 : 400);
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/osc/onboard/automatic") {
     try {
       writeJson(response, 200, { ok: true, ...(await automaticOscOnboardingFromRuntime(store, config, runtime)) });
@@ -1864,6 +1914,51 @@ function requiredString(value, field) {
   const text = optionalString(value);
   if (!text) throw new Error(`${field} is required`);
   return text;
+}
+
+function blockStateRoleForTarget(score, target, targets = []) {
+  const app = optionalString(target.app).toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+  const targetId = optionalString(target.id);
+  const deviceId = optionalString(target.deviceId || target.unitId);
+  const exact = Object.entries(score.oscAssignments ?? {}).find(([, assignment]) => assignment.oscTargetId === targetId);
+  if (exact) {
+    if (optionalString(exact[1].app) !== app) throw new Error(`OSC target '${targetId}' is assigned to incompatible role '${exact[0]}'`);
+    return { roleId: exact[0], assignment: exact[1], created: false };
+  }
+  const compatible = Object.entries(score.oscAssignments ?? {}).filter(([, assignment]) => {
+    if (optionalString(assignment.app) !== app || optionalString(assignment.deviceId) !== deviceId) return false;
+    const assignedTargetId = optionalString(assignment.oscTargetId);
+    return !assignedTargetId || !targets.some((entry) => entry.id === assignedTargetId && entry.status === "online" && entry.sendable);
+  });
+  if (compatible.length) {
+    const error = new Error(`${compatible.length} compatible unresolved score role${compatible.length === 1 ? "" : "s"} require assignment in Admin before writing`);
+    error.code = "OSC_ROLE_ASSIGNMENT_REQUIRED";
+    throw error;
+  }
+  const used = new Set(Object.keys(score.oscAssignments ?? {}));
+  let ordinal = 1;
+  while (used.has(`${app}-${ordinal}`)) ordinal += 1;
+  const roleId = `${app}-${ordinal}`;
+  return {
+    roleId,
+    created: true,
+    assignment: {
+      label: optionalString(target.label) || `${app} ${ordinal}`,
+      app,
+      deviceId,
+      oscTargetId: targetId,
+      ignoreRecall: false,
+      locked: false
+    }
+  };
+}
+
+function uniqueOscClipId(score, requested) {
+  const base = requiredString(requested, "clipId");
+  if (!score.oscClips?.[base]) return base;
+  let suffix = 2;
+  while (score.oscClips?.[`${base}-${suffix}`]) suffix += 1;
+  return `${base}-${suffix}`;
 }
 
 function revisionOptions(body) {

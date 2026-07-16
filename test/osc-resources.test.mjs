@@ -19,11 +19,12 @@ test("OSC resource report distinguishes mapped, compatible, offline, ambiguous, 
   ];
 
   const report = buildOscResourceReport(assignments, targets);
-  assert.equal(report.roles.find(({ roleId }) => roleId === "list-a").status, "ambiguous");
+  assert.equal(report.roles.find(({ roleId }) => roleId === "list-a").status, "mapped");
   assert.equal(report.roles.find(({ roleId }) => roleId === "plate-a").status, "mapped");
   assert.equal(report.roles.find(({ roleId }) => roleId === "analog-a").status, "offline");
   assert.equal(report.roles.find(({ roleId }) => roleId === "missing-a").status, "offline");
-  assert.equal(report.resources.find(({ targetId }) => targetId === "list-1").status, "compatible");
+  assert.equal(report.resources.find(({ targetId }) => targetId === "list-1").status, "mapped");
+  assert.equal(report.resources.find(({ targetId }) => targetId === "list-2").status, "compatible");
   assert.equal(report.resources.find(({ targetId }) => targetId === "plate-1").status, "mapped");
   assert.equal(report.resources.find(({ targetId }) => targetId === "analog-1").status, "offline");
   assert.equal(report.resources.find(({ targetId }) => targetId === "ttid-1").status, "ambiguous");

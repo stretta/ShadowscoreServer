@@ -35,6 +35,11 @@ export function resolveOscAssignment(roleId, assignment = {}, targets = []) {
       ignored ? "Recall is disabled for this role." : "Locked target is online.");
   }
 
+  if (exactTarget && targetIsOnline(exactTarget) && targetMatches(exactTarget, { app, deviceId }, { allowEmptyDevice: true })) {
+    return resolution(role, assignment, ignored ? "ignored" : "online", exactTarget, compatible,
+      ignored ? "Recall is disabled for this role." : "Assigned target is online.");
+  }
+
   if (ambiguousCompatible.length || onlineCompatible.length > 1) {
     return resolution(role, assignment, "ambiguous", undefined, compatible,
       `${Math.max(ambiguousCompatible.length, onlineCompatible.length)} compatible live targets require an explicit locked selection.`);
@@ -43,11 +48,6 @@ export function resolveOscAssignment(roleId, assignment = {}, targets = []) {
   if (onlineCompatible.length === 1) {
     const target = onlineCompatible[0];
     return resolution(role, assignment, ignored ? "ignored" : "online", target, compatible,
-      ignored ? "Recall is disabled for this role." : "Assigned target is online.");
-  }
-
-  if (exactTarget && targetIsOnline(exactTarget) && targetMatches(exactTarget, { app, deviceId }, { allowEmptyDevice: true })) {
-    return resolution(role, assignment, ignored ? "ignored" : "online", exactTarget, compatible,
       ignored ? "Recall is disabled for this role." : "Assigned target is online.");
   }
 

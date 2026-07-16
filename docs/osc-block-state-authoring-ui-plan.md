@@ -1,8 +1,28 @@
 # OSC Block-State Authoring UI Development Plan
 
-Status: proposed workflow for review. This document does not authorize an
-implementation and does not replace the current OSC snapshot contract until
-the open questions below are resolved through prototype testing.
+Status: implemented and live-verified in the shared OSC editor workflow on
+2026-07-16. The
+normal editor now uses draft-backed Block State writes, just-in-time role
+creation, per-instance/block draft preservation, instance cards, role-level
+Ignore recall, and independent Save Copy To transactions. The acceptance gate
+was completed against the deployed wren rig; the prototype scenarios remain
+useful regression exercises rather than implementation gates.
+
+## Live Verification
+
+Verified on the deployed wren host on 2026-07-16:
+
+- Written block navigation was silent: EDITING changed while PLAYING remained
+  independent, CHASE disengaged, the score version and structure revision did
+  not change, and all 40 observed live parameter values remained unchanged.
+- Exact assignments resolved correctly with two same-app instances on wren,
+  while instance focus and readback remained separate from live-send targets.
+- A legacy numeric enum value compiled into a complete 40-write recall plan
+  without an unsupported-control omission.
+- Written state loaded as clean after display normalization, with Replace
+  disabled until the displayed draft differs semantically from saved state.
+- The user completed the remaining live interaction and audible acceptance
+  checks and confirmed the workflow verified.
 
 ## Purpose
 
@@ -314,11 +334,13 @@ selection. Separate checkboxes retain live multi-target sends. Checked targets
 never influence which instance's state is displayed or which role is written.
 Named broadcast actions such as RTZ All and Clock All remain separate.
 
-### Q4. When May The Editor Bind An Existing Role Automatically?
+### Q4. Existing Unresolved Roles Require Resolution — Decided
 
-Test whether an exactly-one compatible unresolved role should bind on first
-write, require an inline confirmation, or always go through Admin. Multiple
-compatible roles or targets must never be resolved silently.
+First Write reuses only a role already mapped to the exact target. If a
+compatible unresolved role exists, the write remains non-mutating and directs
+the user to resolve the assignment. A new app-plus-ordinal role is created only
+when there is no unresolved compatible role; other same-app roles already
+mapped to distinct online instances do not block just-in-time onboarding.
 
 ### Q5. Save Copy To Copies The Displayed Draft — Decided
 

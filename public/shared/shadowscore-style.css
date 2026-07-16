@@ -272,6 +272,43 @@ td,
   font-weight: 850;
 }
 
+.ss-osc-snapshot-instances {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding-bottom: 2px;
+}
+
+.ss-osc-instance-card {
+  background: var(--ss-surface);
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius-control);
+  display: grid;
+  flex: 0 0 230px;
+  gap: 6px;
+  padding: 9px;
+}
+
+.ss-osc-instance-card.focused {
+  border-color: var(--ss-accent);
+  box-shadow: 0 0 0 1px var(--ss-accent);
+}
+
+.ss-osc-instance-focus {
+  align-items: start;
+  cursor: pointer;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto 1fr;
+}
+
+.ss-osc-instance-focus span { display: grid; gap: 2px; min-width: 0; }
+.ss-osc-instance-focus strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ss-osc-instance-focus small,
+.ss-osc-instance-state,
+.ss-osc-instance-ignore { color: var(--ss-muted); font-size: 10px; font-weight: 800; }
+.ss-osc-instance-ignore { align-items: center; display: flex; gap: 5px; }
+
 .ss-osc-snapshot-transport {
   align-items: stretch;
   display: grid;
@@ -357,6 +394,14 @@ td,
   color: var(--ss-accent);
 }
 
+.ss-osc-snapshot-slot.dirty span {
+  color: var(--ss-warning, #f59e0b);
+}
+
+.ss-osc-snapshot-slot.provisional {
+  border-style: dashed;
+}
+
 .ss-osc-snapshot-slot.editing {
   border-color: var(--ss-accent);
   box-shadow: 0 0 0 1px var(--ss-accent);
@@ -394,6 +439,16 @@ td,
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.ss-osc-snapshot-copy {
+  align-items: end;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ss-osc-snapshot-copy label { display: grid; gap: 4px; min-width: 220px; }
+.ss-osc-snapshot-copy span { color: var(--ss-muted); font-size: 11px; font-weight: 850; }
 
 .ss-osc-snapshot-state {
   color: var(--ss-accent);

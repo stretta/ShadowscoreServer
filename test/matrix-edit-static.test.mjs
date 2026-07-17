@@ -66,6 +66,8 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(js, /Switch clip failed/);
   assert.match(js, /needs a clip in section/);
   assert.match(js, /Switch the whole score to/);
+  assert.match(js, /\/mesostructure\/\$\{encodeURIComponent\([^}]+\)\}\/scale-transform/);
+  assert.match(js, /will receive the synchronized rooted scale and TTID/);
   assert.match(js, /\/admin\/restore/);
   assert.match(js, /\/transport\//);
   assert.match(js, /return-to-start/);

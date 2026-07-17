@@ -113,7 +113,7 @@
 
     const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
 
-    refreshButton.addEventListener("click", () => refresh().catch(reportError));
+    refreshButton.addEventListener("click", () => refresh({ hydrate: true }).catch(reportError));
     selectAllButton.addEventListener("click", selectAllTargets);
     readSourceSelect.addEventListener("change", () => {
       renderGlobalParams();
@@ -132,7 +132,7 @@
     });
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
-    async function refresh() {
+    async function refresh({ hydrate = false } = {}) {
       refreshButton.disabled = true;
       try {
         const body = await fetchJson("/osc/targets?app=listvelsequencer&status=online");
@@ -144,7 +144,8 @@
         renderReadSources();
         renderGlobalParams();
         renderRows();
-        setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListVelSequencer targets");
+        if (hydrate && targets.length) await getData();
+        else setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListVelSequencer targets");
         snapshotClient?.draftChanged();
       } finally {
         refreshButton.disabled = false;

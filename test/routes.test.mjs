@@ -3464,6 +3464,8 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /isToggleParam/);
   assert.match(response.body, /Instance focus/);
   assert.doesNotMatch(response.body, />Read Instance</);
+  assert.match(response.body, /refresh\(\{ hydrate: true \}\)/);
+  assert.match(response.body, /if \(hydrate && targets\.length\) await populateFields\(\)/);
   assert.match(response.body, /readOnBlockChange: true/);
   assert.match(response.body, /args: \[-999\]/);
   assert.match(response.body, /messages\/out\/\$\{encodeURIComponent\(inputPortName\)\}Ack/);
@@ -3506,6 +3508,8 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /Instance focus/);
   assert.match(response.body, /async function getData/);
   assert.doesNotMatch(response.body, />Read Instance</);
+  assert.match(response.body, /refresh\(\{ hydrate: true \}\)/);
+  assert.match(response.body, /if \(hydrate && targets\.length\) await getData\(\)/);
   assert.match(response.body, /readOnBlockChange: true/);
   assert.match(response.body, /OSCQuery parameter read failed/);
   assert.match(response.body, /mountOscSnapshotPanel/);

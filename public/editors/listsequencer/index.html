@@ -418,7 +418,7 @@
     let scaleState = new Map();
     let snapshotClient;
 
-    refreshButton.addEventListener("click", () => refresh().catch(reportError));
+    refreshButton.addEventListener("click", () => refresh({ hydrate: true }).catch(reportError));
     selectAllButton.addEventListener("click", selectAllTargets);
     document.querySelector("main").addEventListener("input", (event) => {
       if (event.target.matches("[data-param], [data-inport]")) snapshotClient?.draftChanged();
@@ -446,24 +446,28 @@
       SCALES = Object.freeze(body.scales || {});
     }
 
-    async function refresh() {
+    async function refresh({ hydrate = false } = {}) {
       refreshButton.disabled = true;
-      const body = await fetchJson("/osc/targets?app=listsequencer&status=online");
-      targets = body.targets || [];
-      inputPorts = collectInputPorts(targets);
-      transposeParams = collectTransposeParams(targets);
-      rootParams = collectNamedParams(targets, new Set(["root"]));
-      ttidParams = collectTtidParams(targets);
-      genericParams = collectGenericParams(targets);
-      ttidState = mergeTtidState(ttidParams);
-      renderTargets();
-      renderReadSources();
-      renderInports();
-      renderTtid();
-      hydrateBlockTtid();
-      setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListSequencer targets");
-      snapshotClient?.draftChanged();
-      refreshButton.disabled = false;
+      try {
+        const body = await fetchJson("/osc/targets?app=listsequencer&status=online");
+        targets = body.targets || [];
+        inputPorts = collectInputPorts(targets);
+        transposeParams = collectTransposeParams(targets);
+        rootParams = collectNamedParams(targets, new Set(["root"]));
+        ttidParams = collectTtidParams(targets);
+        genericParams = collectGenericParams(targets);
+        ttidState = mergeTtidState(ttidParams);
+        renderTargets();
+        renderReadSources();
+        renderInports();
+        renderTtid();
+        hydrateBlockTtid();
+        if (hydrate && targets.length) await populateFields();
+        else setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListSequencer targets");
+        snapshotClient?.draftChanged();
+      } finally {
+        refreshButton.disabled = false;
+      }
     }
 
     async function fetchJson(url, options = {}) {

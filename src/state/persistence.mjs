@@ -11,7 +11,7 @@ export async function loadPersistedScore(config, fallbackScore) {
   const scorePath = resolvePath(config.persistence.path);
   try {
     const raw = await fs.readFile(scorePath, "utf8");
-    const persisted = JSON.parse(raw);
+    const persisted = migratePersistedScore(JSON.parse(raw));
     assertScoreShape(persisted);
     return reconcileScore(config, fallbackScore, persisted);
   } catch (error) {
@@ -20,6 +20,18 @@ export async function loadPersistedScore(config, fallbackScore) {
     }
     throw new Error(`failed to load persisted score from ${scorePath}: ${messageForError(error)}`);
   }
+}
+
+export function migratePersistedScore(score) {
+  if (!isPlainObject(score)) return score;
+  const migrated = structuredClone(score);
+  for (const clip of Object.values(migrated.oscClips ?? {})) {
+    if (!isPlainObject(clip?.params)) continue;
+    clip.params = Object.fromEntries(
+      Object.entries(clip.params).filter(([name]) => !isReservedTtidName(name))
+    );
+  }
+  return migrated;
 }
 
 export function createScorePersistence(store, config) {
@@ -404,6 +416,7 @@ function normalizePersistedMesostructure(mesostructure) {
     {
       duration: isPlainObject(block?.duration) ? structuredClone(block.duration) : {},
       scale: isPlainObject(block?.scale) ? structuredClone(block.scale) : {},
+      ...(block?.ttid === undefined ? {} : { ttid: block.ttid }),
       players: isPlainObject(block?.players) ? structuredClone(block.players) : {},
       oscLayers: Object.fromEntries(Object.entries(block?.oscLayers ?? {}).map(([roleId, layer]) => [
         roleId,
@@ -430,6 +443,7 @@ function normalizePersistedOscAssignments(assignments) {
       deviceId: stringField(assignment?.deviceId),
       oscTargetId: stringField(assignment?.oscTargetId),
       ignoreRecall: Boolean(assignment?.ignoreRecall),
+      ignoreScale: Boolean(assignment?.ignoreScale),
       locked: Boolean(assignment?.locked),
       routingStatus: stringField(assignment?.routingStatus),
       routingMessage: stringField(assignment?.routingMessage)
@@ -488,6 +502,11 @@ function createEmptyAssignment() {
 
 function cleanToken(value) {
   return stringField(value).toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "");
+}
+
+function isReservedTtidName(name) {
+  const normalized = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return normalized === "ttid" || normalized === "scale";
 }
 
 function stringField(value) {

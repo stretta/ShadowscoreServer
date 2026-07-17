@@ -7,6 +7,7 @@ import { defaultConfig, mergeConfig } from "../src/config.mjs";
 import {
   createScorePersistence,
   loadPersistedScore,
+  migratePersistedScore,
   reconcileScore,
   writeScoreSnapshot
 } from "../src/state/persistence.mjs";
@@ -138,6 +139,45 @@ test("OSC assignments, clips, and layers survive persistence", async () => {
   assert.deepEqual(reconcileScore(config, fallback, legacy).oscAssignments, {});
   assert.deepEqual(reconcileScore(config, fallback, legacy).oscClips, {});
   assert.deepEqual(reconcileScore(config, fallback, legacy).mesostructure.A.oscLayers, {});
+});
+
+test("persisted OSC clips migrate legacy TTID parameters out of snapshot ownership", () => {
+  const persisted = scoreWithVersion(1);
+  persisted.oscClips = {
+    legacy: {
+      app: "listsequencer",
+      params: { Clock: 1, Scale: 2741, "T-T-I-D": 4095 },
+      inputPorts: { Steps: [1, 0, 1, 0] }
+    }
+  };
+
+  const migrated = migratePersistedScore(persisted);
+
+  assert.deepEqual(migrated.oscClips.legacy.params, { Clock: 1 });
+  assert.deepEqual(persisted.oscClips.legacy.params, { Clock: 1, Scale: 2741, "T-T-I-D": 4095 });
+});
+
+test("legacy persisted scores load through the mesostructural TTID cutover", async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-persist-"));
+  const config = configFor(directory);
+  const fallback = createInitialScore(config);
+  const persisted = structuredClone(fallback);
+  persisted.mesostructure.A.scale = {};
+  delete persisted.mesostructure.A.ttid;
+  persisted.oscClips.legacy = {
+    app: "listsequencer",
+    params: { Clock: 1, Scale: 2741 },
+    inputPorts: { Steps: [1, 0, 1, 0] }
+  };
+  await fs.mkdir(path.dirname(config.persistence.path), { recursive: true });
+  await fs.writeFile(config.persistence.path, `${JSON.stringify(persisted)}\n`);
+
+  const loaded = await loadPersistedScore(config, fallback);
+  const score = createScoreStore(loaded).getScore();
+
+  assert.deepEqual(score.oscClips.legacy.params, { Clock: 1 });
+  assert.equal(score.mesostructure.A.scale.scale_name, "Ionian");
+  assert.equal(score.mesostructure.A.ttid, 2741);
 });
 
 function configFor(directory, persistence = {}) {

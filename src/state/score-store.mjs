@@ -1470,7 +1470,10 @@ function normalizeMesoBlock(blockDocument) {
   if (blockDocument.scale !== undefined && !isPlainObject(blockDocument.scale)) {
     throw new Error("mesostructural block scale must be an object");
   }
-  const scale = normalizeScale(blockDocument.scale ?? DEFAULT_SCALE);
+  const scaleDocument = isPlainObject(blockDocument.scale) && Object.keys(blockDocument.scale).length > 0
+    ? blockDocument.scale
+    : DEFAULT_SCALE;
+  const scale = normalizeScale(scaleDocument);
   return {
     duration: structuredClone(blockDocument.duration),
     scale,

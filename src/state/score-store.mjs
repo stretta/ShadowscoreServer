@@ -1,4 +1,5 @@
 import { EventEmitter } from "node:events";
+import { DEFAULT_SCALE, normalizeScale, normalizeTtid, reinterpretPitch, scaleToTtid } from "../harmonic/scale.mjs";
 import { reconcileOscAssignments as reconcileOscRoleAssignments } from "../osc/assignments.mjs";
 import { normalizeOscClip } from "../osc/snapshot-contract.mjs";
 import { createScoreInitializationPlan } from "./score-initialization.mjs";
@@ -111,19 +112,107 @@ export function createScoreStore(initialScore, options = {}) {
     updateContext(nextContext, options = {}) {
       assertExpectedScoreVersion(score, options.expectedVersion);
       assertExpectedRevisions(score, options);
+      const context = options.replace ? structuredClone(nextContext) : deepMerge(score.context, nextContext);
+      if (isPlainObject(nextContext?.scale) && Object.keys(nextContext.scale).length) {
+        const scale = { ...(score.context?.scale ?? DEFAULT_SCALE), ...nextContext.scale };
+        if (nextContext.scale.scale_name !== undefined && nextContext.scale.scale_intervals === undefined) delete scale.scale_intervals;
+        context.scale = normalizeScale(scale);
+      }
       score = {
         ...score,
         ...nextRevisionFields(score),
-        context: options.replace ? structuredClone(nextContext) : deepMerge(score.context, nextContext)
+        context
       };
       emitChange(events, "context.updated", score, { context: score.context }, options);
       return structuredClone(score);
+    },
+    updateBlockTtid(blockId, value, options = {}) {
+      const id = normalizeBlockId(blockId);
+      const block = score.mesostructure[id];
+      if (!block) throw new Error(`unknown mesostructural block '${id}'`);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const ttid = normalizeTtid(value);
+      score = {
+        ...score,
+        ...nextRevisionFields(score),
+        mesostructure: { ...score.mesostructure, [id]: { ...block, ttid } }
+      };
+      emitChange(events, "mesostructure.ttid.updated", score, { blockId: id, ttid }, options);
+      return structuredClone(score);
+    },
+    transformBlockScale(blockId, scaleDocument, options = {}) {
+      const id = normalizeBlockId(blockId);
+      const block = score.mesostructure[id];
+      if (!block) throw new Error(`unknown mesostructural block '${id}'`);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const targetScale = normalizeScale(scaleDocument);
+      const fallbackSourceScale = scaleFromContext(score.context, block.scale);
+      let affectedClipCount = 0;
+      let exemptClipCount = 0;
+      let affectedNoteCount = 0;
+      let changedPitchCount = 0;
+      const clips = Object.fromEntries(Object.entries(score.clips ?? {}).map(([clipId, clip]) => {
+        if (clip.behavior?.followsScale === false) {
+          exemptClipCount += 1;
+          return [clipId, clip];
+        }
+        const sourceScale = scaleFromContext(clip.context, fallbackSourceScale);
+        const result = transformNotes(clip.notes, sourceScale, targetScale);
+        affectedClipCount += 1;
+        affectedNoteCount += result.noteCount;
+        changedPitchCount += result.changedPitchCount;
+        return [clipId, {
+          ...clip,
+          notes: result.notes,
+          context: { ...(clip.context ?? {}), scale: structuredClone(targetScale) }
+        }];
+      }));
+      let legacyNoteCount = 0;
+      let legacyChangedPitchCount = 0;
+      const voices = Object.fromEntries(Object.entries(score.voices ?? {}).map(([voiceId, voice]) => {
+        const result = transformNotes(voice.notes, fallbackSourceScale, targetScale);
+        legacyNoteCount += result.noteCount;
+        legacyChangedPitchCount += result.changedPitchCount;
+        return [voiceId, { ...voice, version: (voice.version ?? 0) + 1, notes: result.notes }];
+      }));
+      const ttid = scaleToTtid(targetScale);
+      const summary = {
+        blockId: id,
+        scale: structuredClone(targetScale),
+        ttid,
+        affectedClipCount,
+        exemptClipCount,
+        affectedNoteCount,
+        changedPitchCount,
+        legacyNoteCount,
+        legacyChangedPitchCount
+      };
+      score = {
+        ...score,
+        ...nextRevisionFields(score, { structure: true }),
+        context: { ...score.context, scale: structuredClone(targetScale) },
+        clips,
+        voices,
+        mesostructure: { ...score.mesostructure, [id]: { ...block, scale: targetScale, ttid } }
+      };
+      emitChange(events, "mesostructure.scale.transformed", score, summary, options);
+      return { score: structuredClone(score), summary: structuredClone(summary) };
     },
     replaceMesoBlock(blockId, blockDocument, options = {}) {
       const id = normalizeBlockId(blockId);
       assertExpectedScoreVersion(score, options.expectedVersion);
       assertExpectedRevisions(score, options);
-      const block = normalizeMesoBlock(blockDocument);
+      const existing = score.mesostructure[id];
+      const block = normalizeMesoBlock({
+        ...blockDocument,
+        scale: blockDocument.scale ?? existing?.scale ?? DEFAULT_SCALE,
+        ttid: blockDocument.ttid ?? existing?.ttid
+      });
+      if (existing && blockDocument.scale !== undefined && JSON.stringify(block.scale) !== JSON.stringify(existing.scale)) {
+        throw new Error(`mesostructural block '${id}' scale changes must use scale-transform`);
+      }
       assertOscBlockReferences(id, block, score.oscAssignments, score.oscClips);
       score = {
         ...score,
@@ -959,7 +1048,7 @@ function normalizedScoreInitializationPlan(request, ensembleId) {
 function createDefaultContext() {
   return {
     clip: {},
-    scale: {},
+    scale: structuredClone(DEFAULT_SCALE),
     grid: {},
     seed: 0
   };
@@ -1046,7 +1135,8 @@ function createDefaultMesostructure(voiceIds = []) {
       blockId,
       {
         duration: { bars: 4 },
-        scale: {},
+        scale: structuredClone(DEFAULT_SCALE),
+        ttid: scaleToTtid(DEFAULT_SCALE),
         oscLayers: {},
         players: Object.fromEntries(
           voiceIds.map((voiceId) => [voiceId, { clipId: defaultClipId(blockId, voiceId) }])
@@ -1125,6 +1215,7 @@ function normalizeOscAssignment(assignmentDocument) {
     deviceId: stringField(assignmentDocument.deviceId),
     oscTargetId: stringField(assignmentDocument.oscTargetId),
     ignoreRecall: Boolean(assignmentDocument.ignoreRecall),
+    ignoreScale: Boolean(assignmentDocument.ignoreScale),
     locked: Boolean(assignmentDocument.locked),
     routingStatus: stringField(assignmentDocument.routingStatus),
     routingMessage: stringField(assignmentDocument.routingMessage)
@@ -1268,9 +1359,13 @@ function normalizeClipDocument(clipDocument = {}) {
   if (clipDocument.duration !== undefined && !isPlainObject(clipDocument.duration)) {
     throw new Error("clip duration must be an object");
   }
+  const context = structuredClone(clipDocument.context ?? createDefaultContext());
+  context.scale = isPlainObject(context.scale) && Object.keys(context.scale).length
+    ? normalizeScale(context.scale)
+    : {};
   return {
     notes: structuredClone(clipDocument.notes ?? []),
-    context: structuredClone(clipDocument.context ?? createDefaultContext()),
+    context,
     duration: normalizeDuration(clipDocument.duration),
     playbackType: normalizePlaybackType(clipDocument.playbackType),
     behavior: normalizeClipBehavior(clipDocument.behavior ?? {})
@@ -1375,9 +1470,11 @@ function normalizeMesoBlock(blockDocument) {
   if (blockDocument.scale !== undefined && !isPlainObject(blockDocument.scale)) {
     throw new Error("mesostructural block scale must be an object");
   }
+  const scale = normalizeScale(blockDocument.scale ?? DEFAULT_SCALE);
   return {
     duration: structuredClone(blockDocument.duration),
-    scale: structuredClone(blockDocument.scale ?? {}),
+    scale,
+    ttid: blockDocument.ttid === undefined ? scaleToTtid(scale) : normalizeTtid(blockDocument.ttid),
     oscLayers: normalizeOscLayers(blockDocument.oscLayers ?? {}),
     players: normalizeMesoBlockPlayers(blockDocument.players ?? {})
   };
@@ -1707,6 +1804,34 @@ function deepMerge(base, override) {
     }
   }
   return merged;
+}
+
+function scaleFromContext(context, fallback = DEFAULT_SCALE) {
+  const candidate = isPlainObject(context?.scale)
+    ? context.scale
+    : isPlainObject(context) && (context.root_note !== undefined || context.scale_intervals !== undefined)
+      ? context
+      : fallback;
+  try {
+    return normalizeScale(candidate);
+  } catch {
+    return normalizeScale(fallback);
+  }
+}
+
+function transformNotes(notesDocument, sourceScale, targetScale) {
+  const notes = Array.isArray(notesDocument) ? notesDocument : [];
+  let changedPitchCount = 0;
+  return {
+    noteCount: notes.length,
+    get changedPitchCount() { return changedPitchCount; },
+    notes: notes.map((note) => {
+      if (!Number.isFinite(Number(note?.pitch))) return structuredClone(note);
+      const pitch = reinterpretPitch(Number(note.pitch), sourceScale, targetScale);
+      if (pitch !== Number(note.pitch)) changedPitchCount += 1;
+      return { ...structuredClone(note), pitch };
+    })
+  };
 }
 
 function isPlainObject(value) {

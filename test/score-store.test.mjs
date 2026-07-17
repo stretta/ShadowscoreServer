@@ -26,6 +26,8 @@ test("initial score creates configured voices", () => {
   assert.equal(score.clips["a-player-1"].playbackType, "looped");
   for (const block of Object.values(score.mesostructure)) {
     assert.deepEqual(block.duration, { bars: 4 });
+    assert.equal(block.scale.scale_name, "Ionian");
+    assert.equal(block.ttid, 2741);
     assert.deepEqual(block.oscLayers, {});
     assert.equal(Object.keys(block.players).length, 6);
     for (const assignment of Object.values(block.players)) {
@@ -92,11 +94,13 @@ test("OSC role assignments remain separate from player assignments and emit expl
     deviceId: "heron",
     oscTargetId: "heron:plate:main",
     ignoreRecall: true,
+    ignoreScale: true,
     locked: true
   }, { expectedScoreRevision: 0 });
 
   assert.equal(assigned.oscAssignments["plate-a"].app, "plate");
   assert.equal(assigned.oscAssignments["plate-a"].ignoreRecall, true);
+  assert.equal(assigned.oscAssignments["plate-a"].ignoreScale, true);
   assert.equal(assigned.assignments["player-1"].deviceId, "");
   assert.equal(assigned.structureRevision, 0);
   assert.deepEqual(events, ["osc.assignment.replaced"]);
@@ -333,6 +337,38 @@ test("mesostructural blocks can be duplicated with independent assigned clips", 
   });
   assert.equal(edited.clips["g-player-1"].notes[0].pitch, 36);
   assert.notEqual(edited.clips["a-player-1"].notes[0].pitch, 36);
+});
+
+test("block TTID edits are non-destructive and scale transforms commit notes, metadata, scale, and TTID atomically", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const originalPitch = store.getScore().clips["a-player-1"].notes[0].pitch;
+  const edited = store.updateBlockTtid("A", 1, { expectedScoreRevision: 0 });
+  assert.equal(edited.mesostructure.A.ttid, 1);
+  assert.equal(edited.clips["a-player-1"].notes[0].pitch, originalPitch);
+
+  store.replaceClip("a-player-1", {
+    ...edited.clips["a-player-1"],
+    context: { ...edited.clips["a-player-1"].context, scale: { root_note: 0, scale_name: "Chromatic", scale_intervals: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] } },
+    notes: [{ pitch: 61 }]
+  });
+  store.replaceClip("a-player-2", {
+    ...store.getScore().clips["a-player-2"],
+    behavior: { followsScale: false },
+    notes: [{ pitch: 61 }]
+  });
+  const result = store.transformBlockScale("A", { root_note: 0, scale_name: "Ionian", scale_intervals: [0, 2, 4, 5, 7, 9, 11] });
+
+  assert.equal(result.score.clips["a-player-1"].notes[0].pitch, 62);
+  assert.equal(result.score.clips["a-player-1"].context.scale.scale_name, "Ionian");
+  assert.equal(result.score.clips["a-player-2"].notes[0].pitch, 61);
+  assert.equal(result.score.mesostructure.A.scale.scale_name, "Ionian");
+  assert.equal(result.score.mesostructure.A.ttid, 2741);
+  assert.equal(result.summary.blockId, "A");
+  assert.equal(result.summary.exemptClipCount, 1);
+  assert.throws(() => store.replaceMesoBlock("A", {
+    ...result.score.mesostructure.A,
+    scale: { root_note: 0, scale_name: "Chromatic", scale_intervals: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }
+  }), /must use scale-transform/);
 });
 
 test("mesostructural block duplication preserves shared clip assignments inside the copy", () => {

@@ -3,7 +3,7 @@ import http from "node:http";
 import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
-import { recallOscSnapshotsForBlock, routeRequest, writeTransportControlsToPlaybackTargets } from "./http/routes.mjs";
+import { distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest, writeTransportControlsToPlaybackTargets } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { createOscSnapshotAutoRecall } from "./osc/snapshot-auto-recall.mjs";
 import { createManualOscQueryDeviceRegistry } from "./oscquery/manual-device-registry.mjs";
@@ -45,7 +45,10 @@ const macroPlayback = createMacroPlayback(store, config, {
 });
 runtime.macroPlayback = macroPlayback;
 const oscSnapshotAutoRecall = createOscSnapshotAutoRecall(store, {
-  recall: ({ blockId }) => recallOscSnapshotsForBlock(store, config, runtime, blockId),
+  recall: async ({ blockId }) => {
+    await distributeTtidForBlock(store.getScore(), config, runtime, blockId);
+    return recallOscSnapshotsForBlock(store, config, runtime, blockId);
+  },
   onError: (error, request) => console.error(`[osc-snapshot] automatic recall failed for ${request.blockId}: ${error.message}`)
 });
 runtime.oscSnapshotAutoRecall = oscSnapshotAutoRecall;

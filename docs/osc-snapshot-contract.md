@@ -66,6 +66,13 @@ The following are excluded unless a future export explicitly opts them in:
 - current-stage, playback-debug, scope, meter, and other observed state; and
 - browser-only selection, routing, dirty-state, and status fields.
 
+TTID is always excluded and cannot be opted back into an OSC clip. Any live
+parameter whose `meta.editor` is `ttid` is block-owned harmonic state even when
+the export calls it `Scale`, `PitchSet`, or another name. Capture and recall use
+the live metadata classification; imported snapshots containing semantic
+`Scale` or `ttid` parameters are rejected. Root, transpose, mode, `Clock`, and
+other non-TTID controls remain ordinary device snapshot state.
+
 `meta.snapshot: false` or `meta.snapshot_state: false` always excludes a
 control. `meta.snapshot_order: "late"` places an otherwise persistent control
 in the late group. `Clock` is recognized by semantic parameter name and always
@@ -81,6 +88,11 @@ For each resolved role, the compiler produces:
 2. persistent input-port lists;
 3. controls marked late by editor/export metadata;
 4. `Clock`, when saved.
+
+At playback start and mesostructural block entry, the server sends the block's
+shared TTID before compiling this device-specific sequence. Roles or targets
+with `ignoreScale` skip only the TTID send; `ignoreRecall` remains the separate
+whole-snapshot policy.
 
 Roles may dispatch concurrently, but writes for one resolved instance remain
 ordered. A missing or excluded control is reported for that role and does not

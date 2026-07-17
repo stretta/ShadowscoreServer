@@ -108,6 +108,20 @@ export function createCollaborationHub(store, config = {}) {
             sourceClientId: client.id
           }));
           break;
+        case "mesostructure.ttid.update":
+          ack(client, requestId, store.updateBlockTtid(
+            requireString(payload.blockId, "blockId"),
+            payload.ttid ?? payload.value,
+            { ...revisionOptions(payload), sourceClientId: client.id }
+          ));
+          break;
+        case "mesostructure.scale.transform":
+          ack(client, requestId, store.transformBlockScale(
+            requireString(payload.blockId, "blockId"),
+            payload.scale ?? {},
+            { ...revisionOptions(payload), sourceClientId: client.id }
+          ));
+          break;
         case "osc.clip.add":
           ack(client, requestId, store.addOscClip(
             requireString(payload.clipId ?? payload.id, "clipId"),

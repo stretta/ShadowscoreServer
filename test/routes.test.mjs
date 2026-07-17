@@ -58,9 +58,11 @@ test("OSC assignment routes manage logical roles separately with revision checks
     app: "analogsequencer",
     deviceId: "heron",
     oscTargetId: "heron:analogsequencer:main",
-    ignoreRecall: true
+    ignoreRecall: true,
+    ignoreScale: true
   });
   assert.equal(saved.oscAssignments["analog-a"].ignoreRecall, true);
+  assert.equal(saved.oscAssignments["analog-a"].ignoreScale, true);
   assert.equal(saved.assignments["player-1"].deviceId, "");
 
   const assignments = await requestJson(context, "GET", "/osc/assignments");
@@ -634,6 +636,32 @@ test("structure routes reject stale expected structure revisions", async () => {
   assert.match(rejected.body, /stale structure revision 0; current structure revision is 1/);
   assert.match(rejected.body, /"currentScoreRevision":1/);
   assert.match(rejected.body, /"currentStructureRevision":1/);
+});
+
+test("harmonic routes expose the catalog and keep direct TTID edits separate from destructive scale transforms", async () => {
+  const context = createRouteContext();
+  const catalog = await requestJson(context, "GET", "/harmonic/scales");
+  assert.deepEqual(catalog.scales.ionian, [0, 2, 4, 5, 7, 9, 11]);
+
+  const originalPitch = context.store.getScore().clips["a-player-1"].notes[0].pitch;
+  const direct = await requestJson(context, "PUT", "/mesostructure/A/ttid", {
+    expectedScoreRevision: 0,
+    ttid: 1,
+    auditionTargets: []
+  });
+  assert.equal(direct.score.mesostructure.A.ttid, 1);
+  assert.equal(direct.score.clips["a-player-1"].notes[0].pitch, originalPitch);
+  assert.equal(direct.drift.drifted, true);
+
+  const transformed = await requestJson(context, "POST", "/mesostructure/A/scale-transform", {
+    expectedScoreRevision: 1,
+    expectedStructureRevision: 0,
+    scale: { root_note: 0, scale_name: "Aeolian", scale_intervals: [0, 2, 3, 5, 7, 8, 10] }
+  });
+  assert.equal(transformed.score.mesostructure.A.scale.scale_name, "Aeolian");
+  assert.equal(transformed.score.mesostructure.A.ttid, 1453);
+  assert.equal(transformed.summary.blockId, "A");
+  assert.equal(transformed.score.structureRevision, 1);
 });
 
 test("OSC clip and block layer routes create, reuse, replace, and safely delete state", async () => {

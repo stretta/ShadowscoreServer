@@ -351,32 +351,7 @@
 
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
-    const SCALES = Object.freeze({
-      "ionian": [0, 2, 4, 5, 7, 9, 11],
-      "dorian": [0, 2, 3, 5, 7, 9, 10],
-      "phrygian": [0, 1, 3, 5, 7, 8, 10],
-      "lydian": [0, 2, 4, 6, 7, 9, 11],
-      "mixolydian": [0, 2, 4, 5, 7, 9, 10],
-      "aeolian": [0, 2, 3, 5, 7, 8, 10],
-      "chromatic": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-      "harmonic-minor": [0, 2, 3, 5, 7, 8, 11],
-      "melodic-minor": [0, 2, 3, 5, 7, 9, 11],
-      "major-pentatonic": [0, 2, 4, 7, 9],
-      "minor-pentatonic": [0, 2, 3, 7, 8],
-      "lydian-augmented": [0, 2, 4, 6, 8, 9, 11],
-      "major-bebop": [0, 2, 4, 5, 7, 8, 9, 11],
-      "half-diminished": [0, 2, 3, 5, 6, 8, 10],
-      "lydian-dominant": [0, 2, 4, 6, 7, 9, 10],
-      "mixolydian-b6": [0, 2, 4, 5, 7, 8, 10],
-      "altered": [0, 1, 3, 4, 6, 8, 10],
-      "dorian-b2": [0, 1, 3, 5, 7, 9, 10],
-      "blues": [0, 3, 5, 6, 7, 10],
-      "5th-mode-of-harmonic-minor": [0, 1, 4, 5, 7, 8, 10],
-      "5th-mode-of-harmonic-major": [0, 1, 4, 5, 7, 9, 10],
-      "dominant-bebop": [0, 2, 4, 5, 7, 9, 10, 11],
-      "dominant-diminished": [0, 1, 3, 4, 6, 7, 9, 10],
-      "whole-tone": [0, 2, 4, 6, 8, 10]
-    });
+    let SCALES = Object.freeze({ ionian: [0, 2, 4, 5, 7, 9, 11] });
 
     const targetsEl = document.querySelector("#targets");
     const editorsEl = document.querySelector("#editors");
@@ -406,11 +381,19 @@
       serializeDraft: serializeSnapshotDraft,
       applySnapshot: applySavedSnapshot,
       onFocusChange: getState,
+      readOnBlockChange: true,
       liveTargetRoot: targetsEl,
       setStatus
     });
 
-    Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
+    Promise.all([loadScales(), snapshotClient.init()]).then(refresh).then(hydrateBlockTtid).catch(reportError);
+
+    async function loadScales() {
+      const response = await fetch("/harmonic/scales", { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok || body.ok === false) throw new Error(body.error || "Scale catalog unavailable");
+      SCALES = Object.freeze(body.scales || {});
+    }
 
     async function refresh() {
       refreshButton.disabled = true;
@@ -697,14 +680,13 @@
           if (!node || node.VALUE === undefined) return param;
           const value = scalarValue(node.VALUE);
           populated += 1;
-          if (String(param.meta?.editor || "").trim().toLowerCase() === "ttid") {
-            paramState.set(param.name, normalizeMask(value));
-          }
+          if (String(param.meta?.editor || "").trim().toLowerCase() === "ttid") return param;
           return { ...param, value };
         });
         ttidParams = collectTtidParams([target, ...targets.filter((entry) => entry.id !== target.id)]);
         renderParamSelect();
         renderEditors();
+        await hydrateBlockTtid();
         snapshotClient?.draftChanged();
         setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
       } finally {
@@ -728,13 +710,24 @@
       const value = normalizeMask(mask);
       paramState.set(param.name, value);
       renderEditors();
-      snapshotClient?.draftChanged();
-      await sendParam(param.name, value);
+      const state = snapshotClient?.snapshotState();
+      const blockId = state?.blockId;
+      if (!blockId) throw new Error("Choose an EDITING block");
+      const selected = selectedTargetsForParam(param.name);
+      const response = await fetch(`/mesostructure/${encodeURIComponent(blockId)}/ttid`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ttid: value, expectedScoreRevision: state.score?.scoreRevision, auditionTargets: selected })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) throw new Error(body.error || "TTID update failed");
+      setStatus(`Updated ${blockId} TTID to ${value}${selected.length ? ` and auditioned ${selected.length} target${selected.length === 1 ? "" : "s"}` : ""}`);
+      await hydrateBlockTtid(body.score);
     }
 
     function serializeSnapshotDraft() {
       const preferredTarget = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
-      const paramEntries = ttidParams.map((param) => ({ name: param.name, value: valueFor(param) }));
+      const paramEntries = [];
       for (const name of ["ChromaticTranspose", "ScalarTranspose"]) {
         const param = preferredTarget?.parameters?.find((entry) => entry.name === name)
           || targets.flatMap((target) => target.parameters || []).find((entry) => entry.name === name);
@@ -746,12 +739,30 @@
     function applySavedSnapshot(snapshot) {
       for (const [name, value] of Object.entries(snapshot.params ?? {})) {
         setDraftParamValue(name, value);
-        if (ttidParams.some((param) => param.name === name)) paramState.set(name, normalizeMask(value));
       }
       ttidParams = collectTtidParams(targets);
       renderParamSelect();
       renderEditors();
       snapshotClient?.draftChanged();
+    }
+
+    async function hydrateBlockTtid(scoreOverride) {
+      const state = snapshotClient?.snapshotState();
+      const score = scoreOverride || state?.score;
+      const blockId = state?.blockId;
+      const block = score?.mesostructure?.[blockId];
+      if (!block) return;
+      for (const param of ttidParams) paramState.set(param.name, normalizeMask(block.ttid));
+      renderEditors();
+      const expected = encodeScale(Number(block.scale?.root_note || 0), canonicalScaleName(block.scale?.scale_name));
+      if (expected !== normalizeMask(block.ttid)) {
+        setStatus("Runtime TTID differs from the rendered ShadowScore scale. Use Matrix Edit to synchronize both.");
+      }
+    }
+
+    function canonicalScaleName(value) {
+      const name = String(value || "ionian").trim().toLowerCase().replace(/\s+/g, "-");
+      return Object.hasOwn(SCALES, name) ? name : "ionian";
     }
 
     function setDraftParamValue(name, value) {

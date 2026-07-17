@@ -30,6 +30,9 @@ Start with the current guides:
 
 Design and implementation notes:
 
+- [`mesostructural-ttid-scale-plan.md`](mesostructural-ttid-scale-plan.md):
+  block-owned TTID, destructive Matrix Edit scale transformation, OSC snapshot
+  exclusion, runtime distribution, drift visibility, and client scale opt-out.
 - [`structure-and-clip-work-plan.md`](structure-and-clip-work-plan.md):
   historical/current notes for Structure Editor, Event List, Matrix Edit, clip
   APIs, saved scores, and migration.

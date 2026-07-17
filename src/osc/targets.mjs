@@ -51,6 +51,7 @@ function normalizeOscTarget(target, index) {
     localTargetId: localId,
     source: target.source,
     capabilities,
+    ignoreScale: target.ignoreScale === true || target.metadata?.ignoreScale === true || target.meta?.ignoreScale === true,
     diagnostics
   });
 }

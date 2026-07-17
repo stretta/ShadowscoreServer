@@ -8,10 +8,27 @@ The request owns structural intent only:
 - `players`: stable player ids plus optional labels, colors, and assignees;
 - `clips`: reusable note clips with notes, loop duration, playback type,
   context, and behavior;
-- `blocks`: mesostructural ids, durations, scale context, and player-to-clip
-  assignments;
+- `blocks`: mesostructural ids, durations, required rooted scale context,
+  required 12-bit `ttid`, and player-to-clip assignments;
 - `macrostructure`: tempo and ordered block occurrences;
 - `oscRoles`: stable logical ids, app capabilities, labels, and recall policy.
+
+The canonical block harmonic shape is:
+
+```json
+{
+  "scale": {
+    "root_note": 0,
+    "scale_intervals": [0, 2, 4, 5, 7, 9, 11],
+    "scale_name": "Ionian"
+  },
+  "ttid": 2741
+}
+```
+
+Initialization normalizes omitted new-score values to this C Ionian default,
+but every stored block contains both fields. OSC roles may independently set
+`ignoreRecall` and `ignoreScale`.
 
 Live `deviceId`, RNBO target, and OSC target fields are rejected. Rig discovery
 and OSC onboarding fill those mappings after the skeleton exists. Likewise,

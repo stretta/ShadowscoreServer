@@ -1,3 +1,5 @@
+import { DEFAULT_SCALE, normalizeScale, normalizeTtid, scaleToTtid } from "../harmonic/scale.mjs";
+
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
 export function createScoreInitializationPlan(request, options = {}) {
@@ -129,7 +131,8 @@ function normalizeBlock(document, index) {
   return {
     id,
     duration: structuredClone(document.duration ?? { bars: 1 }),
-    scale: structuredClone(document.scale ?? {}),
+    scale: normalizeScale(document.scale ?? DEFAULT_SCALE),
+    ttid: document.ttid === undefined ? scaleToTtid(document.scale ?? DEFAULT_SCALE) : normalizeTtid(document.ttid),
     players
   };
 }
@@ -147,6 +150,7 @@ function normalizeOscRole(document, index) {
     deviceId: "",
     oscTargetId: "",
     ignoreRecall: Boolean(document.ignoreRecall),
+    ignoreScale: Boolean(document.ignoreScale),
     locked: false,
     routingStatus: "",
     routingMessage: ""
@@ -202,7 +206,7 @@ function cleanString(value) {
 }
 
 function defaultContext() {
-  return { clip: {}, scale: {}, grid: {}, seed: 0 };
+  return { clip: {}, scale: structuredClone(DEFAULT_SCALE), grid: {}, seed: 0 };
 }
 
 function isObject(value) {

@@ -391,20 +391,7 @@
     import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260716-chase-focus1";
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
-    const SCALES = Object.freeze({
-      "ionian": [0, 2, 4, 5, 7, 9, 11],
-      "dorian": [0, 2, 3, 5, 7, 9, 10],
-      "phrygian": [0, 1, 3, 5, 7, 8, 10],
-      "lydian": [0, 2, 4, 6, 7, 9, 11],
-      "mixolydian": [0, 2, 4, 5, 7, 9, 10],
-      "aeolian": [0, 2, 3, 5, 7, 8, 10],
-      "chromatic": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
-      "harmonic-minor": [0, 2, 3, 5, 7, 8, 11],
-      "melodic-minor": [0, 2, 3, 5, 7, 9, 11],
-      "major-pentatonic": [0, 2, 4, 7, 9],
-      "minor-pentatonic": [0, 2, 3, 7, 8],
-      "whole-tone": [0, 2, 4, 6, 8, 10]
-    });
+    let SCALES = Object.freeze({ ionian: [0, 2, 4, 5, 7, 9, 11] });
     const INPORT_SPECS = Object.freeze([
       { name: "Steps", label: "Steps (0/1)" },
       { name: "PrimaryRotation", label: "Primary Rotation (-60 60)" },
@@ -452,7 +439,12 @@
       setStatus
     });
 
-    Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
+    Promise.all([loadScales(), snapshotClient.init()]).then(refresh).catch(reportError);
+
+    async function loadScales() {
+      const body = await fetchJson("/harmonic/scales");
+      SCALES = Object.freeze(body.scales || {});
+    }
 
     async function refresh() {
       refreshButton.disabled = true;
@@ -468,6 +460,7 @@
       renderReadSources();
       renderInports();
       renderTtid();
+      hydrateBlockTtid();
       setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListSequencer targets");
       snapshotClient?.draftChanged();
       refreshButton.disabled = false;
@@ -497,7 +490,8 @@
         .map((control) => ({
           name: control.dataset.param,
           value: control.type === "checkbox" ? (control.checked ? 1 : 0) : control.value,
-          values: byParamName.get(control.dataset.param)?.values
+          values: byParamName.get(control.dataset.param)?.values,
+          meta: byParamName.get(control.dataset.param)?.meta
         }));
       const byInputPortName = new Map(inputPorts.map((entry) => [entry.name, entry]));
       const inputPortEntries = Array.from(document.querySelectorAll("[data-inport]"))
@@ -515,9 +509,6 @@
         target.parameters = (target.parameters ?? []).map((param) => Object.hasOwn(snapshot.params ?? {}, param.name)
           ? { ...param, value: oscEditorParamValue(param, snapshot.params[param.name]) }
           : param);
-      }
-      for (const [name, value] of Object.entries(snapshot.params ?? {})) {
-        if (ttidParams.some((param) => param.name === name)) ttidState.set(name, normalizeMask(value));
       }
       transposeParams = collectTransposeParams(targets);
       rootParams = collectNamedParams(targets, new Set(["root"]));
@@ -908,6 +899,7 @@
       target.parameters = (target.parameters || []).map((param) => {
         const node = nodes[param.name];
         if (!node || node.VALUE === undefined) return param;
+        if (String(param.meta?.editor || "").trim().toLowerCase() === "ttid") return param;
         populated += 1;
         return { ...param, value: scalarValue(node.VALUE) };
       });
@@ -921,6 +913,7 @@
       ttidState = mergeTtidState(ttidParams);
       renderInports();
       renderTtid();
+      hydrateBlockTtid();
       snapshotClient?.draftChanged();
       return populated;
     }
@@ -955,15 +948,23 @@
       const value = normalizeMask(mask);
       ttidState.set(param.name, value);
       renderTtid();
-      snapshotClient?.draftChanged();
       const selected = selectedTargetsFor(param.targetIds);
-      if (!selected.length) {
-        setStatus("No targets selected");
-        return;
-      }
-      const body = await postOsc({ targets: selected, param: param.name, args: [value] });
-      const sent = (body.results || []).filter((result) => result.ok).length;
-      setStatus(`Sent ${labelFor(param)} ${formatMask(value)} to ${sent}/${selected.length}`);
+      const state = snapshotClient?.snapshotState();
+      if (!state?.blockId) throw new Error("Choose an EDITING block");
+      const body = await fetchJson(`/mesostructure/${encodeURIComponent(state.blockId)}/ttid`, {
+        method: "PUT",
+        body: JSON.stringify({ ttid: value, expectedScoreRevision: state.score?.scoreRevision, auditionTargets: selected })
+      });
+      setStatus(`Updated ${state.blockId} TTID to ${formatMask(value)}${selected.length ? ` and auditioned ${selected.length} target${selected.length === 1 ? "" : "s"}` : ""}`);
+      hydrateBlockTtid(body.score);
+    }
+
+    function hydrateBlockTtid(scoreOverride) {
+      const state = snapshotClient?.snapshotState();
+      const block = (scoreOverride || state?.score)?.mesostructure?.[state?.blockId];
+      if (!block) return;
+      for (const param of ttidParams) ttidState.set(param.name, normalizeMask(block.ttid));
+      renderTtid();
     }
 
     async function sendParam(param, value) {

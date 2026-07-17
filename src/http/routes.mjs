@@ -4,6 +4,8 @@ import { transportPage } from "./transport-page.mjs";
 import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
 import { configuredRnboTargets, discoverRnboControlTargets, discoverRnboDevices, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
 import { editorManifests } from "../editors/manifest.mjs";
+import { distributeBlockTtid } from "../harmonic/distribution.mjs";
+import { harmonicDrift, scaleCatalog } from "../harmonic/scale.mjs";
 import { resolveOscAssignments } from "../osc/assignments.mjs";
 import { findOscMacro, listOscMacros, resolveMacroStepAddress, saveOscMacro, validateMacro } from "../osc/macros.mjs";
 import { sendOscMessage } from "../osc/send.mjs";
@@ -44,6 +46,11 @@ export async function routeRequest(request, response, store, config, runtime = {
         port: config.rnbo.port
       }
     });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/harmonic/scales") {
+    writeJson(response, 200, { ok: true, scales: scaleCatalog() });
     return;
   }
 
@@ -191,6 +198,7 @@ export async function routeRequest(request, response, store, config, runtime = {
         deviceId: target.deviceId || target.unitId,
         oscTargetId: target.id,
         ignoreRecall: Boolean(body.ignoreRecall),
+        ignoreScale: Boolean(body.ignoreScale),
         locked: Boolean(body.locked)
       };
       const score = store.onboardOscTarget(roleId, assignment, clipId, captured.clip, blockId, revisionOptions(body));
@@ -1135,6 +1143,50 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  const mesoTtidMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/ttid$/);
+  if (mesoTtidMatch && (request.method === "PUT" || request.method === "POST")) {
+    try {
+      const blockId = decodeURIComponent(mesoTtidMatch[1]);
+      const body = await readJson(request);
+      const score = request.method === "PUT"
+        ? store.updateBlockTtid(blockId, body.ttid ?? body.value, revisionOptions(body))
+        : store.getScore();
+      const active = score.structureState?.activeBlockId === blockId;
+      const distribution = await distributeTtidForBlock(score, config, runtime, blockId, {
+        targetIds: request.method === "POST" || active
+          ? undefined
+          : Array.isArray(body.auditionTargets) ? body.auditionTargets : []
+      });
+      writeJson(response, distribution.ok ? 200 : 502, {
+        ok: distribution.ok,
+        score,
+        blockId,
+        ttid: score.mesostructure[blockId].ttid,
+        drift: harmonicDrift(score.mesostructure[blockId].scale, score.mesostructure[blockId].ttid),
+        distribution
+      });
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
+  const mesoScaleTransformMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/scale-transform$/);
+  if (request.method === "POST" && mesoScaleTransformMatch) {
+    try {
+      const blockId = decodeURIComponent(mesoScaleTransformMatch[1]);
+      const body = await readJson(request);
+      const result = store.transformBlockScale(blockId, body.scale ?? withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body));
+      const distribution = result.score.structureState?.activeBlockId === blockId
+        ? await distributeTtidForBlock(result.score, config, runtime, blockId)
+        : null;
+      writeJson(response, distribution?.ok === false ? 502 : 200, { ok: distribution?.ok !== false, ...result, distribution });
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
   const mesoBlockMatch = url.pathname.match(/^\/mesostructure\/([^/]+)$/);
   if ((request.method === "POST" || request.method === "DELETE") && mesoBlockMatch) {
     try {
@@ -1350,6 +1402,13 @@ export async function recallOscSnapshotsForBlock(store, config, runtime, blockId
     targets: buildOscTargets(await readAllOscTargets(config, runtime)),
     roles: options.roles,
     dryRun: Boolean(options.dryRun),
+    sender: runtime.oscSender
+  });
+}
+
+export async function distributeTtidForBlock(score, config, runtime, blockId, options = {}) {
+  return distributeBlockTtid(score, blockId, buildOscTargets(await readAllOscTargets(config, runtime)), {
+    targetIds: options.targetIds,
     sender: runtime.oscSender
   });
 }
@@ -1719,6 +1778,8 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
   const jackStart = await maybeStartJack(runtime);
   const jackTempo = await maybeSendJackTempo(runtime, score.macrostructure?.tempo);
+  const ttidDistribution = await distributeTtidForBlock(score, config, runtime, score.structureState?.activeBlockId);
+  const snapshotRecall = await recallOscSnapshotsForBlock(store, config, runtime, score.structureState?.activeBlockId);
   const clockWrites = await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId });
   const phaseWrites = body.phaseReset === false
     ? []
@@ -1732,6 +1793,8 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     mode,
     jackStart,
     jackTempo,
+    ttidDistribution,
+    snapshotRecall,
     clockWrites,
     phaseWrites
   };

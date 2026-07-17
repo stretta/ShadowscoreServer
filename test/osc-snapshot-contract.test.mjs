@@ -107,3 +107,12 @@ test("control disposition excludes momentary commands and orders Clock last", ()
     reason: "metadata-late"
   });
 });
+
+test("TTID metadata is mesostructural and cannot be imported as OSC clip state", () => {
+  assert.deepEqual(snapshotControlDisposition({ kind: "param", name: "PitchSet", meta: { editor: "ttid" } }), {
+    state: "excluded",
+    reason: "mesostructural-ttid"
+  });
+  assert.throws(() => normalizeOscSnapshot({ app: "listsequencer", params: { Scale: 2741 }, inputPorts: {} }), /cannot own mesostructural TTID/);
+  assert.throws(() => normalizeOscSnapshot({ app: "quantizer", params: { ttid: 2741 }, inputPorts: {} }), /cannot own mesostructural TTID/);
+});

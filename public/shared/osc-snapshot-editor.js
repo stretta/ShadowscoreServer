@@ -731,7 +731,9 @@ export function createOscEditorSnapshot({ app, paramEntries = [], inputPortEntri
   return {
     schemaVersion: 1,
     app: normalizedApp,
-    params: Object.fromEntries(paramEntries.map(({ name, value, values }) => {
+    params: Object.fromEntries(paramEntries
+      .filter(({ name, meta }) => String(meta?.editor ?? "").trim().toLowerCase() !== "ttid" && !["scale", "ttid"].includes(String(name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "")))
+      .map(({ name, value, values }) => {
       const semanticName = controlName(name, "parameter");
       return [semanticName, oscSnapshotParamValue({ name: semanticName, value, values })];
     })),

@@ -33,6 +33,8 @@ test("score initialization builds an exact device-free score skeleton", () => {
   assert.equal(plan.score.oscAssignments["analog-1"].oscTargetId, "");
   assert.deepEqual(plan.score.mesostructure.A.players, { "player-1": "a-one", "player-2": "a-two" });
   assert.deepEqual(plan.score.mesostructure.A.oscLayers, {});
+  assert.equal(plan.score.mesostructure.A.scale.scale_name, "Ionian");
+  assert.equal(plan.score.mesostructure.A.ttid, 2741);
   assert.deepEqual(plan.score.macrostructure, { tempo: 96, blocks: ["A", "A"] });
   assert.deepEqual(plan.score.structureState, { activeBlockId: "A", macroIndex: 0 });
   assert.equal(plan.summary.emptyOscLayerSlotCount, 2);

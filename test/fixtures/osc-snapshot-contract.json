@@ -78,7 +78,7 @@
       "snapshot": {
         "schemaVersion": 1,
         "app": "ttid",
-        "params": { "Scale": 2741, "ClockRate": 8, "Clock": 1 },
+        "params": { "ClockRate": 8, "Clock": 1 },
         "inputPorts": {}
       }
     },

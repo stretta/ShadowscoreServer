@@ -57,6 +57,7 @@ export async function runAutomaticOscOnboarding({ store, config, loadTargets, ca
         deviceId,
         oscTargetId: target.id,
         ignoreRecall: Boolean(template.ignoreRecall),
+        ignoreScale: Boolean(template.ignoreScale),
         locked: Boolean(template.locked)
       };
       const score = store.onboardOscTarget(roleId, assignment, clipId, captured.clip, blockId);

@@ -8,7 +8,8 @@ The server owns reusable clips, the mesostructural blocks that assign those clip
 
 - Shared `context`: ensemble-wide scale, root, grid, clip, and seed defaults.
 - `clips`: reusable ShadowScore note documents. Clip-owned metadata includes duration, time signature, playback type, and behavior flags.
-- `mesostructure`: section-sized blocks with durations, optional scale context, and per-player clip assignments.
+- `mesostructure`: section-sized blocks with durations, required rooted scale
+  context, required block-owned TTID, and per-player clip assignments.
 - `macrostructure`: the ordered chain of mesostructural blocks plus macro tempo.
 - `structureState`: the active block and macro-chain index used for editing and playback.
 - Per-voice `notes`: legacy ShadowScore note documents retained for compatibility and migration.
@@ -254,6 +255,9 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /mesostructure`: add or replace a mesostructural block with `{ "blockId": "...", "block": { "duration": { "bars": 8 }, "players": {} } }`.
 - `POST /mesostructure/:blockId`: add or replace one mesostructural block.
 - `POST /mesostructure/:blockId/duplicate`: duplicate one mesostructural block, using `blockId` or `id` in the request body for the new block ID.
+- `PUT /mesostructure/:blockId/ttid`: non-destructively update block TTID with the normal revision guard; active-block edits distribute immediately to eligible online targets.
+- `POST /mesostructure/:blockId/ttid`: manually resend the stored block TTID without changing the score.
+- `POST /mesostructure/:blockId/scale-transform`: atomically reinterpret scale-following clip and legacy voice pitches, update clip scale metadata, and synchronize the block scale and TTID.
 - `DELETE /mesostructure/:blockId`: remove one mesostructural block and delete its appearances from the macro chain.
 - `GET /osc/clips`: list reusable, composition-owned OSC clips.
 - `POST /osc/clips`: create an OSC clip with a stable `clipId` and semantic state.
@@ -321,6 +325,8 @@ Client command messages are JSON objects:
 - `context.update`: update shared context with `context`, optional `replace`, and optional `expectedVersion`.
 - `mesostructure.block.replace`: add or replace one mesostructural block with `blockId` and `block`.
 - `mesostructure.block.remove`: remove one mesostructural block with `blockId`.
+- `mesostructure.ttid.update`: update block-owned TTID without changing notes.
+- `mesostructure.scale.transform`: atomically transform notes and synchronize block scale plus TTID.
 - `osc.clip.add`, `osc.clip.replace`, `osc.clip.remove`: manage reusable OSC clips.
 - `mesostructure.oscLayer.assign`, `mesostructure.oscLayer.remove`: manage block role-to-clip layers.
 - `macrostructure.update`: update macrostructure with `macrostructure`, optional `replace`, and optional `expectedVersion`.

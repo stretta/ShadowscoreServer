@@ -60,6 +60,9 @@ export function snapshotControlDisposition({ kind, name, meta = {} } = {}) {
   if (meta?.snapshot === false || meta?.snapshot_state === false) {
     return { state: "excluded", reason: "metadata-excluded" };
   }
+  if (controlKind === "param" && isTtidMetadata(meta)) {
+    return { state: "excluded", reason: "mesostructural-ttid" };
+  }
   if (controlKind === "inputPort" && isMomentaryInputPort(semanticName, meta)) {
     return { state: "excluded", reason: "momentary-control" };
   }
@@ -78,11 +81,25 @@ function normalizeParams(document) {
   }
   return Object.fromEntries(Object.entries(document).map(([name, value]) => {
     const semanticName = normalizeControlName(name, "parameter");
+    if (isReservedTtidName(semanticName)) {
+      throw new Error(`OSC snapshots cannot own mesostructural TTID parameter '${semanticName}'`);
+    }
     if (!Number.isFinite(value)) {
       throw new Error(`OSC snapshot parameter '${semanticName}' must be numeric`);
     }
     return [semanticName, Number(value)];
   }));
+}
+
+function isTtidMetadata(meta) {
+  const value = meta?.editor;
+  if (Array.isArray(value)) return value.some((entry) => String(entry).trim().toLowerCase() === "ttid");
+  return String(value ?? "").trim().toLowerCase() === "ttid";
+}
+
+function isReservedTtidName(name) {
+  const normalized = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return normalized === "ttid" || normalized === "scale";
 }
 
 function normalizeInputPorts(document) {

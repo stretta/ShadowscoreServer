@@ -279,6 +279,7 @@ export function adminPage() {
         </label>
         <div class="osc-role-options">
           <label><input id="osc-role-ignore" type="checkbox"> Ignore Shadowscore recall</label>
+          <label><input id="osc-role-ignore-scale" type="checkbox"> Ignore block scale / TTID</label>
           <label><input id="osc-role-locked" type="checkbox"> Lock target mapping</label>
           <button class="primary" id="save-osc-role" type="submit">Create role</button>
           <button id="onboard-osc-target" type="button">Add to current score</button>
@@ -342,6 +343,7 @@ export function adminPage() {
     const oscRoleDeviceEl = document.querySelector("#osc-role-device");
     const oscRoleTargetEl = document.querySelector("#osc-role-target");
     const oscRoleIgnoreEl = document.querySelector("#osc-role-ignore");
+    const oscRoleIgnoreScaleEl = document.querySelector("#osc-role-ignore-scale");
     const oscRoleLockedEl = document.querySelector("#osc-role-locked");
     const saveOscRoleEl = document.querySelector("#save-osc-role");
     const onboardOscTargetEl = document.querySelector("#onboard-osc-target");
@@ -569,7 +571,8 @@ export function adminPage() {
           assignment.deviceId ? "device " + assignment.deviceId : "device unassigned",
           assignment.oscTargetId || "target unassigned",
           assignment.locked ? "locked" : "",
-          assignment.ignoreRecall ? "recall ignored" : ""
+          assignment.ignoreRecall ? "recall ignored" : "",
+          assignment.ignoreScale ? "scale ignored" : ""
         ].filter(Boolean).join(" · ");
         const detail = document.createElement("div");
         detail.className = "send-detail";
@@ -1139,6 +1142,7 @@ export function adminPage() {
         deviceId: oscRoleDeviceEl.value.trim() || target?.deviceId || target?.unitId || "",
         oscTargetId: oscRoleTargetEl.value,
         ignoreRecall: oscRoleIgnoreEl.checked,
+        ignoreScale: oscRoleIgnoreScaleEl.checked,
         locked: oscRoleLockedEl.checked
       };
       setOscRoleStatus("Saving role " + roleId + "...");
@@ -1189,6 +1193,7 @@ export function adminPage() {
             clipName: (oscRoleLabelEl.value.trim() || roleId) + " · " + blockId,
             blockId,
             ignoreRecall: oscRoleIgnoreEl.checked,
+            ignoreScale: oscRoleIgnoreScaleEl.checked,
             locked: oscRoleLockedEl.checked,
             expectedStructureRevision: currentScore.structureRevision
           })
@@ -1277,6 +1282,7 @@ export function adminPage() {
       oscRoleAppEl.value = assignment.app ?? "";
       oscRoleDeviceEl.value = assignment.deviceId ?? "";
       oscRoleIgnoreEl.checked = Boolean(assignment.ignoreRecall);
+      oscRoleIgnoreScaleEl.checked = Boolean(assignment.ignoreScale);
       oscRoleLockedEl.checked = Boolean(assignment.locked);
       saveOscRoleEl.textContent = "Update role";
       cancelOscRoleEl.hidden = false;

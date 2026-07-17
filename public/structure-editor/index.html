@@ -376,15 +376,18 @@
             <label>Duration
               <input id="duration-value" type="number" min="0.001" step="0.001" value="8">
             </label>
-            <label>Root
+            <label>Rendered Root (Matrix Edit)
               <select id="scale-root">
-                <option value="">None</option>
               </select>
             </label>
-            <label class="wide">Scale
-              <input id="scale-name" spellcheck="false" placeholder="Major">
+            <label class="wide">Rendered Scale (Matrix Edit)
+              <input id="scale-name" spellcheck="false" placeholder="Ionian" required>
+            </label>
+            <label>Runtime TTID
+              <input id="block-ttid" type="number" min="0" max="4095" step="1">
             </label>
           </div>
+          <div id="harmonic-warning" class="empty" hidden>Runtime TTID differs from the rendered ShadowScore scale. Use Matrix Edit to synchronize both.</div>
           <div>
             <table>
               <thead>
@@ -471,6 +474,8 @@
       durationValue: document.querySelector("#duration-value"),
       scaleRoot: document.querySelector("#scale-root"),
       scaleName: document.querySelector("#scale-name"),
+      blockTtid: document.querySelector("#block-ttid"),
+      harmonicWarning: document.querySelector("#harmonic-warning"),
       players: document.querySelector("#players"),
       playersEmpty: document.querySelector("#players-empty"),
       revertBlock: document.querySelector("#revert-block"),
@@ -532,7 +537,7 @@
       els.resetBlock.addEventListener("click", resetBlock);
       els.startMacro.addEventListener("click", startMacroPlayback);
       els.stopMacro.addEventListener("click", stopMacroPlayback);
-      [els.blockId, els.durationUnit, els.durationValue, els.scaleRoot, els.scaleName].forEach((el) => {
+      [els.blockId, els.durationUnit, els.durationValue, els.scaleRoot, els.scaleName, els.blockTtid].forEach((el) => {
         el.addEventListener("input", () => {
           markBlockDirty();
         });
@@ -709,13 +714,16 @@
     function renderBlockEditor() {
       const block = currentBlock();
       const enabled = Boolean(block);
-      [els.blockId, els.durationUnit, els.durationValue, els.scaleRoot, els.scaleName].forEach((el) => {
+      [els.blockId, els.durationUnit, els.durationValue, els.scaleRoot, els.scaleName, els.blockTtid].forEach((el) => {
         el.disabled = !enabled;
       });
+      els.scaleRoot.disabled = true;
+      els.scaleName.disabled = true;
       els.players.innerHTML = "";
       if (!block) {
         els.blockId.value = "";
         els.durationValue.value = "8";
+        els.harmonicWarning.hidden = true;
         els.playersEmpty.hidden = false;
         updateButtons();
         return;
@@ -726,6 +734,8 @@
       els.durationValue.value = String(durationValue);
       els.scaleRoot.value = Number.isFinite(block.scale?.root_note) ? String(block.scale.root_note) : "";
       els.scaleName.value = block.scale?.scale_name ?? "";
+      els.blockTtid.value = String(block.ttid ?? 2741);
+      els.harmonicWarning.hidden = Number(block.ttid) === ttidForScale(block.scale);
 
       const voices = state.session?.voices ?? Object.keys(state.score?.voices ?? {}).map((id) => ({ id, label: id }));
       els.playersEmpty.hidden = voices.length > 0;
@@ -895,7 +905,8 @@
           ...state.score.mesostructure,
           [id]: {
             duration: { bars: 4 },
-            scale: {},
+            scale: { root_note: 0, scale_name: "Ionian", scale_intervals: [0, 2, 4, 5, 7, 9, 11] },
+            ttid: 2741,
             players: {}
           }
         }
@@ -1171,13 +1182,11 @@
 
     function blockFromForm() {
       const unit = els.durationUnit.value === "beats" ? "beats" : "bars";
-      const scale = {};
-      if (els.scaleRoot.value !== "") {
-        scale.root_note = numberValue(els.scaleRoot.value, 0);
-      }
-      if (els.scaleName.value.trim()) {
-        scale.scale_name = els.scaleName.value.trim();
-      }
+      const scale = structuredClone(currentBlock()?.scale ?? {
+        root_note: 0,
+        scale_intervals: [0, 2, 4, 5, 7, 9, 11],
+        scale_name: "Ionian"
+      });
       const players = {};
       els.players.querySelectorAll("select[data-voice-id]").forEach((input) => {
         const clipId = input.value.trim();
@@ -1189,8 +1198,15 @@
         ...currentBlock(),
         duration: { [unit]: numberValue(els.durationValue.value, 8) },
         scale,
+        ttid: Math.max(0, Math.min(4095, Math.round(numberValue(els.blockTtid.value, 2741)))),
         players
       };
+    }
+
+    function ttidForScale(scale = {}) {
+      const root = Number(scale.root_note || 0) % 12;
+      const intervals = Array.isArray(scale.scale_intervals) ? scale.scale_intervals : [];
+      return intervals.reduce((mask, interval) => mask | (1 << ((root + Number(interval)) % 12)), 0);
     }
 
     function markBlockDirty() {

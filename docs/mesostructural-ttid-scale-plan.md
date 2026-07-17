@@ -2,17 +2,21 @@
 
 ## Implementation Status
 
-The ShadowscoreServer implementation is complete for the canonical catalog and
-conversion module, normalized block schema, revision-guarded TTID and atomic
-scale-transform APIs, OSC snapshot exclusion, block-owned TTID controls in the
-TTID and List Sequencer editors, drift visibility, `ignoreScale`, and ordered
-runtime distribution. The server-side contract and tests are the authority for
-these behaviors.
+Implementation and cross-repository landing are complete. ShadowscoreServer
+owns the canonical catalog and conversion module, normalized block schema,
+revision-guarded TTID and atomic scale-transform APIs, persisted-score cutover,
+OSC snapshot exclusion, block-owned TTID controls, drift visibility,
+`ignoreScale`, and ordered runtime distribution. The ShadowScore data-format
+reference documents the ownership contract, and the clean Matrix Edit source
+and exported bundle use the atomic scale-transform endpoint.
 
-The separately versioned ShadowScore data-format reference and Matrix Edit
-source/export remain cross-repository landing steps. Until that source bundle
-is refreshed, older Matrix Edit builds can still use their legacy whole-score
-restore path and should not be treated as implementing Phase 7.
+The deployed `wren` topology was verified on 2026-07-17 with the host
+ListSequencer, the remote `finch` ListSequencer, and a Quantizer export; all
+three accepted the active block TTID. The registered ShadowScore playback
+clients accepted the score transaction, but do not currently advertise a
+TTID-tagged parameter. No opted-out percussion target was registered during
+the live check, so `ignoreScale` exemption remains covered by automated
+distribution and recall tests rather than that unavailable hardware fixture.
 
 ## Intent
 

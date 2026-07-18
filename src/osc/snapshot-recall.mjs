@@ -11,6 +11,7 @@ export function compileOscSnapshot(snapshot, target, context = {}) {
     params: [],
     inputPorts: [],
     late: [],
+    preClock: [],
     clock: []
   };
   const missingControls = [];
@@ -41,13 +42,41 @@ export function compileOscSnapshot(snapshot, target, context = {}) {
     });
   }
 
+  compileRecallOptions(snapshot, target, writesByGroup, missingControls, context);
+
   const writes = [
     ...writesByGroup.params,
     ...writesByGroup.inputPorts,
     ...writesByGroup.late,
+    ...writesByGroup.preClock,
     ...writesByGroup.clock
   ].map((write, index) => ({ ...write, index }));
   return { writes, missingControls, excludedControls };
+}
+
+function compileRecallOptions(snapshot, target, writesByGroup, missingControls, context) {
+  if (snapshot.app !== "analogsequencer" || snapshot.recall?.rtzBeforePlay !== true || !clockStartsPlayback(snapshot.params)) return;
+  const inputPort = (target.inputPorts ?? []).find((entry) => String(entry.name ?? "").toLowerCase() === "rtz");
+  if (!inputPort?.address) {
+    missingControls.push({ kind: "inputPort", name: "rtz", reason: "missing-live-control" });
+    return;
+  }
+  writesByGroup.preClock.push({
+    blockId: context.blockId,
+    roleId: context.roleId,
+    targetId: context.targetId,
+    kind: "inputPort",
+    name: inputPort.name,
+    group: "preClock",
+    address: inputPort.address,
+    args: [1],
+    packetBytes: oscPacketByteLength(inputPort.address, [1])
+  });
+}
+
+function clockStartsPlayback(params = {}) {
+  const entry = Object.entries(params).find(([name]) => name.toLowerCase() === "clock");
+  return entry ? Number(entry[1]) !== 0 : false;
 }
 
 export function compileOscBlockRecall(score, blockId, targets, options = {}) {
@@ -223,6 +252,12 @@ function liveParameterArgs(control, args, missingControls, name) {
   if (control.type !== "s" || !Array.isArray(control.values) || control.values.length === 0) return args;
   const choices = Array.from(new Set(control.values.map(String)));
   const index = Number(args[0]);
+  if (isMaxCountName(name) && Number.isInteger(index) && index >= 0 && index < choices.length) {
+    // AnalogSequencer reports stages from 1, but MaxCnt is the zero-based terminal
+    // counter value. A saved UI count of 16 is enum index 15 and must send "15".
+    const terminalCount = String(Math.max(1, index));
+    if (choices.includes(terminalCount)) return [terminalCount];
+  }
   if (!Number.isInteger(index) || index < 0 || index >= choices.length) {
     const legacyChoice = choices.find((choice) => choice === String(args[0]));
     if (legacyChoice !== undefined) return [legacyChoice];
@@ -230,6 +265,10 @@ function liveParameterArgs(control, args, missingControls, name) {
     return null;
   }
   return [choices[index]];
+}
+
+function isMaxCountName(name) {
+  return /^(?:maxcount|maxcnt)$/i.test(String(name ?? ""));
 }
 
 async function dispatchRole(role, options) {

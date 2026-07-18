@@ -1327,7 +1327,7 @@ async function readSessionRuntime(config, runtime) {
   const manualTargets = await runtime.manualOscQueryDevices?.rnboTargets?.() ?? [];
   const manualOscTargets = await runtime.manualOscQueryDevices?.oscTargets?.() ?? [];
   const manualRnboDevices = await runtime.manualOscQueryDevices?.rnboDevices?.() ?? [];
-  return {
+  const sessionRuntime = {
     rnboTargets: [...localUnit.targets, ...peerTargets, ...manualTargets],
     oscTargets: [...localUnit.oscTargets, ...peerOscTargets, ...manualOscTargets],
     rnboDevices: [...localUnit.rnboDevices, ...(runtime.peerRegistry?.rnboDevices?.() ?? []), ...manualRnboDevices],
@@ -1336,6 +1336,8 @@ async function readSessionRuntime(config, runtime) {
     jackTransport: runtime.jackTransport,
     rnboAdapter: runtime.rnboAdapter
   };
+  runtime.sessionRuntimeCache = sessionRuntime;
+  return sessionRuntime;
 }
 
 function requireManualOscQueryDevices(runtime) {
@@ -1363,8 +1365,10 @@ async function readAllRnboDevices(config, runtime) {
   return sessionRuntime.rnboDevices;
 }
 
-async function readAllOscTargets(config, runtime) {
-  const sessionRuntime = await readSessionRuntime(config, runtime);
+async function readAllOscTargets(config, runtime, options = {}) {
+  const sessionRuntime = options.preferCached && runtime.sessionRuntimeCache
+    ? runtime.sessionRuntimeCache
+    : await readSessionRuntime(config, runtime);
   return [...sessionRuntime.rnboTargets, ...sessionRuntime.oscTargets];
 }
 
@@ -1399,7 +1403,9 @@ export async function recallOscSnapshotsForBlock(store, config, runtime, blockId
   return oscSnapshotRecallService(runtime).recall({
     score: store.getScore(),
     blockId,
-    targets: buildOscTargets(await readAllOscTargets(config, runtime)),
+    targets: buildOscTargets(await readAllOscTargets(config, runtime, {
+      preferCached: Boolean(options.preferCachedTargets)
+    })),
     roles: options.roles,
     dryRun: Boolean(options.dryRun),
     sender: runtime.oscSender
@@ -1407,7 +1413,9 @@ export async function recallOscSnapshotsForBlock(store, config, runtime, blockId
 }
 
 export async function distributeTtidForBlock(score, config, runtime, blockId, options = {}) {
-  return distributeBlockTtid(score, blockId, buildOscTargets(await readAllOscTargets(config, runtime)), {
+  return distributeBlockTtid(score, blockId, buildOscTargets(await readAllOscTargets(config, runtime, {
+    preferCached: Boolean(options.preferCachedTargets)
+  })), {
     targetIds: options.targetIds,
     sender: runtime.oscSender
   });

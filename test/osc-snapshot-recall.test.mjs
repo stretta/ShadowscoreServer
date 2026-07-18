@@ -57,6 +57,52 @@ test("snapshot compiler translates numeric enum indexes to live OSCQuery string 
   }]);
 });
 
+test("AnalogSequencer MaxCnt maps a saved 16-stage count to terminal counter value 15", () => {
+  const compiled = compileOscSnapshot({
+    app: "analogsequencer",
+    params: { MaxCnt: 15 }
+  }, oscTarget({
+    app: "analogsequencer",
+    parameters: [{ ...param("MaxCnt"), type: "s", values: Array.from({ length: 16 }, (_, index) => String(index + 1)) }]
+  }));
+
+  assert.deepEqual(compiled.writes.map((write) => [write.name, write.args]), [["MaxCnt", ["15"]]]);
+});
+
+test("AnalogSequencer recall can send RTZ immediately before Clock starts playback", () => {
+  const compiled = compileOscSnapshot({
+    app: "analogsequencer",
+    params: { Clock: 1, GateTime: 0.4 },
+    inputPorts: {},
+    recall: { rtzBeforePlay: true }
+  }, oscTarget({
+    app: "analogsequencer",
+    parameters: [param("Clock"), param("GateTime")],
+    inputPorts: [inport("rtz")]
+  }), { blockId: "B", roleId: "analog-a", targetId: "heron:analogsequencer:main" });
+
+  assert.deepEqual(compiled.writes.map((write) => [write.group, write.name, write.args]), [
+    ["params", "GateTime", [0.4]],
+    ["preClock", "rtz", [1]],
+    ["clock", "Clock", [1]]
+  ]);
+});
+
+test("AnalogSequencer RTZ-before-play does not fire when the recalled Clock is off", () => {
+  const compiled = compileOscSnapshot({
+    app: "analogsequencer",
+    params: { Clock: 0 },
+    inputPorts: {},
+    recall: { rtzBeforePlay: true }
+  }, oscTarget({
+    app: "analogsequencer",
+    parameters: [param("Clock")],
+    inputPorts: [inport("rtz")]
+  }));
+
+  assert.deepEqual(compiled.writes.map((write) => write.name), ["Clock"]);
+});
+
 test("recall telemetry measures encoded payloads and the dispatch window", async () => {
   const score = scoreWithRoles({
     online: snapshot("listsequencer", { GateTime: 0.4, Clock: 1 }, { Steps: [1, 0, 1, 0] })

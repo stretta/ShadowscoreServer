@@ -74,6 +74,14 @@ test("snapshot normalization accepts unknown semantic controls for offline autho
   }).params, { FutureParameter: 12 });
 });
 
+test("snapshot normalization retains the optional RTZ-before-play recall behavior", () => {
+  assert.deepEqual(normalizeOscSnapshot({
+    app: "analogsequencer",
+    params: { Clock: 1 },
+    recall: { rtzBeforePlay: true }
+  }).recall, { rtzBeforePlay: true });
+});
+
 test("snapshot normalization rejects live addresses and non-numeric values", () => {
   assert.throws(
     () => normalizeOscSnapshot({ app: "plate", params: { "/rnbo/inst/1/params/Gain": 1 } }),

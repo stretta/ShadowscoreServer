@@ -178,7 +178,10 @@ Active macro entry changes also enqueue composition-owned OSC snapshot recall.
 The entry key includes macro index and block id, so repeated observations do
 not resend while separate occurrences of the same block still recall. Playback
 status reports this queue separately from ShadowScore note delivery and
-`SetStage` phase alignment.
+`SetStage` phase alignment. AnalogSequencer block states can opt into
+`recall.rtzBeforePlay`; when their saved `Clock` value starts playback, recall
+orders the state writes, `rtz`, and `Clock` so reset occurs immediately before
+play.
 
 ## Editing Model
 

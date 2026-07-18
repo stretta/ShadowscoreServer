@@ -46,8 +46,8 @@ const macroPlayback = createMacroPlayback(store, config, {
 runtime.macroPlayback = macroPlayback;
 const oscSnapshotAutoRecall = createOscSnapshotAutoRecall(store, {
   recall: async ({ blockId }) => {
-    await distributeTtidForBlock(store.getScore(), config, runtime, blockId);
-    return recallOscSnapshotsForBlock(store, config, runtime, blockId);
+    await distributeTtidForBlock(store.getScore(), config, runtime, blockId, { preferCachedTargets: true });
+    return recallOscSnapshotsForBlock(store, config, runtime, blockId, { preferCachedTargets: true });
   },
   onError: (error, request) => console.error(`[osc-snapshot] automatic recall failed for ${request.blockId}: ${error.message}`)
 });

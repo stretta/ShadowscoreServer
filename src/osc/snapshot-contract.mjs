@@ -11,9 +11,10 @@ export function normalizeOscClip(document) {
     schemaVersion: document.schemaVersion,
     app: document.app,
     params: document.params,
-    inputPorts: document.inputPorts
+    inputPorts: document.inputPorts,
+    recall: document.recall
   });
-  rejectUnknownFields(document, new Set(["name", "schemaVersion", "app", "params", "inputPorts", "capture"]), "OSC clip");
+  rejectUnknownFields(document, new Set(["name", "schemaVersion", "app", "params", "inputPorts", "recall", "capture"]), "OSC clip");
   return {
     name: stringField(document.name),
     ...snapshot,
@@ -42,13 +43,22 @@ export function normalizeOscSnapshot(document) {
   if (!app) {
     throw new Error("OSC snapshot app must be a non-empty semantic identifier");
   }
-  rejectUnknownFields(document, new Set(["schemaVersion", "app", "params", "inputPorts"]), "OSC snapshot");
+  rejectUnknownFields(document, new Set(["schemaVersion", "app", "params", "inputPorts", "recall"]), "OSC snapshot");
+  const recall = normalizeRecall(document.recall);
   return {
     schemaVersion,
     app,
     params: normalizeParams(document.params ?? {}),
-    inputPorts: normalizeInputPorts(document.inputPorts ?? {})
+    inputPorts: normalizeInputPorts(document.inputPorts ?? {}),
+    ...(recall.rtzBeforePlay ? { recall } : {})
   };
+}
+
+function normalizeRecall(document) {
+  if (document === undefined) return {};
+  if (!isPlainObject(document)) throw new Error("OSC snapshot recall options must be an object");
+  rejectUnknownFields(document, new Set(["rtzBeforePlay"]), "OSC snapshot recall options");
+  return document.rtzBeforePlay === true ? { rtzBeforePlay: true } : {};
 }
 
 export function snapshotControlDisposition({ kind, name, meta = {} } = {}) {

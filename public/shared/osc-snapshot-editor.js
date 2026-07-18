@@ -725,9 +725,10 @@ function draftKey(roleId, targetId, blockId) {
   return oscBlockDraftKey({ roleId, targetId, blockId });
 }
 
-export function createOscEditorSnapshot({ app, paramEntries = [], inputPortEntries = [] } = {}) {
+export function createOscEditorSnapshot({ app, paramEntries = [], inputPortEntries = [], recall = {} } = {}) {
   const normalizedApp = cleanToken(app);
   if (!normalizedApp) throw new Error("Snapshot app is required");
+  const rtzBeforePlay = recall?.rtzBeforePlay === true;
   return {
     schemaVersion: 1,
     app: normalizedApp,
@@ -739,7 +740,8 @@ export function createOscEditorSnapshot({ app, paramEntries = [], inputPortEntri
     })),
     inputPorts: Object.fromEntries(inputPortEntries
       .filter(({ name, meta }) => !isMomentaryInputPort(name, meta))
-      .map(({ name, value }) => [controlName(name, "input port"), parseNumericList(value, name)]))
+      .map(({ name, value }) => [controlName(name, "input port"), parseNumericList(value, name)])),
+    ...(rtzBeforePlay ? { recall: { rtzBeforePlay: true } } : {})
   };
 }
 
@@ -795,7 +797,8 @@ function normalizeEditorSnapshot(snapshot, app) {
   const normalized = createOscEditorSnapshot({
     app: snapshot?.app ?? app,
     paramEntries: Object.entries(snapshot?.params ?? {}).map(([name, value]) => ({ name, value })),
-    inputPortEntries: Object.entries(snapshot?.inputPorts ?? {}).map(([name, value]) => ({ name, value }))
+    inputPortEntries: Object.entries(snapshot?.inputPorts ?? {}).map(([name, value]) => ({ name, value })),
+    recall: snapshot?.recall
   });
   if (normalized.app !== app) throw new Error(`Snapshot app must be '${app}'`);
   return normalized;
@@ -816,7 +819,8 @@ function canonicalSnapshot(snapshot) {
     schemaVersion: Number(snapshot.schemaVersion ?? 1),
     app: cleanToken(snapshot.app),
     params: sortedObject(snapshot.params, Number),
-    inputPorts: sortedObject(snapshot.inputPorts, (value) => (value ?? []).map(Number))
+    inputPorts: sortedObject(snapshot.inputPorts, (value) => (value ?? []).map(Number)),
+    recall: snapshot.recall?.rtzBeforePlay === true ? { rtzBeforePlay: true } : {}
   };
 }
 

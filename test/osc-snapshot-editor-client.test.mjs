@@ -21,12 +21,14 @@ test("shared OSC editor snapshot core normalizes parameter and list drafts", () 
   assert.deepEqual(createOscEditorSnapshot({
     app: "AnalogSequencer",
     paramEntries: [{ name: "01StageValue", value: "64" }, { name: "Clock", value: 0 }],
-    inputPortEntries: [{ name: "Steps", value: "1 0 1" }, { name: "rtz", value: [1] }]
+    inputPortEntries: [{ name: "Steps", value: "1 0 1" }, { name: "rtz", value: [1] }],
+    recall: { rtzBeforePlay: true }
   }), {
     schemaVersion: 1,
     app: "analogsequencer",
     params: { "01StageValue": 64, Clock: 0 },
-    inputPorts: { Steps: [1, 0, 1] }
+    inputPorts: { Steps: [1, 0, 1] },
+    recall: { rtzBeforePlay: true }
   });
 });
 

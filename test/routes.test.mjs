@@ -5,7 +5,7 @@ import path from "node:path";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { recallOscSnapshotsForBlock, routeRequest } from "../src/http/routes.mjs";
+import { distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "../src/http/routes.mjs";
 import { createOscSnapshotAutoRecall } from "../src/osc/snapshot-auto-recall.mjs";
 import { createMacroPlayback } from "../src/playback/macro-playback.mjs";
 import { createPeerRegistry } from "../src/registration/peer-registry.mjs";
@@ -1156,6 +1156,60 @@ test("active block route changes automatically recall snapshots once and expose 
   assert.equal(playback.oscSnapshotRecall.last.blockId, "B");
   assert.equal(playback.oscSnapshotRecall.last.attemptedWriteCount, 3);
   automatic.close();
+});
+
+test("automatic OSC recall can use cached targets without refreshing discovery on the block boundary", async () => {
+  const sends = [];
+  const target = {
+    id: "rnbo-inst-42:analogsequencer",
+    localId: "rnbo-inst-42:analogsequencer",
+    label: "Analog Sequencer 42",
+    host: "127.0.0.1",
+    port: 1234,
+    baseAddress: "/rnbo/inst/42",
+    app: "analogsequencer",
+    instance: "main",
+    hardwareUnitId: "wren",
+    deviceId: "wren",
+    available: true,
+    parameters: [{ name: "Clock", address: "/rnbo/inst/42/params/Clock" }],
+    inputPorts: [{ name: "rtz", address: "/rnbo/inst/42/messages/in/rtz" }]
+  };
+  const context = createRouteContext({
+    runtime: {
+      oscSender: async (write) => { sends.push(write); },
+      sessionRuntimeCache: { rnboTargets: [], oscTargets: [target] },
+      manualOscQueryDevices: {
+        async rnboTargets() { throw new Error("discovery should not run"); },
+        async rnboDevices() { throw new Error("discovery should not run"); },
+        async oscTargets() { throw new Error("discovery should not run"); }
+      }
+    }
+  });
+  await requestJson(context, "PUT", "/osc/assignments/analog-a", {
+    app: "analogsequencer",
+    deviceId: "wren",
+    oscTargetId: "rnbo-inst-42:analogsequencer"
+  });
+  await createOscClipLayer(context, "B", "analog-a", "analog-b-state", {
+    app: "analogsequencer",
+    params: { Clock: 1 },
+    inputPorts: {},
+    recall: { rtzBeforePlay: true }
+  });
+
+  const result = await recallOscSnapshotsForBlock(context.store, context.config, context.runtime, "B", {
+    preferCachedTargets: true
+  });
+  await distributeTtidForBlock(context.store.getScore(), context.config, context.runtime, "B", {
+    preferCachedTargets: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(sends.map((write) => write.address), [
+    "/rnbo/inst/42/messages/in/rtz",
+    "/rnbo/inst/42/params/Clock"
+  ]);
 });
 
 test("structure playhead routes select, advance, and reset active blocks", async () => {
@@ -3477,7 +3531,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
-  assert.match(response.body, /20260716-chase-focus1/);
+  assert.match(response.body, /20260717-rtz-before-play1/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -3516,7 +3570,7 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotDraft/);
   assert.match(response.body, /applySavedSnapshot/);
-  assert.match(response.body, /20260716-chase-focus1/);
+  assert.match(response.body, /20260717-rtz-before-play1/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -3551,6 +3605,8 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /isMaxCountParam/);
   assert.match(response.body, /maxcnt/);
   assert.match(response.body, /maxCountParamValue/);
+  assert.match(response.body, /maxCountWireValue/);
+  assert.match(response.body, /normalizeMaxCountParam/);
   assert.match(response.body, /uniqueParameterValues/);
   assert.match(response.body, /Max Count/);
   assert.match(response.body, /\.stage\.unused/);
@@ -3569,6 +3625,9 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /serializeSnapshotDraft/);
   assert.match(response.body, /applySavedSnapshot/);
   assert.match(response.body, /dataset\.snapshotValue/);
+  assert.match(response.body, /id="rtz-before-play"/);
+  assert.match(response.body, /On block change, send RTZ before play/);
+  assert.match(response.body, /recall: \{ rtzBeforePlay: rtzBeforePlayInput\.checked \}/);
 });
 
 test("OSC editors place controls above Block State and live destinations below it", async () => {
@@ -3585,7 +3644,7 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /20260716-chase-focus1/, `${editor} should load the chase/focus-safe shared client`);
+    assert.match(response.body, /20260717-rtz-before-play1/, `${editor} should load the current shared snapshot client`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');
     const targetsIndex = response.body.indexOf('id="targets"');

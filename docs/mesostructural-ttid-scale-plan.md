@@ -7,8 +7,11 @@ owns the canonical catalog and conversion module, normalized block schema,
 revision-guarded TTID and atomic scale-transform APIs, persisted-score cutover,
 OSC snapshot exclusion, block-owned TTID controls, drift visibility,
 `ignoreScale`, and ordered runtime distribution. The ShadowScore data-format
-reference documents the ownership contract, and the clean Matrix Edit source
-and exported bundle use the atomic scale-transform endpoint.
+reference documents the ownership contract. Matrix Edit now writes block TTID
+non-destructively, folds the visible pitch grid to that mask, and reserves pitch
+mutation for an explicit focused-document `Quantize to TTID` action. The atomic
+scale-transform endpoint remains available as a server API but is no longer the
+Matrix Edit scale-selection path.
 
 The deployed `wren` topology was verified on 2026-07-17 with the host
 ListSequencer, the remote `finch` ListSequencer, and a Quantizer export; all
@@ -59,8 +62,11 @@ The ownership rules are:
 - `clip.context.scale` describes the notes currently stored in that clip.
 - `mesostructure.*.scale` describes rooted and named harmonic context.
 - `mesostructure.*.ttid` is the rootless runtime pitch-class set.
-- Matrix Edit writes transformed clip data, clip scale metadata, block scale,
-  and block TTID together.
+- Matrix Edit writes block TTID directly and uses it as a non-destructive pitch
+  fold. Notes excluded by the fold remain stored and reappear when included
+  again.
+- Matrix Edit changes focused note data only after explicit confirmation through
+  `Quantize to TTID`; that action does not infer or write rooted scale metadata.
 - OSC editors write block TTID only.
 - TTID never belongs to an OSC clip or instance snapshot.
 - Direct TTID editing may intentionally diverge from block scale and rendered
@@ -189,20 +195,22 @@ TTID-capable editors inherit it automatically.
 
 ## Phase 7: Matrix Edit Changes
 
-Matrix Edit's destructive scale controls should:
+Matrix Edit's current TTID controls:
 
-- Hydrate from the focused clip's `context.scale`.
-- Fall back only when the clip lacks scale information.
-- Never hydrate from block TTID.
-- Require explicit user selection and confirmation.
-- Call the atomic scale-transform endpoint rather than `/admin/restore`.
-- Refresh from the committed score response.
+- Hydrate from the selected block's TTID.
+- Expose the twelve pitch-class bits directly, with compact rooted scale presets
+  as a convenience for producing a TTID mask.
+- Write TTID through the revision-guarded block TTID endpoint.
+- Fold non-member pitch rows out of the grid without deleting or rewriting their
+  notes.
+- Report how many focused notes are hidden by the fold.
+- Require a separate, explicit confirmation before `Quantize to TTID` moves the
+  focused clip or legacy voice notes to their nearest allowed pitches.
+- Refresh from the committed score response after a TTID write.
 
-Matrix Edit may display the block's runtime TTID separately as informational
-state, but a TTID change must never trigger a note transformation.
-
-When Matrix Edit commits a scale change, it is the synchronization authority
-across ShadowScore and TTID-only clients.
+Changing TTID may immediately affect TTID-capable runtime clients, but it never
+transforms stored Matrix Edit notes. The server's atomic scale-transform API is
+retained for explicit whole-score conversion workflows outside this control.
 
 ## Phase 8: Drift Visibility
 
@@ -264,7 +272,7 @@ Update:
 - ShadowscoreServer data-model and implementation documentation.
 - The OSC snapshot contract.
 - Mesostructural recall documentation.
-- Matrix Edit scale-operation documentation.
+- Matrix Edit TTID fold and explicit quantization documentation.
 - Admin and client scale-exemption documentation.
 
 Document the asymmetric authority model and the possibility of intentional

@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ShadowScore Matrix Edit</title>
     <link rel="stylesheet" href="/shared/shadowscore-style.css" />
-    <script type="module" crossorigin src="/matrix-edit/assets/index-5z-vFnHg.js"></script>
-    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-Hj3A_M_K.css">
+    <script type="module" crossorigin src="/matrix-edit/assets/index-C-eKgnJ8.js"></script>
+    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-Cx8fqSHN.css">
   </head>
   <body>
     <nav class="ss-route-tabs" aria-label="ShadowScore routes">
@@ -103,14 +103,19 @@
         </div>
       </div>
       <div class="toolbar compact">
-        <label>
-          Root
-          <select id="scale-root"></select>
-        </label>
-        <label>
-          Scale
-          <select id="scale"></select>
-        </label>
+        <div class="ttid-fold" aria-label="Block TTID pitch-class fold">
+          <div class="ttid-fold-head">
+            <span>TTID <output id="ttid-value">4095</output></span>
+            <output id="ttid-hidden-notes">0 hidden</output>
+          </div>
+          <div class="ttid-preset">
+            <select id="ttid-preset-root" aria-label="TTID preset root"></select>
+            <select id="ttid-preset-scale" aria-label="TTID scale preset"></select>
+            <button id="ttid-apply-preset" type="button">Set</button>
+          </div>
+          <div id="ttid-selector" class="ttid-selector" role="group" aria-label="TTID pitch classes"></div>
+        </div>
+        <button id="quantize-ttid" type="button" title="Destructively move the focused clip's notes to the nearest pitch in the current TTID">Quantize to TTID</button>
         <label>
           Low Note
           <span class="stepper">

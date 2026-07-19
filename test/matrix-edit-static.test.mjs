@@ -48,6 +48,11 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(html, /<select id="clip" aria-label="ShadowScore clip"><\/select>/);
   assert.match(html, /<select id="rnbo-target" aria-label="Live client"><\/select>/);
   assert.match(html, /id="routing-status"/);
+  assert.match(html, /id="ttid-selector"/);
+  assert.match(html, /id="ttid-hidden-notes"/);
+  assert.match(html, /id="ttid-preset-root"/);
+  assert.match(html, /id="ttid-preset-scale"/);
+  assert.match(html, /id="quantize-ttid"/);
   assert.doesNotMatch(html, /voice-picker/);
   assert.match(js, /\/session/);
   assert.match(js, /\/score/);
@@ -65,9 +70,10 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(js, /Switching \$\{[^}]+\} to clip/);
   assert.match(js, /Switch clip failed/);
   assert.match(js, /needs a clip in section/);
-  assert.match(js, /Switch the whole score to/);
-  assert.match(js, /\/mesostructure\/\$\{encodeURIComponent\([^}]+\)\}\/scale-transform/);
-  assert.match(js, /will receive the synchronized rooted scale and TTID/);
+  assert.match(js, /\/mesostructure\/\$\{encodeURIComponent\([^}]+\)\}\/ttid/);
+  assert.match(js, /Changing TTID alone does not/);
+  assert.match(js, /notes hidden by fold/);
+  assert.doesNotMatch(js, /\/mesostructure\/\$\{encodeURIComponent\([^}]+\)\}\/scale-transform/);
   assert.match(js, /\/admin\/restore/);
   assert.match(js, /\/transport\//);
   assert.match(js, /return-to-start/);
@@ -93,6 +99,8 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(css, /ss-route-tabs/);
   assert.match(css, /routing-status/);
   assert.match(css, /routing-status\.ambiguous/);
+  assert.match(css, /ttid-selector/);
+  assert.match(css, /ttid-pitch-class/);
   assert.match(css, /grid-template-rows:auto auto auto minmax\(320px,1fr\) auto/);
   assert.match(css, /\.edit-tools\{[^}]*display:flex[^}]*flex-wrap:nowrap[^}]*margin-left:auto/);
 });

@@ -13,6 +13,7 @@ test("Piano Roll exposes explicit draft controls and editing surfaces", async ()
   assert.match(html, /<a href="\/transport\/status">Transport<\/a>/);
   assert.match(html, /id="save"[^>]*disabled/);
   assert.match(html, /id="revert"[^>]*disabled/);
+  assert.match(html, /id="chase"[^>]*type="checkbox"/);
   assert.match(html, /id="fold"[^>]*aria-pressed="false"/);
   assert.match(html, /id="roll"/);
   assert.match(html, /id="roll"[^>]*tabindex="0"/);
@@ -42,5 +43,9 @@ test("Piano Roll saves revision-aware clip drafts and supports right-edge resize
   assert.match(js, /\.\.\.referenceNotes\(\)/);
   assert.match(js, /const visiblePitches = \(\) => state\.folded/);
   assert.match(js, /ui\.fold\.addEventListener\("click"/);
+  assert.match(js, /ui\.chase\.addEventListener\("change"/);
+  assert.match(js, /ui\.block\.disabled=state\.chasing/);
+  assert.match(js, /function followChase\(\)/);
+  assert.match(js, /state\.playback\?\.activeBlockId\|\|state\.score\?\.structureState\?\.activeBlockId/);
   assert.match(js, /Save failed:/);
 });

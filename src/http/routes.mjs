@@ -212,6 +212,22 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/osc/block-state/clear") {
+    try {
+      const body = await readJson(request);
+      const scope = requiredString(body.scope, "scope");
+      const result = store.clearOscBlockStates({
+        scope,
+        blockId: optionalString(body.blockId),
+        roleId: optionalString(body.roleId)
+      }, revisionOptions(body));
+      writeJson(response, 200, { ok: true, scope, clearedCount: result.cleared.length, ...result });
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
   if (request.method === "POST" && (url.pathname === "/osc/block-state/write" || url.pathname === "/osc/block-state/copy")) {
     try {
       const body = await readJson(request);

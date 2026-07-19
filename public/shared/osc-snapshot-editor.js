@@ -7,8 +7,8 @@ export function mountOscSnapshotPanel(parent, options = {}) {
   section.setAttribute("aria-label", "Block state");
   section.innerHTML = `
     <div class="ss-osc-snapshot-head">
-      <div><h2>Block State</h2><div class="ss-osc-snapshot-detail">Focus chooses what is displayed and written, and makes that instance the sole live-send destination.</div></div>
-      <div data-snapshot-focus class="ss-osc-snapshot-focus">Focused instance: —</div>
+      <div><h2>Block State</h2><div class="ss-osc-snapshot-detail">Focus chooses what is displayed and written. Control gestures go to compatible checked instances.</div></div>
+      <div class="ss-osc-snapshot-head-actions"><div data-snapshot-focus class="ss-osc-snapshot-focus">Editing from: — · Live output to: 0 checked instances</div><button data-snapshot-clear-open type="button">Clear State…</button></div>
     </div>
     <div data-snapshot-instances class="ss-osc-snapshot-instances" aria-label="Block State instances"></div>
     <div class="ss-osc-snapshot-transport">
@@ -33,6 +33,15 @@ export function mountOscSnapshotPanel(parent, options = {}) {
       </div>
       <div class="ss-osc-snapshot-actions"><div><button data-snapshot-assign type="button">Assign Selected Clip</button><button data-snapshot-duplicate type="button">Duplicate Selected Clip</button></div></div>
     </details>
+    <dialog data-snapshot-clear-dialog class="ss-osc-clear-dialog">
+      <form data-snapshot-clear-form method="dialog">
+        <div><h3>Clear State</h3><p>Choose which Written Block State slots become Unspecified. This sends no OSC and preserves assignments and clips.</p></div>
+        <label><input type="radio" name="snapshot-clear-scope" value="instance-block" checked><span><strong>This instance · this block</strong><small data-snapshot-clear-instance>0 Written states</small></span></label>
+        <label><input type="radio" name="snapshot-clear-scope" value="block"><span><strong>All instances · this block</strong><small data-snapshot-clear-block>0 Written states</small></span></label>
+        <label><input type="radio" name="snapshot-clear-scope" value="all"><span><strong>All instances · all blocks</strong><small data-snapshot-clear-all>0 Written states</small></span></label>
+        <div class="ss-osc-clear-actions"><button data-snapshot-clear-cancel type="button">Cancel</button><button data-snapshot-clear-confirm class="danger" type="submit">Clear selected scope</button></div>
+      </form>
+    </dialog>
   `;
   parent.insertBefore(section, options.before ?? null);
   const internalSourceSelect = section.querySelector("[data-snapshot-source]");
@@ -60,6 +69,14 @@ export function mountOscSnapshotPanel(parent, options = {}) {
     recallButton: section.querySelector("[data-snapshot-recall]"),
     copyTargetSelect: section.querySelector("[data-snapshot-copy-target]"),
     copyButton: section.querySelector("[data-snapshot-copy]"),
+    clearOpenButton: section.querySelector("[data-snapshot-clear-open]"),
+    clearDialog: section.querySelector("[data-snapshot-clear-dialog]"),
+    clearForm: section.querySelector("[data-snapshot-clear-form]"),
+    clearCancelButton: section.querySelector("[data-snapshot-clear-cancel]"),
+    clearConfirmButton: section.querySelector("[data-snapshot-clear-confirm]"),
+    clearInstanceCount: section.querySelector("[data-snapshot-clear-instance]"),
+    clearBlockCount: section.querySelector("[data-snapshot-clear-block]"),
+    clearAllCount: section.querySelector("[data-snapshot-clear-all]"),
     playingBlock: section.querySelector("[data-snapshot-playing]"),
     playbackState: section.querySelector("[data-snapshot-playback]"),
     chaseInput: section.querySelector("[data-snapshot-chase]"),
@@ -135,6 +152,14 @@ export function createOscSnapshotEditorClient(options) {
     elements.assignButton?.addEventListener("click", () => assign().catch(reportError));
     elements.duplicateButton?.addEventListener("click", () => duplicate().catch(reportError));
     elements.recallButton?.addEventListener("click", () => recall().catch(reportError));
+    elements.clearOpenButton?.addEventListener("click", openClearDialog);
+    elements.clearCancelButton?.addEventListener("click", closeClearDialog);
+    elements.clearForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const scope = new FormData(elements.clearForm).get("snapshot-clear-scope");
+      clearState(scope).catch(reportError);
+    });
+    options.liveTargetRoot?.addEventListener("change", renderLiveRouting);
   }
 
   async function refreshContext() {
@@ -214,6 +239,7 @@ export function createOscSnapshotEditorClient(options) {
     elements.assignButton.disabled = !(blockId && roleId && selected);
     elements.duplicateButton.disabled = !(selected && elements.clipIdInput?.value.trim());
     elements.recallButton.disabled = !layerClip;
+    renderClearAvailability();
     if (elements.copyButton) elements.copyButton.disabled = !draft || !elements.copyTargetSelect?.value;
     if (!blockId) return setState("No mesostructural blocks available");
     if (!sourceId) return setState(`No online ${options.roleLabel || app} instance is focused`);
@@ -273,6 +299,44 @@ export function createOscSnapshotEditorClient(options) {
     savedDrafts.set(destinationKey, structuredClone(draft));
     renderContext();
     options.setStatus?.(`Saved an independent copy of ${blockId} state to ${targets.find((target) => target.id === targetId)?.label || targetId}; focus and live clients were unchanged`);
+  }
+
+  function openClearDialog() {
+    renderClearAvailability();
+    const choices = Array.from(elements.clearForm?.querySelectorAll?.('[name="snapshot-clear-scope"]') ?? []);
+    const defaultChoice = choices.find((input) => input.value === "instance-block" && !input.disabled)
+      ?? choices.find((input) => !input.disabled);
+    if (defaultChoice) defaultChoice.checked = true;
+    if (typeof elements.clearDialog?.showModal === "function") elements.clearDialog.showModal();
+    else elements.clearDialog?.setAttribute("open", "");
+  }
+
+  function closeClearDialog() {
+    if (typeof elements.clearDialog?.close === "function") elements.clearDialog.close();
+    else elements.clearDialog?.removeAttribute("open");
+  }
+
+  async function clearState(scope) {
+    const blockId = elements.blockSelect?.value;
+    const roleId = elements.roleSelect?.value;
+    const scopes = oscClearStateScopes(score, blockId, roleId);
+    const selected = scopes[scope];
+    if (!selected || selected.count === 0) throw new Error("There are no Written Block States in that scope");
+    if (scope !== "instance-block" && !window.confirm(selected.confirmation)) return;
+    elements.clearConfirmButton.disabled = true;
+    try {
+      const result = await fetchJson("/osc/block-state/clear", {
+        method: "POST",
+        body: JSON.stringify({ expectedStructureRevision: score?.structureRevision ?? 0, scope, blockId, roleId })
+      });
+      score = result.score;
+      assignments = score.oscAssignments ?? {};
+      closeClearDialog();
+      renderContext();
+      options.setStatus?.(`Cleared ${result.clearedCount} Written Block State${result.clearedCount === 1 ? "" : "s"}; no OSC was sent`);
+    } finally {
+      elements.clearConfirmButton.disabled = false;
+    }
   }
 
   async function load() {
@@ -386,7 +450,7 @@ export function createOscSnapshotEditorClient(options) {
     };
     for (const eventName of [
       "snapshot", "osc.clip.added", "osc.clip.captured", "osc.clip.replaced", "osc.clip.removed",
-      "osc.blockState.written", "osc.blockState.replaced",
+      "osc.blockState.written", "osc.blockState.replaced", "osc.blockState.cleared",
       "mesostructure.oscLayer.assigned", "mesostructure.oscLayer.removed",
       "structure.playhead.updated", "osc.assignment.replaced", "osc.assignment.removed",
       "osc.assignment.reconciled", "admin.reset", "admin.score.created", "admin.score.initialized", "admin.restore"
@@ -544,8 +608,20 @@ export function createOscSnapshotEditorClient(options) {
     if (elements.playingBlock) elements.playingBlock.textContent = playingBlockId() || "—";
     if (elements.playbackState) elements.playbackState.textContent = playback?.running ? `Running · ${playback.mode || "auto"}` : "Stopped";
     if (elements.chaseInput) elements.chaseInput.checked = chase;
+    renderLiveRouting();
+  }
+  function renderLiveRouting() {
     const target = targets.find((entry) => entry.id === elements.sourceSelect?.value);
-    if (elements.focus) elements.focus.textContent = `Focused instance: ${target?.label || elements.sourceSelect?.value || "—"}`;
+    const checkedCount = options.liveTargetRoot?.querySelectorAll?.("[data-target]:checked")?.length ?? 0;
+    if (elements.focus) elements.focus.textContent = `Editing from: ${target?.label || elements.sourceSelect?.value || "—"} · Live output to: ${checkedCount} checked instance${checkedCount === 1 ? "" : "s"}`;
+  }
+  function renderClearAvailability() {
+    const scopes = oscClearStateScopes(score, elements.blockSelect?.value, elements.roleSelect?.value);
+    if (elements.clearInstanceCount) elements.clearInstanceCount.textContent = writtenStateCountLabel(scopes["instance-block"].count);
+    if (elements.clearBlockCount) elements.clearBlockCount.textContent = writtenStateCountLabel(scopes.block.count);
+    if (elements.clearAllCount) elements.clearAllCount.textContent = writtenStateCountLabel(scopes.all.count);
+    if (elements.clearOpenButton) elements.clearOpenButton.disabled = scopes.all.count === 0;
+    for (const input of elements.clearForm?.querySelectorAll?.('[name="snapshot-clear-scope"]') ?? []) input.disabled = scopes[input.value]?.count === 0;
   }
   function renderSlots() {
     if (!elements.slots) return;
@@ -656,6 +732,31 @@ export function oscBlockSlotState(score, blockId, roleId) {
   const layer = score?.mesostructure?.[blockId]?.oscLayers?.[roleId];
   const clip = layer?.clipId ? score?.oscClips?.[layer.clipId] : null;
   return clip ? { status: "Written", clipId: layer.clipId, clip } : { status: "Unspecified", clipId: "", clip: null };
+}
+
+export function oscClearStateScopes(score, blockId, roleId) {
+  const blockLayers = score?.mesostructure?.[blockId]?.oscLayers ?? {};
+  const instanceCount = roleId && blockLayers[roleId] ? 1 : 0;
+  const blockCount = Object.keys(blockLayers).length;
+  const allCount = Object.values(score?.mesostructure ?? {}).reduce((count, block) => count + Object.keys(block?.oscLayers ?? {}).length, 0);
+  return {
+    "instance-block": {
+      count: instanceCount,
+      confirmation: `Clear ${instanceCount} Written state for this instance in block ${blockId || "—"}?`
+    },
+    block: {
+      count: blockCount,
+      confirmation: `Clear ${blockCount} Written Block State${blockCount === 1 ? "" : "s"} across all instances in block ${blockId || "—"}?`
+    },
+    all: {
+      count: allCount,
+      confirmation: `Clear ${allCount} Written Block State${allCount === 1 ? "" : "s"} across all instances in all blocks?`
+    }
+  };
+}
+
+function writtenStateCountLabel(count) {
+  return `${count} Written state${count === 1 ? "" : "s"}`;
 }
 
 export function oscChaseHydration({

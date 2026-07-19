@@ -191,6 +191,18 @@ Write persists the complete displayed draft. It does not recapture the focused
 client and does not send the draft before saving. A draft must be complete
 before Write is enabled.
 
+Provide one compact **Clear State…** action with three explicit scopes:
+
+- this instance in the EDITING block;
+- every instance in the EDITING block; and
+- every instance in every block.
+
+The dialog defaults to the narrowest available scope, reports the number of
+Written slots affected, and requires an additional confirmation for either
+multi-instance scope. Clear makes those slots Unspecified by removing their
+block-layer references atomically. It sends no OSC and preserves OSC clips,
+role assignments, and Ignore Recall settings.
+
 ### 4. Copy Between Instances
 
 Provide an explicit action that does not require changing focus:

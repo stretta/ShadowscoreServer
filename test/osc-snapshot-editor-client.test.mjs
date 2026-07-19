@@ -5,6 +5,7 @@ import {
   oscBlockDraftKey,
   oscBlockDraftState,
   oscBlockSlotState,
+  oscClearStateScopes,
   oscChaseHydration,
   oscClockRecallNotice,
   oscEditorParamValue,
@@ -114,6 +115,22 @@ test("block slots distinguish unspecified state from explicitly written empty da
   assert.deepEqual(oscBlockSlotState(score, "B", "list-a"), { status: "Unspecified", clipId: "", clip: null });
   assert.equal(oscWriteActionLabel({ blockId: "A", written: true }), "Replace A State");
   assert.equal(oscWriteActionLabel({ blockId: "B", written: false }), "Write B State");
+});
+
+test("clear scope counts distinguish focused, block-wide, and score-wide Written states", () => {
+  const score = {
+    mesostructure: {
+      A: { oscLayers: { "analog-a": { clipId: "a-analog" }, "plate-a": { clipId: "a-plate" } } },
+      B: { oscLayers: { "analog-a": { clipId: "b-analog" } } },
+      C: { oscLayers: {} }
+    }
+  };
+  const scopes = oscClearStateScopes(score, "A", "analog-a");
+  assert.equal(scopes["instance-block"].count, 1);
+  assert.equal(scopes.block.count, 2);
+  assert.equal(scopes.all.count, 3);
+  assert.match(scopes.block.confirmation, /all instances in block A/);
+  assert.match(scopes.all.confirmation, /all instances in all blocks/);
 });
 
 test("draft state is keyed independently by role and block and distinguishes dirty from provisional", () => {

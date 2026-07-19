@@ -266,6 +266,14 @@ td,
   margin: 0;
 }
 
+.ss-osc-snapshot-head-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .ss-osc-snapshot-focus {
   color: var(--ss-text);
   font-size: 13px;
@@ -437,6 +445,62 @@ td,
   color: var(--ss-muted);
   font-size: 12px;
   font-weight: 800;
+}
+
+.ss-osc-clear-dialog {
+  background: var(--ss-panel);
+  border: 1px solid var(--ss-border-strong);
+  border-radius: var(--ss-radius-ui);
+  color: var(--ss-text);
+  max-width: min(520px, calc(100vw - 32px));
+  padding: 0;
+}
+
+.ss-osc-clear-dialog::backdrop {
+  background: rgb(2 6 23 / 68%);
+}
+
+.ss-osc-clear-dialog form {
+  display: grid;
+  gap: 10px;
+  padding: 16px;
+}
+
+.ss-osc-clear-dialog h3,
+.ss-osc-clear-dialog p {
+  margin: 0;
+}
+
+.ss-osc-clear-dialog p {
+  color: var(--ss-muted);
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.ss-osc-clear-dialog form > label {
+  align-items: flex-start;
+  background: var(--ss-surface);
+  border: 1px solid var(--ss-border);
+  border-radius: var(--ss-radius-control);
+  cursor: pointer;
+  display: flex;
+  gap: 10px;
+  padding: 10px;
+}
+
+.ss-osc-clear-dialog label span {
+  display: grid;
+  gap: 2px;
+}
+
+.ss-osc-clear-dialog label small {
+  color: var(--ss-muted);
+}
+
+.ss-osc-clear-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
 }
 
 .ss-osc-snapshot-actions > div {

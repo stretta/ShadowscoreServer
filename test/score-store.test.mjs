@@ -110,6 +110,41 @@ test("OSC role assignments remain separate from player assignments and emit expl
   assert.deepEqual(events, ["osc.assignment.replaced", "osc.assignment.removed"]);
 });
 
+test("Block State clear scopes atomically remove layer references but preserve assignments and clips", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const events = [];
+  store.events.on("change", (event) => events.push(event));
+  store.replaceOscAssignment("analog-a", { app: "analogsequencer", deviceId: "wren" });
+  store.replaceOscAssignment("plate-a", { app: "plate", deviceId: "heron" });
+  store.addOscClip("a-analog", { app: "analogsequencer", params: { Clock: 1 }, inputPorts: {} });
+  store.addOscClip("b-analog", { app: "analogsequencer", params: { Clock: 0 }, inputPorts: {} });
+  store.addOscClip("a-plate", { app: "plate", params: { Decay: 0.5 }, inputPorts: {} });
+  store.assignOscLayer("A", "analog-a", "a-analog");
+  store.assignOscLayer("A", "plate-a", "a-plate");
+  store.assignOscLayer("B", "analog-a", "b-analog");
+
+  const firstRevision = store.getScore().structureRevision;
+  const focused = store.clearOscBlockStates({ scope: "instance-block", blockId: "A", roleId: "analog-a" }, { expectedStructureRevision: firstRevision });
+  assert.deepEqual(focused.cleared, [{ blockId: "A", roleId: "analog-a", clipId: "a-analog" }]);
+  assert.equal(focused.score.mesostructure.A.oscLayers["analog-a"], undefined);
+  assert.ok(focused.score.mesostructure.A.oscLayers["plate-a"]);
+
+  const block = store.clearOscBlockStates({ scope: "block", blockId: "A" }, { expectedStructureRevision: focused.score.structureRevision });
+  assert.deepEqual(block.score.mesostructure.A.oscLayers, {});
+  assert.ok(block.score.mesostructure.B.oscLayers["analog-a"]);
+
+  const all = store.clearOscBlockStates({ scope: "all" }, { expectedStructureRevision: block.score.structureRevision });
+  assert.deepEqual(all.score.mesostructure.B.oscLayers, {});
+  assert.deepEqual(Object.keys(all.score.oscAssignments).sort(), ["analog-a", "plate-a"]);
+  assert.deepEqual(Object.keys(all.score.oscClips).sort(), ["a-analog", "a-plate", "b-analog"]);
+  assert.deepEqual(events.slice(-3).map((event) => event.type), ["osc.blockState.cleared", "osc.blockState.cleared", "osc.blockState.cleared"]);
+
+  const noOpRevision = all.score.structureRevision;
+  const noOp = store.clearOscBlockStates({ scope: "all" }, { expectedStructureRevision: noOpRevision });
+  assert.equal(noOp.cleared.length, 0);
+  assert.equal(noOp.score.structureRevision, noOpRevision);
+});
+
 test("OSC layer and clip replacements enforce role app compatibility", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceOscAssignment("analog-a", { app: "analogsequencer", deviceId: "wren" });

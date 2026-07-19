@@ -376,6 +376,42 @@ export function createScoreStore(initialScore, options = {}) {
       }, options);
       return structuredClone(score);
     },
+    clearOscBlockStates({ scope, blockId, roleId } = {}, options = {}) {
+      const normalizedScope = String(scope ?? "").trim().toLowerCase();
+      if (!new Set(["instance-block", "block", "all"]).has(normalizedScope)) {
+        throw new Error("OSC Block State clear scope must be 'instance-block', 'block', or 'all'");
+      }
+      const normalizedBlockId = normalizedScope === "all" ? "" : normalizeBlockId(blockId);
+      if (normalizedBlockId && !score.mesostructure[normalizedBlockId]) {
+        throw new Error(`unknown mesostructural block '${normalizedBlockId}'`);
+      }
+      const normalizedRoleId = normalizedScope === "instance-block" ? normalizeOscRoleId(roleId) : "";
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+
+      const blockIds = normalizedScope === "all" ? Object.keys(score.mesostructure) : [normalizedBlockId];
+      const cleared = [];
+      const mesostructure = { ...score.mesostructure };
+      for (const id of blockIds) {
+        const block = score.mesostructure[id];
+        const oscLayers = { ...(block.oscLayers ?? {}) };
+        const roleIds = normalizedScope === "instance-block" ? [normalizedRoleId] : Object.keys(oscLayers);
+        let changed = false;
+        for (const role of roleIds) {
+          const layer = oscLayers[role];
+          if (!layer) continue;
+          cleared.push({ blockId: id, roleId: role, clipId: layer.clipId });
+          delete oscLayers[role];
+          changed = true;
+        }
+        if (changed) mesostructure[id] = { ...block, oscLayers };
+      }
+
+      if (!cleared.length) return { score: structuredClone(score), cleared };
+      score = { ...score, ...nextRevisionFields(score, { structure: true }), mesostructure };
+      emitChange(events, "osc.blockState.cleared", score, { scope: normalizedScope, blockId: normalizedBlockId, roleId: normalizedRoleId, cleared }, options);
+      return { score: structuredClone(score), cleared };
+    },
     replaceOscClip(clipId, clipDocument, options = {}) {
       const id = normalizeOscClipId(clipId);
       if (!score.oscClips?.[id]) throw new Error(`unknown OSC clip '${id}'`);

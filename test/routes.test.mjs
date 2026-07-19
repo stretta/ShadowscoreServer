@@ -901,6 +901,16 @@ test("Block State write onboards displayed drafts just in time and copy remains 
   assert.notEqual(replaced.clipId, copied.clipId);
   assert.equal(replaced.clip.params.GateTime, 0.8);
   assert.equal(replaced.score.oscClips[written.clipId].params.GateTime, 0.4);
+
+  const cleared = await requestJson(context, "POST", "/osc/block-state/clear", {
+    scope: "block",
+    blockId: "A",
+    expectedStructureRevision: replaced.score.structureRevision
+  });
+  assert.equal(cleared.clearedCount, 2);
+  assert.deepEqual(cleared.score.mesostructure.A.oscLayers, {});
+  assert.ok(cleared.score.oscAssignments[written.roleId]);
+  assert.ok(cleared.score.oscClips[written.clipId]);
 });
 
 test("Block State write leaves compatible unresolved roles untouched for Admin resolution", async () => {
@@ -3538,7 +3548,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
-  assert.match(response.body, /20260717-rtz-before-play1/);
+  assert.match(response.body, /20260719-clear-state1/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -3577,7 +3587,7 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotDraft/);
   assert.match(response.body, /applySavedSnapshot/);
-  assert.match(response.body, /20260717-rtz-before-play1/);
+  assert.match(response.body, /20260719-clear-state1/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -3651,7 +3661,7 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /20260717-rtz-before-play1/, `${editor} should load the current shared snapshot client`);
+    assert.match(response.body, /20260719-clear-state1/, `${editor} should load the current shared snapshot client`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');
     const targetsIndex = response.body.indexOf('id="targets"');
@@ -3728,6 +3738,12 @@ test("shared OSC snapshot editor client is served as a static asset", async () =
   assert.match(response.body, /expectedStructureRevision/);
   assert.match(response.body, /osc\/block-state\/write/);
   assert.match(response.body, /osc\/block-state\/copy/);
+  assert.match(response.body, /osc\/block-state\/clear/);
+  assert.match(response.body, /Clear State…/);
+  assert.match(response.body, /This instance · this block/);
+  assert.match(response.body, /All instances · this block/);
+  assert.match(response.body, /All instances · all blocks/);
+  assert.match(response.body, /Live output to:/);
   assert.match(response.body, /Save Copy To/);
   assert.match(response.body, /Unwritten Draft/);
   assert.match(response.body, /resolveFocusedOscRole/);

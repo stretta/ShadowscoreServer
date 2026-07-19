@@ -456,7 +456,11 @@ test("extracts ListSequencer OSC control targets with message inports and TTID p
     CONTENTS: {
       params: {
         CONTENTS: {
-          ClockRate: rnboParam("/rnbo/inst/13/params/ClockRate", "16n", undefined, undefined, 0),
+          ClockRate: {
+            ...rnboParam("/rnbo/inst/13/params/ClockRate", "16n", undefined, undefined, 0),
+            TYPE: "s",
+            RANGE: [{ VALS: ["4n", "8nd", "8n", "16n", "Beats"] }]
+          },
           Root: rnboParam("/rnbo/inst/13/params/Root", 60, 0, 127, 1),
           ChromaticTranspose: rnboParam("/rnbo/inst/13/params/ChromaticTranspose", 0, -24, 24, 2),
           ScalarTranspose: rnboParam("/rnbo/inst/13/params/ScalarTranspose", 0, -24, 24, 3),
@@ -468,7 +472,9 @@ test("extracts ListSequencer OSC control targets with message inports and TTID p
                 VALUE: "{\"display_precision\":\"0\",\"editor\":\"ttid\"}"
               }
             }
-          }
+          },
+          ArbBeats: rnboParam("/rnbo/inst/13/params/ArbBeats", 0.125, 0.125, 64, 5),
+          Clock: rnboParam("/rnbo/inst/13/params/Clock", 1, 0, 1, 6)
         }
       },
       messages: {
@@ -476,10 +482,13 @@ test("extracts ListSequencer OSC control targets with message inports and TTID p
           in: {
             CONTENTS: {
               Steps: rnboInport("/rnbo/inst/13/messages/in/Steps"),
+              StepsSecondary: rnboInport("/rnbo/inst/13/messages/in/StepsSecondary"),
               PrimaryRotation: rnboInport("/rnbo/inst/13/messages/in/PrimaryRotation"),
               SecondaryRotation: rnboInport("/rnbo/inst/13/messages/in/SecondaryRotation"),
+              Oct: rnboInport("/rnbo/inst/13/messages/in/Oct"),
               Velocity: rnboInport("/rnbo/inst/13/messages/in/Velocity"),
-              Duration: rnboInport("/rnbo/inst/13/messages/in/Duration")
+              Duration: rnboInport("/rnbo/inst/13/messages/in/Duration"),
+              rtz: rnboInport("/rnbo/inst/13/messages/in/rtz")
             }
           }
         }
@@ -497,12 +506,18 @@ test("extracts ListSequencer OSC control targets with message inports and TTID p
   assert.equal(targets[0].oscCapabilities.includes("ttid-edit"), true);
   assert.deepEqual(targets[0].inputPorts.map((inputPort) => inputPort.name), [
     "Duration",
+    "Oct",
     "PrimaryRotation",
+    "rtz",
     "SecondaryRotation",
     "Steps",
+    "StepsSecondary",
     "Velocity"
   ]);
   assert.equal(targets[0].parameters.find((param) => param.name === "Scale")?.meta?.editor, "ttid");
+  assert.deepEqual(targets[0].parameters.find((param) => param.name === "ClockRate")?.values, ["4n", "8nd", "8n", "16n", "Beats"]);
+  assert.equal(targets[0].parameters.find((param) => param.name === "ArbBeats")?.min, 0.125);
+  assert.equal(targets[0].parameters.find((param) => param.name === "ArbBeats")?.max, 64);
 });
 
 test("extracts ListVelSequencer rows and pitch-map parameters", () => {

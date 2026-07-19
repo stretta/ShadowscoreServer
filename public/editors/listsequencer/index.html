@@ -394,11 +394,19 @@
     let SCALES = Object.freeze({ ionian: [0, 2, 4, 5, 7, 9, 11] });
     const INPORT_SPECS = Object.freeze([
       { name: "Steps", label: "Steps (0/1)" },
+      { name: "StepsSecondary", label: "Secondary Steps (0/1)" },
       { name: "PrimaryRotation", label: "Primary Rotation (-60 60)" },
       { name: "SecondaryRotation", label: "Secondary Rotation (-60 60)" },
+      { name: "Oct", label: "Octave" },
       { name: "Velocity", label: "Velocity (0-127)" },
       { name: "Duration", label: "Duration (ticks)" }
     ]);
+    const PARAM_LABELS = Object.freeze({
+      arbbeats: "Arb Beats",
+      clock: "Clock",
+      clockrate: "Clock Mode"
+    });
+    const MOMENTARY_INPORT_NAMES = new Set(["get", "panic", "probe", "reset", "rtz", "setstage"]);
     const TRANSPOSE_NAMES = new Set(["chromatictranspose", "scalartranspose", "chromatic", "scalar"]);
 
     const targetsEl = document.querySelector("#targets");
@@ -628,7 +636,7 @@
 
     function renderInports() {
       const rows = [
-        ...inputPorts.map(renderInputPort),
+        ...inputPorts.map((inputPort) => isMomentaryInputPort(inputPort) ? renderActionInputPort(inputPort) : renderInputPort(inputPort)),
         ...transposeParams.map(renderTransposeParam),
         ...genericParams.map(renderGenericParam)
       ];
@@ -657,6 +665,21 @@
           sendAddress(inputPort, parseArgs(input.value));
         }
       });
+      return row;
+    }
+
+    function renderActionInputPort(inputPort) {
+      const row = document.createElement("article");
+      row.className = "text-row";
+      row.innerHTML = `
+        <div>
+          <div class="control-name">${escapeHtml(actionLabel(inputPort.name))}</div>
+          <div class="control-detail">${escapeHtml(inputPort.name)} · momentary · ${inputPort.targetIds.length}</div>
+        </div>
+        <span class="meta">Triggers immediately on checked instances</span>
+        <button type="button">Trigger</button>
+      `;
+      row.querySelector("button").addEventListener("click", () => sendAddress(inputPort, [1]).catch(reportError));
       return row;
     }
 
@@ -689,7 +712,7 @@
       const range = rangeText(param);
       row.innerHTML = `
         <div>
-          <div class="control-name">${escapeHtml(param.displayName || param.name)}${range ? ` (${escapeHtml(range)})` : ""}</div>
+          <div class="control-name">${escapeHtml(paramLabel(param.name, param.displayName))}${range ? ` (${escapeHtml(range)})` : ""}</div>
           <div class="control-detail">${escapeHtml(param.name)} · ${param.targetIds.length}</div>
         </div>
       `;
@@ -872,7 +895,7 @@
         return;
       }
       const availableNames = new Set((target.inputPorts || []).map((entry) => entry.name));
-      const fields = inputPorts.filter((inputPort) => availableNames.has(inputPort.name));
+      const fields = inputPorts.filter((inputPort) => !isMomentaryInputPort(inputPort) && availableNames.has(inputPort.name));
 
       setStatus(`Getting parameters and ${fields.length} OSC field${fields.length === 1 ? "" : "s"} from ${target.label || target.id}...`);
       const populatedParams = await hydrateParameters(target);
@@ -979,7 +1002,7 @@
       }
       const body = await postOsc({ targets: selected, param: param.name, args: [value] });
       const sent = (body.results || []).filter((result) => result.ok).length;
-      setStatus(`Sent ${paramLabel(param.name)} ${value} to ${sent}/${selected.length}`);
+      setStatus(`Sent ${paramLabel(param.name, param.displayName)} ${value} to ${sent}/${selected.length}`);
     }
 
     async function postOsc(payload) {
@@ -1095,8 +1118,25 @@
       return normalizedName(name).startsWith("chromatic") ? "Chromatic Transpose" : "Scalar Transpose";
     }
 
-    function paramLabel(name) {
-      return normalizedName(name) === "root" ? "Root" : transposeLabel(name);
+    function paramLabel(name, displayName = "") {
+      const normalized = normalizedName(name);
+      if (PARAM_LABELS[normalized]) return PARAM_LABELS[normalized];
+      if (normalized === "root") return "Root";
+      if (TRANSPOSE_NAMES.has(normalized)) return transposeLabel(name);
+      return displayName || name;
+    }
+
+    function isMomentaryInputPort(inputPort) {
+      if (inputPort.meta?.snapshot === true || inputPort.meta?.snapshot_state === true) return false;
+      const normalized = normalizedName(inputPort.name);
+      return MOMENTARY_INPORT_NAMES.has(normalized)
+        || normalized.endsWith("probe")
+        || normalized.endsWith("panic")
+        || normalized.endsWith("ack");
+    }
+
+    function actionLabel(name) {
+      return normalizedName(name) === "rtz" ? "Return to Zero" : (name || "Action");
     }
 
     function isReportedNumber(value) {

@@ -3504,10 +3504,17 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /compact TTID/);
   assert.match(response.body, /formatMask/);
   assert.match(response.body, /Steps \(0\/1\)/);
+  assert.match(response.body, /Secondary Steps \(0\/1\)/);
   assert.match(response.body, /Primary Rotation \(-60 60\)/);
   assert.match(response.body, /Secondary Rotation \(-60 60\)/);
+  assert.match(response.body, /Octave/);
   assert.match(response.body, /Velocity \(0-127\)/);
   assert.match(response.body, /Duration \(ticks\)/);
+  assert.match(response.body, /Clock Mode/);
+  assert.match(response.body, /Arb Beats/);
+  assert.match(response.body, /Return to Zero/);
+  assert.match(response.body, /isMomentaryInputPort/);
+  assert.match(response.body, /!isMomentaryInputPort\(inputPort\)/);
   assert.match(response.body, /createNumberObject/);
   assert.match(response.body, /chromatictranspose/);
   assert.match(response.body, /scalartranspose/);

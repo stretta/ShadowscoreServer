@@ -55,6 +55,9 @@ Design and implementation notes:
 - [`rnbo-connection-hardening-pass.md`](rnbo-connection-hardening-pass.md):
   four-Pi baseline, canary rollout, ACK, debounce, and mixed-fleet hardening
   strategy for the RNBO score connection.
+- [`phase-aligned-rnbo-playback-and-editor-state-plan.md`](phase-aligned-rnbo-playback-and-editor-state-plan.md):
+  shared playback snapshot, editor convergence, staged RNBO preparation, and
+  JACK-boundary activation rollout.
 - [`beat-derived-macro-playback-plan.md`](beat-derived-macro-playback-plan.md):
   beat-witness model and macro playback design.
 - [`wren-jack-transport-macro-playback-plan.md`](wren-jack-transport-macro-playback-plan.md):

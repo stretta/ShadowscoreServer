@@ -1,4 +1,5 @@
 import dgram from "node:dgram";
+import { createHash } from "node:crypto";
 import { encodeOscMessage } from "./osc.mjs";
 import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
@@ -6,7 +7,13 @@ import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 const OPCODES = Object.freeze({
   BEGIN_REPLACE: 1,
   NOTE: 20,
-  COMMIT: 90
+  COMMIT: 90,
+  READY: 92,
+  ACTIVE: 93
+});
+
+const TRANSACTION_FLAGS = Object.freeze({
+  PREPARE_ONLY: 1
 });
 
 const SCALE_INTERVALS = Object.freeze({
@@ -50,6 +57,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   let activeSend = undefined;
   let debounceTimer = undefined;
   const debounceWaiters = [];
+  const playbackLifecycleEvents = [];
 
   const adapter = {
     enabled: true,
@@ -57,6 +65,10 @@ export function createRnboOscAdapter(config, runtime = {}) {
       store = nextStore;
       store.events.on("change", (event) => {
         if (!shouldSendScoreTransaction(event)) {
+          return;
+        }
+        if (event.type === "structure.playhead.updated" && activeBlockAlreadyCommitted(event.score)) {
+          if (config.rnbo.log !== false) console.log(`[rnbo] skip unchanged active block ${event.score?.structureState?.activeBlockId ?? ""}`);
           return;
         }
         void resendScore(event.score, event.type).catch((error) => {
@@ -71,6 +83,17 @@ export function createRnboOscAdapter(config, runtime = {}) {
       }
       return resendScore(store.getScore(), reason, options);
     },
+    prepareBlock(blockId, reason = "lookahead") {
+      if (!store) {
+        return Promise.reject(new Error("RNBO adapter is not attached to a score store"));
+      }
+      const score = scoreWithActiveBlock(store.getScore(), blockId);
+      return resendScore(score, `${reason}:${blockId}`, {
+        immediate: true,
+        stagedOnly: true,
+        preparedBlockId: blockId
+      });
+    },
     sendStatus() {
       return [...lastSendStatus.values()];
     },
@@ -81,6 +104,101 @@ export function createRnboOscAdapter(config, runtime = {}) {
         active: activeSend ? structuredClone(activeSend) : null,
         queuedRequest: queuedSend ? summarizeSendRequest(queuedSend) : null
       };
+    },
+    async waitForIdle() {
+      while (debounceTimer || sendLoopActive || queuedSend) {
+        if (debounceTimer) {
+          await delay(Math.max(5, resendDebounceMs(config) + 1));
+        }
+        await sendLoopPromise;
+      }
+      return adapter.sendQueueStatus();
+    },
+    lifecycleEvents() {
+      return structuredClone(playbackLifecycleEvents);
+    },
+    schedulePreparedActivations(options = {}) {
+      const targetId = String(options.targetId ?? "").trim();
+      const initialStage = clampInt(options.initialStage ?? 0, 0, 2147483647);
+      const requests = [...lastSendStatus.values()]
+        .filter((status) => status.stagedScoreActivation === true)
+        .filter((status) => Number.isInteger(status.preparedTransaction))
+        .filter((status) => !targetId || status.targetId === targetId)
+        .map((status) => ({
+          targetId: status.targetId,
+          transactionId: status.preparedTransaction,
+          expectedClientId: status.ack?.expectedClientId,
+          url: status.ack?.url ?? "",
+          initialStage
+        }));
+      const observedAt = new Date().toISOString();
+      for (const request of requests) {
+        recordLifecycleEvent({
+          type: "activation_scheduled",
+          observedAt,
+          ...request
+        });
+      }
+      return structuredClone(requests);
+    },
+    async confirmPreparedActivations(requests = [], options = {}) {
+      const activation = rnboActivationConfig(config, options.tempo);
+      const fetchImpl = options.fetchImpl ?? runtime.fetchImpl ?? globalThis.fetch;
+      return Promise.all(requests.map(async (request) => {
+        const startedAt = Date.now();
+        let acknowledgement = badAck("activation-missed", {
+          url: request.url,
+          expectedTransactionId: request.transactionId
+        });
+        while (Date.now() - startedAt <= activation.timeoutMs) {
+          acknowledgement = await readScoreActivationAck(request, {
+            fetchImpl,
+            timeoutMs: activation.requestTimeoutMs
+          });
+          if (acknowledgement.ok) break;
+          await delay(activation.pollIntervalMs);
+        }
+        const completedAt = new Date().toISOString();
+        const previous = lastSendStatus.get(request.targetId);
+        if (acknowledgement.ok && previous?.preparedTransaction === request.transactionId) {
+          lastSendStatus.set(request.targetId, {
+            ...previous,
+            activeTransaction: request.transactionId,
+            preparedTransaction: null,
+            activationAcknowledgementAt: completedAt,
+            activationAck: acknowledgement
+          });
+          recordLifecycleEvent({
+            type: "activation_completed",
+            observedAt: completedAt,
+            targetId: request.targetId,
+            transactionId: request.transactionId,
+            activationDurationMs: Math.max(0, Date.now() - startedAt),
+            acknowledgement
+          });
+        } else {
+          if (previous) {
+            lastSendStatus.set(request.targetId, {
+              ...previous,
+              activationAcknowledgementAt: completedAt,
+              activationAck: acknowledgement
+            });
+          }
+          recordLifecycleEvent({
+            type: "activation_missed",
+            observedAt: completedAt,
+            targetId: request.targetId,
+            transactionId: request.transactionId,
+            activationDurationMs: Math.max(0, Date.now() - startedAt),
+            acknowledgement
+          });
+        }
+        return {
+          targetId: request.targetId,
+          transactionId: request.transactionId,
+          acknowledgement
+        };
+      }));
     },
     close() {
       if (discoveryTimer) {
@@ -180,6 +298,11 @@ export function createRnboOscAdapter(config, runtime = {}) {
         try {
           const result = await sendScoreTransaction(socket, config, request.score, transactionId, {
             runtime,
+            scoreRevision: request.score?.scoreRevision ?? request.score?.version ?? 0,
+            onLifecycleEvent: recordLifecycleEvent,
+            reuseCompiledTarget: payloadReuseAllowed(request)
+              ? reusableStagedTargetStatus
+              : undefined,
             ...request.options
           });
           latestSendResult = result;
@@ -212,6 +335,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
       options: {
         ...(previous?.options ?? {}),
         ...next.options,
+        stagedOnly: previous
+          ? previous.options?.stagedOnly === true && next.options?.stagedOnly === true
+          : next.options?.stagedOnly === true,
         forceFullClearRows: previous?.options?.forceFullClearRows === true || next.options?.forceFullClearRows === true
       }
     };
@@ -223,7 +349,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
       scoreRevision: request.score?.scoreRevision ?? request.score?.version ?? 0,
       structureRevision: request.score?.structureRevision ?? 0,
       reasons: [...(request.reasons ?? [])],
-      forceFullClearRows: request.options?.forceFullClearRows === true
+      forceFullClearRows: request.options?.forceFullClearRows === true,
+      stagedOnly: request.options?.stagedOnly === true,
+      preparedBlockId: request.options?.preparedBlockId ?? ""
     };
   }
 
@@ -231,25 +359,89 @@ export function createRnboOscAdapter(config, runtime = {}) {
     const entries = Array.isArray(result?.targets)
       ? result.targets
       : [{ target: undefined, compiled: result }];
+    const currentTargetIds = new Set(entries.map(({ target, compiled }) => (
+      target?.id ?? target?.address ?? compiled?.targetId ?? ""
+    )).filter(Boolean));
+    if (result?.partial !== true) {
+      for (const targetId of lastSendStatus.keys()) {
+        if (!currentTargetIds.has(targetId)) {
+          lastSendStatus.delete(targetId);
+        }
+      }
+    }
     for (const { target, compiled } of entries) {
       const targetId = target?.id ?? target?.address ?? compiled?.targetId ?? "";
       if (!targetId) {
+        continue;
+      }
+      if (compiled?.reused === true && lastSendStatus.has(targetId)) {
+        lastSendStatus.set(targetId, {
+          ...lastSendStatus.get(targetId),
+          at: new Date().toISOString(),
+          reusedAt: compiled.reusedAt ?? new Date().toISOString(),
+          reuseReason: compiled.reuseReason ?? "identical-staged-payload"
+        });
         continue;
       }
       lastSendStatus.set(targetId, {
         targetId,
         voiceId: target?.voiceId ?? "",
         at: new Date().toISOString(),
+        transactionId: compiled?.transactionId ?? compiled?.ack?.transactionId ?? null,
+        scoreRevision: compiled?.scoreRevision ?? null,
+        payloadRevision: compiled?.payloadRevision ?? null,
+        payloadHash: compiled?.payloadHash ?? null,
+        blockId: compiled?.blockId ?? compiled?.timing?.blockId ?? "",
         noteCount: compiled?.noteCount ?? 0,
         transmittedRowCount: compiled?.transmittedRowCount ?? 0,
         replacementMode: compiled?.replacementMode ?? "legacy-full-clear",
         compactScoreReplace: compiled?.compactScoreReplace === true,
+        stagedScoreActivation: compiled?.stagedScoreActivation === true,
         forceFullClearRows: compiled?.forceFullClearRows === true,
         patternLength: compiled?.patternLength ?? 0,
         stagesPerBeat: compiled?.stagesPerBeat ?? compiled?.timing?.stagesPerBeat ?? 0,
+        sendStartedAt: compiled?.sendStartedAt ?? null,
+        sendCompletedAt: compiled?.sendCompletedAt ?? null,
+        acknowledgementAt: compiled?.acknowledgementAt ?? null,
+        preparationDurationMs: compiled?.preparationDurationMs ?? null,
+        activeTransaction: compiled?.stagedScoreActivation === true
+          ? lastSendStatus.get(targetId)?.activeTransaction ?? null
+          : compiled?.transactionId ?? compiled?.ack?.transactionId ?? null,
+        preparedTransaction: compiled?.stagedScoreActivation === true && compiled?.ack?.status === "prepared"
+          ? compiled?.transactionId ?? compiled?.ack?.transactionId ?? null
+          : null,
+        activationAcknowledgementAt: null,
+        activationAck: null,
         ack: compiled?.ack
       });
     }
+  }
+
+  function activeBlockAlreadyCommitted(score) {
+    const blockId = score?.structureState?.activeBlockId ?? "";
+    const statuses = [...lastSendStatus.values()];
+    return Boolean(blockId && statuses.length && statuses.every((status) => (
+      status.stagedScoreActivation !== true && status.blockId === blockId && status.ack?.ok === true
+    )));
+  }
+
+  function reusableStagedTargetStatus(target, compiled) {
+    if (compiled?.stagedScoreActivation !== true) return null;
+    const targetId = target?.id ?? target?.address ?? compiled?.targetId ?? "";
+    const previous = lastSendStatus.get(targetId);
+    if (!previous || previous.payloadHash !== compiled.payloadHash || previous.blockId !== compiled.timing?.blockId) {
+      return null;
+    }
+    if (!Number.isInteger(previous.activeTransaction) && !Number.isInteger(previous.preparedTransaction)) {
+      return null;
+    }
+    return previous;
+  }
+
+  function recordLifecycleEvent(event) {
+    playbackLifecycleEvents.push(event);
+    if (playbackLifecycleEvents.length > 200) playbackLifecycleEvents.splice(0, playbackLifecycleEvents.length - 200);
+    if (config.rnbo.log !== false) console.log(`[rnbo-playback] ${JSON.stringify(event)}`);
   }
 
   function startTargetDiscoveryMonitor() {
@@ -287,8 +479,31 @@ export function createRnboOscAdapter(config, runtime = {}) {
 }
 
 export async function sendScoreTransaction(socket, config, score, transactionId, options = {}) {
-  const targets = await rnboTargetsForSend(config, score, options.runtime);
+  const targets = await rnboTargetsForSend(config, score, options.runtime, options);
   const compiledTargets = await Promise.all(targets.map(async (target) => {
+    const preview = compileScoreTransaction(score, config, transactionId, target, options);
+    const reusedStatus = options.reuseCompiledTarget?.(target, preview);
+    if (reusedStatus) {
+      const reusedAt = new Date().toISOString();
+      const compiled = {
+        ...preview,
+        transactionId: reusedStatus.transactionId,
+        scoreRevision: reusedStatus.scoreRevision,
+        payloadRevision: reusedStatus.payloadRevision,
+        targetId: target.id ?? target.address ?? "",
+        voiceId: target.voiceId ?? "",
+        reused: true,
+        reusedAt,
+        reuseReason: "identical-staged-payload",
+        ack: reusedStatus.ack
+      };
+      emitLifecycleEvent(options, "prepare_reused", compiled, target, {
+        observedAt: reusedAt,
+        activeTransaction: reusedStatus.activeTransaction ?? null,
+        preparedTransaction: reusedStatus.preparedTransaction ?? null
+      });
+      return { target, compiled };
+    }
     const compiled = await sendCompiledScoreTransaction(socket, config, score, transactionId, target, options);
     if (config.rnbo.log !== false) {
       const ack = compiled.ack?.ok === false ? ` ack=${compiled.ack.status}` : "";
@@ -299,6 +514,9 @@ export async function sendScoreTransaction(socket, config, score, transactionId,
     return { target, compiled };
   }));
 
+  if (options.stagedOnly === true) {
+    return { targets: compiledTargets, partial: true, scope: "staged-only" };
+  }
   return compiledTargets.length === 1 ? compiledTargets[0].compiled : { targets: compiledTargets };
 }
 
@@ -307,17 +525,36 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
   const attempts = ackConfig.enabled ? ackConfig.retries + 1 : 1;
   let compiled;
   let ack = skippedAck("disabled");
+  const now = typeof options.now === "function" ? options.now : Date.now;
+  const sendStartedMs = now();
+  let sendCompletedMs = sendStartedMs;
+  let acknowledgementMs = sendStartedMs;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     compiled = compileScoreTransaction(score, config, transactionId, target, options);
+    if (attempt === 0) emitLifecycleEvent(options, "prepare_started", compiled, target, {
+      observedAt: new Date(sendStartedMs).toISOString()
+    });
     await sendCompiledMessages(socket, config, target, compiled);
+    sendCompletedMs = now();
     ack = await readScoreTransactionAck(config, target, compiled, transactionId, {
       ...options,
       attempt
     });
+    acknowledgementMs = now();
     if (ack.ok || ack.status === "skipped") {
+      emitLifecycleEvent(options, "prepare_completed", compiled, target, {
+        observedAt: new Date(acknowledgementMs).toISOString(),
+        acknowledgement: ack,
+        preparationDurationMs: Math.max(0, acknowledgementMs - sendStartedMs)
+      });
       break;
     }
+    if (attempt === attempts - 1) emitLifecycleEvent(options, "prepare_failed", compiled, target, {
+      observedAt: new Date(acknowledgementMs).toISOString(),
+      acknowledgement: ack,
+      preparationDurationMs: Math.max(0, acknowledgementMs - sendStartedMs)
+    });
     if (attempt < attempts - 1 && ackConfig.retryDelayMs > 0) {
       await delay(ackConfig.retryDelayMs);
     }
@@ -325,6 +562,13 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
 
   return {
     ...compiled,
+    transactionId,
+    scoreRevision: options.scoreRevision ?? score.scoreRevision ?? score.version ?? 0,
+    payloadRevision: `${options.scoreRevision ?? score.scoreRevision ?? score.version ?? 0}:${compiled?.timing?.blockId ?? ""}`,
+    sendStartedAt: new Date(sendStartedMs).toISOString(),
+    sendCompletedAt: new Date(sendCompletedMs).toISOString(),
+    acknowledgementAt: new Date(acknowledgementMs).toISOString(),
+    preparationDurationMs: Math.max(0, acknowledgementMs - sendStartedMs),
     targetId: target.id ?? target.address ?? "",
     voiceId: target.voiceId ?? "",
     ack
@@ -422,7 +666,8 @@ export function validateScoreTransactionAck(value, { target = {}, compiled = {},
   if (expectedClientId !== undefined && clientId !== expectedClientId) {
     return { ...base, status: "client mismatch", clientId };
   }
-  if (opcode !== OPCODES.COMMIT) {
+  const expectedOpcode = compiled.stagedScoreActivation === true ? OPCODES.READY : OPCODES.COMMIT;
+  if (opcode !== expectedOpcode) {
     return { ...base, status: opcode === 91 ? "rejected" : "opcode-mismatch", clientId };
   }
   if (txn !== transactionId) {
@@ -443,13 +688,87 @@ export function validateScoreTransactionAck(value, { target = {}, compiled = {},
   return {
     ...base,
     ok: true,
-    status: "committed",
+    status: expectedOpcode === OPCODES.READY ? "prepared" : "committed",
     clientId
   };
 }
 
+export async function readScoreActivationAck(request, options = {}) {
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  if (!request?.url || typeof fetchImpl !== "function") {
+    return badAck("unavailable", {
+      url: request?.url ?? "",
+      expectedTransactionId: request?.transactionId
+    });
+  }
+  try {
+    const response = await fetchImpl(request.url, {
+      signal: AbortSignal.timeout(clampInt(options.timeoutMs ?? 300, 1, 60000))
+    });
+    if (!response.ok) {
+      return badAck("http-error", { url: request.url, httpStatus: response.status });
+    }
+    const body = await response.json();
+    return validateScoreActivationAck(body?.VALUE, request);
+  } catch (error) {
+    return badAck("read-failed", {
+      url: request.url,
+      expectedTransactionId: request.transactionId,
+      error: messageForError(error)
+    });
+  }
+}
+
+export function validateScoreActivationAck(value, {
+  transactionId,
+  expectedClientId,
+  initialStage = 0,
+  url = ""
+} = {}) {
+  if (!Array.isArray(value)) {
+    return badAck("missing", { value: [], url, expectedTransactionId: transactionId });
+  }
+  const values = value.map((entry) => Number(entry));
+  const opcodeIndex = ackOpcodeIndex(values);
+  const opcode = values[opcodeIndex];
+  const txn = values[opcodeIndex + 1];
+  const activeRowCount = values[opcodeIndex + 2];
+  const activatedStage = values[opcodeIndex + 3];
+  const okFlag = values.at(-1);
+  const clientId = opcodeIndex > 0 ? values[0] : undefined;
+  const base = {
+    ok: false,
+    value: values,
+    url,
+    opcode,
+    transactionId: txn,
+    expectedTransactionId: transactionId,
+    clientId,
+    expectedClientId,
+    activeRowCount,
+    activatedStage,
+    expectedStage: initialStage
+  };
+  if (expectedClientId !== undefined && clientId !== Number(expectedClientId)) {
+    return { ...base, status: "client mismatch" };
+  }
+  if (opcode !== OPCODES.ACTIVE) {
+    return { ...base, status: "awaiting activation" };
+  }
+  if (txn !== transactionId) {
+    return { ...base, status: "stale transaction" };
+  }
+  if (okFlag !== 1) {
+    return { ...base, status: "rejected" };
+  }
+  if (activatedStage !== initialStage) {
+    return { ...base, status: "stage mismatch" };
+  }
+  return { ...base, ok: true, status: "active" };
+}
+
 function ackOpcodeIndex(values) {
-  if (values.length > 1 && [1, 20, 30, 90, 91, 100].includes(values[1])) {
+  if (values.length > 1 && [1, 20, 30, 90, 91, 92, 93, 100].includes(values[1])) {
     return 1;
   }
   return 0;
@@ -469,6 +788,13 @@ function shouldDebounceResend(config, reason, options = {}) {
   return resendDebounceMs(config) > 0;
 }
 
+function payloadReuseAllowed(request) {
+  if (request.options?.forceFullClearRows === true || request.options?.forceResend === true) {
+    return false;
+  }
+  return !(request.reasons ?? []).some((reason) => ["manual", "admin", "admin-full-clear", "target-discovery"].includes(reason));
+}
+
 function rnboAckConfig(config) {
   const rnbo = config.rnbo ?? {};
   const ack = rnbo.ack ?? {};
@@ -480,6 +806,19 @@ function rnboAckConfig(config) {
     settleMs: clampInt(ack.settleMs ?? 50, 0, 10000),
     timeoutMs: clampInt(ack.timeoutMs ?? rnbo.oscQuery?.timeoutMs ?? 1000, 1, 60000),
     oscQueryPort: clampInt(ack.oscQueryPort ?? 5678, 1, 65535)
+  };
+}
+
+function rnboActivationConfig(config, tempo) {
+  const activation = config.rnbo?.activation ?? {};
+  const bpm = Number(tempo);
+  const beatWaitMs = Number.isFinite(bpm) && bpm > 0 ? 60000 / bpm : 0;
+  const beatMarginMs = clampInt(activation.beatMarginMs ?? 750, 0, 60000);
+  const configuredTimeoutMs = clampInt(activation.timeoutMs ?? 1800, 1, 60000);
+  return {
+    timeoutMs: Math.max(configuredTimeoutMs, Math.ceil(beatWaitMs + beatMarginMs)),
+    pollIntervalMs: clampInt(activation.pollIntervalMs ?? 50, 1, 10000),
+    requestTimeoutMs: clampInt(activation.requestTimeoutMs ?? 300, 1, 60000)
   };
 }
 
@@ -540,9 +879,28 @@ function operationalAckStatus(status) {
   }
 }
 
-async function rnboTargetsForSend(config, score, runtime = {}) {
+async function rnboTargetsForSend(config, score, runtime = {}, options = {}) {
   const liveTargets = await readLiveRnboTargets(config, runtime);
-  return rnboTargets(config, score, liveTargets);
+  const targets = rnboTargets(config, score, liveTargets);
+  return options.stagedOnly === true
+    ? targets.filter((target) => target.capabilities?.stagedScoreActivation === true)
+    : targets;
+}
+
+function scoreWithActiveBlock(score, blockId) {
+  const normalizedBlockId = String(blockId ?? "").trim();
+  if (!normalizedBlockId || !score?.mesostructure?.[normalizedBlockId]) {
+    throw new Error(`Unknown look-ahead block '${normalizedBlockId}'`);
+  }
+  const macroIndex = (score.macrostructure?.blocks ?? []).indexOf(normalizedBlockId);
+  return {
+    ...score,
+    structureState: {
+      ...(score.structureState ?? {}),
+      activeBlockId: normalizedBlockId,
+      macroIndex: macroIndex >= 0 ? macroIndex : score.structureState?.macroIndex ?? 0
+    }
+  };
 }
 
 async function readLiveRnboTargets(config, runtime = {}) {
@@ -567,7 +925,8 @@ export function rnboTargetSignature(targets = []) {
       target.capabilities?.noteDataFloatCount ?? "",
       target.capabilities?.supportsBeginReplaceClear === true ? "begin-clear" : "",
       target.capabilities?.activeRowCountCommit === true ? "active-row-count" : "",
-      target.capabilities?.compactScoreReplace === true ? "compact" : ""
+      target.capabilities?.compactScoreReplace === true ? "compact" : "",
+      target.capabilities?.stagedScoreActivation === true ? "staged-activation" : ""
     ].join("\u001f"))
     .sort()
     .join("\u001e");
@@ -661,10 +1020,12 @@ export function compileScoreTransaction(score, config, transactionId, target = r
     ? notes.length
     : Math.max(notes.length, clearRowCount);
   const replacementMode = compactScoreReplace ? "compact" : "legacy-full-clear";
+  const stagedScoreActivation = target.capabilities?.stagedScoreActivation === true;
+  const transactionFlags = stagedScoreActivation ? TRANSACTION_FLAGS.PREPARE_ONLY : 0;
   const messages = [
     {
       label: "BEGIN_REPLACE",
-      values: [...prefix, OPCODES.BEGIN_REPLACE, transactionId, 1, transmittedRowCount, patternLength, stagesPerBeat, 0]
+      values: [...prefix, OPCODES.BEGIN_REPLACE, transactionId, 1, transmittedRowCount, patternLength, stagesPerBeat, transactionFlags]
     }
   ];
 
@@ -681,17 +1042,46 @@ export function compileScoreTransaction(score, config, transactionId, target = r
     values: [...prefix, OPCODES.COMMIT, transactionId, transmittedRowCount, 0]
   });
 
+  const payloadHash = createHash("sha256")
+    .update(JSON.stringify(messages.map((message) => {
+      const values = [...message.values];
+      values[prefix.length + 1] = 0;
+      return values;
+    })))
+    .digest("hex");
+
   return {
+    transactionId,
     messages,
     noteCount: notes.length,
     transmittedRowCount,
     replacementMode,
     compactScoreReplace,
+    stagedScoreActivation,
+    transactionFlags,
     forceFullClearRows,
     patternLength,
     stagesPerBeat,
-    timing
+    timing,
+    payloadHash,
+    blockId: timing.blockId
   };
+}
+
+function emitLifecycleEvent(options, type, compiled, target, details = {}) {
+  if (typeof options.onLifecycleEvent !== "function") return;
+  options.onLifecycleEvent({
+    type,
+    transactionId: compiled?.transactionId ?? null,
+    targetId: target?.id ?? target?.address ?? "",
+    voiceId: target?.voiceId ?? "",
+    blockId: compiled?.timing?.blockId ?? "",
+    payloadRevision: `${options.scoreRevision ?? ""}:${compiled?.timing?.blockId ?? ""}`,
+    payloadHash: compiled?.payloadHash ?? null,
+    compiledRowCount: compiled?.noteCount ?? 0,
+    transmittedRowCount: compiled?.transmittedRowCount ?? 0,
+    ...details
+  });
 }
 
 function noteValues(prefix, transactionId, index, note, selectionStart, stagesPerBeat) {

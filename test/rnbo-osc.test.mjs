@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { compileScoreTransaction, compileTimingContract, createRnboOscAdapter, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority, validateScoreTransactionAck } from "../src/adapters/rnbo-osc.mjs";
+import { compileScoreTransaction, compileTimingContract, createRnboOscAdapter, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority, validateScoreActivationAck, validateScoreTransactionAck } from "../src/adapters/rnbo-osc.mjs";
 
 test("compiles ensemble score into RNBO ShadowScore transaction messages", () => {
   const config = mergeConfig(defaultConfig, {
@@ -34,10 +34,12 @@ test("compiles ensemble score into RNBO ShadowScore transaction messages", () =>
     resolutionMode: "fixed",
     quantizationError: null
   });
-  assert.deepEqual(compiled.messages[0].values, [1, 123, 1, 2, 32, 16, 0]);
+  assert.deepEqual(compiled.messages[0].values, [1, 123, 1, 2, 32, 16, 1]);
   assert.deepEqual(compiled.messages[1].values, [20, 123, 0, 10, 60, 0, 4, 100, 0, 10000, 0, 64]);
   assert.deepEqual(compiled.messages[2].values, [20, 123, 1, 20, 64, 8, 8, 90, 0, 7500, 2, 50]);
   assert.deepEqual(compiled.messages[3].values, [90, 123, 2, 0]);
+  assert.match(compiled.payloadHash, /^[a-f0-9]{64}$/);
+  assert.equal(compiled.payloadHash, compileScoreTransaction(score, config, 456).payloadHash);
 });
 
 test("RNBO target signature is stable across ordering and changes on reload-sensitive fields", () => {
@@ -65,6 +67,38 @@ test("RNBO target signature is stable across ordering and changes on reload-sens
   assert.equal(rnboTargetSignature([a, b]), rnboTargetSignature([b, a]));
   assert.notEqual(rnboTargetSignature([a]), rnboTargetSignature([{ ...a, instanceId: "6", address: "/rnbo/inst/6/messages/in/shadowscore" }]));
   assert.notEqual(rnboTargetSignature([a]), rnboTargetSignature([{ ...a, available: false }]));
+});
+
+test("staged-capable targets prepare score data without legacy commit activation", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 0
+    }
+  });
+  const target = {
+    clientId: 90,
+    address: "/rnbo/inst/2/messages/in/shadowscore",
+    capabilities: {
+      ...compactReplaceCapabilities(),
+      stagedScoreActivation: true
+    }
+  };
+  const compiled = compileScoreTransaction(createScore(), config, 123, target);
+
+  assert.equal(compiled.stagedScoreActivation, true);
+  assert.equal(compiled.transactionFlags, 1);
+  assert.deepEqual(compiled.messages[0].values, [90, 1, 123, 1, 2, 32, 16, 1]);
+  assert.equal(validateScoreTransactionAck([90, 92, 123, 2, 32, 1], {
+    target,
+    compiled,
+    transactionId: 123
+  }).status, "prepared");
+  assert.equal(validateScoreTransactionAck([90, 90, 123, 2, 32, 1], {
+    target,
+    compiled,
+    transactionId: 123
+  }).status, "opcode-mismatch");
 });
 
 test("builds a fixed timing contract from config and target capabilities", () => {
@@ -300,7 +334,7 @@ test("compiles client-prefixed transactions for a specific voice target", () => 
   const compiled = compileScoreTransaction(createScore(), config, 321, config.rnbo.targets[0]);
 
   assert.equal(compiled.noteCount, 1);
-  assert.deepEqual(compiled.messages[0].values, [4404, 1, 321, 1, 1, 32, 16, 0]);
+  assert.deepEqual(compiled.messages[0].values, [4404, 1, 321, 1, 1, 32, 16, 1]);
   assert.deepEqual(compiled.messages[1].values, [4404, 20, 321, 0, 20, 64, 8, 8, 90, 0, 7500, 2, 50]);
   assert.deepEqual(compiled.messages[2].values, [4404, 90, 321, 1, 0]);
 });
@@ -495,7 +529,7 @@ test("mesostructural block scale transposes assigned clips during playback compi
   assert.deepEqual(compiled.messages.slice(1, 3).map((message) => message.values[4]), [62, 66]);
 });
 
-test("pads clear rows to the target row capacity so RNBO playback lookup overwrites stale note rows", () => {
+test("mandatory compact replacement clears an empty score without padded rows", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
       stagesPerBeat: 16,
@@ -513,12 +547,10 @@ test("pads clear rows to the target row capacity so RNBO playback lookup overwri
   });
 
   assert.equal(compiled.noteCount, 0);
-  assert.equal(compiled.transmittedRowCount, 819);
-  assert.equal(compiled.messages.length, 821);
-  assert.deepEqual(compiled.messages[0].values, [1, 901, 1, 819, 32, 16, 0]);
-  assert.deepEqual(compiled.messages[1].values, [20, 901, 0, 0, 0, 0, 1, 0, 1, 0, 0, 64]);
-  assert.deepEqual(compiled.messages[819].values, [20, 901, 818, 0, 0, 0, 1, 0, 1, 0, 0, 64]);
-  assert.deepEqual(compiled.messages[820].values, [90, 901, 819, 0]);
+  assert.equal(compiled.transmittedRowCount, 0);
+  assert.equal(compiled.messages.length, 2);
+  assert.deepEqual(compiled.messages[0].values, [1, 901, 1, 0, 32, 16, 1]);
+  assert.deepEqual(compiled.messages[1].values, [90, 901, 0, 0]);
 });
 
 test("compact-capable RNBO targets send only actual note rows", () => {
@@ -539,7 +571,7 @@ test("compact-capable RNBO targets send only actual note rows", () => {
   assert.equal(compiled.transmittedRowCount, 2);
   assert.equal(compiled.replacementMode, "compact");
   assert.equal(compiled.compactScoreReplace, true);
-  assert.deepEqual(compiled.messages[0].values, [1, 902, 1, 2, 32, 16, 0]);
+  assert.deepEqual(compiled.messages[0].values, [1, 902, 1, 2, 32, 16, 1]);
   assert.deepEqual(compiled.messages.at(-1).values, [90, 902, 2, 0]);
 });
 
@@ -561,11 +593,11 @@ test("configured compact-capable RNBO targets inherit default compact capabiliti
   assert.equal(compiled.transmittedRowCount, 2);
   assert.equal(compiled.replacementMode, "compact");
   assert.equal(compiled.compactScoreReplace, true);
-  assert.deepEqual(compiled.messages[0].values, [1, 904, 1, 2, 32, 16, 0]);
+  assert.deepEqual(compiled.messages[0].values, [1, 904, 1, 2, 32, 16, 1]);
   assert.deepEqual(compiled.messages.at(-1).values, [90, 904, 2, 0]);
 });
 
-test("target capability flags can opt out of configured compact defaults", () => {
+test("target capability flags cannot opt out of the mandatory compact contract", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
       stagesPerBeat: 16,
@@ -580,11 +612,11 @@ test("target capability flags can opt out of configured compact defaults", () =>
     }
   });
 
-  assert.equal(compiled.transmittedRowCount, 819);
-  assert.equal(compiled.replacementMode, "legacy-full-clear");
-  assert.equal(compiled.compactScoreReplace, false);
-  assert.deepEqual(compiled.messages[0].values, [1, 905, 1, 819, 32, 16, 0]);
-  assert.deepEqual(compiled.messages.at(-1).values, [90, 905, 819, 0]);
+  assert.equal(compiled.transmittedRowCount, 2);
+  assert.equal(compiled.replacementMode, "compact");
+  assert.equal(compiled.compactScoreReplace, true);
+  assert.deepEqual(compiled.messages[0].values, [1, 905, 1, 2, 32, 16, 1]);
+  assert.deepEqual(compiled.messages.at(-1).values, [90, 905, 2, 0]);
 });
 
 test("full-clear option forces capacity rows for compact-capable RNBO targets", () => {
@@ -612,7 +644,7 @@ test("full-clear option forces capacity rows for compact-capable RNBO targets", 
   assert.equal(compiled.replacementMode, "legacy-full-clear");
   assert.equal(compiled.compactScoreReplace, false);
   assert.equal(compiled.forceFullClearRows, true);
-  assert.deepEqual(compiled.messages[0].values, [1, 903, 1, 819, 32, 16, 0]);
+  assert.deepEqual(compiled.messages[0].values, [1, 903, 1, 819, 32, 16, 1]);
 });
 
 test("sends one OSC packet per compiled transaction message", async () => {
@@ -653,6 +685,9 @@ test("sends one OSC packet per compiled transaction message", async () => {
 
 test("link tempo authority omits Tempo from routine score transport writes", async () => {
   const config = mergeConfig(defaultConfig, {
+    transport: {
+      tempoAuthority: "link"
+    },
     rnbo: {
       host: "127.0.0.1",
       port: 9000,
@@ -716,7 +751,6 @@ test("server tempo authority sends Tempo with routine score transport writes", a
       callback();
     }
   };
-
   await sendScoreTransaction(socket, config, createScore(), 124);
 
   assert.equal(tempoAuthority(config), "server");
@@ -849,8 +883,8 @@ test("sends score updates to assignment-bound RNBO targets", async () => {
   assert.equal(packets.length, result.messages.length + 2);
   assert.equal(packets[0].host, "192.168.68.96");
   assert.equal(packets[0].port, 1234);
-  assert.deepEqual(result.messages[0].values, [2202, 1, 700, 1, 819, 32, 16, 0]);
-  assert.equal(result.replacementMode, "legacy-full-clear");
+  assert.deepEqual(result.messages[0].values, [2202, 1, 700, 1, 1, 32, 16, 1]);
+  assert.equal(result.replacementMode, "compact");
   assert.equal(packets.map(({ packet }) => readOscAddress(packet)).includes("/rnbo/inst/2/messages/in/Tempo"), false);
 });
 
@@ -904,7 +938,7 @@ test("assignment-bound RNBO targets inherit live target connection details", asy
 
   assert.equal(packets[0].host, "192.168.68.88");
   assert.equal(packets[0].port, 1234);
-  assert.deepEqual(result.messages[0].values, [90, 1, 701, 1, 1, 32, 16, 0]);
+  assert.deepEqual(result.messages[0].values, [90, 1, 701, 1, 1, 32, 16, 1]);
   assert.deepEqual(result.messages.at(-1).values, [90, 90, 701, 1, 0]);
 });
 
@@ -939,7 +973,7 @@ test("score transaction retries once when RNBO ACK reports a rejected commit", a
   const packets = [];
   const ackValues = [
     [91, 702, 0, -1, -1],
-    [90, 702, 1, 1, 1]
+    [92, 702, 1, 32, 1]
   ];
   const socket = {
     send(packet, port, host, callback) {
@@ -958,7 +992,7 @@ test("score transaction retries once when RNBO ACK reports a rejected commit", a
   });
 
   assert.equal(result.ack.ok, true);
-  assert.equal(result.ack.status, "committed");
+  assert.equal(result.ack.status, "prepared");
   assert.equal(result.ack.attempt, 1);
   assert.equal(packets.length, 12);
 });
@@ -994,7 +1028,7 @@ test("score transaction surfaces stale or failed RNBO ACK state without throwing
     fetchImpl: async () => ({
       ok: true,
       async json() {
-        return { VALUE: [90, 700, 1, 1, 1] };
+        return { VALUE: [92, 700, 1, 32, 1] };
       }
     })
   });
@@ -1033,6 +1067,32 @@ test("validates client-prefixed RNBO commit ACKs", () => {
   assert.equal(ack.clientId, 90);
 });
 
+test("validates Finch staged activation ACKs independently from READY", () => {
+  const active = validateScoreActivationAck([90, 93, 1104, 32, 0, 1], {
+    transactionId: 1104,
+    expectedClientId: 90,
+    initialStage: 0
+  });
+  const stillPrepared = validateScoreActivationAck([90, 92, 1104, 32, 1], {
+    transactionId: 1104,
+    expectedClientId: 90,
+    initialStage: 0
+  });
+  const wrongStage = validateScoreActivationAck([90, 93, 1104, 32, 1, 1], {
+    transactionId: 1104,
+    expectedClientId: 90,
+    initialStage: 0
+  });
+
+  assert.equal(active.ok, true);
+  assert.equal(active.status, "active");
+  assert.equal(active.activeRowCount, 32);
+  assert.equal(stillPrepared.ok, false);
+  assert.equal(stillPrepared.status, "awaiting activation");
+  assert.equal(wrongStage.ok, false);
+  assert.equal(wrongStage.status, "stage mismatch");
+});
+
 test("RNBO adapter resends score transactions when assignments change", () => {
   assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.replaced", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "clip.replaced", detail: {} }), true);
@@ -1046,6 +1106,194 @@ test("RNBO adapter resends score transactions when assignments change", () => {
   assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { voices: true } }), true);
   assert.equal(shouldSendScoreTransaction({ type: "admin.reset", detail: { notes: true } }), true);
   assert.equal(shouldSendScoreTransaction({ type: "voice.notes.replaced", detail: {} }), true);
+});
+
+test("RNBO adapter promotes only a prepared Finch transaction after ACTIVE readback", async () => {
+  let ackValue = [90, 92, 1104, 2, 32, 1];
+  let packetCount = 0;
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1103,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        instanceId: "20",
+        clientId: 90,
+        address: "/rnbo/inst/20/messages/in/shadowscore",
+        capabilities: {
+          ...compactReplaceCapabilities(),
+          stagedScoreActivation: true
+        }
+      }],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 },
+      activation: { timeoutMs: 20, beatMarginMs: 0, pollIntervalMs: 1, requestTimeoutMs: 20 }
+    }
+  });
+  const store = {
+    events: new EventEmitter(),
+    getScore: () => createScore()
+  };
+  const fetchImpl = async () => ({
+    ok: true,
+    async json() {
+      return { VALUE: ackValue };
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        packetCount += 1;
+        callback();
+      },
+      close() {}
+    },
+    fetchImpl
+  });
+  adapter.attach(store);
+  try {
+    await adapter.resendCurrentScore("manual", { fetchImpl });
+    assert.equal(adapter.sendStatus()[0].activeTransaction, null);
+    assert.equal(adapter.sendStatus()[0].preparedTransaction, 1104, JSON.stringify(adapter.sendStatus()[0]));
+
+    const requests = adapter.schedulePreparedActivations({ initialStage: 0 });
+    ackValue = [90, 93, 1104, 2, 0, 1];
+    const activations = await adapter.confirmPreparedActivations(requests, { tempo: 120 });
+
+    assert.equal(activations[0].acknowledgement.status, "active");
+    assert.equal(adapter.sendStatus()[0].activeTransaction, 1104);
+    assert.equal(adapter.sendStatus()[0].preparedTransaction, null);
+    assert.equal(adapter.sendStatus()[0].activationAck.status, "active");
+    assert.deepEqual(adapter.lifecycleEvents().slice(-2).map((event) => event.type), [
+      "activation_scheduled",
+      "activation_completed"
+    ]);
+
+    const packetsAfterActivation = packetCount;
+    await adapter.resendCurrentScore("structure.playhead.updated", { immediate: true, fetchImpl });
+    assert.equal(packetCount, packetsAfterActivation);
+    assert.equal(adapter.sendStatus()[0].activeTransaction, 1104);
+    assert.equal(adapter.sendStatus()[0].preparedTransaction, null);
+    assert.equal(adapter.lifecycleEvents().at(-1).type, "prepare_reused");
+  } finally {
+    adapter.close();
+  }
+});
+
+test("RNBO adapter removes stale send status when a target instance is replaced", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      oscQuery: { enabled: false },
+      targets: [{
+        host: "127.0.0.1",
+        port: 1234,
+        address: "/rnbo/inst/18/messages/in/shadowscore"
+      }]
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        callback();
+      },
+      close() {}
+    }
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => createScore() });
+  try {
+    await adapter.resendCurrentScore("manual");
+    assert.equal(adapter.sendStatus()[0].targetId, "/rnbo/inst/18/messages/in/shadowscore");
+
+    config.rnbo.targets = [{
+      host: "127.0.0.1",
+      port: 1234,
+      address: "/rnbo/inst/22/messages/in/shadowscore"
+    }];
+    await adapter.resendCurrentScore("manual");
+
+    assert.deepEqual(adapter.sendStatus().map((status) => status.targetId), [
+      "/rnbo/inst/22/messages/in/shadowscore"
+    ]);
+  } finally {
+    adapter.close();
+  }
+});
+
+test("RNBO look-ahead preparation sends to every mandatory staged target", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      oscQuery: { enabled: false },
+      targets: [
+        {
+          host: "127.0.0.1",
+          port: 1234,
+          address: "/rnbo/inst/20/messages/in/shadowscore",
+          capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true }
+        },
+        {
+          host: "127.0.0.1",
+          port: 1234,
+          address: "/rnbo/inst/22/messages/in/shadowscore",
+          capabilities: compactReplaceCapabilities()
+        }
+      ]
+    }
+  });
+  const packets = [];
+  const score = {
+    ...createScore(),
+    clips: {
+      "b-player-1": {
+        notes: [],
+        context: { clip: {}, scale: {}, grid: {}, seed: 0 },
+        duration: { beats: 4 },
+        playbackType: "looped"
+      }
+    },
+    mesostructure: {
+      A: { duration: { beats: 4 }, players: {} },
+      B: { duration: { beats: 4 }, players: { "player-1": { clipId: "b-player-1" } } }
+    },
+    macrostructure: { tempo: 120, blocks: ["A", "B"] },
+    structureState: { activeBlockId: "A", macroIndex: 0 }
+  };
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        packets.push(readOscAddress(packet));
+        callback();
+      },
+      close() {}
+    }
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    await adapter.prepareBlock("B");
+    assert.ok(packets.length > 0);
+    assert.equal(packets.some((address) => address.includes("/rnbo/inst/20/")), true);
+    assert.equal(packets.some((address) => address.includes("/rnbo/inst/22/")), true);
+    assert.equal(adapter.sendStatus().length, 2);
+    assert.equal(adapter.sendStatus().every((status) => status.stagedScoreActivation), true);
+    assert.equal(adapter.sendStatus().every((status) => status.blockId === "B"), true);
+  } finally {
+    adapter.close();
+  }
 });
 
 test("RNBO adapter debounces automatic score-change resends but leaves manual resend immediate", async () => {
@@ -1108,6 +1356,10 @@ test("RNBO adapter debounces automatic score-change resends but leaves manual re
     const manual = adapter.resendCurrentScore("manual");
     await manual;
     assert.equal(adapter.sendQueueStatus().inProgress, false);
+    assert.deepEqual(adapter.lifecycleEvents().slice(-2).map((event) => event.type), ["prepare_started", "prepare_completed"]);
+    assert.match(adapter.sendStatus()[0].payloadHash, /^[a-f0-9]{64}$/);
+    assert.equal(adapter.sendStatus()[0].noteCount, 2);
+    assert.ok(adapter.sendStatus()[0].preparationDurationMs >= 0);
   } finally {
     adapter.close();
   }

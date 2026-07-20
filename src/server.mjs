@@ -5,6 +5,7 @@ import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
 import { distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest, writeTransportControlsToPlaybackTargets } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
+import { createRnboStageCollector } from "./playback/rnbo-stage-collector.mjs";
 import { createOscSnapshotAutoRecall } from "./osc/snapshot-auto-recall.mjs";
 import { createManualOscQueryDeviceRegistry } from "./oscquery/manual-device-registry.mjs";
 import { createOscSnapshotRecallService } from "./osc/snapshot-recall.mjs";
@@ -24,6 +25,7 @@ const manualOscQueryDevices = createManualOscQueryDeviceRegistry(config);
 const oscSnapshotRecall = createOscSnapshotRecallService();
 const rnbo = createRnboOscAdapter(config, { peerRegistry });
 const jackTransport = createJackTransportState(config);
+const rnboStageCollector = createRnboStageCollector(config);
 const jackController = config.transport?.jack?.enabled
   ? createJackTransportController(config)
   : null;
@@ -33,15 +35,38 @@ const runtime = {
   peerRegistry,
   manualOscQueryDevices,
   oscSnapshotRecall,
-  rnboAdapter: rnbo
+  rnboAdapter: rnbo,
+  rnboStageCollector
 };
 const macroPlayback = createMacroPlayback(store, config, {
   jackTransport,
-  afterAdvance: async () => ({
-    action: "SetStage",
-    value: 0,
-    writes: await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 })
-  })
+  beforeAdvance: ({ nextBlockId }) => rnbo.prepareBlock(nextBlockId),
+  armAdvance: async () => {
+    const activationSchedule = rnbo.schedulePreparedActivations?.({ initialStage: 0 }) ?? [];
+    const phaseWrites = (await Promise.all(activationSchedule.map((activation) =>
+      writeTransportControlsToPlaybackTargets(
+        store.getScore(), config, runtime, { SetStage: activation.initialStage }, { targetId: activation.targetId }
+      )
+    ))).flat();
+    const clockWrites = (await Promise.all(activationSchedule.map((activation) =>
+      writeTransportControlsToPlaybackTargets(
+        store.getScore(), config, runtime, { Clock: 1 }, { targetId: activation.targetId }
+      )
+    ))).flat();
+    const activations = activationSchedule.length
+      ? await rnbo.confirmPreparedActivations(activationSchedule, {
+        tempo: store.getScore().macrostructure?.tempo
+      })
+      : [];
+    return {
+      action: "SetStage",
+      value: 0,
+      writes: phaseWrites,
+      phaseWrites,
+      clockWrites,
+      activations
+    };
+  }
 });
 runtime.macroPlayback = macroPlayback;
 const oscSnapshotAutoRecall = createOscSnapshotAutoRecall(store, {
@@ -78,18 +103,23 @@ server.listen(config.http.port, config.http.host, () => {
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
 
-function shutdown() {
-  server.close(async () => {
-    try {
-      await persistence.close();
-      collaboration.close();
-      oscSnapshotAutoRecall.close();
-      macroPlayback.close();
-      rnbo.close();
-      process.exit(0);
-    } catch (error) {
-      console.error(`[persistence] shutdown flush failed: ${error.message}`);
-      process.exit(1);
-    }
-  });
+let shutdownPending = false;
+
+async function shutdown() {
+  if (shutdownPending) return;
+  shutdownPending = true;
+  collaboration.close();
+  oscSnapshotAutoRecall.close();
+  macroPlayback.close();
+  rnbo.close();
+  rnboStageCollector.close();
+  server.close();
+  server.closeAllConnections?.();
+  try {
+    await persistence.close();
+    process.exit(0);
+  } catch (error) {
+    console.error(`[persistence] shutdown flush failed: ${error.message}`);
+    process.exit(1);
+  }
 }

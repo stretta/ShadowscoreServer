@@ -501,14 +501,15 @@ test("transport status page exposes host transport controls", async () => {
   assert.match(response.body, /id="macro-anchor"/);
   assert.match(response.body, /id="phase-reset"/);
   assert.match(response.body, /id="timing-contracts"/);
-  assert.match(response.body, /renderContracts\(contracts\.contracts \|\| \[\]\)/);
+  assert.match(response.body, /fetchJson\("\/playback\/snapshot"\)/);
+  assert.match(response.body, /renderContracts\(snapshot\.timingContracts \|\| \[\]\)/);
+  assert.match(response.body, /lastPlaybackGeneration/);
   assert.match(response.body, /Disagrees on/);
   assert.match(response.body, /\/transport\/events/);
   assert.match(response.body, /\/transport\/play/);
   assert.match(response.body, /\/transport\/stop/);
   assert.match(response.body, /\/macrostructure\/advance/);
   assert.match(response.body, /\/macrostructure\/reset/);
-  assert.match(response.body, /\/playback\/timing-contracts/);
 });
 
 test("playback timing contracts include one entry per playback target", async () => {
@@ -1427,14 +1428,14 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Clock",
-      value: 1
+      path: "/rnbo/inst/2/messages/in/SetStage",
+      value: 0
     },
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/messages/in/SetStage",
-      value: 0
+      path: "/rnbo/inst/2/params/Clock",
+      value: 1
     }
   ]);
   assert.equal(started.clockWrites.length, 1);
@@ -1452,7 +1453,131 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     path: "/rnbo/inst/2/params/Clock",
     value: 0
   });
-  assert.deepEqual(jackCalls, [["start"], ["tempo", 120], ["stop"]]);
+  assert.deepEqual(jackCalls, [["tempo", 120], ["start"], ["stop"]]);
+});
+
+test("transport auto mode selects JACK after the controller starts rolling", async () => {
+  let now = 1000;
+  let startOptions = null;
+  const jackTransport = createJackTransportState(defaultConfig, { now: () => now });
+  const context = createRouteContext({
+    runtime: {
+      jackTransport,
+      jackController: {
+        async tempo(bpm) {
+          return { ok: true, action: "tempo", bpm };
+        },
+        async start() {
+          jackTransport.update(jackSnapshot({ absoluteBeat: 16, state: "rolling" }));
+          now = 1010;
+          return { ok: true, action: "start" };
+        }
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: Boolean(startOptions),
+          mode: startOptions?.mode ?? "stopped",
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: { source: startOptions?.mode ?? "none", usable: Boolean(startOptions), fresh: true }
+        }),
+        start: (options) => {
+          startOptions = options;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  const started = await requestJson(context, "POST", "/transport/play", { mode: "auto" });
+
+  assert.equal(started.ok, true);
+  assert.equal(started.mode, "jack");
+  assert.equal(startOptions.mode, "jack");
+});
+
+test("transport play reconciles Finch prepared data after SetStage then Clock", async () => {
+  const sequence = [];
+  let running = false;
+  const activationRequest = {
+    targetId: "finch-client",
+    transactionId: 1104,
+    expectedClientId: 90,
+    url: "http://finch.local:5678/rnbo/inst/20/messages/out/shadowscore_ack",
+    initialStage: 0
+  };
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [{
+          id: "finch-client",
+          host: "finch.local",
+          port: 1234,
+          address: "/rnbo/inst/20/messages/in/shadowscore"
+        }]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        sequence.push(write.path.endsWith("/SetStage") ? "SetStage" : "Clock");
+      },
+      rnboAdapter: {
+        enabled: true,
+        async waitForIdle() {},
+        sendStatus: () => [{ targetId: "finch-client", ack: { ok: true, status: "prepared" } }],
+        sendQueueStatus: () => ({ inProgress: false, queued: false }),
+        schedulePreparedActivations(options) {
+          sequence.push("activation_scheduled");
+          assert.deepEqual(options, { targetId: "", initialStage: 0 });
+          return [activationRequest];
+        },
+        async confirmPreparedActivations(requests, options) {
+          sequence.push("activation_completed");
+          assert.deepEqual(requests, [activationRequest]);
+          assert.equal(options.tempo, 120);
+          return [{
+            targetId: "finch-client",
+            transactionId: 1104,
+            acknowledgement: { ok: true, status: "active" }
+          }];
+        },
+        lifecycleEvents: () => []
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: { source: "timer", usable: true, fresh: true }
+        }),
+        start: () => {
+          sequence.push("playback_started");
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => {
+          running = false;
+        }
+      }
+    }
+  });
+
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "finch-client",
+    rnboHost: "finch.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/20/messages/in/shadowscore"
+  });
+  const started = await requestJson(context, "POST", "/transport/play", { mode: "timer" });
+
+  assert.deepEqual(sequence, [
+    "SetStage",
+    "activation_scheduled",
+    "Clock",
+    "playback_started",
+    "activation_completed"
+  ]);
+  assert.equal(started.activations[0].acknowledgement.status, "active");
 });
 
 test("macrostructure tempo save sends JACK tempo when control is available", async () => {
@@ -1622,6 +1747,110 @@ test("macro playback route reports RNBO client readback as beat witness", async 
     targetCount: 1,
     reason: "RNBO current_stage readback"
   });
+});
+
+test("playback snapshot is versioned and reports authoritative and execution positions atomically", async () => {
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [{
+          id: "finch",
+          host: "192.168.68.96",
+          port: 9000,
+          address: "/rnbo/inst/2/messages/in/shadowscore",
+          voiceId: "player-1",
+          currentStage: 60
+        }]
+      }
+    }),
+    runtime: {
+      rnboAdapter: {
+        sendStatus: () => [{
+          targetId: "finch",
+          transactionId: 1103,
+          scoreRevision: 4,
+          payloadRevision: "4:A",
+          payloadHash: "payload-hash",
+          blockId: "A",
+          noteCount: 392,
+          transmittedRowCount: 392,
+          preparationDurationMs: 2800,
+          ack: { ok: true, transactionId: 1103 }
+        }],
+        sendQueueStatus: () => ({ inProgress: false, queued: false, active: null, queuedRequest: null }),
+        lifecycleEvents: () => [{ type: "prepare_completed", targetId: "finch" }]
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          mode: "jack",
+          activeBlockId: "A",
+          macroIndex: 0,
+          beatIntoBlock: 4,
+          compositionBeat: 4,
+          witness: { source: "jack", usable: true, fresh: true }
+        })
+      },
+      jackTransport: {
+        snapshot: () => ({
+          source: "jack",
+          status: "fresh",
+          fresh: true,
+          ageMs: 10,
+          latest: { beatsPerMinute: 100, absoluteBeat: 4 }
+        })
+      }
+    }
+  });
+
+  const first = await requestJson(context, "GET", "/playback/snapshot");
+  const second = await requestJson(context, "GET", "/playback/snapshot");
+
+  assert.equal(second.generation, first.generation + 1);
+  assert.equal(first.transport.authority, "jack");
+  assert.equal(first.transport.beatIntoBlock, 4);
+  assert.equal(first.targets.finch.currentStage, 60);
+  assert.equal(first.targets.finch.beatIntoBlock, 3.75);
+  assert.equal(first.targets.finch.phaseErrorBeats, -0.25);
+  assert.equal(first.targets.finch.activeTransaction, 1103);
+  assert.equal(first.targets.finch.noteCount, 392);
+  assert.equal(first.lifecycleEvents[0].type, "prepare_completed");
+});
+
+test("playback snapshot timestamps its boundary after peer stage collection", async () => {
+  let stateObservedAt = null;
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [{
+          id: "finch",
+          host: "192.168.68.96",
+          port: 9000,
+          address: "/rnbo/inst/2/messages/in/shadowscore",
+          voiceId: "player-1"
+        }]
+      }
+    }),
+    runtime: {
+      rnboStageCollector: {
+        async refresh() {
+          await new Promise((resolve) => setTimeout(resolve, 10));
+          stateObservedAt = Date.now() - 5;
+        },
+        targets(targets) {
+          return targets.map((target) => ({
+            ...target,
+            currentStage: 64,
+            stateObservedAt
+          }));
+        }
+      }
+    }
+  });
+
+  const snapshot = await requestJson(context, "GET", "/playback/snapshot");
+
+  assert.ok(snapshot.targets.finch.stateAgeMs >= 5);
 });
 
 test("macro playback route derives macro index from updated JACK witness beat", async () => {
@@ -1865,14 +2094,14 @@ test("macro playback start can include an immediate phase reset", async () => {
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Clock",
-      value: 1
+      path: "/rnbo/inst/2/messages/in/SetStage",
+      value: 0
     },
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/messages/in/SetStage",
-      value: 0
+      path: "/rnbo/inst/2/params/Clock",
+      value: 1
     }
   ]);
   assert.deepEqual(started.phaseWrites, [
@@ -2238,8 +2467,10 @@ test("hardware registration appears in session and RNBO targets", async () => {
   const targets = await requestJson(context, "GET", "/rnbo/targets");
   const target = targets.targets.find((target) => target.id === "shadowbox-b:b-source");
   assert.equal(Boolean(target), true);
-  assert.equal(target.capabilities.maxStages, 1024);
-  assert.equal(target.capabilities.maxNoteRows, 512);
+  assert.equal(target.capabilities.maxStages, 4096);
+  assert.equal(target.capabilities.maxNoteRows, 819);
+  assert.equal(target.capabilities.noteDataFloatCount, 16384);
+  assert.equal(target.capabilities.stagedScoreActivation, true);
   assert.deepEqual(targets.sendQueue, {
     inProgress: false,
     queued: false,
@@ -2657,12 +2888,13 @@ test("playback timing contract route exposes target-specific compiled contracts"
     quantizationError: null
   });
   assert.equal(contract.noteCount, 4);
-  assert.equal(contract.transmittedRowCount, 819);
-  assert.equal(contract.replacementMode, "legacy-full-clear");
-  assert.equal(contract.compactScoreReplace, false);
-  assert.equal(contract.targetCapabilities.compactScoreReplace, false);
-  assert.equal(contract.targetCapabilities.supportsBeginReplaceClear, false);
-  assert.equal(contract.targetCapabilities.activeRowCountCommit, false);
+  assert.equal(contract.transmittedRowCount, 4);
+  assert.equal(contract.replacementMode, "compact");
+  assert.equal(contract.compactScoreReplace, true);
+  assert.equal(contract.targetCapabilities.compactScoreReplace, true);
+  assert.equal(contract.targetCapabilities.supportsBeginReplaceClear, true);
+  assert.equal(contract.targetCapabilities.activeRowCountCommit, true);
+  assert.equal(contract.targetCapabilities.stagedScoreActivation, true);
 });
 
 test("playback timing contracts honor per-target registered stage capacity", async () => {
@@ -2922,6 +3154,34 @@ test("RNBO target transport controls route writes playback transport controls", 
   ]);
   assert.equal(context.config.rnbo.transport.MaxSteps, 32);
   assert.equal(context.config.rnbo.transport.Clock, undefined);
+});
+
+test("transport controls fan out concurrently across targets", async () => {
+  let activeWriters = 0;
+  let maxActiveWriters = 0;
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          { id: "client-a", host: "192.168.68.70", port: 1234, address: "/rnbo/inst/2/messages/in/shadowscore" },
+          { id: "client-b", host: "192.168.68.71", port: 1234, address: "/rnbo/inst/3/messages/in/shadowscore" }
+        ]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async () => {
+        activeWriters += 1;
+        maxActiveWriters = Math.max(maxActiveWriters, activeWriters);
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        activeWriters -= 1;
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/macrostructure/phase-reset", {});
+
+  assert.equal(result.ok, true);
+  assert.equal(maxActiveWriters, 2);
 });
 
 test("legacy RNBO target params route aliases transport controls", async () => {

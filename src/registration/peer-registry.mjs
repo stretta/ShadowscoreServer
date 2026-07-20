@@ -1,6 +1,6 @@
 import os from "node:os";
 import net from "node:net";
-import { legacyRnboPlaybackCapabilities, rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
+import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 
 export function createPeerRegistry(config, options = {}) {
   const units = new Map();
@@ -256,9 +256,7 @@ function normalizeTargets(targets, hardwareUnitId, hardwareUnitName, config) {
       baseAddress: stringField(target.baseAddress) || undefined,
       voiceId: stringField(target.voiceId) || undefined,
       clientId: target.clientId === undefined ? undefined : nullableStringField(target.clientId),
-      capabilities: target.capabilities
-        ? rnboPlaybackCapabilities(config, target.capabilities)
-        : legacyRnboPlaybackCapabilities(config),
+      capabilities: rnboPlaybackCapabilities(config, target.capabilities),
       source: stringField(target.source) || "registration",
       hardwareUnitId,
       hardwareUnitName,

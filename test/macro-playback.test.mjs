@@ -165,6 +165,103 @@ test("JACK macro playback runs phase alignment after block advance", async () =>
   playback.close();
 });
 
+test("JACK macro playback prepares the next block once inside the look-ahead window", async () => {
+  const config = {
+    ...defaultConfig,
+    rnbo: { ...defaultConfig.rnbo, lookAheadBeats: 1 }
+  };
+  const store = createScoreStore(createInitialScore(config));
+  store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ tempo: 120, blocks: ["A", "B"] });
+  const jackTransport = createJackTransportState(config, { now: () => 1000 });
+  const calls = [];
+  const playback = createMacroPlayback(store, config, {
+    jackTransport,
+    beforeAdvance: async (detail) => {
+      calls.push(detail);
+      return { prepared: detail.nextBlockId };
+    }
+  });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack" });
+  jackTransport.update(jackSnapshot({ absoluteBeat: 102.9 }));
+  assert.equal(calls.length, 0);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 103.1 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+  playback.snapshot();
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].activeBlockId, "A");
+  assert.equal(calls[0].nextBlockId, "B");
+  assert.equal(calls[0].nextMacroIndex, 1);
+  assert.equal(calls[0].boundaryBeat, 104);
+  assert.equal(playback.snapshot().lookAhead.last.ok, true);
+  assert.equal(playback.snapshot().lookAhead.last.nextBlockId, "B");
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 103.5 }));
+  playback.snapshot();
+  assert.equal(calls.length, 1);
+  playback.close();
+});
+
+test("JACK macro playback arms a prepared block once during the preceding beat", async () => {
+  const config = {
+    ...defaultConfig,
+    rnbo: {
+      ...defaultConfig.rnbo,
+      lookAheadBeats: 2,
+      activation: { ...defaultConfig.rnbo.activation, armLeadBeats: 0.75 }
+    }
+  };
+  const store = createScoreStore(createInitialScore(config));
+  store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ tempo: 120, blocks: ["A", "B"] });
+  const jackTransport = createJackTransportState(config, { now: () => 1000 });
+  const prepared = [];
+  const armed = [];
+  const playback = createMacroPlayback(store, config, {
+    jackTransport,
+    beforeAdvance: async (detail) => {
+      prepared.push(detail);
+      return { prepared: detail.nextBlockId };
+    },
+    armAdvance: async (detail) => {
+      armed.push(detail);
+      return { armed: detail.nextBlockId };
+    }
+  });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack" });
+  jackTransport.update(jackSnapshot({ absoluteBeat: 102.1 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(prepared.length, 1);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 103.1 }));
+  playback.snapshot();
+  assert.equal(armed.length, 0);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 103.3 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(armed.length, 1);
+  assert.equal(armed[0].nextBlockId, "B");
+  assert.equal(armed[0].boundaryBeat, 104);
+  assert.deepEqual(armed[0].preparation, { prepared: "B" });
+  assert.equal(playback.snapshot().activationArm.last.ok, true);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 103.8 }));
+  playback.snapshot();
+  assert.equal(armed.length, 1);
+  playback.close();
+});
+
 test("beat-derived macro position preserves repeated block ids", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceMesoBlock("A", { duration: { beats: 2 }, players: {} });

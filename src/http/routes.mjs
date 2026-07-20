@@ -15,6 +15,7 @@ import { buildOscTargets } from "../osc/targets.mjs";
 import { buildOscResourceReport } from "../osc/resources.mjs";
 import { runAutomaticOscOnboarding } from "../osc/onboarding.mjs";
 import { selectBeatWitness } from "../playback/beat-witness.mjs";
+import { buildPlaybackSnapshot, nextPlaybackSnapshotGeneration } from "../playback/playback-snapshot.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
@@ -645,6 +646,11 @@ export async function routeRequest(request, response, store, config, runtime = {
 
   if (request.method === "GET" && url.pathname === "/macrostructure/playback") {
     writeJson(response, 200, await macroPlaybackSnapshot(runtime, store, config));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/playback/snapshot") {
+    writeJson(response, 200, await coherentPlaybackSnapshot(runtime, store, config));
     return;
   }
 
@@ -1373,7 +1379,7 @@ async function readOscControlTargets(config) {
 
 async function readAllRnboTargets(config, runtime) {
   const sessionRuntime = await readSessionRuntime(config, runtime);
-  return sessionRuntime.rnboTargets;
+  return runtime.rnboStageCollector?.targets?.(sessionRuntime.rnboTargets) ?? sessionRuntime.rnboTargets;
 }
 
 async function readAllRnboDevices(config, runtime) {
@@ -1552,17 +1558,16 @@ async function findRnboTarget(config, runtime, targetId) {
 
 async function writeTransportControlsToAvailableTargets(config, runtime, controls) {
   const targets = (await readAllRnboTargets(config, runtime)).filter((target) => target.available !== false);
-  const writes = [];
-  for (const target of targets) {
+  const targetWrites = await Promise.all(targets.map(async (target) => {
     const targetWrites = await writeRnboTransportControls(config, target, controls, {
       writer: runtime.rnboParamWriter
     });
-    writes.push(...targetWrites.map((write) => ({
+    return targetWrites.map((write) => ({
       ...write,
       targetId: target.id
-    })));
-  }
-  return writes;
+    }));
+  }));
+  return targetWrites.flat();
 }
 
 export async function writeTransportControlsToPlaybackTargets(score, config, runtime, controls, options = {}) {
@@ -1695,9 +1700,9 @@ function transportSnapshot(config, runtime) {
   };
 }
 
-async function macroPlaybackSnapshot(runtime, store, config) {
+async function macroPlaybackSnapshot(runtime, store, config, witnessContext) {
   if (runtime.macroPlayback?.snapshot) {
-    const context = await readBeatWitnessContext(store.getScore(), config, runtime);
+    const context = witnessContext ?? await readBeatWitnessContext(store.getScore(), config, runtime);
     return {
       ...runtime.macroPlayback.snapshot(context),
       oscSnapshotRecall: automaticOscSnapshotRecallStatus(runtime)
@@ -1739,6 +1744,36 @@ async function macroPlaybackSnapshot(runtime, store, config) {
     },
     oscSnapshotRecall: automaticOscSnapshotRecallStatus(runtime)
   };
+}
+
+async function coherentPlaybackSnapshot(runtime, store, config) {
+  const score = store.getScore();
+  let targets = await readAllRnboTargets(config, runtime);
+  if (runtime.rnboStageCollector?.refresh) {
+    await runtime.rnboStageCollector.refresh(targets);
+    targets = runtime.rnboStageCollector.targets(targets);
+  }
+  // Capture the coherent snapshot boundary after peer polling completes so
+  // each target's stateAgeMs reflects when its readback actually arrived.
+  const observedAt = Date.now();
+  targets = withRnboSendStatus(targets, runtime);
+  const timingContracts = targets.map((target) => playbackTimingContractForTarget(score, config, target));
+  const playback = await macroPlaybackSnapshot(runtime, store, config, {
+    rnboTargets: targets,
+    timingContracts
+  });
+  return buildPlaybackSnapshot({
+    generation: nextPlaybackSnapshotGeneration(runtime),
+    observedAt,
+    score,
+    playback,
+    jack: transportSnapshot(config, runtime),
+    targets,
+    timingContracts,
+    sendQueue: rnboSendQueueStatus(runtime),
+    lifecycleEvents: runtime.rnboAdapter?.lifecycleEvents?.() ?? [],
+    staleAfterMs: config.transport?.rnboClient?.staleAfterMs ?? 1000
+  });
 }
 
 function automaticOscSnapshotRecallStatus(runtime) {
@@ -1799,29 +1834,52 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const playback = requireMacroPlayback(runtime);
   const score = store.getScore();
   const targetId = optionalString(body.targetId);
-  const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
-  const jackStart = await maybeStartJack(runtime);
+  const rnboReadiness = await awaitRnboPlaybackReady(runtime);
   const jackTempo = await maybeSendJackTempo(runtime, score.macrostructure?.tempo);
+  const jackStart = await maybeStartJack(runtime);
   const ttidDistribution = await distributeTtidForBlock(score, config, runtime, score.structureState?.activeBlockId);
   const snapshotRecall = await recallOscSnapshotsForBlock(store, config, runtime, score.structureState?.activeBlockId);
-  const clockWrites = await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId });
   const phaseWrites = body.phaseReset === false
     ? []
     : await writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: 0 }, { targetId });
+  const activationSchedule = body.phaseReset === false
+    ? []
+    : runtime.rnboAdapter?.schedulePreparedActivations?.({ targetId, initialStage: 0 }) ?? [];
+  const clockWrites = await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId });
+  const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
   playback.start({
     mode,
     reset: Boolean(body.reset),
     sourceClientId
   });
+  const activations = activationSchedule.length
+    ? await runtime.rnboAdapter.confirmPreparedActivations(activationSchedule, {
+      tempo: score.macrostructure?.tempo
+    })
+    : [];
   return {
     mode,
+    rnboReadiness,
     jackStart,
     jackTempo,
     ttidDistribution,
     snapshotRecall,
+    activations,
     clockWrites,
     phaseWrites
   };
+}
+
+async function awaitRnboPlaybackReady(runtime) {
+  if (!runtime.rnboAdapter?.enabled) return null;
+  if (typeof runtime.rnboAdapter.waitForIdle === "function") {
+    await runtime.rnboAdapter.waitForIdle();
+  }
+  const failed = (runtime.rnboAdapter.sendStatus?.() ?? []).filter((status) => status.ack?.ok === false);
+  if (failed.length) {
+    throw new Error(`RNBO playback is not ready: ${failed.map((status) => `${status.targetId} ${status.ack?.status ?? "failed"}`).join(", ")}`);
+  }
+  return runtime.rnboAdapter.sendQueueStatus?.() ?? { inProgress: false, queued: false };
 }
 
 async function stopUnifiedTransport(store, config, runtime, body = {}) {

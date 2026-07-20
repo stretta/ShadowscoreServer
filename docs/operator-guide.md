@@ -226,6 +226,24 @@ curl http://<host>.local:8790/transport
 journalctl -u shadowscore-jack-transport-bridge.service -n 80 --no-pager
 ```
 
+If Wren remains in `deactivating (stop-sigterm)` during a deploy, check whether
+the RNBO graph editor on port `3000` has a transport view open. That view can
+hold the server's `/transport/events` SSE connection open. Before the
+2026-07-20 shutdown fix, Node waited for that long-lived connection inside
+`server.close()` and systemd did not restart the service until its 90-second
+stop timeout sent SIGKILL. The server now closes collaboration, SSE, and other
+open HTTP connections before flushing persistence, so an open graph editor
+must not delay shutdown. Diagnose the old symptom with:
+
+```sh
+systemctl status shadowscore-server.service
+systemctl show shadowscore-server.service -p ActiveState -p SubState -p MainPID -p TimeoutStopUSec
+```
+
+Treat this separately from a transport playback failure: during the shutdown
+stall, port `8790` refuses connections while the old Node PID remains visible
+in `stop-sigterm`.
+
 If `tools/deploy_pi.sh` syncs files but cannot complete the non-interactive
 service restart, re-run with `SHADOWSCORE_SUDO_PASSWORD` for known lab units or
 use `--force-restart` for the kill/reset/start recovery path. From an

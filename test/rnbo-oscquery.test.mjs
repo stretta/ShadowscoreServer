@@ -38,8 +38,10 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
   assert.equal(capabilities.maxNoteRows, 819);
   assert.equal(capabilities.noteRowWidth, 10);
   assert.equal(capabilities.supportsAdaptiveResolution, true);
-  assert.equal(capabilities.activeRowCountCommit, false);
-  assert.equal(capabilities.compactScoreReplace, false);
+  assert.equal(capabilities.noteDataFloatCount, 16384);
+  assert.equal(capabilities.activeRowCountCommit, true);
+  assert.equal(capabilities.compactScoreReplace, true);
+  assert.equal(capabilities.stagedScoreActivation, true);
 });
 
 test("extracts ShadowScoreClient compact replacement capabilities from OSCQuery metadata", () => {
@@ -59,7 +61,8 @@ test("extracts ShadowScoreClient compact replacement capabilities from OSCQuery 
       VALUE: JSON.stringify({
         supportsBeginReplaceClear: true,
         activeRowCountCommit: true,
-        compactScoreReplace: true
+        compactScoreReplace: true,
+        stagedScoreActivation: true
       })
     }
   };
@@ -70,6 +73,7 @@ test("extracts ShadowScoreClient compact replacement capabilities from OSCQuery 
   assert.equal(targets[0].capabilities.supportsBeginReplaceClear, true);
   assert.equal(targets[0].capabilities.activeRowCountCommit, true);
   assert.equal(targets[0].capabilities.compactScoreReplace, true);
+  assert.equal(targets[0].capabilities.stagedScoreActivation, true);
 });
 
 test("ignores nested ShadowScore metadata message paths", () => {

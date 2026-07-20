@@ -169,6 +169,10 @@ Modes:
 - `server`: server tempo writes intentionally steer ensemble tempo through the
   ShadowScoreClient/RNBO tempo parameter.
 
+Current decision: Shadowscore writes the macrostructure tempo to JACK before
+starting JACK. RNBO follows that same tempo domain through Link, so routine
+score transport does not send a separate RNBO `Tempo` control.
+
 This avoids duplicating tempo control when the ShadowScoreClient's tempo
 parameter already drives Link.
 
@@ -229,8 +233,9 @@ Later refinement:
 6. Compare active block duration against `/playback/timing-contracts`.
 7. Confirm RNBO receives the new block transaction after `structureState`
    advances.
-8. Confirm no routine score resend writes `Tempo` when `tempoAuthority` is
-   `link`.
+8. Confirm unified start writes the macrostructure tempo to JACK before JACK
+   starts, and no routine score resend writes a separate RNBO `Tempo` when
+   `tempoAuthority` is `link`.
 9. Confirm fallback timer mode still works if the JACK bridge is unavailable.
 
 ## Open Decisions

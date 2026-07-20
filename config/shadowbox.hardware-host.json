@@ -49,7 +49,10 @@
     "capabilities": {
       "supportsBeginReplaceClear": true,
       "activeRowCountCommit": true,
-      "compactScoreReplace": true
+      "compactScoreReplace": true,
+      "stagedScoreActivation": true,
+      "maxNoteRows": 819,
+      "noteDataFloatCount": 16384
     },
     "stagesPerBeat": 16,
     "clearRowCount": 64,

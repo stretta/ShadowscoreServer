@@ -5,6 +5,7 @@ import {
   gridStepsPerBeat,
   moveNote,
   nudgeNote,
+  executionBeatForVoice,
   playbackBeatForVoice,
   projectClipOccurrences,
   resizeNoteRight,
@@ -21,6 +22,19 @@ test("playback wiper uses the focused voice RNBO stage when macro beat is unavai
     targets: [{ id: "rnbo-inst-5:shadowscore", currentStage: 89 }],
     contracts: [{ targetId: "rnbo-inst-5:shadowscore", assignedVoiceId: "player-1", timing: { blockId: "F", stagesPerBeat: 16 } }]
   }), 89 / 16);
+});
+
+test("playback wiper prefers the authoritative beat and exposes client execution separately", () => {
+  const options = {
+    playback: { playing: true, activeBlockId: "F", beatIntoBlock: 6 },
+    blockId: "F",
+    voiceId: "player-1",
+    assignment: { rnboTargetId: "rnbo-inst-5:shadowscore" },
+    targets: [{ id: "rnbo-inst-5:shadowscore", currentStage: 89 }],
+    contracts: [{ targetId: "rnbo-inst-5:shadowscore", assignedVoiceId: "player-1", timing: { blockId: "F", stagesPerBeat: 16 } }]
+  };
+  assert.equal(playbackBeatForVoice(options), 6);
+  assert.equal(executionBeatForVoice(options), 89 / 16);
 });
 
 test("playback wiper falls back to macro beat and remains gated to the active block", () => {

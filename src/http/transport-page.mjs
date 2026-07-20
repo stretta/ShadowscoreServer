@@ -198,17 +198,19 @@ export function transportPage() {
   <script>
     const fields = Object.fromEntries(Array.from(document.querySelectorAll("[id]")).map((el) => [el.id, el]));
     let lastTransport = null;
+    let refreshPending = false;
+    let lastPlaybackGeneration = 0;
 
-    fields.play.addEventListener("click", () => startPlayback("auto"));
-    fields["start-jack"].addEventListener("click", () => startPlayback("jack"));
-    fields["start-timer"].addEventListener("click", () => startPlayback("timer"));
-    fields.reanchor.addEventListener("click", () => startPlayback("jack", { phaseReset: true }));
-    fields.stop.addEventListener("click", stopPlayback);
-    fields.advance.addEventListener("click", () => postJson("/macrostructure/advance", {}));
-    fields.reset.addEventListener("click", resetToA);
-    fields["jack-start"].addEventListener("click", () => postJson("/transport/jack/start", {}));
-    fields["jack-stop"].addEventListener("click", () => postJson("/transport/jack/stop", {}));
-    fields["jack-locate"].addEventListener("click", () => postJson("/transport/jack/locate", { frame: 0 }));
+    fields.play.addEventListener("click", () => runAction(() => startPlayback("auto")));
+    fields["start-jack"].addEventListener("click", () => runAction(() => startPlayback("jack")));
+    fields["start-timer"].addEventListener("click", () => runAction(() => startPlayback("timer")));
+    fields.reanchor.addEventListener("click", () => runAction(() => startPlayback("jack", { phaseReset: true })));
+    fields.stop.addEventListener("click", () => runAction(stopPlayback));
+    fields.advance.addEventListener("click", () => runAction(() => postJson("/macrostructure/advance", {})));
+    fields.reset.addEventListener("click", () => runAction(resetToA));
+    fields["jack-start"].addEventListener("click", () => runAction(() => postJson("/transport/jack/start", {})));
+    fields["jack-stop"].addEventListener("click", () => runAction(() => postJson("/transport/jack/stop", {})));
+    fields["jack-locate"].addEventListener("click", () => runAction(() => postJson("/transport/jack/locate", { frame: 0 })));
 
     refreshAll();
     setInterval(refreshAll, 1000);
@@ -216,26 +218,28 @@ export function transportPage() {
     const transportEvents = new EventSource("/transport/events");
     transportEvents.addEventListener("snapshot", (event) => {
       const payload = JSON.parse(event.data);
-      lastTransport = payload.transport;
-      renderTransport(lastTransport);
-      log("transport " + lastTransport.status + " " + formatNumber(lastTransport.latest?.absoluteBeat, 3));
+      log("transport event " + payload.transport.status + " " + formatNumber(payload.transport.latest?.absoluteBeat, 3));
+      refreshAll();
     });
     transportEvents.onerror = () => log("transport events disconnected");
 
     async function refreshAll() {
+      if (refreshPending) return;
+      refreshPending = true;
       try {
-        const [transport, playback, contracts] = await Promise.all([
-          fetchJson("/transport"),
-          fetchJson("/macrostructure/playback"),
-          fetchJson("/playback/timing-contracts")
-        ]);
-        lastTransport = transport;
-        renderTransport(transport);
-        renderPlayback(playback);
-        renderContracts(contracts.contracts || []);
-        fields.status.textContent = new Date().toLocaleTimeString();
+        const snapshot = await fetchJson("/playback/snapshot");
+        if (!Number.isInteger(snapshot.generation) || snapshot.generation <= lastPlaybackGeneration) return;
+        lastPlaybackGeneration = snapshot.generation;
+        lastTransport = snapshot.transport?.jack || {};
+        renderTransport(lastTransport);
+        renderPlayback(snapshot.playback || {});
+        renderContracts(snapshot.timingContracts || []);
+        const age = Math.max(0, Date.now() - Date.parse(snapshot.observedAt));
+        fields.status.textContent = "JACK authority · snapshot " + snapshot.generation + " · " + age + " ms old";
       } catch (error) {
         fields.status.textContent = String(error.message || error);
+      } finally {
+        refreshPending = false;
       }
     }
 
@@ -253,6 +257,16 @@ export function transportPage() {
       await postJson("/macrostructure/reset", {});
       await postJson("/macrostructure/phase-reset", {});
       await refreshAll();
+    }
+
+    async function runAction(action) {
+      try {
+        await action();
+      } catch (error) {
+        const message = String(error?.message || error);
+        fields.status.textContent = message;
+        log("error: " + message);
+      }
     }
 
     async function fetchJson(url) {

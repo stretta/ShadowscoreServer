@@ -174,7 +174,8 @@ Add a target capability:
 {
   supportsBeginReplaceClear: true,
   activeRowCountCommit: true,
-  compactScoreReplace: true
+  compactScoreReplace: true,
+  stagedScoreActivation: false
 }
 ```
 
@@ -184,6 +185,10 @@ Suggested interpretation:
 - `supportsBeginReplaceClear: true`: `BEGIN_REPLACE` resets stale transaction
   receiver state.
 - `activeRowCountCommit: true`: playback scans only committed active rows.
+- `stagedScoreActivation: true`: `BEGIN_REPLACE` flag bit `1` requests
+  prepare-only storage and requires opcode `92` READY instead of activating on
+  the legacy opcode `90` commit path. Keep this false until the RNBO export
+  implements separate active and staging storage.
 
 All three should be true before the server skips full-capacity clear rows.
 

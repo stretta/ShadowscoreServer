@@ -17,6 +17,16 @@ export function playbackBeatForVoice(options = {}) {
     return undefined;
   }
 
+  const macroBeat = playback.beatIntoBlock == null ? NaN : Number(playback.beatIntoBlock);
+  return Number.isFinite(macroBeat) ? macroBeat : executionBeatForVoice(options);
+}
+
+export function executionBeatForVoice(options = {}) {
+  const playback = options.playback;
+  if (!playback?.playing || playback.activeBlockId !== options.blockId) {
+    return undefined;
+  }
+
   const targetId = options.assignment?.rnboTargetId;
   const target = (options.targets || []).find((entry) => entry.id === targetId);
   const contract = (options.contracts || []).find((entry) =>
@@ -34,9 +44,7 @@ export function playbackBeatForVoice(options = {}) {
   ) {
     return currentStage / stagesPerBeat;
   }
-
-  const macroBeat = playback.beatIntoBlock == null ? NaN : Number(playback.beatIntoBlock);
-  return Number.isFinite(macroBeat) ? macroBeat : undefined;
+  return undefined;
 }
 
 export function sourceTimeForProjectedTime(projectedTime, clipDuration, playbackType = "looped") {

@@ -31,7 +31,10 @@ export const defaultConfig = Object.freeze({
       library: ""
     },
     rnboClient: {
-      maxSkewBeats: 0.25
+      maxSkewBeats: 0.25,
+      pollIntervalMs: 125,
+      timeoutMs: 300,
+      staleAfterMs: 750
     }
   },
   static: {
@@ -228,12 +231,20 @@ export const defaultConfig = Object.freeze({
       defaultStagesPerBeat: 16,
       maxStages: 4096,
       maxNoteRows: 819,
-      noteDataFloatCount: 8192,
+      noteDataFloatCount: 16384,
       noteRowWidth: 10,
       contextDataFloatCount: 64,
       quantizationErrorTargetBeats: 0.0020833333333333333,
       candidateStagesPerBeat: [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 16, 20, 24, 30, 32, 40, 48, 60, 80, 96, 120, 160, 240, 480],
       supportedClockIntervals: [1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 16, 20, 24, 30, 32, 40, 48, 60, 80, 96, 120, 160, 240, 480]
+    },
+    capabilities: {
+      supportsBeginReplaceClear: true,
+      activeRowCountCommit: true,
+      compactScoreReplace: true,
+      stagedScoreActivation: true,
+      maxNoteRows: 819,
+      noteDataFloatCount: 16384
     },
     transport: {
       Tempo: 120,
@@ -244,6 +255,14 @@ export const defaultConfig = Object.freeze({
     forceFullClearRows: false,
     transactionStart: 1000,
     resendDebounceMs: 100,
+    activation: {
+      timeoutMs: 1800,
+      beatMarginMs: 750,
+      armLeadBeats: 0.75,
+      pollIntervalMs: 50,
+      requestTimeoutMs: 300
+    },
+    lookAheadBeats: 12,
     sendDelayMs: 5
   },
   osc: {

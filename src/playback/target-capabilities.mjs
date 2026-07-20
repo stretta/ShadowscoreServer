@@ -4,7 +4,12 @@ export function rnboPlaybackCapabilities(config, override = {}) {
     : {};
   override = override && typeof override === "object" && !Array.isArray(override) ? override : {};
   const resolution = config.rnbo?.resolution ?? {};
-  const noteDataFloatCount = clampInt(override.noteDataFloatCount ?? configured.noteDataFloatCount ?? resolution.noteDataFloatCount, 8192, 1, 2147483647);
+  const noteDataFloatCount = Math.max(16384, clampInt(
+    override.noteDataFloatCount ?? configured.noteDataFloatCount ?? resolution.noteDataFloatCount,
+    16384,
+    1,
+    2147483647
+  ));
   const noteRowWidth = clampInt(override.noteRowWidth ?? configured.noteRowWidth ?? resolution.noteRowWidth, 10, 1, 1024);
   const maxNoteRows = clampInt(
     override.maxNoteRows ?? configured.maxNoteRows ?? resolution.maxNoteRows ?? Math.floor(noteDataFloatCount / noteRowWidth),
@@ -20,21 +25,14 @@ export function rnboPlaybackCapabilities(config, override = {}) {
     noteRowWidth,
     contextDataFloatCount: clampInt(override.contextDataFloatCount ?? configured.contextDataFloatCount ?? resolution.contextDataFloatCount, 64, 1, 2147483647),
     supportsAdaptiveResolution: boolCapability(override, configured, "supportsAdaptiveResolution", true),
-    supportsBeginReplaceClear: boolCapability(override, configured, "supportsBeginReplaceClear", false),
-    activeRowCountCommit: boolCapability(override, configured, "activeRowCountCommit", false),
-    compactScoreReplace: boolCapability(override, configured, "compactScoreReplace", false),
+    supportsBeginReplaceClear: true,
+    activeRowCountCommit: true,
+    compactScoreReplace: true,
+    stagedScoreActivation: true,
     contractTransport: String(override.contractTransport ?? configured.contractTransport ?? "rnbo-osc"),
     bestEffort: boolCapability(override, configured, "bestEffort", true),
     supportedClockIntervals: clockIntervals(override.supportedClockIntervals ?? configured.supportedClockIntervals ?? resolution.supportedClockIntervals)
   };
-}
-
-export function legacyRnboPlaybackCapabilities(config, override = {}) {
-  return rnboPlaybackCapabilities(config, {
-    maxStages: 1024,
-    maxNoteRows: 512,
-    ...override
-  });
 }
 
 function clockIntervals(values) {

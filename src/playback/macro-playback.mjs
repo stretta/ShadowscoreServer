@@ -4,6 +4,8 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   const timers = options.timers ?? globalThis;
   const jackTransport = options.jackTransport;
   const afterAdvance = options.afterAdvance;
+  const beforeAdvance = options.beforeAdvance;
+  const armAdvance = options.armAdvance;
   let running = false;
   let mode = "stopped";
   let timer = undefined;
@@ -22,6 +24,12 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   let lastJackStatus = "unusable";
   let phaseAlignmentPending = false;
   let lastPhaseAlignment = null;
+  let lastLookAheadKey = "";
+  let lookAheadPending = false;
+  let lastLookAhead = null;
+  let lastActivationArmKey = "";
+  let activationArmPending = false;
+  let lastActivationArm = null;
 
   const onChange = (event) => {
     if (!running) {
@@ -63,6 +71,10 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       clearTimer();
       mode = requestedMode;
       running = true;
+      lastLookAheadKey = "";
+      lookAheadPending = false;
+      lastActivationArmKey = "";
+      activationArmPending = false;
       if (startOptions.reset) {
         store.resetStructurePlayhead({ sourceClientId: startOptions.sourceClientId });
       }
@@ -184,6 +196,8 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     activeBlockEndBeat = macroStartBeat + derived.blockEndBeat - macroStartOffsetBeats;
     activeBlockDurationBeats = derived.durationBeats;
     currentBlockDurationMs = durationMsFromBeats(derived.durationBeats, score, config);
+    runBeforeAdvance(score, derived, witness);
+    runArmAdvance(score, derived, witness);
 
     const current = currentMacroPosition(score);
     if (derived.macroIndex === current.macroIndex && derived.activeBlockId === current.activeBlockId) {
@@ -259,6 +273,14 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       phaseAlignment: {
         pending: phaseAlignmentPending,
         last: lastPhaseAlignment
+      },
+      lookAhead: {
+        pending: lookAheadPending,
+        last: lastLookAhead
+      },
+      activationArm: {
+        pending: activationArmPending,
+        last: lastActivationArm
       }
     };
   }
@@ -307,6 +329,105 @@ export function createMacroPlayback(store, config = {}, options = {}) {
         };
         console.error(`[macro-playback] phase alignment failed: ${messageForError(error)}`);
       });
+  }
+
+  function runBeforeAdvance(score, derived, witness) {
+    if (typeof beforeAdvance !== "function" || lookAheadPending) return;
+    const threshold = Math.max(0, Number(config.rnbo?.lookAheadBeats ?? 12));
+    const beatsRemaining = Math.max(0, derived.durationBeats - derived.beatIntoBlock);
+    if (beatsRemaining > threshold) return;
+    const blocks = score.macrostructure?.blocks ?? [];
+    if (blocks.length < 2) return;
+    const nextMacroIndex = (derived.macroIndex + 1) % blocks.length;
+    const nextBlockId = blocks[nextMacroIndex];
+    const boundaryCompositionBeat = derived.compositionBeat - derived.beatIntoBlock + derived.durationBeats;
+    const key = `${boundaryCompositionBeat}:${derived.macroIndex}:${nextMacroIndex}:${nextBlockId}`;
+    if (key === lastLookAheadKey) return;
+    lastLookAheadKey = key;
+    lookAheadPending = true;
+    Promise.resolve(beforeAdvance({
+      activeBlockId: derived.activeBlockId,
+      macroIndex: derived.macroIndex,
+      nextBlockId,
+      nextMacroIndex,
+      beatsRemaining,
+      boundaryBeat: activeBlockEndBeat,
+      witnessSource: witness.source
+    })).then((result) => {
+      lookAheadPending = false;
+      lastLookAhead = {
+        ok: true,
+        at: new Date().toISOString(),
+        activeBlockId: derived.activeBlockId,
+        nextBlockId,
+        boundaryBeat: activeBlockEndBeat,
+        result: result ?? null
+      };
+    }).catch((error) => {
+      lookAheadPending = false;
+      lastLookAhead = {
+        ok: false,
+        at: new Date().toISOString(),
+        activeBlockId: derived.activeBlockId,
+        nextBlockId,
+        boundaryBeat: activeBlockEndBeat,
+        error: messageForError(error)
+      };
+      console.error(`[macro-playback] look-ahead preparation failed: ${messageForError(error)}`);
+    });
+  }
+
+  function runArmAdvance(score, derived, witness) {
+    if (typeof armAdvance !== "function" || activationArmPending) return;
+    const leadBeats = Math.min(0.999, Math.max(0, Number(config.rnbo?.activation?.armLeadBeats ?? 0.75)));
+    const beatsRemaining = Math.max(0, derived.durationBeats - derived.beatIntoBlock);
+    if (beatsRemaining <= 0 || beatsRemaining > leadBeats) return;
+    const blocks = score.macrostructure?.blocks ?? [];
+    if (blocks.length < 2) return;
+    const nextMacroIndex = (derived.macroIndex + 1) % blocks.length;
+    const nextBlockId = blocks[nextMacroIndex];
+    if (
+      lastLookAhead?.ok !== true ||
+      lastLookAhead.activeBlockId !== derived.activeBlockId ||
+      lastLookAhead.nextBlockId !== nextBlockId
+    ) return;
+    const boundaryCompositionBeat = derived.compositionBeat - derived.beatIntoBlock + derived.durationBeats;
+    const key = `${boundaryCompositionBeat}:${derived.macroIndex}:${nextMacroIndex}:${nextBlockId}`;
+    if (key === lastActivationArmKey) return;
+    const boundaryBeat = activeBlockEndBeat;
+    lastActivationArmKey = key;
+    activationArmPending = true;
+    Promise.resolve(armAdvance({
+      activeBlockId: derived.activeBlockId,
+      macroIndex: derived.macroIndex,
+      nextBlockId,
+      nextMacroIndex,
+      beatsRemaining,
+      boundaryBeat,
+      witnessSource: witness.source,
+      preparation: lastLookAhead.result
+    })).then((result) => {
+      activationArmPending = false;
+      lastActivationArm = {
+        ok: true,
+        at: new Date().toISOString(),
+        activeBlockId: derived.activeBlockId,
+        nextBlockId,
+        boundaryBeat,
+        result: result ?? null
+      };
+    }).catch((error) => {
+      activationArmPending = false;
+      lastActivationArm = {
+        ok: false,
+        at: new Date().toISOString(),
+        activeBlockId: derived.activeBlockId,
+        nextBlockId,
+        boundaryBeat,
+        error: messageForError(error)
+      };
+      console.error(`[macro-playback] activation arm failed: ${messageForError(error)}`);
+    });
   }
 }
 

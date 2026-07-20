@@ -75,6 +75,7 @@
     },
     "stagesPerBeat": 16,
     "transactionStart": 1000,
+    "sendBatchSize": 4,
     "sendDelayMs": 5
   }
 }

@@ -77,6 +77,11 @@ As of 2026-07-20:
 - The coherent snapshot boundary is timestamped after concurrent peer polling,
   so each execution witness retains its real observation age. This prevents
   later peer responses from being clamped to a misleading zero-age readback.
+- Phase 6 ordered UDP bursts are live on Wren with `sendBatchSize: 4` and the
+  existing 5 ms inter-burst delay. A fresh Block A fleet resend completed in
+  1.37 seconds; individual READY durations were 0.84 to 0.97 seconds with exact
+  row counts and no retries. A subsequent four-client activation retained a
+  0.052-beat median normalized phase spread.
 
 ## Objective
 
@@ -93,10 +98,11 @@ Ensure that:
 
 Live testing on `wren.local` established several distinct problems:
 
-- Finch's dense block D compiles to 392 rows, but transfers have taken roughly
-  18 to 42 seconds with the current paced, row-by-row sender.
-- The live D block lasts 38.4 seconds at 100 BPM. A transfer that starts at the
-  boundary can therefore arrive too late for some or all of the block.
+- The historical dense block-D fixture compiled to 392 Finch rows, but the live
+  score has since changed and Block D is empty. Block A is the current canary:
+  Finch transmits 158 rows, Heron 186, Raven 127, and Wren 211.
+- Before ordered bursts, current Block A preparation took 2.99 to 4.54 seconds
+  across the fleet. That was too slow for a narrow activation look-ahead.
 - The clients can agree with one another while remaining several beats behind
   the JACK-derived server position.
 - Matrix can poll a peer instance number through wren's OSCQuery address rather
@@ -160,9 +166,9 @@ phase_error
 
 ### Phase 1 acceptance gate
 
-A Finch block-D run must clearly report:
+A Block A fleet run must clearly report:
 
-- the expected 392 rows;
+- the expected 158, 186, 127, and 211 rows;
 - transfer duration;
 - acknowledgement result;
 - server and Finch beat positions; and
@@ -332,9 +338,9 @@ playback.
 - Schedule preparation using measured worst-case duration plus a safety margin.
 - Do not repeatedly transfer identical payload hashes.
 
-If two consecutive macro entries use identical block-D content, reuse the
-prepared or active payload. Send only the boundary activation information
-instead of transmitting another 392-row table.
+If two consecutive macro entries use identical content, reuse the prepared or
+active payload. Send only the boundary activation information instead of
+retransmitting the note table.
 
 ### Phase 4 acceptance gate
 
@@ -421,8 +427,9 @@ Test every pacing or batching change for:
 
 ### Phase 6 acceptance gate
 
-A 392-row Finch payload should prepare comfortably inside the look-ahead
-window, preferably in under three seconds, without validation failures.
+Every populated Block A target should prepare comfortably inside the look-ahead
+window, preferably in under three seconds, with exact row-count validation and
+without retries.
 
 ## Phase 7: Live Rollout
 
@@ -432,7 +439,7 @@ Roll out incrementally:
 2. Update Transport to use the snapshot.
 3. Update Piano Roll and Matrix.
 4. Deploy double buffering to all four birds.
-5. Test dense D repeatedly on Finch.
+5. Test populated Block A repeatedly across the fleet.
 6. Enable scheduled activation on the fleet.
 7. Validate Block A note counts and phase alignment across Finch, Heron, Raven,
    and Wren.
@@ -465,11 +472,11 @@ Simulate:
 - HTTP responses arriving out of order; and
 - client stage drift.
 
-### Live Finch tests
+### Live fleet tests
 
-For dense D, verify:
+For populated Block A, verify:
 
-- all 392 rows are received and validated;
+- all target-specific rows are received and validated;
 - `READY_ACK` precedes the boundary;
 - `ACTIVE_ACK` follows the scheduled boundary;
 - the first expected notes occur near stage zero;

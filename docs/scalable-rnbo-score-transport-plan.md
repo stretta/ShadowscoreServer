@@ -1,5 +1,16 @@
 # Scalable RNBO Score Transport Plan
 
+## Implementation Update
+
+As of 2026-07-20, compact staged replacement is mandatory across the four-bird
+fleet. The server now queues score messages in ordered groups of four on each
+target's UDP socket, awaits the group, then applies the existing 5 ms pacing
+delay before the next group. A live Block A resend completed across all four
+targets in 1.37 seconds; individual READY durations were 0.84 to 0.97 seconds,
+with exact row counts and no retry. The prior one-message pacing baseline was
+2.99 to 4.54 seconds. ACK validation and the explicit full-clear recovery mode
+remain unchanged.
+
 ## Goal
 
 Make ShadowScore-to-RNBO score replacement scale to the normal ensemble shape:

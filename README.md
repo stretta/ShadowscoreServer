@@ -233,6 +233,7 @@ For the session-day operator flow, see
 - Automatic updates reuse an identical active or prepared staged payload by hash and block identity. Manual, target-discovery, and forced full-clear sends always retransmit.
 - During JACK-derived playback, the server prepares the next macro block inside the configured `rnbo.lookAheadBeats` window on staged-capable targets only; legacy clients are not sent future-block payloads.
 - `POST /admin/rnbo/resend`: manually resend the current score to RNBO playback targets. Add `?mode=full-clear` or `{ "mode": "full-clear" }` to force capacity-sized clear rows even for compact-capable targets.
+- Score replacement queues ordered UDP bursts controlled by `rnbo.sendBatchSize` (default `4`) and retains `rnbo.sendDelayMs` pacing between bursts. `BEGIN_REPLACE`, indexed note rows, `COMMIT`, and transport inports keep their original order; READY row-count validation and retry remain the delivery gate.
 - `POST /transport/jack/snapshot`: accept a host-local JACK BBT snapshot from the bridge helper.
 - `POST /transport/jack/start`: start JACK transport through a configured JACK controller.
 - `POST /transport/jack/stop`: stop JACK transport through a configured JACK controller.

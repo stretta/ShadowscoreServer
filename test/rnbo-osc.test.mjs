@@ -221,6 +221,40 @@ test("fit transactions send derived ClockInterval with compiled MaxSteps", async
   ]);
 });
 
+test("score transactions queue ordered UDP bursts before pacing the next batch", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      clearRowCount: 0,
+      sendBatchSize: 3,
+      sendDelayMs: 0,
+      log: false,
+      ack: { enabled: false }
+    }
+  });
+  const pending = [];
+  const socket = {
+    send(packet, port, host, callback) {
+      pending.push({ packet, callback });
+    }
+  };
+  const batchSizes = [];
+  const sending = sendScoreTransaction(socket, config, createScore(), 125);
+
+  for (const expectedSize of [3, 1, 1, 1]) {
+    await new Promise((resolve) => setImmediate(resolve));
+    batchSizes.push(pending.length);
+    assert.equal(pending.length, expectedSize);
+    const callbacks = pending.splice(0).map(({ callback }) => callback);
+    callbacks.forEach((callback) => callback());
+  }
+  await sending;
+
+  assert.deepEqual(batchSizes, [3, 1, 1, 1]);
+});
+
 test("fidelity timing contract chooses the lowest grid that meets the error target", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

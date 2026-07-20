@@ -576,8 +576,10 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
 }
 
 async function sendCompiledMessages(socket, config, target, compiled) {
-  for (const message of compiled.messages) {
-    await sendOscMessage(socket, config, target, message.values);
+  const batchSize = clampInt(config.rnbo.sendBatchSize ?? 1, 1, 64);
+  for (let index = 0; index < compiled.messages.length; index += batchSize) {
+    const batch = compiled.messages.slice(index, index + batchSize);
+    await Promise.all(batch.map((message) => sendOscMessage(socket, config, target, message.values)));
     if (config.rnbo.sendDelayMs > 0) {
       await delay(config.rnbo.sendDelayMs);
     }

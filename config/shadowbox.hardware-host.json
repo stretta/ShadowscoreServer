@@ -57,6 +57,7 @@
     "stagesPerBeat": 16,
     "clearRowCount": 64,
     "transactionStart": 1000,
+    "sendBatchSize": 4,
     "sendDelayMs": 5
   }
 }

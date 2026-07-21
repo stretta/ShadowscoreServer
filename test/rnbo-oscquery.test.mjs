@@ -42,6 +42,28 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
   assert.equal(capabilities.activeRowCountCommit, true);
   assert.equal(capabilities.compactScoreReplace, true);
   assert.equal(capabilities.stagedScoreActivation, true);
+  assert.equal(capabilities.continuingScoreActivation, false);
+});
+
+test("derives continuing activation from the live ActivatePrepared inport", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      capabilities: { continuingScoreActivation: true },
+      oscQuery: { enabled: true }
+    }
+  });
+  const oldTree = createOscQueryTree();
+  oldTree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.messages.CONTENTS.in.CONTENTS.shadowscore.CONTENTS = {
+    capabilities: { VALUE: JSON.stringify({ continuingScoreActivation: true }) }
+  };
+  assert.equal(extractRnboTargets(oldTree, config)[0].capabilities.continuingScoreActivation, false);
+
+  const currentTree = createOscQueryTree();
+  currentTree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.messages.CONTENTS.in.CONTENTS.ActivatePrepared = {
+    FULL_PATH: "/rnbo/inst/2/messages/in/ActivatePrepared",
+    TYPE: "iii"
+  };
+  assert.equal(extractRnboTargets(currentTree, config)[0].capabilities.continuingScoreActivation, true);
 });
 
 test("extracts ShadowScoreClient compact replacement capabilities from OSCQuery metadata", () => {

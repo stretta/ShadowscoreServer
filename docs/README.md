@@ -58,6 +58,9 @@ Design and implementation notes:
 - [`phase-aligned-rnbo-playback-and-editor-state-plan.md`](phase-aligned-rnbo-playback-and-editor-state-plan.md):
   shared playback snapshot, editor convergence, staged RNBO preparation, and
   JACK-boundary activation rollout.
+- [`live-score-editing-and-client-application-plan.md`](live-score-editing-and-client-application-plan.md):
+  canonical autosave, dependency-aware client preparation, Saved/Prepared/Active
+  UI semantics, and explicit next-beat application for live block editing.
 - [`beat-derived-macro-playback-plan.md`](beat-derived-macro-playback-plan.md):
   beat-witness model and macro playback design.
 - [`wren-jack-transport-macro-playback-plan.md`](wren-jack-transport-macro-playback-plan.md):

@@ -251,6 +251,35 @@ td,
   padding: 10px 12px;
 }
 
+.ss-playback-update {
+  align-items: center;
+  background: color-mix(in srgb, var(--ss-panel) 88%, var(--ss-accent-secondary));
+  border: 1px solid var(--ss-border-strong);
+  border-radius: var(--ss-radius-control);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-height: 38px;
+  padding: 6px 8px;
+}
+
+.ss-playback-update-state {
+  color: var(--ss-muted);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.ss-playback-update details {
+  color: var(--ss-muted);
+  font-size: 12px;
+}
+
+.ss-playback-update-targets {
+  display: grid;
+  gap: 3px;
+  padding: 6px 0 2px;
+}
+
 .ss-osc-snapshot-head,
 .ss-osc-snapshot-actions,
 .ss-osc-snapshot-status {

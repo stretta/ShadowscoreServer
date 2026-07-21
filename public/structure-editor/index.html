@@ -344,6 +344,7 @@
       </label>
       <div class="status" id="status">Loading session...</div>
     </section>
+    <div id="playback-update" aria-label="Playback application status"></div>
 
     <div class="workspace">
       <section class="panel" aria-label="Blocks">
@@ -402,7 +403,7 @@
           </div>
           <div class="actions">
             <button id="revert-block" type="button">Revert</button>
-            <button class="primary" id="save-block" type="button">Save Assignments</button>
+            <span class="status" id="block-save-state">Saved</span>
           </div>
         </div>
       </section>
@@ -433,7 +434,7 @@
           <div class="chain" id="chain"></div>
           <div class="actions">
             <button id="revert-macro" type="button">Revert</button>
-            <button class="primary" id="save-macro" type="button">Save Song Form</button>
+            <span class="status" id="macro-save-state">Saved</span>
           </div>
         </div>
       </section>
@@ -442,6 +443,7 @@
 
   <script type="module">
     import { createShadowScoreClientState } from "../shared/shadowscore-client-state.js";
+    import { createPlaybackUpdateControl } from "../shared/playback-update-control.js";
 
     const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
     const state = {
@@ -457,7 +459,8 @@
       macroPlaybackTimer: undefined,
       blockDirty: false,
       macroDirty: false,
-      saving: false
+      saving: false,
+      structureSaveTimer: undefined
     };
 
     const els = {
@@ -479,7 +482,7 @@
       players: document.querySelector("#players"),
       playersEmpty: document.querySelector("#players-empty"),
       revertBlock: document.querySelector("#revert-block"),
-      saveBlock: document.querySelector("#save-block"),
+      blockSaveState: document.querySelector("#block-save-state"),
       tempo: document.querySelector("#tempo"),
       activeBlock: document.querySelector("#active-block"),
       setActiveBlock: document.querySelector("#set-active-block"),
@@ -493,8 +496,14 @@
       chain: document.querySelector("#chain"),
       addChain: document.querySelector("#add-chain"),
       revertMacro: document.querySelector("#revert-macro"),
-      saveMacro: document.querySelector("#save-macro")
+      macroSaveState: document.querySelector("#macro-save-state")
     };
+
+    createPlaybackUpdateControl({
+      root: document.querySelector("#playback-update"),
+      serverUrl: () => state.serverUrl,
+      getBlockId: () => state.selectedBlockId || state.score?.structureState?.activeBlockId || ""
+    });
 
     initScaleRoots();
     bindEvents();
@@ -509,7 +518,7 @@
       els.server.addEventListener("change", () => {
         void loadServer(els.server.value);
       });
-      els.addBlock.addEventListener("click", addBlock);
+      els.addBlock.addEventListener("click", () => void addBlock());
       els.duplicateBlock.addEventListener("click", duplicateBlock);
       els.deleteBlock.addEventListener("click", deleteBlock);
       els.revertBlock.addEventListener("click", () => {
@@ -520,7 +529,6 @@
         state.score = state.client?.effectiveScore() ?? state.score;
         renderBlockEditor();
       });
-      els.saveBlock.addEventListener("click", saveBlock);
       els.addChain.addEventListener("click", () => {
         void addChainEntry();
       });
@@ -528,7 +536,6 @@
         state.macroDirty = false;
         renderMacroEditor();
       });
-      els.saveMacro.addEventListener("click", saveMacrostructure);
       els.activeBlock.addEventListener("change", () => {
         void setActiveBlock();
       });
@@ -548,6 +555,7 @@
       els.tempo.addEventListener("input", () => {
         state.macroDirty = true;
         updateButtons();
+        queueStructureAutosave();
       });
       els.tempo.addEventListener("change", () => {
         void persistMacrostructure("Saving tempo...", "Saved tempo.");
@@ -692,7 +700,7 @@
         button.type = "button";
         button.setAttribute("aria-selected", String(blockId === state.selectedBlockId));
         button.dataset.active = String(blockId === state.score?.structureState?.activeBlockId);
-        button.addEventListener("click", () => selectBlock(blockId));
+        button.addEventListener("click", () => void selectBlock(blockId));
 
         const id = document.createElement("span");
         id.className = "block-id";
@@ -877,13 +885,11 @@
       return row;
     }
 
-    function selectBlock(blockId) {
+    async function selectBlock(blockId) {
       if (blockId === state.selectedBlockId) {
         return;
       }
-      if (state.blockDirty && !window.confirm("Discard unsaved block edits?")) {
-        return;
-      }
+      if (state.blockDirty) await saveBlock();
       state.selectedBlockId = blockId;
       state.blockDirty = false;
       state.client?.revertDraft(blockDraftKey(blockId));
@@ -891,13 +897,11 @@
       renderBlockEditor();
     }
 
-    function addBlock() {
+    async function addBlock() {
       if (!state.score) {
         return;
       }
-      if (state.blockDirty && !window.confirm("Discard unsaved block edits?")) {
-        return;
-      }
+      if (state.blockDirty) await saveBlock();
       const id = nextBlockId();
       state.score = {
         ...state.score,
@@ -916,6 +920,7 @@
       state.client?.beginDraft(blockDraftKey(id), state.score.mesostructure[id]);
       state.score = state.client?.effectiveScore() ?? state.score;
       renderAll();
+      queueStructureAutosave();
     }
 
     async function deleteBlock() {
@@ -981,7 +986,7 @@
     }
 
     async function saveBlock() {
-      if (!state.score || !state.selectedBlockId) {
+      if (!state.score || !state.selectedBlockId || !state.blockDirty) {
         return;
       }
       const originalId = state.selectedBlockId;
@@ -1048,7 +1053,7 @@
     }
 
     async function saveMacrostructure(savingMessage = "Saving playback chain...", savedMessage = "Saved playback chain.") {
-      if (!state.score) {
+      if (!state.score || !state.macroDirty) {
         return;
       }
       const macrostructure = {
@@ -1218,6 +1223,21 @@
       state.score = state.client?.effectiveScore() ?? state.score;
       renderBlockList();
       updateButtons();
+      queueStructureAutosave();
+    }
+
+    function queueStructureAutosave() {
+      window.clearTimeout(state.structureSaveTimer);
+      state.structureSaveTimer = window.setTimeout(() => void flushStructureAutosave(), 450);
+    }
+
+    async function flushStructureAutosave() {
+      if (state.saving) {
+        queueStructureAutosave();
+        return;
+      }
+      if (state.blockDirty) await saveBlock();
+      if (state.macroDirty) await saveMacrostructure();
     }
 
     function blockDraftKey(blockId) {
@@ -1408,11 +1428,11 @@
       els.addBlock.disabled = !hasScore || state.saving;
       els.duplicateBlock.disabled = !hasBlock || state.saving;
       els.deleteBlock.disabled = !hasBlock || state.saving;
-      els.saveBlock.disabled = !hasBlock || !state.blockDirty || state.saving;
       els.revertBlock.disabled = !state.blockDirty || state.saving;
       els.addChain.disabled = !hasScore || state.saving || !Object.keys(state.score?.mesostructure ?? {}).length;
-      els.saveMacro.disabled = !hasScore || !state.macroDirty || state.saving;
       els.revertMacro.disabled = !state.macroDirty || state.saving;
+      els.blockSaveState.textContent = state.saving && state.blockDirty ? "Saving…" : state.blockDirty ? "Saving…" : "Saved";
+      els.macroSaveState.textContent = state.saving && state.macroDirty ? "Saving…" : state.macroDirty ? "Saving…" : "Saved";
       els.activeBlock.disabled = !hasScore || state.saving || !Object.keys(state.score?.mesostructure ?? {}).length;
       els.setActiveBlock.disabled = !hasScore || state.saving || !els.activeBlock.value;
       els.advanceBlock.disabled = !hasScore || state.saving || !(state.score?.macrostructure?.blocks ?? []).length;

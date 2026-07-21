@@ -3,7 +3,7 @@ import http from "node:http";
 import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
-import { distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest, writeTransportControlsToPlaybackTargets } from "./http/routes.mjs";
+import { distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { createRnboStageCollector } from "./playback/rnbo-stage-collector.mjs";
 import { createOscSnapshotAutoRecall } from "./osc/snapshot-auto-recall.mjs";
@@ -41,30 +41,16 @@ const runtime = {
 const macroPlayback = createMacroPlayback(store, config, {
   jackTransport,
   beforeAdvance: ({ nextBlockId }) => rnbo.prepareBlock(nextBlockId),
-  armAdvance: async () => {
-    const activationSchedule = rnbo.schedulePreparedActivations?.({ initialStage: 0 }) ?? [];
-    const phaseWrites = (await Promise.all(activationSchedule.map((activation) =>
-      writeTransportControlsToPlaybackTargets(
-        store.getScore(), config, runtime, { SetStage: activation.initialStage }, { targetId: activation.targetId }
-      )
-    ))).flat();
-    const clockWrites = (await Promise.all(activationSchedule.map((activation) =>
-      writeTransportControlsToPlaybackTargets(
-        store.getScore(), config, runtime, { Clock: 1 }, { targetId: activation.targetId }
-      )
-    ))).flat();
-    const activations = activationSchedule.length
-      ? await rnbo.confirmPreparedActivations(activationSchedule, {
-        tempo: store.getScore().macrostructure?.tempo
-      })
-      : [];
+  armAdvance: async ({ nextBlockId }) => {
+    const update = await rnbo.applyBlockUpdate(nextBlockId, {
+      activationMode: "continue"
+    });
     return {
-      action: "SetStage",
-      value: 0,
-      writes: phaseWrites,
-      phaseWrites,
-      clockWrites,
-      activations
+      action: "ActivatePrepared",
+      value: 1,
+      writes: [],
+      activations: update.activations ?? [],
+      update
     };
   }
 });

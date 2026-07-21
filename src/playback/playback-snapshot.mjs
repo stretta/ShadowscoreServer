@@ -18,6 +18,7 @@ export function buildPlaybackSnapshot({
   timingContracts = [],
   sendQueue = {},
   lifecycleEvents = [],
+  updates = null,
   staleAfterMs = 1000
 } = {}) {
   const observedAtMs = finiteNumber(observedAt, Date.now());
@@ -107,7 +108,8 @@ export function buildPlaybackSnapshot({
     targets: targetSnapshots,
     timingContracts,
     sendQueue,
-    lifecycleEvents: lifecycleEvents.slice(-100)
+    lifecycleEvents: lifecycleEvents.slice(-100),
+    updates
   };
 }
 

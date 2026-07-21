@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ShadowScore Matrix Edit</title>
     <link rel="stylesheet" href="/shared/shadowscore-style.css" />
-    <script type="module" crossorigin src="/matrix-edit/assets/index-C-eKgnJ8.js"></script>
-    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-Cx8fqSHN.css">
+    <script type="module" crossorigin src="/matrix-edit/assets/index-8G87UaLc.js"></script>
+    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-DkWAktNw.css">
   </head>
   <body>
     <nav class="ss-route-tabs" aria-label="ShadowScore routes">
@@ -49,6 +49,14 @@
         <button id="stop-transport" type="button">Stop</button>
         <button id="return-start" type="button">Return to A</button>
         <span id="stage-status" class="stage-status"></span>
+        <div id="playback-update" class="ss-playback-update" aria-live="polite" hidden>
+          <span id="playback-update-state" class="ss-playback-update-state">Loading playback state…</span>
+          <button id="playback-update-action" type="button" disabled>Apply next beat</button>
+          <details id="playback-update-details">
+            <summary>Players</summary>
+            <div id="playback-update-targets" class="ss-playback-update-targets"></div>
+          </details>
+        </div>
         <details class="advanced-panel">
           <summary>Advanced</summary>
           <div class="advanced-popover">

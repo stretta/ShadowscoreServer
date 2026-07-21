@@ -156,7 +156,7 @@ export function extractRnboTargets(tree, config) {
       currentStagePath: outports.current_stage,
       currentStage: outports.current_stage_value,
       clientId: readClientId(node, instanceNode),
-      capabilities: rnboPlaybackCapabilities(config, readTargetCapabilities(node, instanceNode)),
+      capabilities: rnboPlaybackCapabilities(config, observedTargetCapabilities(node, instanceNode)),
       source: "rnbooscquery",
       available: true
     }));
@@ -459,6 +459,18 @@ function readTargetCapabilities(inportNode, instanceNode) {
     }
   }
   return undefined;
+}
+
+function observedTargetCapabilities(inportNode, instanceNode) {
+  const advertised = readTargetCapabilities(inportNode, instanceNode) ?? {};
+  const messageInputs = instanceNode?.CONTENTS?.messages?.CONTENTS?.in?.CONTENTS ?? {};
+  return {
+    ...advertised,
+    // Continuing activation is a live protocol surface, not a configuration
+    // promise. A peer may retain newer config while an older RNBO export is
+    // loaded, so the actual inport is authoritative in both directions.
+    continuingScoreActivation: Boolean(messageInputs.ActivatePrepared)
+  };
 }
 
 function parseCapabilityValue(value) {

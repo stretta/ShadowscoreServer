@@ -654,6 +654,48 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/playback/updates") {
+    try {
+      const adapter = requirePlaybackUpdateAdapter(runtime);
+      writeJson(response, 200, await adapter.playbackUpdates(optionalString(url.searchParams.get("blockId"))));
+    } catch (error) {
+      writeError(response, error, 503);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/playback/updates/apply-next-beat") {
+    try {
+      const body = await readJson(request);
+      const playback = await macroPlaybackSnapshot(runtime, store, config);
+      if (!playback.running) throw new Error("transport is stopped; use Update players now");
+      const adapter = requirePlaybackUpdateAdapter(runtime);
+      writeJson(response, 200, await adapter.applyBlockUpdate(body.blockId, {
+        activationMode: "continue",
+        expectedScoreRevision: optionalInteger(body.expectedScoreRevision, "expectedScoreRevision")
+      }));
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/playback/updates/update-now") {
+    try {
+      const body = await readJson(request);
+      const playback = await macroPlaybackSnapshot(runtime, store, config);
+      if (playback.running) throw new Error("transport is running; use Apply next beat");
+      const adapter = requirePlaybackUpdateAdapter(runtime);
+      writeJson(response, 200, await adapter.applyBlockUpdate(body.blockId, {
+        activationMode: "now",
+        expectedScoreRevision: optionalInteger(body.expectedScoreRevision, "expectedScoreRevision")
+      }));
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/admin") {
     writeHtml(response, 200, adminPage());
     return;
@@ -1762,6 +1804,9 @@ async function coherentPlaybackSnapshot(runtime, store, config) {
     rnboTargets: targets,
     timingContracts
   });
+  const updates = typeof runtime.rnboAdapter?.playbackUpdates === "function"
+    ? await runtime.rnboAdapter.playbackUpdates(playback.activeBlockId ?? score.structureState?.activeBlockId ?? "")
+    : null;
   return buildPlaybackSnapshot({
     generation: nextPlaybackSnapshotGeneration(runtime),
     observedAt,
@@ -1772,8 +1817,17 @@ async function coherentPlaybackSnapshot(runtime, store, config) {
     timingContracts,
     sendQueue: rnboSendQueueStatus(runtime),
     lifecycleEvents: runtime.rnboAdapter?.lifecycleEvents?.() ?? [],
+    updates,
     staleAfterMs: config.transport?.rnboClient?.staleAfterMs ?? 1000
   });
+}
+
+function requirePlaybackUpdateAdapter(runtime) {
+  const adapter = runtime.rnboAdapter;
+  if (!adapter?.enabled || typeof adapter.playbackUpdates !== "function") {
+    throw new Error("RNBO playback update service is not available");
+  }
+  return adapter;
 }
 
 function automaticOscSnapshotRecallStatus(runtime) {
@@ -1834,7 +1888,16 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const playback = requireMacroPlayback(runtime);
   const score = store.getScore();
   const targetId = optionalString(body.targetId);
+  if (runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.prepareBlock === "function") {
+    await runtime.rnboAdapter.prepareBlock(score.structureState?.activeBlockId, "transport-start");
+  }
   const rnboReadiness = await awaitRnboPlaybackReady(runtime);
+  const playbackUpdate = body.phaseReset === false || typeof runtime.rnboAdapter?.applyBlockUpdate !== "function"
+    ? null
+    : await runtime.rnboAdapter.applyBlockUpdate(score.structureState?.activeBlockId, {
+      activationMode: "now",
+      expectedScoreRevision: score.scoreRevision ?? score.version
+    });
   const jackTempo = await maybeSendJackTempo(runtime, score.macrostructure?.tempo);
   const jackStart = await maybeStartJack(runtime);
   const ttidDistribution = await distributeTtidForBlock(score, config, runtime, score.structureState?.activeBlockId);
@@ -1842,7 +1905,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const phaseWrites = body.phaseReset === false
     ? []
     : await writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: 0 }, { targetId });
-  const activationSchedule = body.phaseReset === false
+  const activationSchedule = body.phaseReset === false || playbackUpdate
     ? []
     : runtime.rnboAdapter?.schedulePreparedActivations?.({ targetId, initialStage: 0 }) ?? [];
   const clockWrites = await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId });
@@ -1852,11 +1915,11 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     reset: Boolean(body.reset),
     sourceClientId
   });
-  const activations = activationSchedule.length
+  const activations = playbackUpdate?.activations ?? (activationSchedule.length
     ? await runtime.rnboAdapter.confirmPreparedActivations(activationSchedule, {
       tempo: score.macrostructure?.tempo
     })
-    : [];
+    : []);
   return {
     mode,
     rnboReadiness,
@@ -1864,6 +1927,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     jackTempo,
     ttidDistribution,
     snapshotRecall,
+    playbackUpdate,
     activations,
     clockWrites,
     phaseWrites

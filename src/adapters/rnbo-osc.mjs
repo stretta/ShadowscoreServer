@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { encodeOscMessage } from "./osc.mjs";
 import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
+import { impactAffectsRnbo, impactVoicesForBlock, scoreMutationImpact } from "../playback/score-mutation-impact.mjs";
 
 const OPCODES = Object.freeze({
   BEGIN_REPLACE: 1,
@@ -58,22 +59,28 @@ export function createRnboOscAdapter(config, runtime = {}) {
   let debounceTimer = undefined;
   const debounceWaiters = [];
   const playbackLifecycleEvents = [];
+  const mutationImpacts = [];
+  const playbackUpdateState = new Map();
+  const dirtyVoicesByBlock = new Map();
+  let invalidateAllPlayback = false;
+  let lastObservedScore;
+  const metrics = {
+    mutationCount: 0,
+    targetEnumerationCount: 0,
+    compileCount: 0,
+    transmissionCount: 0,
+    reuseCount: 0
+  };
 
   const adapter = {
     enabled: true,
     attach(nextStore) {
       store = nextStore;
+      lastObservedScore = store.getScore();
       store.events.on("change", (event) => {
-        if (!shouldSendScoreTransaction(event)) {
-          return;
-        }
-        if (event.type === "structure.playhead.updated" && activeBlockAlreadyCommitted(event.score)) {
-          if (config.rnbo.log !== false) console.log(`[rnbo] skip unchanged active block ${event.score?.structureState?.activeBlockId ?? ""}`);
-          return;
-        }
-        void resendScore(event.score, event.type).catch((error) => {
-          console.error(`[rnbo] send failed: ${messageForError(error)}`);
-        });
+        const impact = scoreMutationImpact(event, lastObservedScore);
+        lastObservedScore = event.score;
+        recordMutationImpact(impact);
       });
       startTargetDiscoveryMonitor();
     },
@@ -83,16 +90,122 @@ export function createRnboOscAdapter(config, runtime = {}) {
       }
       return resendScore(store.getScore(), reason, options);
     },
-    prepareBlock(blockId, reason = "lookahead") {
+    prepareBlock(blockId, reason = "lookahead", options = {}) {
       if (!store) {
         return Promise.reject(new Error("RNBO adapter is not attached to a score store"));
       }
       const score = scoreWithActiveBlock(store.getScore(), blockId);
+      const voiceIds = dirtyVoiceSelection(score, blockId);
       return resendScore(score, `${reason}:${blockId}`, {
+        ...options,
         immediate: true,
         stagedOnly: true,
-        preparedBlockId: blockId
+        preparedBlockId: blockId,
+        voiceIds
       });
+    },
+    mutationImpacts() {
+      return structuredClone(mutationImpacts);
+    },
+    metrics() {
+      return structuredClone(metrics);
+    },
+    async playbackUpdates(blockId = "") {
+      if (!store) throw new Error("RNBO adapter is not attached to a score store");
+      const canonical = store.getScore();
+      const selectedBlockId = String(blockId || canonical.structureState?.activeBlockId || "").trim();
+      const score = selectedBlockId ? scoreWithActiveBlock(canonical, selectedBlockId) : canonical;
+      const targets = await rnboTargetsForSend(config, score, runtime);
+      metrics.targetEnumerationCount += targets.length;
+      const updates = targets.map((target) => desiredUpdateForTarget(score, selectedBlockId, target));
+      const affected = updates.filter((update) => update.state !== "active");
+      return {
+        blockId: selectedBlockId,
+        scoreRevision: canonical.scoreRevision ?? canonical.version ?? 0,
+        state: aggregateUpdateState(updates),
+        affectedTargetCount: affected.length,
+        preparedTargetCount: updates.filter((update) => update.state === "prepared").length,
+        activeTargetCount: updates.filter((update) => update.state === "active").length,
+        invalidateAll: invalidateAllPlayback,
+        targets: Object.fromEntries(updates.map((update) => [update.targetId, update])),
+        latestImpact: mutationImpacts.at(-1) ?? null,
+        metrics: structuredClone(metrics)
+      };
+    },
+    async applyBlockUpdate(blockId = "", options = {}) {
+      if (!store) throw new Error("RNBO adapter is not attached to a score store");
+      const canonical = store.getScore();
+      const selectedBlockId = String(blockId || canonical.structureState?.activeBlockId || "").trim();
+      const scoreRevision = canonical.scoreRevision ?? canonical.version ?? 0;
+      if (options.expectedScoreRevision !== undefined && Number(options.expectedScoreRevision) !== Number(scoreRevision)) {
+        const error = new Error(`stale score revision ${options.expectedScoreRevision}; current score revision is ${scoreRevision}`);
+        error.code = "STALE_SCORE_REVISION";
+        error.currentScoreRevision = scoreRevision;
+        throw error;
+      }
+      const activationMode = options.activationMode === "now" ? "now" : "continue";
+      await adapter.prepareBlock(selectedBlockId, activationMode === "now" ? "update-now" : "apply-next-beat", {
+        fetchImpl: options.fetchImpl ?? runtime.fetchImpl
+      });
+      await adapter.waitForIdle();
+      const updates = await adapter.playbackUpdates(selectedBlockId);
+      const pending = Object.values(updates.targets).filter((update) => update.state !== "active");
+      if (!pending.length) return { ...updates, activationMode, action: "already-active", activations: [] };
+
+      const score = scoreWithActiveBlock(canonical, selectedBlockId);
+      const targets = await rnboTargetsForSend(config, score, runtime, {
+        targetIds: pending.map((update) => update.targetId),
+        stagedOnly: true
+      });
+      const targetById = new Map(targets.map((target) => [target.id ?? target.address ?? "", target]));
+      const requests = pending.map((update) => {
+        const target = targetById.get(update.targetId);
+        const status = lastSendStatus.get(update.targetId);
+        if (!target || target.capabilities?.continuingScoreActivation !== true) {
+          const error = new Error(`RNBO target '${update.targetId}' does not support continuing score activation`);
+          error.code = "CONTINUING_ACTIVATION_UNSUPPORTED";
+          throw error;
+        }
+        if (!Number.isInteger(status?.preparedTransaction) || status?.ack?.ok !== true) {
+          const error = new Error(`RNBO target '${update.targetId}' is not READY for score revision ${scoreRevision} (ack=${status?.ack?.status ?? "missing"}, preparedTransaction=${status?.preparedTransaction ?? "none"}${status?.ack?.error ? `, error=${status.ack.error}` : ""})`);
+          error.code = "PLAYBACK_UPDATE_NOT_READY";
+          throw error;
+        }
+        return {
+          target,
+          targetId: update.targetId,
+          transactionId: status.preparedTransaction,
+          expectedClientId: status.ack?.expectedClientId,
+          url: status.ack?.url ?? "",
+          initialStage: activationMode === "now" ? 0 : null,
+          activationMode,
+          boundary: activationMode === "now" ? "now" : "next-beat"
+        };
+      });
+
+      const armedAt = new Date().toISOString();
+      await Promise.all(requests.map(async (request) => {
+        await sendPreparedActivationRequest(socket, request.target, request);
+        recordLifecycleEvent({
+          type: "playback.update.armed",
+          observedAt: armedAt,
+          targetId: request.targetId,
+          transactionId: request.transactionId,
+          activationMode: request.activationMode,
+          boundary: request.boundary
+        });
+      }));
+      const activations = await adapter.confirmPreparedActivations(requests, {
+        tempo: canonical.macrostructure?.tempo,
+        fetchImpl: options.fetchImpl
+      });
+      const finalUpdates = await adapter.playbackUpdates(selectedBlockId);
+      return {
+        ...finalUpdates,
+        activationMode,
+        action: finalUpdates.state === "active" ? "active" : "activation-failed",
+        activations
+      };
     },
     sendStatus() {
       return [...lastSendStatus.values()];
@@ -168,6 +281,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
             activationAcknowledgementAt: completedAt,
             activationAck: acknowledgement
           });
+          promotePlaybackUpdate(request.targetId, request.transactionId, acknowledgement);
           recordLifecycleEvent({
             type: "activation_completed",
             observedAt: completedAt,
@@ -338,7 +452,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
         stagedOnly: previous
           ? previous.options?.stagedOnly === true && next.options?.stagedOnly === true
           : next.options?.stagedOnly === true,
-        forceFullClearRows: previous?.options?.forceFullClearRows === true || next.options?.forceFullClearRows === true
+        forceFullClearRows: previous?.options?.forceFullClearRows === true || next.options?.forceFullClearRows === true,
+        voiceIds: mergeOptionalSelection(previous?.options?.voiceIds, next.options?.voiceIds),
+        targetIds: mergeOptionalSelection(previous?.options?.targetIds, next.options?.targetIds)
       }
     };
   }
@@ -351,7 +467,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
       reasons: [...(request.reasons ?? [])],
       forceFullClearRows: request.options?.forceFullClearRows === true,
       stagedOnly: request.options?.stagedOnly === true,
-      preparedBlockId: request.options?.preparedBlockId ?? ""
+      preparedBlockId: request.options?.preparedBlockId ?? "",
+      voiceIds: request.options?.voiceIds ?? null,
+      targetIds: request.options?.targetIds ?? null
     };
   }
 
@@ -359,6 +477,8 @@ export function createRnboOscAdapter(config, runtime = {}) {
     const entries = Array.isArray(result?.targets)
       ? result.targets
       : [{ target: undefined, compiled: result }];
+    metrics.targetEnumerationCount += entries.length;
+    metrics.compileCount += entries.length;
     const currentTargetIds = new Set(entries.map(({ target, compiled }) => (
       target?.id ?? target?.address ?? compiled?.targetId ?? ""
     )).filter(Boolean));
@@ -375,14 +495,17 @@ export function createRnboOscAdapter(config, runtime = {}) {
         continue;
       }
       if (compiled?.reused === true && lastSendStatus.has(targetId)) {
+        metrics.reuseCount += 1;
         lastSendStatus.set(targetId, {
           ...lastSendStatus.get(targetId),
           at: new Date().toISOString(),
           reusedAt: compiled.reusedAt ?? new Date().toISOString(),
           reuseReason: compiled.reuseReason ?? "identical-staged-payload"
         });
+        recordPlaybackUpdate(target, compiled, lastSendStatus.get(targetId));
         continue;
       }
+      metrics.transmissionCount += 1;
       lastSendStatus.set(targetId, {
         targetId,
         voiceId: target?.voiceId ?? "",
@@ -397,6 +520,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
         replacementMode: compiled?.replacementMode ?? "legacy-full-clear",
         compactScoreReplace: compiled?.compactScoreReplace === true,
         stagedScoreActivation: compiled?.stagedScoreActivation === true,
+        continuingScoreActivation: compiled?.continuingScoreActivation === true,
         forceFullClearRows: compiled?.forceFullClearRows === true,
         patternLength: compiled?.patternLength ?? 0,
         stagesPerBeat: compiled?.stagesPerBeat ?? compiled?.timing?.stagesPerBeat ?? 0,
@@ -414,15 +538,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
         activationAck: null,
         ack: compiled?.ack
       });
+      recordPlaybackUpdate(target, compiled, lastSendStatus.get(targetId));
     }
-  }
-
-  function activeBlockAlreadyCommitted(score) {
-    const blockId = score?.structureState?.activeBlockId ?? "";
-    const statuses = [...lastSendStatus.values()];
-    return Boolean(blockId && statuses.length && statuses.every((status) => (
-      status.stagedScoreActivation !== true && status.blockId === blockId && status.ack?.ok === true
-    )));
+    clearPreparedDirtySelection(entries);
   }
 
   function reusableStagedTargetStatus(target, compiled) {
@@ -442,6 +560,123 @@ export function createRnboOscAdapter(config, runtime = {}) {
     playbackLifecycleEvents.push(event);
     if (playbackLifecycleEvents.length > 200) playbackLifecycleEvents.splice(0, playbackLifecycleEvents.length - 200);
     if (config.rnbo.log !== false) console.log(`[rnbo-playback] ${JSON.stringify(event)}`);
+  }
+
+  function recordMutationImpact(impact) {
+    metrics.mutationCount += 1;
+    mutationImpacts.push(impact);
+    if (mutationImpacts.length > 100) mutationImpacts.splice(0, mutationImpacts.length - 100);
+    if (impact.invalidateAll) invalidateAllPlayback = true;
+    if (impactAffectsRnbo(impact)) {
+      for (const blockId of impact.blockIds) {
+        const dirty = dirtyVoicesByBlock.get(blockId) ?? new Set();
+        for (const voiceId of impactVoicesForBlock(impact, blockId)) dirty.add(voiceId);
+        dirtyVoicesByBlock.set(blockId, dirty);
+      }
+      for (const state of playbackUpdateState.values()) {
+        if (!impact.invalidateAll && !(impact.blockIds ?? []).includes(state.blockId)) continue;
+        const affectedVoices = impactVoicesForBlock(impact, state.blockId);
+        if (!impact.invalidateAll && !affectedVoices.includes(state.voiceId)) continue;
+        state.desiredScoreRevision = impact.scoreRevision;
+        state.desiredHash = null;
+        state.state = "saved-not-active";
+        state.lastImpact = structuredClone(impact);
+      }
+      recordLifecycleEvent({
+        type: "playback.update.desired",
+        observedAt: new Date().toISOString(),
+        scoreRevision: impact.scoreRevision,
+        blockIds: impact.blockIds,
+        voiceIdsByBlock: impact.voiceIdsByBlock,
+        invalidateAll: impact.invalidateAll
+      });
+    }
+  }
+
+  function dirtyVoiceSelection(score, blockId) {
+    const assigned = Object.keys(score.mesostructure?.[blockId]?.players ?? {});
+    if (invalidateAllPlayback) return assigned;
+    const dirty = dirtyVoicesByBlock.get(blockId);
+    const missing = assigned.filter((voiceId) => ![...playbackUpdateState.values()].some((state) => state.blockId === blockId && state.voiceId === voiceId));
+    if (!dirty) return missing;
+    return [...new Set([...dirty, ...missing])];
+  }
+
+  function desiredUpdateForTarget(score, blockId, target) {
+    metrics.compileCount += 1;
+    const compiled = compileScoreTransaction(score, config, 0, target);
+    const targetId = target.id ?? target.address ?? "";
+    const key = playbackUpdateKey(blockId, targetId);
+    const previous = playbackUpdateState.get(key) ?? {};
+    const desiredHash = compiled.payloadHash;
+    const active = previous.activeHash === desiredHash && Number.isInteger(previous.activeTransaction);
+    const prepared = !active && previous.preparedHash === desiredHash && Number.isInteger(previous.preparedTransaction);
+    return {
+      targetId,
+      voiceId: target.voiceId ?? "",
+      blockId,
+      desiredScoreRevision: score.scoreRevision ?? score.version ?? 0,
+      desiredHash,
+      preparedTransaction: previous.preparedTransaction ?? null,
+      preparedHash: previous.preparedHash ?? null,
+      activeTransaction: previous.activeTransaction ?? null,
+      activeHash: previous.activeHash ?? null,
+      state: active ? "active" : prepared ? "prepared" : "saved-not-active",
+      lastError: previous.lastError ?? null
+    };
+  }
+
+  function recordPlaybackUpdate(target, compiled, status) {
+    const blockId = compiled?.blockId ?? compiled?.timing?.blockId ?? "";
+    const targetId = target?.id ?? target?.address ?? compiled?.targetId ?? "";
+    if (!blockId || !targetId) return;
+    const key = playbackUpdateKey(blockId, targetId);
+    const previous = playbackUpdateState.get(key) ?? {};
+    const prepared = compiled?.stagedScoreActivation === true && compiled?.ack?.status === "prepared";
+    const active = compiled?.stagedScoreActivation !== true && compiled?.ack?.ok === true;
+    playbackUpdateState.set(key, {
+      ...previous,
+      blockId,
+      targetId,
+      voiceId: target?.voiceId ?? compiled?.voiceId ?? "",
+      desiredScoreRevision: compiled?.scoreRevision ?? previous.desiredScoreRevision ?? null,
+      desiredHash: compiled?.payloadHash ?? previous.desiredHash ?? null,
+      preparedTransaction: prepared ? status?.preparedTransaction ?? compiled?.transactionId ?? null : previous.preparedTransaction ?? null,
+      preparedHash: prepared ? compiled?.payloadHash ?? null : previous.preparedHash ?? null,
+      activeTransaction: active ? status?.activeTransaction ?? compiled?.transactionId ?? null : previous.activeTransaction ?? null,
+      activeHash: active ? compiled?.payloadHash ?? null : previous.activeHash ?? null,
+      state: active ? "active" : prepared ? "prepared" : compiled?.ack?.ok === false ? "failed" : previous.state ?? "saved-not-active",
+      lastError: compiled?.ack?.ok === false ? compiled.ack : null,
+      updatedAt: new Date().toISOString()
+    });
+  }
+
+  function promotePlaybackUpdate(targetId, transactionId, acknowledgement) {
+    for (const [key, state] of playbackUpdateState.entries()) {
+      if (state.targetId !== targetId || state.preparedTransaction !== transactionId) continue;
+      playbackUpdateState.set(key, {
+        ...state,
+        activeTransaction: transactionId,
+        activeHash: state.preparedHash,
+        preparedTransaction: null,
+        preparedHash: null,
+        state: "active",
+        lastError: null,
+        activationAcknowledgement: acknowledgement,
+        updatedAt: new Date().toISOString()
+      });
+    }
+  }
+
+  function clearPreparedDirtySelection(entries) {
+    for (const { target, compiled } of entries) {
+      if (compiled?.ack?.ok !== true) continue;
+      const blockId = compiled?.blockId ?? compiled?.timing?.blockId ?? "";
+      const voiceId = target?.voiceId ?? compiled?.voiceId ?? "";
+      dirtyVoicesByBlock.get(blockId)?.delete(voiceId);
+      if (dirtyVoicesByBlock.get(blockId)?.size === 0) dirtyVoicesByBlock.delete(blockId);
+    }
+    if (dirtyVoicesByBlock.size === 0) invalidateAllPlayback = false;
   }
 
   function startTargetDiscoveryMonitor() {
@@ -763,7 +998,7 @@ export function validateScoreActivationAck(value, {
   if (okFlag !== 1) {
     return { ...base, status: "rejected" };
   }
-  if (activatedStage !== initialStage) {
+  if (initialStage !== null && activatedStage !== initialStage) {
     return { ...base, status: "stage mismatch" };
   }
   return { ...base, ok: true, status: "active" };
@@ -883,7 +1118,15 @@ function operationalAckStatus(status) {
 
 async function rnboTargetsForSend(config, score, runtime = {}, options = {}) {
   const liveTargets = await readLiveRnboTargets(config, runtime);
-  const targets = rnboTargets(config, score, liveTargets);
+  let targets = rnboTargets(config, score, liveTargets);
+  if (Array.isArray(options.voiceIds)) {
+    const voiceIds = new Set(options.voiceIds);
+    targets = targets.filter((target) => !target.voiceId || voiceIds.has(target.voiceId));
+  }
+  if (Array.isArray(options.targetIds)) {
+    const targetIds = new Set(options.targetIds);
+    targets = targets.filter((target) => targetIds.has(target.id ?? target.address ?? ""));
+  }
   return options.stagedOnly === true
     ? targets.filter((target) => target.capabilities?.stagedScoreActivation === true)
     : targets;
@@ -928,7 +1171,8 @@ export function rnboTargetSignature(targets = []) {
       target.capabilities?.supportsBeginReplaceClear === true ? "begin-clear" : "",
       target.capabilities?.activeRowCountCommit === true ? "active-row-count" : "",
       target.capabilities?.compactScoreReplace === true ? "compact" : "",
-      target.capabilities?.stagedScoreActivation === true ? "staged-activation" : ""
+      target.capabilities?.stagedScoreActivation === true ? "staged-activation" : "",
+      target.capabilities?.continuingScoreActivation === true ? "continuing-activation" : ""
     ].join("\u001f"))
     .sort()
     .join("\u001e");
@@ -1023,6 +1267,7 @@ export function compileScoreTransaction(score, config, transactionId, target = r
     : Math.max(notes.length, clearRowCount);
   const replacementMode = compactScoreReplace ? "compact" : "legacy-full-clear";
   const stagedScoreActivation = target.capabilities?.stagedScoreActivation === true;
+  const continuingScoreActivation = target.capabilities?.continuingScoreActivation === true;
   const transactionFlags = stagedScoreActivation ? TRANSACTION_FLAGS.PREPARE_ONLY : 0;
   const messages = [
     {
@@ -1060,6 +1305,7 @@ export function compileScoreTransaction(score, config, transactionId, target = r
     replacementMode,
     compactScoreReplace,
     stagedScoreActivation,
+    continuingScoreActivation,
     transactionFlags,
     forceFullClearRows,
     patternLength,
@@ -1123,9 +1369,17 @@ function noteValues(prefix, transactionId, index, note, selectionStart, stagesPe
 }
 
 function normalizeTransactionTarget(config, target = {}) {
+  const capabilities = rnboPlaybackCapabilities(config, target.capabilities);
   return {
     ...target,
-    capabilities: rnboPlaybackCapabilities(config, target.capabilities)
+    // Current continuing-activation clients require the routing client id as
+    // the first atom. Fresh RNBO instances may not expose an input/ACK value
+    // until after their first transaction, so live discovery cannot always
+    // supply it during bootstrap.
+    clientId: target.clientId ?? (capabilities.continuingScoreActivation === true
+      ? config.rnbo?.clientId ?? 90
+      : undefined),
+    capabilities
   };
 }
 
@@ -1477,6 +1731,21 @@ async function sendOscInportMessage(socket, target, name, value) {
   });
 }
 
+async function sendPreparedActivationRequest(socket, target, request) {
+  const instanceId = readInstanceId(target.address);
+  if (!instanceId) throw new Error(`RNBO target '${target.id ?? ""}' does not include an instance id`);
+  const activationMode = request.activationMode === "continue" ? 1 : 0;
+  const boundary = request.boundary === "next-beat" ? 1 : 0;
+  const packet = encodeOscMessage(`/rnbo/inst/${instanceId}/messages/in/ActivatePrepared`, [
+    request.transactionId,
+    activationMode,
+    boundary
+  ]);
+  await new Promise((resolve, reject) => {
+    socket.send(packet, target.port, target.host, (error) => error ? reject(error) : resolve());
+  });
+}
+
 function rnboTargets(config, score, liveTargets = []) {
   const assignedTargets = assignmentRnboTargets(config, score, liveTargets);
   if (assignedTargets.length > 0) {
@@ -1484,9 +1753,14 @@ function rnboTargets(config, score, liveTargets = []) {
   }
   if (Array.isArray(config.rnbo.targets) && config.rnbo.targets.length > 0) {
     return config.rnbo.targets.map((target) => ({
+      id: target.id,
       host: target.host ?? config.rnbo.host,
       port: target.port ?? config.rnbo.port,
       address: target.address ?? config.rnbo.address,
+      instanceId: target.instanceId,
+      messagePath: target.messagePath,
+      ackPath: target.ackPath,
+      oscQueryUrl: target.oscQueryUrl,
       voiceId: target.voiceId,
       clientId: target.clientId,
       capabilities: rnboPlaybackCapabilities(config, target.capabilities)
@@ -1576,6 +1850,24 @@ function stripTrailingSlash(value) {
 
 function isLoopbackHost(value) {
   return ["127.0.0.1", "localhost", "::1"].includes(String(value ?? "").toLowerCase());
+}
+
+function mergeOptionalSelection(previous, next) {
+  if (!Array.isArray(previous)) return Array.isArray(next) ? [...new Set(next)] : undefined;
+  if (!Array.isArray(next)) return [...new Set(previous)];
+  return [...new Set([...previous, ...next])];
+}
+
+function playbackUpdateKey(blockId, targetId) {
+  return `${blockId}\u001f${targetId}`;
+}
+
+function aggregateUpdateState(updates) {
+  if (!updates.length) return "no-targets";
+  if (updates.every((update) => update.state === "active")) return "active";
+  if (updates.some((update) => update.state === "failed")) return "failed";
+  if (updates.every((update) => ["active", "prepared"].includes(update.state))) return "prepared";
+  return "saved-not-active";
 }
 
 function isPlainObject(value) {

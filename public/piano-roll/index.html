@@ -23,7 +23,7 @@
       <label>Pitch zoom <input id="zoom-y" type="range" min="12" max="32" value="20"></label>
       <label class="toggle"><input id="chase" type="checkbox"> Chase</label>
       <button id="fold" type="button" aria-pressed="false" title="Show only note lanes used in this block">Fold</button>
-      <button id="revert" type="button" disabled>Revert</button><button id="save" type="button" disabled>Save</button>
+      <button id="revert" type="button" disabled>Revert</button>
       <span id="dirty" class="badge">Saved</span>
     </header>
     <section class="summary" aria-live="polite">
@@ -31,6 +31,7 @@
       <span><small>Playback</small><strong id="playing">Stopped</strong></span>
       <span><small>Selection</small><strong id="selection">None</strong></span>
       <span id="status">Loading score…</span>
+      <div id="playback-update" aria-label="Playback application status"></div>
     </section>
     <section class="editor-shell">
       <div id="roll-scroll" class="roll-scroll">
@@ -39,7 +40,7 @@
       <div class="velocity-heading"><span>Velocity</span><output id="velocity-value">—</output></div>
       <div id="velocity-scroll" class="velocity-scroll"><canvas id="velocity" aria-label="Note velocity lane"></canvas></div>
     </section>
-    <p class="help">Click empty space to add. Drag a note to move it or its right edge to resize. Chase follows the playing section; Fold hides note lanes unused by the current block. Arrow keys nudge; Shift+Left/Right resizes; Delete removes. Drafts persist per clip until Save. Event List remains the exact-field review surface.</p>
+    <p class="help">Click empty space to add. Drag a note to move it or its right edge to resize. Completed gestures save automatically. Chase follows the playing section; Fold hides note lanes unused by the current block. Arrow keys nudge; Shift+Left/Right resizes; Delete removes. Playback application is shown separately. Event List remains the exact-field review surface.</p>
   </main>
   <script type="module" src="/piano-roll/app.js"></script>
 </body>

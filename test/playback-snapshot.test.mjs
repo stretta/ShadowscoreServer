@@ -84,3 +84,9 @@ test("playback snapshot distinguishes prepared and active RNBO transactions", ()
   assert.equal(snapshot.targets.finch.activationAcknowledgement.status, "awaiting activation");
   assert.equal(snapshot.targets.finch.activationAcknowledgementAt, "2026-07-20T13:07:43.100Z");
 });
+
+test("playback snapshot exposes shared desired/prepared/active update state", () => {
+  const updates = { blockId: "A", state: "saved-not-active", affectedTargetCount: 1 };
+  const snapshot = buildPlaybackSnapshot({ updates });
+  assert.deepEqual(snapshot.updates, updates);
+});

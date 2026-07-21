@@ -101,6 +101,23 @@ test("staged-capable targets prepare score data without legacy commit activation
   }).status, "opcode-mismatch");
 });
 
+test("fresh continuing clients receive the required client prefix before readback exists", () => {
+  const config = mergeConfig(defaultConfig, { rnbo: { stagesPerBeat: 16 } });
+  const target = {
+    address: "/rnbo/inst/12/messages/in/shadowscore",
+    capabilities: {
+      ...compactReplaceCapabilities(),
+      stagedScoreActivation: true,
+      continuingScoreActivation: true
+    }
+  };
+
+  const compiled = compileScoreTransaction(createScore(), config, 1005, target);
+
+  assert.deepEqual(compiled.messages[0].values.slice(0, 4), [90, 1, 1005, 1]);
+  assert.deepEqual(compiled.messages.at(-1).values, [90, 90, 1005, 2, 0]);
+});
+
 test("builds a fixed timing contract from config and target capabilities", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
@@ -1220,6 +1237,107 @@ test("RNBO adapter promotes only a prepared Finch transaction after ACTIVE readb
   }
 });
 
+test("RNBO adapter applies a prepared update in continue mode without requiring stage zero", async () => {
+  let activationRequested = false;
+  const addresses = [];
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1200,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        instanceId: "20",
+        clientId: 90,
+        voiceId: "player-1",
+        address: "/rnbo/inst/20/messages/in/shadowscore",
+        capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true, continuingScoreActivation: true }
+      }],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 },
+      activation: { timeoutMs: 20, beatMarginMs: 0, pollIntervalMs: 1, requestTimeoutMs: 20 }
+    }
+  });
+  const score = scoreWithBlock(9);
+  const store = { events: new EventEmitter(), getScore: () => score };
+  const fetchImpl = async () => ({
+    ok: true,
+    async json() {
+      return { VALUE: activationRequested ? [90, 93, 1201, 2, 7, 1] : [90, 92, 1201, 2, 32, 1] };
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        const address = readOscAddress(packet);
+        addresses.push(address);
+        if (address.endsWith("/ActivatePrepared")) activationRequested = true;
+        callback();
+      },
+      close() {}
+    },
+    fetchImpl
+  });
+  adapter.attach(store);
+  try {
+    const result = await adapter.applyBlockUpdate("A", {
+      activationMode: "continue",
+      expectedScoreRevision: 9,
+      fetchImpl
+    });
+    assert.equal(addresses.some((address) => address.endsWith("/ActivatePrepared")), true);
+    assert.equal(result.action, "active");
+    assert.equal(result.targets.finch.activeTransaction, 1201);
+    assert.equal(result.activations[0].acknowledgement.activatedStage, 7);
+  } finally {
+    adapter.close();
+  }
+});
+
+test("RNBO adapter refuses live application when a target lacks continuing activation", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1300,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        instanceId: "20",
+        clientId: 90,
+        voiceId: "player-1",
+        address: "/rnbo/inst/20/messages/in/shadowscore",
+        capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true }
+      }],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 }
+    }
+  });
+  const score = scoreWithBlock(10);
+  const adapter = createRnboOscAdapter(config, {
+    socket: { send(packet, port, host, callback) { callback(); }, close() {} },
+    fetchImpl: async () => ({ ok: true, async json() { return { VALUE: [90, 92, 1301, 2, 32, 1] }; } })
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    await assert.rejects(
+      adapter.applyBlockUpdate("A", { expectedScoreRevision: 10 }),
+      (error) => error.code === "CONTINUING_ACTIVATION_UNSUPPORTED"
+    );
+  } finally {
+    adapter.close();
+  }
+});
+
 test("RNBO adapter removes stale send status when a target instance is replaced", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
@@ -1330,7 +1448,78 @@ test("RNBO look-ahead preparation sends to every mandatory staged target", async
   }
 });
 
-test("RNBO adapter debounces automatic score-change resends but leaves manual resend immediate", async () => {
+test("RNBO preparation sends only the voice made dirty by a clip edit", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      oscQuery: { enabled: false },
+      ack: { enabled: false },
+      targets: [
+        {
+          id: "finch",
+          voiceId: "player-1",
+          host: "127.0.0.1",
+          port: 1234,
+          address: "/rnbo/inst/20/messages/in/shadowscore",
+          capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true }
+        },
+        {
+          id: "wren-player",
+          voiceId: "player-2",
+          host: "127.0.0.1",
+          port: 1234,
+          address: "/rnbo/inst/22/messages/in/shadowscore",
+          capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true }
+        }
+      ]
+    }
+  });
+  let score = {
+    ...createScore(),
+    scoreRevision: 1,
+    clips: {
+      one: { notes: createScore().voices["player-1"].notes, context: createScore().context, duration: { beats: 2 }, playbackType: "looped" },
+      two: { notes: createScore().voices["player-2"].notes, context: createScore().context, duration: { beats: 2 }, playbackType: "looped" }
+    },
+    mesostructure: {
+      A: { duration: { beats: 2 }, players: { "player-1": { clipId: "one" }, "player-2": { clipId: "two" } } }
+    },
+    macrostructure: { tempo: 120, blocks: ["A"] },
+    structureState: { activeBlockId: "A", macroIndex: 0 }
+  };
+  const events = new EventEmitter();
+  const addresses = [];
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) { addresses.push(readOscAddress(packet)); callback(); },
+      close() {}
+    }
+  });
+  adapter.attach({ events, getScore: () => score });
+  try {
+    await adapter.prepareBlock("A");
+    assert.equal(addresses.some((address) => address.includes("/inst/20/")), true);
+    assert.equal(addresses.some((address) => address.includes("/inst/22/")), true);
+
+    addresses.length = 0;
+    score = structuredClone(score);
+    score.scoreRevision = 2;
+    score.clips.one.notes[0].pitch = 61;
+    events.emit("change", { type: "clip.replaced", detail: { clipId: "one" }, score });
+    await adapter.prepareBlock("A");
+
+    assert.equal(addresses.some((address) => address.includes("/inst/20/")), true);
+    assert.equal(addresses.some((address) => address.includes("/inst/22/")), false);
+  } finally {
+    adapter.close();
+  }
+});
+
+test("RNBO adapter records automatic score changes without sending and leaves manual resend immediate", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
       enabled: true,
@@ -1366,26 +1555,15 @@ test("RNBO adapter debounces automatic score-change resends but leaves manual re
   });
   adapter.attach(store);
   try {
-    const debounced = new Promise((resolve, reject) => {
-      store.events.emit("change", {
-        type: "voice.notes.replaced",
-        score: createScore()
-      });
-      setTimeout(() => {
-        try {
-          const queue = adapter.sendQueueStatus();
-          assert.equal(queue.inProgress, false);
-          assert.equal(queue.queued, true);
-          assert.deepEqual(queue.queuedRequest.reasons, ["voice.notes.replaced"]);
-          resolve();
-        } catch (error) {
-          reject(error);
-        }
-      }, 5);
+    store.events.emit("change", {
+      type: "voice.notes.replaced",
+      detail: { voiceId: "player-1" },
+      score: createScore()
     });
-    await debounced;
-    await delay(50);
+    await delay(5);
+    assert.equal(adapter.sendQueueStatus().inProgress, false);
     assert.equal(adapter.sendQueueStatus().queued, false);
+    assert.equal(adapter.mutationImpacts().at(-1).eventType, "voice.notes.replaced");
 
     const manual = adapter.resendCurrentScore("manual");
     await manual;
@@ -1449,6 +1627,25 @@ function createScore() {
         ]
       }
     }
+  };
+}
+
+function scoreWithBlock(scoreRevision) {
+  const score = createScore();
+  return {
+    ...score,
+    scoreRevision,
+    clips: {
+      main: {
+        notes: score.voices["player-1"].notes,
+        context: score.context,
+        duration: { beats: 2 },
+        playbackType: "looped"
+      }
+    },
+    mesostructure: { A: { duration: { beats: 2 }, players: { "player-1": { clipId: "main" } } } },
+    macrostructure: { tempo: 120, blocks: ["A"] },
+    structureState: { activeBlockId: "A", macroIndex: 0 }
   };
 }
 

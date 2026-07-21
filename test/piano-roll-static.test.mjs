@@ -5,22 +5,24 @@ import test from "node:test";
 const htmlUrl = new URL("../public/piano-roll/index.html", import.meta.url);
 const jsUrl = new URL("../public/piano-roll/app.js", import.meta.url);
 
-test("Piano Roll exposes explicit draft controls and editing surfaces", async () => {
+test("Piano Roll exposes autosave recovery and editing surfaces", async () => {
   const html = await readFile(htmlUrl, "utf8");
   assert.match(html, /<title>ShadowScore Piano Roll<\/title>/);
   assert.match(html, /<a href="\/piano-roll" aria-current="page">Piano Roll<\/a>/);
   assert.match(html, /<a href="\/editors">OSC Generators<\/a>/);
   assert.match(html, /<a href="\/transport\/status">Transport<\/a>/);
-  assert.match(html, /id="save"[^>]*disabled/);
+  assert.doesNotMatch(html, /id="save"/);
+  assert.match(html, /Completed gestures save automatically/);
   assert.match(html, /id="revert"[^>]*disabled/);
   assert.match(html, /id="chase"[^>]*type="checkbox"/);
   assert.match(html, /id="fold"[^>]*aria-pressed="false"/);
   assert.match(html, /id="roll"/);
   assert.match(html, /id="roll"[^>]*tabindex="0"/);
   assert.match(html, /id="velocity"/);
+  assert.match(html, /id="playback-update"/);
 });
 
-test("Piano Roll saves revision-aware clip drafts and supports right-edge resize", async () => {
+test("Piano Roll autosaves revision-aware clip drafts and supports right-edge resize", async () => {
   const js = await readFile(jsUrl, "utf8");
   assert.match(js, /expectedVersion:entry\.baseVersion/);
   assert.match(js, /kind:right-p\.x<=9\?"resize":"move"/);
@@ -36,7 +38,7 @@ test("Piano Roll saves revision-aware clip drafts and supports right-edge resize
   assert.match(js, /pointercancel",cancelDrag/);
   assert.match(js, /createClipDraftStore/);
   assert.match(js, /draftStore\.reconcile/);
-  assert.match(js, /unsaved elsewhere/);
+  assert.match(js, /saving elsewhere/);
   assert.match(js, /dirtyClipIds/);
   assert.match(js, /expectedVersion:entry\.baseVersion/);
   assert.match(js, /state\.draft\.notes\.push/);
@@ -49,5 +51,7 @@ test("Piano Roll saves revision-aware clip drafts and supports right-edge resize
   assert.match(js, /ui\.block\.disabled=state\.chasing/);
   assert.match(js, /function followChase\(\)/);
   assert.match(js, /state\.playback\?\.activeBlockId\|\|state\.score\?\.structureState\?\.activeBlockId/);
-  assert.match(js, /Save failed:/);
+  assert.match(js, /Autosave failed:/);
+  assert.match(js, /function queueAutosave/);
+  assert.match(js, /createPlaybackUpdateControl/);
 });

@@ -1580,6 +1580,85 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
   assert.equal(started.activations[0].acknowledgement.status, "active");
 });
 
+test("transport play prefers atomic block activation for continuing clients", async () => {
+  const sequence = [];
+  let running = false;
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [{
+          id: "finch-client",
+          host: "finch.local",
+          port: 1234,
+          address: "/rnbo/inst/20/messages/in/shadowscore"
+        }]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => {
+        sequence.push(write.path.endsWith("/SetStage") ? "SetStage" : "Clock");
+      },
+      rnboAdapter: {
+        enabled: true,
+        async prepareBlock(blockId, reason) {
+          sequence.push(`prepare:${blockId}:${reason}`);
+        },
+        async waitForIdle() {},
+        sendStatus: () => [{ targetId: "finch-client", ack: { ok: true, status: "prepared" } }],
+        sendQueueStatus: () => ({ inProgress: false, queued: false }),
+        async applyBlockUpdate(blockId, options) {
+          sequence.push(`apply:${blockId}:${options.activationMode}`);
+          assert.equal(typeof options.expectedScoreRevision, "number");
+          return {
+            blockId,
+            action: "active",
+            activations: [{
+              targetId: "finch-client",
+              transactionId: 1105,
+              acknowledgement: { ok: true, status: "active" }
+            }]
+          };
+        },
+        schedulePreparedActivations() {
+          assert.fail("legacy activation scheduling must not run when applyBlockUpdate is available");
+        },
+        lifecycleEvents: () => []
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: { source: "timer", usable: true, fresh: true }
+        }),
+        start: () => {
+          sequence.push("playback_started");
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "finch-client",
+    rnboHost: "finch.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/20/messages/in/shadowscore"
+  });
+  const started = await requestJson(context, "POST", "/transport/play", { mode: "timer" });
+
+  assert.deepEqual(sequence, [
+    "prepare:A:transport-start",
+    "apply:A:now",
+    "SetStage",
+    "Clock",
+    "playback_started"
+  ]);
+  assert.equal(started.playbackUpdate.action, "active");
+  assert.equal(started.activations[0].acknowledgement.status, "active");
+});
+
 test("macrostructure tempo save sends JACK tempo when control is available", async () => {
   const jackCalls = [];
   const context = createRouteContext({
@@ -1851,6 +1930,60 @@ test("playback snapshot timestamps its boundary after peer stage collection", as
   const snapshot = await requestJson(context, "GET", "/playback/snapshot");
 
   assert.ok(snapshot.targets.finch.stateAgeMs >= 5);
+});
+
+test("playback updates route exposes the adapter's shared live-edit state", async () => {
+  const context = createRouteContext({
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async playbackUpdates(blockId) {
+          return {
+            blockId,
+            scoreRevision: 12,
+            state: "saved-not-active",
+            affectedTargetCount: 1,
+            targets: { finch: { state: "saved-not-active" } }
+          };
+        }
+      }
+    }
+  });
+
+  const updates = await requestJson(context, "GET", "/playback/updates?blockId=A");
+  assert.equal(updates.blockId, "A");
+  assert.equal(updates.state, "saved-not-active");
+  assert.equal(updates.targets.finch.state, "saved-not-active");
+});
+
+test("playback update actions choose continue while running and now while stopped", async () => {
+  const calls = [];
+  const adapter = {
+    enabled: true,
+    async playbackUpdates() { return {}; },
+    async applyBlockUpdate(blockId, options) {
+      calls.push({ blockId, options });
+      return { blockId, action: "active", activationMode: options.activationMode };
+    }
+  };
+  const running = createRouteContext({
+    runtime: { rnboAdapter: adapter, macroPlayback: { snapshot: () => ({ running: true, activeBlockId: "A" }) } }
+  });
+  const applied = await requestJson(running, "POST", "/playback/updates/apply-next-beat", {
+    blockId: "A",
+    expectedScoreRevision: 0
+  });
+  assert.equal(applied.activationMode, "continue");
+
+  const stopped = createRouteContext({
+    runtime: { rnboAdapter: adapter, macroPlayback: { snapshot: () => ({ running: false, activeBlockId: "A" }) } }
+  });
+  const updated = await requestJson(stopped, "POST", "/playback/updates/update-now", {
+    blockId: "A",
+    expectedScoreRevision: 0
+  });
+  assert.equal(updated.activationMode, "now");
+  assert.deepEqual(calls.map((call) => call.options.activationMode), ["continue", "now"]);
 });
 
 test("macro playback route derives macro index from updated JACK witness beat", async () => {
@@ -3415,14 +3548,15 @@ test("matrix edit route works with legacy generated static config", async () => 
   assert.match(response.body, /ShadowScore Matrix Edit/);
 });
 
-test("piano roll route serves the explicit-save clip editor", async () => {
+test("piano roll route serves the autosaving clip editor", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/piano-roll");
 
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
   assert.match(response.body, /ShadowScore Piano Roll/);
-  assert.match(response.body, /id="save"/);
+  assert.doesNotMatch(response.body, /id="save"/);
+  assert.match(response.body, /save automatically/);
   assert.match(response.body, /id="roll"/);
 });
 
@@ -3583,7 +3717,9 @@ test("event list route serves server-bundled editor html", async () => {
   assert.match(response.body, /id="clip-time-numerator"/);
   assert.match(response.body, /id="clip-time-denominator"/);
   assert.match(response.body, /TimeSignature/);
-  assert.match(response.body, /id="save-clip-attributes"/);
+  assert.match(response.body, /id="clip-save-state"/);
+  assert.match(response.body, /Commit Bulk Edit/);
+  assert.match(response.body, /queueAutosave/);
   assert.match(response.body, /playbackType/);
   assert.match(response.body, /duration/);
   assert.match(response.body, /one-shot/);
@@ -3647,6 +3783,10 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /blockDraftKey/);
   assert.match(response.body, /withExpectedStructureRevision/);
   assert.match(response.body, /expectedStructureRevision/);
+  assert.match(response.body, /id="block-save-state"/);
+  assert.match(response.body, /id="macro-save-state"/);
+  assert.match(response.body, /queueStructureAutosave/);
+  assert.doesNotMatch(response.body, /Save Assignments|Save Song Form/);
   assert.doesNotMatch(response.body, /scoreWithLocalDrafts/);
 });
 
@@ -3975,6 +4115,20 @@ test("shared client state module is served as a static asset", async () => {
   assert.match(response.headers["Content-Type"], /text\/javascript/);
   assert.match(response.body, /createShadowScoreClientState/);
   assert.match(response.body, /effectiveScore/);
+});
+
+test("shared playback update control is served and integrated across authoring editors", async () => {
+  const context = createRouteContext();
+  const asset = await request(context, "GET", "/shared/playback-update-control.js");
+  assert.equal(asset.status, 200);
+  assert.match(asset.body, /createPlaybackUpdateControl/);
+  for (const route of ["/piano-roll", "/event-list", "/structure-editor"]) {
+    const response = await request(context, "GET", route);
+    assert.equal(response.status, 200);
+    assert.match(response.body, /id="playback-update"/);
+  }
+  const pianoApp = await request(context, "GET", "/piano-roll/app.js");
+  assert.match(pianoApp.body, /playback-update-control\.js/);
 });
 
 test("shared OSC snapshot editor client is served as a static asset", async () => {

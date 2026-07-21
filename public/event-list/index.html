@@ -301,6 +301,7 @@
       </label>
       <div class="status" id="status">Loading session...</div>
     </section>
+    <div id="playback-update" aria-label="Playback application status"></div>
     <section class="toolbar clip-toolbar" aria-label="Clip selection">
       <label>Clip
         <select id="clip"></select>
@@ -342,7 +343,7 @@
       <label>Transpose
         <input id="clip-transpose-mode" spellcheck="false" value="scale-degree">
       </label>
-      <button class="primary" id="save-clip-attributes" type="button">Save Attributes</button>
+      <span class="status" id="clip-save-state">Saved</span>
     </section>
     <section class="summary" aria-live="polite">
       <span><strong id="note-count">0</strong> notes</span>
@@ -363,7 +364,7 @@
         <input id="new-velocity" type="number" min="0" max="127" step="1" value="96">
       </label>
       <button id="add" type="button">Add</button>
-      <button class="primary" id="save" type="button">Save</button>
+      <button class="primary" id="save" type="button" hidden>Commit Bulk Edit</button>
     </section>
     <section class="paste-panel" aria-label="Ableton note array import">
       <label>Ableton note array
@@ -396,6 +397,7 @@
   </main>
   <script type="module">
     import { createShadowScoreClientState } from "../shared/shadowscore-client-state.js";
+    import { createPlaybackUpdateControl } from "../shared/playback-update-control.js";
 
     const fields = ["note_id", "start_time", "duration", "pitch", "velocity", "probability", "velocity_deviation", "release_velocity"];
     const state = {
@@ -410,7 +412,10 @@
       notes: [],
       dirty: false,
       attributesDirty: false,
-      saving: false
+      bulkEditPending: false,
+      saving: false,
+      saveQueued: false,
+      saveTimer: undefined
     };
 
     const els = {
@@ -430,7 +435,7 @@
       clipFollowsPitch: document.querySelector("#clip-follows-pitch"),
       clipFollowsScale: document.querySelector("#clip-follows-scale"),
       clipTransposeMode: document.querySelector("#clip-transpose-mode"),
-      saveClipAttributes: document.querySelector("#save-clip-attributes"),
+      clipSaveState: document.querySelector("#clip-save-state"),
       notes: document.querySelector("#notes"),
       empty: document.querySelector("#empty"),
       count: document.querySelector("#note-count"),
@@ -447,6 +452,12 @@
       newVelocity: document.querySelector("#new-velocity")
     };
 
+    createPlaybackUpdateControl({
+      root: document.querySelector("#playback-update"),
+      serverUrl: () => state.serverUrl,
+      getBlockId: () => blockForClip(state.score, state.clipId)
+    });
+
     els.discover.addEventListener("click", discoverServers);
     els.serverSelect.addEventListener("change", () => {
       els.server.value = els.serverSelect.value;
@@ -455,13 +466,17 @@
     els.server.addEventListener("change", () => {
       void loadServer(els.server.value);
     });
-    els.clip.addEventListener("change", () => {
-      if ((state.dirty || state.attributesDirty) && !window.confirm("Discard unsaved edits for this clip?")) {
+    els.clip.addEventListener("change", async () => {
+      const nextClipId = els.clip.value;
+      if (state.bulkEditPending && !window.confirm("Discard the uncommitted bulk edit for this clip?")) {
         els.clip.value = state.clipId;
         return;
       }
+      if (!state.bulkEditPending && (state.dirty || state.attributesDirty)) {
+        await saveNotes();
+      }
       state.client?.revertDraft(clipDraftKey(state.clipId));
-      state.clipId = els.clip.value;
+      state.clipId = nextClipId;
       loadClip();
     });
     els.newClip.addEventListener("click", createClip);
@@ -477,13 +492,20 @@
       els.clipFollowsScale,
       els.clipTransposeMode
     ].forEach((input) => input.addEventListener("input", markAttributesDirty));
-    els.saveClipAttributes.addEventListener("click", saveClipAttributes);
     els.add.addEventListener("click", addNote);
     els.save.addEventListener("click", saveNotes);
     els.replaceArray.addEventListener("click", () => importAbletonNotes("replace"));
     els.addArray.addEventListener("click", () => importAbletonNotes("add"));
 
     await boot();
+
+    function blockForClip(score, clipId) {
+      const activeBlockId = score?.structureState?.activeBlockId ?? "";
+      const references = Object.entries(score?.mesostructure ?? {}).filter(([, block]) =>
+        Object.values(block?.players ?? {}).some((assignment) => (typeof assignment === "string" ? assignment : assignment?.clipId) === clipId)
+      );
+      return references.find(([blockId]) => blockId === activeBlockId)?.[0] ?? references[0]?.[0] ?? activeBlockId;
+    }
 
     async function boot() {
       renderServerOptions([]);
@@ -598,6 +620,7 @@
       state.notes = normalizeNotes(clip?.notes ?? []);
       state.dirty = false;
       state.attributesDirty = false;
+      state.bulkEditPending = false;
       state.client?.revertDraft(clipDraftKey(state.clipId));
       renderClipAttributes();
       render();
@@ -746,7 +769,11 @@
       els.clipFollowsPitch.disabled = state.saving || !hasClip;
       els.clipFollowsScale.disabled = state.saving || !hasClip;
       els.clipTransposeMode.disabled = state.saving || !hasClip;
-      els.saveClipAttributes.disabled = state.saving || !hasClip || !state.attributesDirty;
+      els.notes.querySelectorAll("input, button").forEach((element) => {
+        element.disabled = state.saving;
+      });
+      els.save.hidden = !state.bulkEditPending;
+      els.clipSaveState.textContent = state.saving ? "Saving…" : state.dirty || state.attributesDirty ? "Saving…" : "Saved";
     }
 
     function noteRow(note, index) {
@@ -820,15 +847,21 @@
           ...note,
           note_id: note.note_id || index + 1
         }));
-        markDirty();
+        markDirty(false);
+        state.bulkEditPending = true;
         render();
-        setStatus(`${mode === "replace" ? "Replaced with" : "Added"} ${imported.length} pasted notes. Save to commit.`);
+        setStatus(`${mode === "replace" ? "Replaced with" : "Added"} ${imported.length} pasted notes. Review, then commit the bulk edit.`);
       } catch (error) {
         setStatus(`Import failed: ${error.message}`);
       }
     }
 
     async function saveNotes() {
+      clearTimeout(state.saveTimer);
+      if (state.saving) {
+        state.saveQueued = true;
+        return;
+      }
       state.saving = true;
       updateButtons();
       try {
@@ -839,6 +872,8 @@
         state.client?.adoptServerScore(score);
         state.client?.revertDraft(clipDraftKey(clipId));
         state.dirty = false;
+        state.attributesDirty = false;
+        state.bulkEditPending = false;
         loadClip();
         setStatus(`Saved ${state.notes.length} notes for ${clipId}.`);
       } catch (error) {
@@ -846,26 +881,10 @@
       } finally {
         state.saving = false;
         updateButtons();
-      }
-    }
-
-    async function saveClipAttributes() {
-      state.saving = true;
-      updateButtons();
-      try {
-        const clipId = requireSelectedClipId();
-        const clip = selectedClip();
-        state.score = await saveClipDocument(clipId, clipDocumentFromEditor(clip));
-        state.client?.adoptServerScore(state.score);
-        state.client?.revertDraft(clipDraftKey(clipId));
-        state.attributesDirty = false;
-        loadClip();
-        setStatus(`Saved clip attributes for ${clipId}.`);
-      } catch (error) {
-        setStatus(`Clip save failed: ${error.message}`);
-      } finally {
-        state.saving = false;
-        updateButtons();
+        if (state.saveQueued) {
+          state.saveQueued = false;
+          queueAutosave();
+        }
       }
     }
 
@@ -970,18 +989,26 @@
       }
     }
 
-    function markDirty() {
+    function markDirty(autosave = true) {
       state.dirty = true;
       updateClipDraft();
-      setStatus("Unsaved edits.");
+      setStatus(autosave ? "Saving edits…" : "Bulk edit ready for review.");
       updateButtons();
+      if (autosave) queueAutosave();
     }
 
     function markAttributesDirty() {
       state.attributesDirty = true;
       updateClipDraft();
-      setStatus("Unsaved clip attributes.");
+      setStatus("Saving clip attributes…");
       updateButtons();
+      queueAutosave();
+    }
+
+    function queueAutosave() {
+      if (state.bulkEditPending) return;
+      clearTimeout(state.saveTimer);
+      state.saveTimer = window.setTimeout(() => void saveNotes(), 350);
     }
 
     function updateClipDraft() {

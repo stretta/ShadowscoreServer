@@ -262,6 +262,51 @@ test("JACK macro playback arms a prepared block once during the preceding beat",
   playback.close();
 });
 
+test("JACK macro playback retries a failed transition arm before the boundary", async () => {
+  const config = {
+    ...defaultConfig,
+    rnbo: {
+      ...defaultConfig.rnbo,
+      lookAheadBeats: 2,
+      activation: { ...defaultConfig.rnbo.activation, armLeadBeats: 0.75 }
+    }
+  };
+  const store = createScoreStore(createInitialScore(config));
+  store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ tempo: 120, blocks: ["A", "B"] });
+  const jackTransport = createJackTransportState(config, { now: () => 1000 });
+  let armCount = 0;
+  const playback = createMacroPlayback(store, config, {
+    jackTransport,
+    beforeAdvance: async ({ nextBlockId }) => ({ prepared: nextBlockId }),
+    armAdvance: async () => {
+      armCount += 1;
+      if (armCount === 1) throw new Error("prepared transaction was superseded");
+      return { armed: "B" };
+    }
+  });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack" });
+  jackTransport.update(jackSnapshot({ absoluteBeat: 102.1 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 103.3 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(playback.snapshot().activationArm.last.ok, false);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 103.5 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(armCount, 2);
+  assert.equal(playback.snapshot().activationArm.last.ok, true);
+  playback.close();
+});
+
 test("beat-derived macro position preserves repeated block ids", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceMesoBlock("A", { duration: { beats: 2 }, players: {} });

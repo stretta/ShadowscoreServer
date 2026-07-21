@@ -1986,6 +1986,38 @@ test("playback update actions choose continue while running and now while stoppe
   assert.deepEqual(calls.map((call) => call.options.activationMode), ["continue", "now"]);
 });
 
+test("Apply next beat refuses to overwrite an imminent macro transition", async () => {
+  let applyCount = 0;
+  const context = createRouteContext({
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async playbackUpdates() { return {}; },
+        async applyBlockUpdate() { applyCount += 1; }
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          mode: "jack",
+          activeBlockId: "A",
+          activeBlockEndBeat: 104,
+          beatsRemaining: 0.5,
+          activationArm: { pending: true, last: null }
+        })
+      }
+    }
+  });
+
+  const response = await request(context, "POST", "/playback/updates/apply-next-beat", {
+    blockId: "A",
+    expectedScoreRevision: 0
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(JSON.parse(response.body).code, "BLOCK_TRANSITION_RESERVED");
+  assert.equal(applyCount, 0);
+});
+
 test("macro playback route derives macro index from updated JACK witness beat", async () => {
   let now = 1000;
   const jackTransport = createJackTransportState(defaultConfig, { now: () => now });

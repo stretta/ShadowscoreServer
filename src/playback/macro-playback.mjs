@@ -365,6 +365,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       };
     }).catch((error) => {
       lookAheadPending = false;
+      lastLookAheadKey = "";
       lastLookAhead = {
         ok: false,
         at: new Date().toISOString(),
@@ -418,6 +419,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       };
     }).catch((error) => {
       activationArmPending = false;
+      lastActivationArmKey = "";
       lastActivationArm = {
         ok: false,
         at: new Date().toISOString(),

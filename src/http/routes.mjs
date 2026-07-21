@@ -669,13 +669,21 @@ export async function routeRequest(request, response, store, config, runtime = {
       const body = await readJson(request);
       const playback = await macroPlaybackSnapshot(runtime, store, config);
       if (!playback.running) throw new Error("transport is stopped; use Update players now");
+      const blockId = optionalString(body.blockId) || playback.activeBlockId || store.getScore().structureState?.activeBlockId || "";
+      assertApplyNextBeatSafe(playback, store.getScore(), config, blockId);
+      const restoreBlockId = nextMacroBlockId(store.getScore(), blockId);
       const adapter = requirePlaybackUpdateAdapter(runtime);
-      writeJson(response, 200, await adapter.applyBlockUpdate(body.blockId, {
+      writeJson(response, 200, await adapter.applyBlockUpdate(blockId, {
         activationMode: "continue",
-        expectedScoreRevision: optionalInteger(body.expectedScoreRevision, "expectedScoreRevision")
+        expectedScoreRevision: optionalInteger(body.expectedScoreRevision, "expectedScoreRevision"),
+        restoreBlockId,
+        authorizeActivation: async () => {
+          const latest = await macroPlaybackSnapshot(runtime, store, config);
+          assertApplyNextBeatSafe(latest, store.getScore(), config, blockId);
+        }
       }));
     } catch (error) {
-      writeError(response, error);
+      writeError(response, error, Number.isInteger(error?.statusCode) ? error.statusCode : 400);
     }
     return;
   }
@@ -1786,6 +1794,50 @@ async function macroPlaybackSnapshot(runtime, store, config, witnessContext) {
     },
     oscSnapshotRecall: automaticOscSnapshotRecallStatus(runtime)
   };
+}
+
+function assertApplyNextBeatSafe(playback, score, config, blockId) {
+  const activeBlockId = String(playback.activeBlockId ?? score.structureState?.activeBlockId ?? "").trim();
+  if (blockId && activeBlockId && blockId !== activeBlockId) {
+    const error = new Error(`Apply next beat can only update the playing block '${activeBlockId}'`);
+    error.code = "PLAYBACK_UPDATE_NOT_ACTIVE_BLOCK";
+    error.statusCode = 409;
+    throw error;
+  }
+
+  const leadBeats = Math.min(0.999, Math.max(0, Number(config.rnbo?.activation?.armLeadBeats ?? 0.75)));
+  const beatsRemaining = Number(playback.beatsRemaining);
+  const transitionArm = playback.activationArm ?? {};
+  const armedForCurrentBoundary = transitionArm.pending === true || (
+    transitionArm.last?.ok === true &&
+    transitionArm.last.activeBlockId === activeBlockId &&
+    Number.isFinite(Number(playback.activeBlockEndBeat)) &&
+    Number(transitionArm.last.boundaryBeat) === Number(playback.activeBlockEndBeat)
+  );
+  const insideJackGuard = Number.isFinite(beatsRemaining) && beatsRemaining > 0 && beatsRemaining <= leadBeats;
+
+  const nextAdvanceAt = Number(playback.nextAdvanceAt);
+  const tempo = Number(score.macrostructure?.tempo ?? config.rnbo?.transport?.Tempo ?? 120);
+  const timerGuardMs = tempo > 0 ? leadBeats * 60000 / tempo : 0;
+  const insideTimerGuard = playback.mode === "timer" && Number.isFinite(nextAdvanceAt) && nextAdvanceAt > 0 &&
+    nextAdvanceAt - Date.now() <= timerGuardMs;
+
+  if (!armedForCurrentBoundary && !insideJackGuard && !insideTimerGuard) return;
+  const error = new Error(`block transition from '${activeBlockId}' is already reserved; Apply next beat is available after the transition`);
+  error.code = "BLOCK_TRANSITION_RESERVED";
+  error.statusCode = 409;
+  throw error;
+}
+
+function nextMacroBlockId(score, activeBlockId) {
+  const blocks = score.macrostructure?.blocks ?? [];
+  if (blocks.length < 2) return "";
+  const stateIndex = Number(score.structureState?.macroIndex);
+  const activeIndex = Number.isInteger(stateIndex) && blocks[stateIndex] === activeBlockId
+    ? stateIndex
+    : blocks.indexOf(activeBlockId);
+  if (activeIndex < 0) return "";
+  return blocks[(activeIndex + 1) % blocks.length] ?? "";
 }
 
 async function coherentPlaybackSnapshot(runtime, store, config) {

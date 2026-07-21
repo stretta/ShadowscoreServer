@@ -1299,6 +1299,161 @@ test("RNBO adapter applies a prepared update in continue mode without requiring 
   }
 });
 
+test("RNBO adapter restores the upcoming block after applying the playing block", async () => {
+  let phase = "prepare-playing";
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1200,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        instanceId: "20",
+        clientId: 90,
+        voiceId: "player-1",
+        address: "/rnbo/inst/20/messages/in/shadowscore",
+        capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true, continuingScoreActivation: true }
+      }],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 },
+      activation: { timeoutMs: 20, beatMarginMs: 0, pollIntervalMs: 1, requestTimeoutMs: 20 }
+    }
+  });
+  const base = scoreWithBlock(9);
+  const score = {
+    ...base,
+    clips: {
+      ...base.clips,
+      next: {
+        ...base.clips.main,
+        notes: base.clips.main.notes.map((note) => ({ ...note, pitch: note.pitch + 7 }))
+      }
+    },
+    mesostructure: {
+      A: base.mesostructure.A,
+      B: { duration: { beats: 2 }, players: { "player-1": { clipId: "next" } } }
+    },
+    macrostructure: { tempo: 120, blocks: ["A", "B"] }
+  };
+  const fetchImpl = async () => ({
+    ok: true,
+    async json() {
+      if (phase === "activate-playing") return { VALUE: [90, 93, 1201, 2, 7, 1] };
+      if (phase === "restore-upcoming") return { VALUE: [90, 92, 1202, 2, 32, 1] };
+      return { VALUE: [90, 92, 1201, 2, 32, 1] };
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        const address = readOscAddress(packet);
+        if (address.endsWith("/ActivatePrepared")) phase = "activate-playing";
+        else if (phase === "activate-playing" && address.endsWith("/shadowscore")) phase = "restore-upcoming";
+        callback();
+      },
+      close() {}
+    },
+    fetchImpl
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    const result = await adapter.applyBlockUpdate("A", {
+      activationMode: "continue",
+      expectedScoreRevision: 9,
+      restoreBlockId: "B",
+      fetchImpl
+    });
+
+    assert.deepEqual(result.restoredPreparation, { ok: true, blockId: "B" });
+    assert.equal(adapter.sendStatus()[0].blockId, "B");
+    assert.equal(adapter.sendStatus()[0].activeTransaction, 1201);
+    assert.equal(adapter.sendStatus()[0].preparedTransaction, 1202);
+  } finally {
+    adapter.close();
+  }
+});
+
+test("RNBO adapter serializes overlapping block activation operations", async () => {
+  let activationRequested = false;
+  let releaseFirst;
+  let firstAuthorized;
+  const firstAuthorizedPromise = new Promise((resolve) => { firstAuthorized = resolve; });
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  const addresses = [];
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1400,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        instanceId: "20",
+        clientId: 90,
+        voiceId: "player-1",
+        address: "/rnbo/inst/20/messages/in/shadowscore",
+        capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true, continuingScoreActivation: true }
+      }],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 },
+      activation: { timeoutMs: 20, beatMarginMs: 0, pollIntervalMs: 1, requestTimeoutMs: 20 }
+    }
+  });
+  const score = scoreWithBlock(11);
+  const fetchImpl = async () => ({
+    ok: true,
+    async json() {
+      return { VALUE: activationRequested ? [90, 93, 1401, 2, 7, 1] : [90, 92, 1401, 2, 32, 1] };
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        const address = readOscAddress(packet);
+        addresses.push(address);
+        if (address.endsWith("/ActivatePrepared")) activationRequested = true;
+        callback();
+      },
+      close() {}
+    },
+    fetchImpl
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    const first = adapter.applyBlockUpdate("A", {
+      expectedScoreRevision: 11,
+      fetchImpl,
+      authorizeActivation: async () => {
+        firstAuthorized();
+        await firstGate;
+      }
+    });
+    await firstAuthorizedPromise;
+
+    const second = adapter.applyBlockUpdate("A", { expectedScoreRevision: 11, fetchImpl });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(adapter.metrics().transmissionCount, 1);
+    assert.equal(addresses.filter((address) => address.endsWith("/ActivatePrepared")).length, 0);
+
+    releaseFirst();
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+    assert.equal(firstResult.action, "active");
+    assert.equal(secondResult.action, "already-active");
+    assert.equal(addresses.filter((address) => address.endsWith("/ActivatePrepared")).length, 1);
+  } finally {
+    adapter.close();
+  }
+});
+
 test("RNBO adapter refuses live application when a target lacks continuing activation", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

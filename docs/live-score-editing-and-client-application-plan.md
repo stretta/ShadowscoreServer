@@ -14,6 +14,10 @@ Implementation and four-client acceptance are complete as of 2026-07-21.
   `POST /playback/updates/update-now` implement the guarded server contract.
   Targets must advertise `continuingScoreActivation`; unsupported fleets are
   rejected before activation.
+- Author-triggered activation and automatic macro-transition activation are
+  serialized. Applying the playing block restores the upcoming block's staged
+  payload, and the server returns `409 BLOCK_TRANSITION_RESERVED` instead of
+  overwriting a transition that is already inside its final arm window.
 - The RNBO client source now includes an `ActivatePrepared` request armer and a
   phase-preserving boundary swap with an owned-note-flush signal.
 
@@ -222,6 +226,11 @@ Live
 target is READY before the safety deadline. If preparation misses the
 immediately following beat, the server chooses a later beat and the UI says so.
 It must never silently activate a partial ensemble or a stale transaction.
+
+The final macro-transition arm window is reserved for the upcoming block. An
+author request that begins or reaches activation inside that window is rejected
+with `BLOCK_TRANSITION_RESERVED`; the upcoming block is restored to the staging
+slot, and the author can apply again after the block transition.
 
 ### Editing a future block
 

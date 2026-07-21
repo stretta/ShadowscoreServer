@@ -58,6 +58,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   let activeSend = undefined;
   let debounceTimer = undefined;
   const debounceWaiters = [];
+  let activationOperationTail = Promise.resolve();
   const playbackLifecycleEvents = [];
   const mutationImpacts = [];
   const playbackUpdateState = new Map();
@@ -132,80 +133,8 @@ export function createRnboOscAdapter(config, runtime = {}) {
         metrics: structuredClone(metrics)
       };
     },
-    async applyBlockUpdate(blockId = "", options = {}) {
-      if (!store) throw new Error("RNBO adapter is not attached to a score store");
-      const canonical = store.getScore();
-      const selectedBlockId = String(blockId || canonical.structureState?.activeBlockId || "").trim();
-      const scoreRevision = canonical.scoreRevision ?? canonical.version ?? 0;
-      if (options.expectedScoreRevision !== undefined && Number(options.expectedScoreRevision) !== Number(scoreRevision)) {
-        const error = new Error(`stale score revision ${options.expectedScoreRevision}; current score revision is ${scoreRevision}`);
-        error.code = "STALE_SCORE_REVISION";
-        error.currentScoreRevision = scoreRevision;
-        throw error;
-      }
-      const activationMode = options.activationMode === "now" ? "now" : "continue";
-      await adapter.prepareBlock(selectedBlockId, activationMode === "now" ? "update-now" : "apply-next-beat", {
-        fetchImpl: options.fetchImpl ?? runtime.fetchImpl
-      });
-      await adapter.waitForIdle();
-      const updates = await adapter.playbackUpdates(selectedBlockId);
-      const pending = Object.values(updates.targets).filter((update) => update.state !== "active");
-      if (!pending.length) return { ...updates, activationMode, action: "already-active", activations: [] };
-
-      const score = scoreWithActiveBlock(canonical, selectedBlockId);
-      const targets = await rnboTargetsForSend(config, score, runtime, {
-        targetIds: pending.map((update) => update.targetId),
-        stagedOnly: true
-      });
-      const targetById = new Map(targets.map((target) => [target.id ?? target.address ?? "", target]));
-      const requests = pending.map((update) => {
-        const target = targetById.get(update.targetId);
-        const status = lastSendStatus.get(update.targetId);
-        if (!target || target.capabilities?.continuingScoreActivation !== true) {
-          const error = new Error(`RNBO target '${update.targetId}' does not support continuing score activation`);
-          error.code = "CONTINUING_ACTIVATION_UNSUPPORTED";
-          throw error;
-        }
-        if (!Number.isInteger(status?.preparedTransaction) || status?.ack?.ok !== true) {
-          const error = new Error(`RNBO target '${update.targetId}' is not READY for score revision ${scoreRevision} (ack=${status?.ack?.status ?? "missing"}, preparedTransaction=${status?.preparedTransaction ?? "none"}${status?.ack?.error ? `, error=${status.ack.error}` : ""})`);
-          error.code = "PLAYBACK_UPDATE_NOT_READY";
-          throw error;
-        }
-        return {
-          target,
-          targetId: update.targetId,
-          transactionId: status.preparedTransaction,
-          expectedClientId: status.ack?.expectedClientId,
-          url: status.ack?.url ?? "",
-          initialStage: activationMode === "now" ? 0 : null,
-          activationMode,
-          boundary: activationMode === "now" ? "now" : "next-beat"
-        };
-      });
-
-      const armedAt = new Date().toISOString();
-      await Promise.all(requests.map(async (request) => {
-        await sendPreparedActivationRequest(socket, request.target, request);
-        recordLifecycleEvent({
-          type: "playback.update.armed",
-          observedAt: armedAt,
-          targetId: request.targetId,
-          transactionId: request.transactionId,
-          activationMode: request.activationMode,
-          boundary: request.boundary
-        });
-      }));
-      const activations = await adapter.confirmPreparedActivations(requests, {
-        tempo: canonical.macrostructure?.tempo,
-        fetchImpl: options.fetchImpl
-      });
-      const finalUpdates = await adapter.playbackUpdates(selectedBlockId);
-      return {
-        ...finalUpdates,
-        activationMode,
-        action: finalUpdates.state === "active" ? "active" : "activation-failed",
-        activations
-      };
+    applyBlockUpdate(blockId = "", options = {}) {
+      return enqueueActivationOperation(() => runBlockUpdate(blockId, options));
     },
     sendStatus() {
       return [...lastSendStatus.values()];
@@ -332,6 +261,131 @@ export function createRnboOscAdapter(config, runtime = {}) {
     }
   };
   return adapter;
+
+  async function runBlockUpdate(blockId = "", options = {}) {
+    let result;
+    let updateError;
+    try {
+      if (!store) throw new Error("RNBO adapter is not attached to a score store");
+      const canonical = store.getScore();
+      const selectedBlockId = String(blockId || canonical.structureState?.activeBlockId || "").trim();
+      const scoreRevision = canonical.scoreRevision ?? canonical.version ?? 0;
+      if (options.expectedScoreRevision !== undefined && Number(options.expectedScoreRevision) !== Number(scoreRevision)) {
+        const error = new Error(`stale score revision ${options.expectedScoreRevision}; current score revision is ${scoreRevision}`);
+        error.code = "STALE_SCORE_REVISION";
+        error.currentScoreRevision = scoreRevision;
+        throw error;
+      }
+      const activationMode = options.activationMode === "now" ? "now" : "continue";
+      await adapter.prepareBlock(selectedBlockId, activationMode === "now" ? "update-now" : "apply-next-beat", {
+        fetchImpl: options.fetchImpl ?? runtime.fetchImpl
+      });
+      await adapter.waitForIdle();
+      const updates = await adapter.playbackUpdates(selectedBlockId);
+      const pending = Object.values(updates.targets).filter((update) => update.state !== "active");
+      if (!pending.length) {
+        result = { ...updates, activationMode, action: "already-active", activations: [] };
+      } else {
+        await options.authorizeActivation?.({
+          blockId: selectedBlockId,
+          scoreRevision,
+          activationMode
+        });
+
+        const score = scoreWithActiveBlock(canonical, selectedBlockId);
+        const targets = await rnboTargetsForSend(config, score, runtime, {
+          targetIds: pending.map((update) => update.targetId),
+          stagedOnly: true
+        });
+        const targetById = new Map(targets.map((target) => [target.id ?? target.address ?? "", target]));
+        const requests = pending.map((update) => {
+          const target = targetById.get(update.targetId);
+          const status = lastSendStatus.get(update.targetId);
+          if (!target || target.capabilities?.continuingScoreActivation !== true) {
+            const error = new Error(`RNBO target '${update.targetId}' does not support continuing score activation`);
+            error.code = "CONTINUING_ACTIVATION_UNSUPPORTED";
+            throw error;
+          }
+          if (!Number.isInteger(status?.preparedTransaction) || status?.ack?.ok !== true) {
+            const error = new Error(`RNBO target '${update.targetId}' is not READY for score revision ${scoreRevision} (ack=${status?.ack?.status ?? "missing"}, preparedTransaction=${status?.preparedTransaction ?? "none"}${status?.ack?.error ? `, error=${status.ack.error}` : ""})`);
+            error.code = "PLAYBACK_UPDATE_NOT_READY";
+            throw error;
+          }
+          return {
+            target,
+            targetId: update.targetId,
+            transactionId: status.preparedTransaction,
+            expectedClientId: status.ack?.expectedClientId,
+            url: status.ack?.url ?? "",
+            initialStage: activationMode === "now" ? 0 : null,
+            activationMode,
+            boundary: activationMode === "now" ? "now" : "next-beat"
+          };
+        });
+
+        const armedAt = new Date().toISOString();
+        await Promise.all(requests.map(async (request) => {
+          await sendPreparedActivationRequest(socket, request.target, request);
+          recordLifecycleEvent({
+            type: "playback.update.armed",
+            observedAt: armedAt,
+            targetId: request.targetId,
+            transactionId: request.transactionId,
+            activationMode: request.activationMode,
+            boundary: request.boundary
+          });
+        }));
+        const activations = await adapter.confirmPreparedActivations(requests, {
+          tempo: canonical.macrostructure?.tempo,
+          fetchImpl: options.fetchImpl
+        });
+        const finalUpdates = await adapter.playbackUpdates(selectedBlockId);
+        result = {
+          ...finalUpdates,
+          activationMode,
+          action: finalUpdates.state === "active" ? "active" : "activation-failed",
+          activations
+        };
+      }
+    } catch (error) {
+      updateError = error;
+    }
+
+    const restoreBlockId = String(options.restoreBlockId ?? "").trim();
+    let restoredPreparation = null;
+    if (restoreBlockId && restoreBlockId !== String(blockId ?? "").trim()) {
+      try {
+        await adapter.prepareBlock(restoreBlockId, "restore-after-apply", {
+          fetchImpl: options.fetchImpl ?? runtime.fetchImpl
+        });
+        await adapter.waitForIdle();
+        restoredPreparation = { ok: true, blockId: restoreBlockId };
+      } catch (error) {
+        restoredPreparation = { ok: false, blockId: restoreBlockId, error: messageForError(error) };
+        if (!updateError) updateError = error;
+      }
+    }
+    if (updateError) {
+      updateError.restoredPreparation = restoredPreparation;
+      throw updateError;
+    }
+    return { ...result, restoredPreparation };
+  }
+
+  function enqueueActivationOperation(operation) {
+    const previous = activationOperationTail.catch(() => undefined);
+    let release;
+    activationOperationTail = new Promise((resolve) => {
+      release = resolve;
+    });
+    return previous.then(async () => {
+      try {
+        return await operation();
+      } finally {
+        release();
+      }
+    });
+  }
 
   function nextTransactionId() {
     transactionId += 1;

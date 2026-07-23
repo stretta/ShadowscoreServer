@@ -4057,6 +4057,18 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /StageStep/);
   assert.match(response.body, /repeat\(16/);
   assert.match(response.body, /midiNote/);
+  assert.match(response.body, /Slider Pitch Range/);
+  assert.match(response.body, /id="pitch-range-min"/);
+  assert.match(response.body, /id="pitch-range-max"/);
+  assert.match(response.body, /populatePitchRangeControls/);
+  assert.match(response.body, /applyPitchRange/);
+  assert.match(response.body, /stagePitchBounds/);
+  assert.match(response.body, /clipped \$\{changed\.length\} stage/);
+  assert.match(response.body, /id="mutate"/);
+  assert.match(response.body, /mutateSequence/);
+  assert.match(response.body, /mutationFallback/);
+  assert.match(response.body, /Math\.random\(\) < 0\.125/);
+  assert.match(response.body, /Mutated \$\{summary\}/);
   assert.match(response.body, /type = "checkbox"/);
   assert.match(response.body, /messages\/out\/current_stage/);
   assert.match(response.body, /setPlayingStage/);

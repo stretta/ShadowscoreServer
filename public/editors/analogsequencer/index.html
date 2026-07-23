@@ -20,7 +20,13 @@
     .target { align-items: start; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); cursor: pointer; display: grid; flex: 0 0 210px; gap: 3px 8px; grid-template-columns: auto 1fr; padding: 8px; }
     .target input { grid-row: 1 / span 2; margin-top: 2px; }
     .target strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sequencer { min-width: 0; overflow-x: auto; padding: 14px; }
+    .sequencer { display: grid; gap: 12px; min-width: 0; overflow-x: auto; padding: 14px; }
+    .pitch-range { align-items: end; display: flex; flex-wrap: wrap; gap: 8px 12px; }
+    .pitch-range strong { align-self: center; font-size: 12px; }
+    .pitch-range label { display: grid; gap: 4px; }
+    .pitch-range label > span { color: var(--ss-muted); font-size: 11px; font-weight: 800; }
+    .pitch-range select { min-width: 120px; }
+    .pitch-range .detail { align-self: center; }
     .stages { display: grid; gap: 7px; grid-template-columns: repeat(16, minmax(58px, 1fr)); min-width: 1030px; }
     .stage { align-items: center; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); display: grid; gap: 7px; grid-template-rows: auto auto 190px auto auto; justify-items: center; padding: 8px 5px; }
     .stage.playing { border-color: var(--ss-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-accent) 42%, transparent), inset 0 0 22px color-mix(in srgb, var(--ss-accent) 13%, transparent); }
@@ -60,7 +66,16 @@
   <nav class="ss-route-tabs" aria-label="ShadowScore routes"><a href="/">Dashboard</a><a href="/structure-editor">Structure</a><a href="/matrix-edit">Matrix</a><a href="/piano-roll">Piano Roll</a><a href="/event-list">Event List</a><a href="/editors" aria-current="page">OSC Generators</a><a href="/admin">Admin</a></nav>
   <main>
     <section class="toolbar"><strong>Focus selects one safe live destination · multi-select below when intentional</strong><div class="toolbar-actions"><label for="read-source">Instance focus</label><select id="read-source" aria-label="Instance focus"></select><button id="get-data" type="button">Read Instance</button><button id="clock-all-off" type="button">Clock Selected Off</button><button id="rtz" class="primary" type="button">RTZ Selected</button><button id="clock-all-on" type="button">Clock Selected On</button><button id="refresh" type="button">Refresh</button></div></section>
-    <section class="sequencer"><div id="stages" class="stages"></div></section>
+    <section class="sequencer">
+      <div class="pitch-range" aria-labelledby="pitch-range-label">
+        <strong id="pitch-range-label">Slider Pitch Range</strong>
+        <label><span>Low note</span><select id="pitch-range-min" aria-label="Lowest slider note"></select></label>
+        <label><span>High note</span><select id="pitch-range-max" aria-label="Highest slider note"></select></label>
+        <button id="mutate" type="button" title="Nudge active pitches by one semitone and occasionally flip an active step">Mutate</button>
+        <span class="detail">Uses the full slider height and clips pitches outside the selected range.</span>
+      </div>
+      <div id="stages" class="stages"></div>
+    </section>
     <section class="parameters"><h2>Sequence Parameters</h2><div id="parameters" class="parameter-grid"></div><label class="parameter-toggle"><input id="rtz-before-play" type="checkbox"> On block change, send RTZ before play</label></section>
     <div id="snapshot-mount"></div>
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live Send Destinations</h2><span>Focus selects one. Check additional instances only for intentional multi-output performance.</span></div><div id="targets" class="targets" aria-live="polite"></div></section>
@@ -74,9 +89,13 @@
     const readSourceSelect = document.querySelector("#read-source");
     const getDataButton = document.querySelector("#get-data");
     const rtzBeforePlayInput = document.querySelector("#rtz-before-play");
+    const pitchRangeMinSelect = document.querySelector("#pitch-range-min");
+    const pitchRangeMaxSelect = document.querySelector("#pitch-range-max");
+    const mutateButton = document.querySelector("#mutate");
     const pending = new Map();
     let targets = [];
     let readSourceId = "";
+    let pitchRange = { min: 0, max: 127 };
     let stagePollTimer;
     let stagePollGeneration = 0;
     let snapshotClient;
@@ -86,6 +105,9 @@
     getDataButton.addEventListener("click", () => getData().catch(reportError));
     document.querySelector("#clock-all-off").addEventListener("click", () => setAllClocks(0).catch(reportError));
     document.querySelector("#clock-all-on").addEventListener("click", () => setAllClocks(1).catch(reportError));
+    pitchRangeMinSelect.addEventListener("change", () => applyPitchRange("min").catch(reportError));
+    pitchRangeMaxSelect.addEventListener("change", () => applyPitchRange("max").catch(reportError));
+    mutateButton.addEventListener("click", () => mutateSequence().catch(reportError));
     document.querySelector("main").addEventListener("input", (event) => { if (event.target.matches("[data-param]")) snapshotClient?.draftChanged(); });
     document.querySelector("main").addEventListener("change", (event) => { if (event.target.matches("[data-param]")) snapshotClient?.draftChanged(); });
     rtzBeforePlayInput.addEventListener("change", () => snapshotClient?.draftChanged());
@@ -100,6 +122,7 @@
       liveTargetRoot: targetsEl,
       setStatus: (text) => { statusEl.textContent = text; }
     });
+    populatePitchRangeControls();
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
     async function refresh() {
@@ -131,6 +154,7 @@
       readSourceSelect.value = readSourceId;
       readSourceSelect.disabled = targets.length === 0;
       getDataButton.disabled = targets.length === 0;
+      mutateButton.disabled = targets.length === 0;
     }
 
     function renderStages() {
@@ -177,9 +201,10 @@
       const stage = document.createElement("div");
       stage.className = `stage${valueParam || stepParam ? "" : " missing"}`;
       stage.dataset.stage = String(number);
-      const value = integerValue(valueParam?.value, integerValue(valueParam?.min, 0));
-      const min = integerValue(valueParam?.min, 0);
-      const max = integerValue(valueParam?.max, 127);
+      const rawValue = integerValue(valueParam?.value, integerValue(valueParam?.min, 0));
+      const { min, max } = stagePitchBounds(valueParam);
+      const value = clamp(rawValue, min, max);
+      if (valueParam) valueParam.value = value;
       stage.innerHTML = `<span class="stage-number">STEP ${number}</span><span class="note">${midiNote(value)}</span>`;
       const slider = document.createElement("input");
       slider.className = "slider"; slider.type = "range"; slider.min = String(min); slider.max = String(max); slider.step = "1"; slider.value = String(clamp(value, min, max)); slider.disabled = !valueParam; if (valueParam) slider.dataset.param = valueParam.name;
@@ -191,6 +216,141 @@
       const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = Boolean(Number(stepParam?.value)); toggle.disabled = !stepParam; if (stepParam) toggle.dataset.param = stepParam.name; toggle.setAttribute("aria-label", `Step ${number}`);
       toggle.addEventListener("change", () => { stepParam.value = toggle.checked ? 1 : 0; sendParam(stepParam.name, stepParam.value).catch(reportError); });
       toggleLabel.append(toggle); stage.append(slider, readout, toggleLabel); return stage;
+    }
+
+    function populatePitchRangeControls() {
+      const options = Array.from({ length: 128 }, (_, note) => {
+        const option = document.createElement("option"); option.value = String(note); option.textContent = `${midiNote(note)} · ${note}`; return option;
+      });
+      pitchRangeMinSelect.replaceChildren(...options.map(option => option.cloneNode(true)));
+      pitchRangeMaxSelect.replaceChildren(...options);
+      syncPitchRangeControls();
+    }
+
+    async function applyPitchRange(changedBoundary) {
+      let min = clamp(integerValue(pitchRangeMinSelect.value, pitchRange.min), 0, 127);
+      let max = clamp(integerValue(pitchRangeMaxSelect.value, pitchRange.max), 0, 127);
+      if (min > max) {
+        if (changedBoundary === "min") max = min;
+        else min = max;
+      }
+      pitchRange = { min, max };
+      syncPitchRangeControls();
+      const source = readSourceTarget();
+      const changed = [];
+      for (const param of source?.parameters || []) {
+        if (!/^(?:(\d+)StageValue|StageValue[_ -]?(\d+))$/i.test(String(param.name || ""))) continue;
+        const bounds = stagePitchBounds(param);
+        const next = clamp(integerValue(param.value, bounds.min), bounds.min, bounds.max);
+        if (next !== integerValue(param.value, next)) {
+          if (pending.has(param.name)) {
+            clearTimeout(pending.get(param.name));
+            pending.delete(param.name);
+          }
+          changed.push({ param, next });
+        }
+        param.value = next;
+      }
+      renderStages();
+      snapshotClient?.draftChanged();
+      const targetIds = selectedTargetIds();
+      if (changed.length && targetIds.length) {
+        await Promise.all(changed.map(({ param, next }) => sendParam(param.name, next, targetIds)));
+      }
+      const rangeLabel = `${midiNote(min)}–${midiNote(max)}`;
+      statusEl.textContent = changed.length
+        ? `Slider range ${rangeLabel} · clipped ${changed.length} stage${changed.length === 1 ? "" : "s"}${targetIds.length ? ` on ${targetIds.length} selected client${targetIds.length === 1 ? "" : "s"}` : " locally"}`
+        : `Slider range ${rangeLabel}`;
+    }
+
+    function stagePitchBounds(param) {
+      const paramMin = clamp(integerValue(param?.min, 0), 0, 127);
+      const paramMax = clamp(integerValue(param?.max, 127), 0, 127);
+      const wireMin = Math.min(paramMin, paramMax);
+      const wireMax = Math.max(paramMin, paramMax);
+      const min = Math.max(wireMin, pitchRange.min);
+      const max = Math.min(wireMax, pitchRange.max);
+      const nearest = clamp(pitchRange.min, wireMin, wireMax);
+      return min <= max ? { min, max } : { min: nearest, max: nearest };
+    }
+
+    function syncPitchRangeControls() {
+      pitchRangeMinSelect.value = String(pitchRange.min);
+      pitchRangeMaxSelect.value = String(pitchRange.max);
+    }
+
+    async function mutateSequence() {
+      const source = readSourceTarget();
+      if (!source) throw new Error("Choose an instance to mutate");
+      const values = indexedParams(source.parameters, /^(?:(\d+)StageValue|StageValue[_ -]?(\d+))$/i);
+      const steps = indexedParams(source.parameters, /^(?:(\d+)StageStep|StageStep[_ -]?(\d+))$/i);
+      const stageCount = maxCountValue(source);
+      const changes = [];
+      for (let number = 1; number <= stageCount; number += 1) {
+        const valueParam = values.get(number);
+        if (valueParam) {
+          const bounds = stagePitchBounds(valueParam);
+          const current = clamp(integerValue(valueParam.value, bounds.min), bounds.min, bounds.max);
+          const next = clamp(current + randomInteger(-1, 1), bounds.min, bounds.max);
+          if (next !== current) changes.push({ param: valueParam, next, kind: "pitch" });
+        }
+        const stepParam = steps.get(number);
+        if (stepParam && Math.random() < 0.125) {
+          changes.push({ param: stepParam, next: Number(stepParam.value) ? 0 : 1, kind: "step" });
+        }
+      }
+      if (!changes.length) {
+        const fallback = mutationFallback(values, steps, stageCount);
+        if (fallback) changes.push(fallback);
+      }
+      if (!changes.length) {
+        statusEl.textContent = "Nothing available to mutate";
+        return;
+      }
+      for (const { param, next } of changes) {
+        cancelPending(param.name);
+        param.value = next;
+      }
+      renderStages();
+      snapshotClient?.draftChanged();
+      const targetIds = selectedTargetIds();
+      if (targetIds.length) {
+        await Promise.all(changes.map(({ param, next }) => sendParam(param.name, next, targetIds)));
+      }
+      const pitchCount = changes.filter(change => change.kind === "pitch").length;
+      const stepCount = changes.filter(change => change.kind === "step").length;
+      const summary = [pitchCount ? `${pitchCount} pitch${pitchCount === 1 ? "" : "es"}` : "", stepCount ? `${stepCount} step${stepCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ");
+      statusEl.textContent = `Mutated ${summary}${targetIds.length ? ` on ${targetIds.length} selected client${targetIds.length === 1 ? "" : "s"}` : " locally"}`;
+    }
+
+    function mutationFallback(values, steps, stageCount) {
+      const pitchCandidates = [];
+      for (let number = 1; number <= stageCount; number += 1) {
+        const param = values.get(number);
+        if (!param) continue;
+        const bounds = stagePitchBounds(param);
+        const current = clamp(integerValue(param.value, bounds.min), bounds.min, bounds.max);
+        if (current > bounds.min || current < bounds.max) pitchCandidates.push({ param, current, bounds });
+      }
+      if (pitchCandidates.length) {
+        const candidate = pitchCandidates[randomInteger(0, pitchCandidates.length - 1)];
+        const directions = [candidate.current > candidate.bounds.min ? -1 : 0, candidate.current < candidate.bounds.max ? 1 : 0].filter(Boolean);
+        return { param: candidate.param, next: candidate.current + directions[randomInteger(0, directions.length - 1)], kind: "pitch" };
+      }
+      const stepCandidates = Array.from(steps.entries()).filter(([number]) => number <= stageCount).map(([, param]) => param);
+      if (!stepCandidates.length) return;
+      const param = stepCandidates[randomInteger(0, stepCandidates.length - 1)];
+      return { param, next: Number(param.value) ? 0 : 1, kind: "step" };
+    }
+
+    function cancelPending(param) {
+      if (!pending.has(param)) return;
+      clearTimeout(pending.get(param));
+      pending.delete(param);
+    }
+
+    function randomInteger(min, max) {
+      return Math.floor(Math.random() * (max - min + 1)) + min;
     }
 
     function indexedParams(parameters, pattern) { const result = new Map(); for (const param of parameters || []) { const match = String(param.name || "").match(pattern); if (match) result.set(Number(match[1] || match[2]), param); } return result; }

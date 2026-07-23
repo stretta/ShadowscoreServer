@@ -213,6 +213,19 @@ set atomically. If any checked destination is already Written, one confirmation
 lists the states that will be replaced. The former Save Copy To control is
 removed because checked-instance writing now covers that workflow directly.
 
+### 5. Copy Checked State To Another Block
+
+**Copy Checked…** uses the current EDITING block as its source and copies each
+checked instance's own Written state into a selected destination block. Every
+destination receives an independent OSC clip; the operation does not make
+blocks share clip identity and sends no OSC.
+
+The batch is atomic. Every checked instance must already resolve to a score role
+and have Written state in the source block. If any checked source slot is
+Unspecified, the UI explains that the copy cannot proceed. Existing Written
+destination slots are counted in the dialog and require one replacement
+confirmation before the entire checked set is copied.
+
 ## Initial Authoring And Just-In-Time Onboarding
 
 The first usable AnalogSequencer path should be:

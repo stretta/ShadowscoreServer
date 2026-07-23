@@ -229,6 +229,88 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/osc/block-state/duplicate") {
+    try {
+      const body = await readJson(request);
+      const sourceBlockId = requiredString(body.sourceBlockId, "sourceBlockId");
+      const destinationBlockId = requiredString(body.destinationBlockId, "destinationBlockId");
+      if (sourceBlockId === destinationBlockId) throw new Error("sourceBlockId and destinationBlockId must be different");
+      const requestedTargetIds = Array.isArray(body.targets)
+        ? Array.from(new Set(body.targets.map((targetId) => requiredString(targetId, "targets[]"))))
+        : [];
+      if (!requestedTargetIds.length) throw new Error("targets must include at least one checked instance");
+      const currentScore = store.getScore();
+      if (!currentScore.mesostructure?.[sourceBlockId]) throw new Error(`unknown mesostructural block '${sourceBlockId}'`);
+      if (!currentScore.mesostructure?.[destinationBlockId]) throw new Error(`unknown mesostructural block '${destinationBlockId}'`);
+      const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+      const replace = Boolean(body.replace);
+      let planningScore = currentScore;
+      const plans = [];
+      for (const requestedTargetId of requestedTargetIds) {
+        const target = targets.find((entry) => entry.id === requestedTargetId || entry.rnboTargetId === requestedTargetId);
+        if (!target) throw new Error(`unknown OSC target '${requestedTargetId}'`);
+        if (target.status !== "online" || !target.sendable) throw new Error(`OSC target '${target.id}' is not online and sendable`);
+        const role = blockStateRoleForTarget(planningScore, target, targets);
+        const sourceLayer = currentScore.mesostructure[sourceBlockId].oscLayers?.[role.roleId];
+        const sourceClip = sourceLayer?.clipId ? currentScore.oscClips?.[sourceLayer.clipId] : null;
+        if (!sourceClip) {
+          const error = new Error(`${sourceBlockId} is Unspecified for '${role.roleId}'`);
+          error.code = "OSC_BLOCK_STATE_UNSPECIFIED";
+          throw error;
+        }
+        const existingLayer = currentScore.mesostructure[destinationBlockId].oscLayers?.[role.roleId];
+        if (existingLayer?.clipId && !replace) {
+          const error = new Error(`${destinationBlockId} is already Written for '${role.roleId}'; replacement intent is required`);
+          error.code = "OSC_BLOCK_STATE_WRITTEN";
+          throw error;
+        }
+        const baseClipId = `${destinationBlockId}-${role.roleId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+        const clipId = existingLayer?.clipId || uniqueOscClipId(planningScore, baseClipId);
+        const label = role.assignment.label || target.label || role.roleId;
+        const clip = structuredClone(sourceClip);
+        clip.name = optionalString(body.name) || `${destinationBlockId} · ${label}`;
+        plans.push({
+          targetId: target.id,
+          roleId: role.roleId,
+          assignment: role.assignment,
+          clipId,
+          clip,
+          replace
+        });
+        planningScore = {
+          ...planningScore,
+          oscClips: { ...(planningScore.oscClips ?? {}), [clipId]: clip },
+          mesostructure: {
+            ...planningScore.mesostructure,
+            [destinationBlockId]: {
+              ...planningScore.mesostructure[destinationBlockId],
+              oscLayers: {
+                ...(planningScore.mesostructure[destinationBlockId].oscLayers ?? {}),
+                [role.roleId]: { clipId }
+              }
+            }
+          }
+        };
+      }
+      const result = store.writeOscBlockStates(plans, destinationBlockId, revisionOptions(body));
+      writeJson(response, 200, {
+        ok: true,
+        sourceBlockId,
+        destinationBlockId,
+        copiedCount: plans.length,
+        copies: result.writes.map((write, index) => ({
+          ...write,
+          targetId: plans[index].targetId,
+          sourceClipId: currentScore.mesostructure[sourceBlockId].oscLayers[write.roleId].clipId
+        })),
+        score: result.score
+      });
+    } catch (error) {
+      writeError(response, error, error?.code === "OSC_BLOCK_STATE_WRITTEN" ? 409 : 400);
+    }
+    return;
+  }
+
   if (request.method === "POST" && (url.pathname === "/osc/block-state/write" || url.pathname === "/osc/block-state/copy")) {
     try {
       const body = await readJson(request);

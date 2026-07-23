@@ -8,7 +8,7 @@ export function mountOscSnapshotPanel(parent, options = {}) {
   section.innerHTML = `
     <div class="ss-osc-snapshot-head">
       <div><h2>Block State</h2><div class="ss-osc-snapshot-detail">Focus chooses what is displayed and written. Control gestures go to compatible checked instances.</div></div>
-      <div class="ss-osc-snapshot-head-actions"><div data-snapshot-focus class="ss-osc-snapshot-focus">Editing from: — · Live output to: 0 checked instances</div><button data-snapshot-clear-open type="button">Clear State…</button></div>
+      <div class="ss-osc-snapshot-head-actions"><div data-snapshot-focus class="ss-osc-snapshot-focus">Editing from: — · Live output to: 0 checked instances</div><button data-snapshot-copy-open type="button">Copy Checked…</button><button data-snapshot-clear-open type="button">Clear State…</button></div>
     </div>
     <div data-snapshot-instances class="ss-osc-snapshot-instances" aria-label="Block State instances"></div>
     <div class="ss-osc-snapshot-transport">
@@ -39,6 +39,13 @@ export function mountOscSnapshotPanel(parent, options = {}) {
         <label><input type="radio" name="snapshot-clear-scope" value="block"><span><strong>All instances · this block</strong><small data-snapshot-clear-block>0 Written states</small></span></label>
         <label><input type="radio" name="snapshot-clear-scope" value="all"><span><strong>All instances · all blocks</strong><small data-snapshot-clear-all>0 Written states</small></span></label>
         <div class="ss-osc-clear-actions"><button data-snapshot-clear-cancel type="button">Cancel</button><button data-snapshot-clear-confirm class="danger" type="submit">Clear selected scope</button></div>
+      </form>
+    </dialog>
+    <dialog data-snapshot-copy-dialog class="ss-osc-clear-dialog">
+      <form data-snapshot-copy-form method="dialog">
+        <div><h3>Copy Checked Block State</h3><p>Copy each checked instance's Written state from the EDITING block into another block. Copies are independent and no OSC is sent.</p></div>
+        <label><span><strong>Destination block</strong><select data-snapshot-copy-block aria-label="Destination block"></select><small data-snapshot-copy-summary>Choose a destination block</small></span></label>
+        <div class="ss-osc-clear-actions"><button data-snapshot-copy-cancel type="button">Cancel</button><button data-snapshot-copy-confirm class="primary" type="submit">Copy checked state</button></div>
       </form>
     </dialog>
   `;
@@ -74,6 +81,13 @@ export function mountOscSnapshotPanel(parent, options = {}) {
     clearInstanceCount: section.querySelector("[data-snapshot-clear-instance]"),
     clearBlockCount: section.querySelector("[data-snapshot-clear-block]"),
     clearAllCount: section.querySelector("[data-snapshot-clear-all]"),
+    copyOpenButton: section.querySelector("[data-snapshot-copy-open]"),
+    copyDialog: section.querySelector("[data-snapshot-copy-dialog]"),
+    copyForm: section.querySelector("[data-snapshot-copy-form]"),
+    copyBlockSelect: section.querySelector("[data-snapshot-copy-block]"),
+    copySummary: section.querySelector("[data-snapshot-copy-summary]"),
+    copyCancelButton: section.querySelector("[data-snapshot-copy-cancel]"),
+    copyConfirmButton: section.querySelector("[data-snapshot-copy-confirm]"),
     playingBlock: section.querySelector("[data-snapshot-playing]"),
     playbackState: section.querySelector("[data-snapshot-playback]"),
     chaseInput: section.querySelector("[data-snapshot-chase]"),
@@ -154,8 +168,16 @@ export function createOscSnapshotEditorClient(options) {
       const scope = new FormData(elements.clearForm).get("snapshot-clear-scope");
       clearState(scope).catch(reportError);
     });
+    elements.copyOpenButton?.addEventListener("click", openCopyDialog);
+    elements.copyCancelButton?.addEventListener("click", closeCopyDialog);
+    elements.copyBlockSelect?.addEventListener("change", renderCopyAvailability);
+    elements.copyForm?.addEventListener("submit", (event) => {
+      event.preventDefault();
+      copyCheckedState().catch(reportError);
+    });
     options.liveTargetRoot?.addEventListener("change", () => {
       renderLiveRouting();
+      renderCopyAvailability();
       renderStatus();
     });
   }
@@ -253,6 +275,7 @@ export function createOscSnapshotEditorClient(options) {
     elements.duplicateButton.disabled = !(selected && elements.clipIdInput?.value.trim());
     elements.recallButton.disabled = !layerClip;
     renderClearAvailability();
+    renderCopyAvailability();
     if (!blockId) return setState("No mesostructural blocks available");
     if (!sourceId) return setState(`No online ${options.roleLabel || app} instance is focused`);
     if (!destinationIds.length) return setState("Check at least one live destination before writing");
@@ -334,6 +357,72 @@ export function createOscSnapshotEditorClient(options) {
       options.setStatus?.(`Cleared ${result.clearedCount} Written Block State${result.clearedCount === 1 ? "" : "s"}; no OSC was sent`);
     } finally {
       elements.clearConfirmButton.disabled = false;
+    }
+  }
+
+  function checkedRoleIds() {
+    return selectedLiveTargetIds(options.liveTargetRoot).map((targetId) =>
+      resolveFocusedOscRole({ app, targetId, targets, assignments, resolutions })
+    ).filter(Boolean);
+  }
+
+  function openCopyDialog() {
+    const sourceBlockId = elements.blockSelect?.value;
+    const blockIds = Object.keys(score?.mesostructure ?? {}).filter((blockId) => blockId !== sourceBlockId);
+    const previous = elements.copyBlockSelect?.value;
+    elements.copyBlockSelect?.replaceChildren(...blockIds.map((blockId) => optionFor(blockId, blockId)));
+    if (blockIds.includes(previous)) elements.copyBlockSelect.value = previous;
+    renderCopyAvailability();
+    if (typeof elements.copyDialog?.showModal === "function") elements.copyDialog.showModal();
+    else elements.copyDialog?.setAttribute("open", "");
+  }
+
+  function closeCopyDialog() {
+    if (typeof elements.copyDialog?.close === "function") elements.copyDialog.close();
+    else elements.copyDialog?.removeAttribute("open");
+  }
+
+  function renderCopyAvailability() {
+    if (!elements.copyOpenButton && !elements.copyConfirmButton) return;
+    const sourceBlockId = elements.blockSelect?.value;
+    const destinationBlockId = elements.copyBlockSelect?.value;
+    const targetIds = selectedLiveTargetIds(options.liveTargetRoot);
+    const roleIds = checkedRoleIds();
+    const availability = oscCopyStateAvailability({ score, sourceBlockId, destinationBlockId, targetIds, roleIds });
+    if (elements.copyOpenButton) elements.copyOpenButton.disabled = !sourceBlockId || targetIds.length === 0 || Object.keys(score?.mesostructure ?? {}).length < 2;
+    if (elements.copyConfirmButton) elements.copyConfirmButton.disabled = !availability.allowed;
+    if (elements.copySummary) elements.copySummary.textContent = availability.reason || availability.summary;
+  }
+
+  async function copyCheckedState() {
+    const sourceBlockId = elements.blockSelect?.value;
+    const destinationBlockId = elements.copyBlockSelect?.value;
+    const targetIds = selectedLiveTargetIds(options.liveTargetRoot);
+    const roleIds = checkedRoleIds();
+    const availability = oscCopyStateAvailability({ score, sourceBlockId, destinationBlockId, targetIds, roleIds });
+    if (!availability.allowed) throw new Error(availability.reason);
+    if (availability.replacementCount > 0 && !window.confirm(
+      `Replace ${availability.replacementCount} Written Block State${availability.replacementCount === 1 ? "" : "s"} in block ${destinationBlockId} and copy all ${targetIds.length} checked instances from block ${sourceBlockId}?`
+    )) return;
+    elements.copyConfirmButton.disabled = true;
+    try {
+      const result = await fetchJson("/osc/block-state/duplicate", {
+        method: "POST",
+        body: JSON.stringify({
+          expectedStructureRevision: score?.structureRevision ?? 0,
+          sourceBlockId,
+          destinationBlockId,
+          targets: targetIds,
+          replace: availability.replacementCount > 0
+        })
+      });
+      score = result.score;
+      assignments = score.oscAssignments ?? {};
+      closeCopyDialog();
+      renderContext();
+      options.setStatus?.(`Copied ${result.copiedCount} checked instance state${result.copiedCount === 1 ? "" : "s"} from ${sourceBlockId} to ${destinationBlockId}; no OSC was sent`);
+    } finally {
+      elements.copyConfirmButton.disabled = false;
     }
   }
 
@@ -744,6 +833,42 @@ export function oscClearStateScopes(score, blockId, roleId) {
       count: allCount,
       confirmation: `Clear ${allCount} Written Block State${allCount === 1 ? "" : "s"} across all instances in all blocks?`
     }
+  };
+}
+
+export function oscCopyStateAvailability({
+  score,
+  sourceBlockId = "",
+  destinationBlockId = "",
+  targetIds = [],
+  roleIds = []
+} = {}) {
+  if (!sourceBlockId) return { allowed: false, reason: "Choose an EDITING source block", summary: "", replacementCount: 0 };
+  if (!Array.isArray(targetIds) || targetIds.length === 0) {
+    return { allowed: false, reason: "Check at least one live destination to copy", summary: "", replacementCount: 0 };
+  }
+  if (roleIds.length !== targetIds.length) {
+    return { allowed: false, reason: "Every checked instance must have a score role before its Block State can be copied", summary: "", replacementCount: 0 };
+  }
+  if (!destinationBlockId) return { allowed: false, reason: "Choose a destination block", summary: "", replacementCount: 0 };
+  if (destinationBlockId === sourceBlockId) return { allowed: false, reason: "Choose a different destination block", summary: "", replacementCount: 0 };
+  const sourceLayers = score?.mesostructure?.[sourceBlockId]?.oscLayers ?? {};
+  const destinationLayers = score?.mesostructure?.[destinationBlockId]?.oscLayers ?? {};
+  const missingCount = roleIds.filter((roleId) => !sourceLayers[roleId]?.clipId || !score?.oscClips?.[sourceLayers[roleId].clipId]).length;
+  if (missingCount) {
+    return {
+      allowed: false,
+      reason: `${missingCount} checked instance${missingCount === 1 ? " is" : "s are"} Unspecified in block ${sourceBlockId}`,
+      summary: "",
+      replacementCount: 0
+    };
+  }
+  const replacementCount = roleIds.filter((roleId) => Boolean(destinationLayers[roleId]?.clipId)).length;
+  return {
+    allowed: true,
+    reason: "",
+    replacementCount,
+    summary: `Copy ${roleIds.length} Written state${roleIds.length === 1 ? "" : "s"} from ${sourceBlockId} to ${destinationBlockId}${replacementCount ? ` · replace ${replacementCount}` : ""}`
   };
 }
 

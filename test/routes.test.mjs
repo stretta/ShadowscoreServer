@@ -953,6 +953,42 @@ test("Block State write atomically saves the displayed draft to every checked ta
   assert.equal(written.score.structureRevision, 1);
   assert.deepEqual(written.writes[0].clip.params, written.writes[1].clip.params);
 
+  const duplicated = await requestJson(context, "POST", "/osc/block-state/duplicate", {
+    targets: [firstTarget.id, secondTarget.id],
+    sourceBlockId: "A",
+    destinationBlockId: "B",
+    expectedStructureRevision: written.score.structureRevision
+  });
+  assert.equal(duplicated.copiedCount, 2);
+  assert.deepEqual(duplicated.copies.map((copy) => copy.sourceClipId).sort(),
+    ["a-listsequencer-1", "a-listsequencer-2"]);
+  assert.deepEqual(Object.values(duplicated.score.mesostructure.B.oscLayers).map((layer) => layer.clipId).sort(),
+    ["b-listsequencer-1", "b-listsequencer-2"]);
+  assert.notEqual(duplicated.score.mesostructure.B.oscLayers["listsequencer-1"].clipId,
+    duplicated.score.mesostructure.A.oscLayers["listsequencer-1"].clipId);
+  assert.deepEqual(duplicated.copies.map((copy) => copy.clip.params), [draft.params, draft.params]);
+  assert.equal(duplicated.score.structureRevision, 2);
+
+  const beforeRejectedDuplicate = context.store.getScore();
+  const duplicateRejected = await request(context, "POST", "/osc/block-state/duplicate", {
+    targets: [firstTarget.id, secondTarget.id],
+    sourceBlockId: "A",
+    destinationBlockId: "B",
+    expectedStructureRevision: beforeRejectedDuplicate.structureRevision
+  });
+  assert.equal(duplicateRejected.status, 409);
+  assert.deepEqual(context.store.getScore(), beforeRejectedDuplicate);
+
+  const duplicateReplaced = await requestJson(context, "POST", "/osc/block-state/duplicate", {
+    targets: [firstTarget.id, secondTarget.id],
+    sourceBlockId: "A",
+    destinationBlockId: "B",
+    expectedStructureRevision: beforeRejectedDuplicate.structureRevision,
+    replace: true
+  });
+  assert.equal(duplicateReplaced.copiedCount, 2);
+  assert.equal(duplicateReplaced.score.structureRevision, 3);
+
   const beforeRejectedReplace = context.store.getScore();
   const rejected = await request(context, "POST", "/osc/block-state/write", {
     targets: [firstTarget.id, secondTarget.id],
@@ -970,7 +1006,7 @@ test("Block State write atomically saves the displayed draft to every checked ta
     replace: true,
     snapshot: { ...draft, params: { ...draft.params, GateTime: 0.8 } }
   });
-  assert.equal(replaced.score.structureRevision, 2);
+  assert.equal(replaced.score.structureRevision, 4);
   assert.deepEqual(replaced.writes.map((write) => write.clip.params.GateTime), [0.8, 0.8]);
 });
 
@@ -4063,7 +4099,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
-  assert.match(response.body, /20260723-checked-write1/);
+  assert.match(response.body, /20260723-copy-checked1/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -4102,7 +4138,7 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotDraft/);
   assert.match(response.body, /applySavedSnapshot/);
-  assert.match(response.body, /20260723-checked-write1/);
+  assert.match(response.body, /20260723-copy-checked1/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -4188,7 +4224,7 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /20260723-checked-write1/, `${editor} should load the current shared snapshot client`);
+    assert.match(response.body, /20260723-copy-checked1/, `${editor} should load the current shared snapshot client`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');
     const targetsIndex = response.body.indexOf('id="targets"');
@@ -4285,7 +4321,10 @@ test("shared OSC snapshot editor client is served as a static asset", async () =
   assert.match(response.body, /All instances · this block/);
   assert.match(response.body, /All instances · all blocks/);
   assert.match(response.body, /Live output to:/);
-  assert.doesNotMatch(response.body, /Save Copy To|data-snapshot-copy/);
+  assert.doesNotMatch(response.body, /Save Copy To/);
+  assert.match(response.body, /data-snapshot-copy-open/);
+  assert.match(response.body, /osc\/block-state\/duplicate/);
+  assert.match(response.body, /Copy Checked Block State/);
   assert.match(response.body, /Checked Instance/);
   assert.match(response.body, /Unwritten Draft/);
   assert.match(response.body, /resolveFocusedOscRole/);

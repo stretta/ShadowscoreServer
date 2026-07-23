@@ -7,6 +7,7 @@ import {
   oscBlockDraftState,
   oscBlockSlotState,
   oscClearStateScopes,
+  oscCopyStateAvailability,
   oscChaseHydration,
   oscClockRecallNotice,
   oscEditorParamValue,
@@ -145,6 +146,46 @@ test("clear scope counts distinguish focused, block-wide, and score-wide Written
   assert.equal(scopes.all.count, 3);
   assert.match(scopes.block.confirmation, /all instances in block A/);
   assert.match(scopes.all.confirmation, /all instances in all blocks/);
+});
+
+test("copy checked state requires every checked role to be Written in the source block", () => {
+  const score = {
+    oscClips: {
+      "a-analog": { app: "analogsequencer", params: { Clock: 1 }, inputPorts: {} },
+      "a-plate": { app: "plate", params: { Decay: 0.5 }, inputPorts: {} },
+      "b-analog": { app: "analogsequencer", params: { Clock: 0 }, inputPorts: {} }
+    },
+    mesostructure: {
+      A: { oscLayers: { "analog-a": { clipId: "a-analog" }, "plate-a": { clipId: "a-plate" } } },
+      B: { oscLayers: { "analog-a": { clipId: "b-analog" } } }
+    }
+  };
+  assert.deepEqual(oscCopyStateAvailability({
+    score,
+    sourceBlockId: "A",
+    destinationBlockId: "B",
+    targetIds: ["analog", "plate"],
+    roleIds: ["analog-a", "plate-a"]
+  }), {
+    allowed: true,
+    reason: "",
+    replacementCount: 1,
+    summary: "Copy 2 Written states from A to B · replace 1"
+  });
+  assert.match(oscCopyStateAvailability({
+    score,
+    sourceBlockId: "B",
+    destinationBlockId: "A",
+    targetIds: ["analog", "plate"],
+    roleIds: ["analog-a", "plate-a"]
+  }).reason, /1 checked instance is Unspecified in block B/);
+  assert.match(oscCopyStateAvailability({
+    score,
+    sourceBlockId: "A",
+    destinationBlockId: "B",
+    targetIds: ["unmapped"],
+    roleIds: []
+  }).reason, /must have a score role/);
 });
 
 test("draft state is keyed independently by role and block and distinguishes dirty from provisional", () => {

@@ -42,6 +42,9 @@ Design and implementation notes:
 - [`transport-and-matrix-ui-ux-plan.md`](transport-and-matrix-ui-ux-plan.md):
   DAW-like transport facade, Matrix Edit simplification, and ownership
   boundaries for setup versus performance.
+- [`smooth-editor-wiper-and-playback-observation-plan.md`](smooth-editor-wiper-and-playback-observation-plan.md):
+  display-rate browser wiper interpolation, shared Matrix/Piano Roll playback
+  observation, and server-owned RNBO polling consolidation.
 - [`piano-roll-clip-editor-plan.md`](piano-roll-clip-editor-plan.md):
   piano-roll clip editor plan, note-duration resizing, shared Matrix Edit
   foundations, and enlarged velocity-lane rollout.

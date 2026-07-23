@@ -18,7 +18,9 @@ test("Piano Roll exposes autosave recovery and editing surfaces", async () => {
   assert.match(html, /id="fold"[^>]*aria-pressed="false"/);
   assert.match(html, /id="roll"/);
   assert.match(html, /id="roll"[^>]*tabindex="0"/);
+  assert.match(html, /id="roll-wiper"[^>]*class="wiper-overlay"/);
   assert.match(html, /id="velocity"/);
+  assert.match(html, /id="velocity-wiper"[^>]*class="wiper-overlay"/);
   assert.match(html, /id="playback-update"/);
 });
 
@@ -32,7 +34,10 @@ test("Piano Roll autosaves revision-aware clip drafts and supports right-edge re
   assert.match(js, /\/playback\/snapshot/);
   assert.match(js, /playbackGeneration/);
   assert.match(js, /state\.playbackRequest/);
-  assert.match(js, /drawWiper/);
+  assert.match(js, /createWiperEstimator/);
+  assert.match(js, /requestAnimationFrame/);
+  assert.match(js, /renderWiperFrame/);
+  assert.doesNotMatch(js, /function drawWiper/);
   assert.match(js, /addEventListener\("keydown"/);
   assert.match(js, /nudgeNote/);
   assert.match(js, /pointercancel",cancelDrag/);

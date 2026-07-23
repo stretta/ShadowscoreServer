@@ -36,9 +36,10 @@
     <section class="editor-shell">
       <div id="roll-scroll" class="roll-scroll">
         <canvas id="roll" aria-label="Piano roll note grid" tabindex="0"></canvas>
+        <div id="roll-wiper" class="wiper-overlay" aria-hidden="true" hidden></div>
       </div>
       <div class="velocity-heading"><span>Velocity</span><output id="velocity-value">—</output></div>
-      <div id="velocity-scroll" class="velocity-scroll"><canvas id="velocity" aria-label="Note velocity lane"></canvas></div>
+      <div id="velocity-scroll" class="velocity-scroll"><canvas id="velocity" aria-label="Note velocity lane"></canvas><div id="velocity-wiper" class="wiper-overlay" aria-hidden="true" hidden></div></div>
     </section>
     <p class="help">Click empty space to add. Drag a note to move it or its right edge to resize. Completed gestures save automatically. Chase follows the playing section; Fold hides note lanes unused by the current block. Arrow keys nudge; Shift+Left/Right resizes; Delete removes. Playback application is shown separately. Event List remains the exact-field review surface.</p>
   </main>

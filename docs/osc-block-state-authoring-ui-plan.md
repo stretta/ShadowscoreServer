@@ -1,10 +1,11 @@
 # OSC Block-State Authoring UI Development Plan
 
 Status: implemented and live-verified in the shared OSC editor workflow on
-2026-07-16. The
+2026-07-16, with checked-instance Block State writes adopted across the editor
+family on 2026-07-23. The
 normal editor now uses draft-backed Block State writes, just-in-time role
 creation, per-instance/block draft preservation, instance cards, role-level
-Ignore recall, and independent Save Copy To transactions. The acceptance gate
+Ignore recall, and atomic writes to every checked instance. The acceptance gate
 was completed against the deployed wren rig; the prototype scenarios remain
 useful regression exercises rather than implementation gates.
 
@@ -203,30 +204,14 @@ multi-instance scope. Clear makes those slots Unspecified by removing their
 block-layer references atomically. It sends no OSC and preserves OSC clips,
 role assignments, and Ignore Recall settings.
 
-### 4. Copy Between Instances
+### 4. Write To Checked Instances
 
-Provide an explicit action that does not require changing focus:
-
-```text
-Save Copy To... -> AnalogSequencer 3
-```
-
-The operation must:
-
-- leave the source instance and block in focus;
-- send no OSC and cause no recall;
-- create a new independent destination clip rather than assigning the source
-  clip id to both roles;
-- write within the same selected mesostructural block by default; and
-- require explicit replacement confirmation when the destination slot is
-  already Written.
-
-After the copy, focusing the destination instance loads its new independent
-state through the ordinary Written-slot behavior.
-
-To copy current live source state, the user first performs explicit instance
-readback to refresh the displayed draft. Save Copy To always copies that draft,
-so its source remains predictable.
+Write uses the displayed focused-instance draft as its source and every checked
+instance as a destination. The operation sends no OSC, creates or replaces an
+independent clip for each destination role, and commits the complete destination
+set atomically. If any checked destination is already Written, one confirmation
+lists the states that will be replaced. The former Save Copy To control is
+removed because checked-instance writing now covers that workflow directly.
 
 ## Initial Authoring And Just-In-Time Onboarding
 
@@ -325,9 +310,9 @@ Live instance readback initializes an Unspecified provisional draft or
 explicitly refreshes the editor. Once displayed, the draft is the source for
 Write and Replace State.
 
-Regression test: play A, edit B with CHASE off, leave the focused target
-unchecked for live sends, save B, then recall B and confirm that the complete
-displayed draft—not the focused client's A state—was persisted.
+Regression test: play A, edit B with CHASE off, check multiple destinations,
+save B, then recall B and confirm that the complete displayed draft—not the
+focused clients' A state—was independently persisted for every destination.
 
 ### Q2. Selecting Unspecified Does Not Write — Decided
 
@@ -339,11 +324,12 @@ or score revision changes until Write is pressed.
 For a Written slot, Write remains disabled while the displayed draft matches
 the saved clip and becomes **Replace State** only when the editor is dirty.
 
-### Q3. Focus And Multi-Target Sends Remain Separate — Decided
+### Q3. Focus And Checked Destinations Have Distinct Roles — Decided
 
-The focus radio owns score capture, display, role identity, and block-slot
-selection. Separate checkboxes retain live multi-target sends. Checked targets
-never influence which instance's state is displayed or which role is written.
+The focus radio owns score hydration, display, and the draft used as the write
+source. Checkboxes own destinations consistently: direct live gestures and
+Block State writes both fan out to every checked instance. Each destination
+receives an independent role and clip; focus does not change during the write.
 Named broadcast actions such as RTZ All and Clock All remain separate.
 
 ### Q4. Existing Unresolved Roles Require Resolution — Decided
@@ -354,12 +340,13 @@ the user to resolve the assignment. A new app-plus-ordinal role is created only
 when there is no unresolved compatible role; other same-app roles already
 mapped to distinct online instances do not block just-in-time onboarding.
 
-### Q5. Save Copy To Copies The Displayed Draft — Decided
+### Q5. Checked Writes Copy The Displayed Draft — Decided
 
-Save Copy To uses the same complete displayed draft selected in Q1 and creates
-an independent destination clip. A user who wants current live instance state
-must first use explicit instance readback to refresh the draft. Test replacement
-of both Unspecified and Written destination slots.
+Write uses the same complete displayed draft selected in Q1 and creates an
+independent clip for every checked destination. A user who wants current live
+instance state must first use explicit instance readback to refresh the draft.
+The server validates every Unspecified or Written destination before committing
+the batch.
 
 ### Q6. Ignore Recall Mutes Recall Data — Decided
 
@@ -385,7 +372,7 @@ Proposed vocabulary:
 - Written
 - Unspecified
 - Save State
-- Save Copy To
+- Checked instances
 - Ignore recall
 
 Keep OSC clip ids, logical roles, layers, capture diagnostics, and manual clip
@@ -504,14 +491,15 @@ PLAYING-versus-EDITING clarity.
 Exit: a newly instantiated AnalogSequencer can acquire independent states in
 any existing block, while ambiguous existing-score mappings remain untouched.
 
-### Checkpoint D: Independent Copy
+### Checkpoint D: Atomic Checked-Instance Write
 
-- Add **Save Copy To** using the displayed draft selected in Q5.
-- Clone rather than alias the destination OSC clip.
-- Add revision checks and explicit Written-destination replacement.
+- Write the displayed draft to every checked instance.
+- Clone rather than alias each destination OSC clip.
+- Add one revision check and explicit Written-destination replacement for the
+  complete batch.
 
-Exit: state can move between two instances in one block without recall, focus
-loss, or later shared mutation.
+Exit: state can move to multiple instances in one block without recall, focus
+loss, partial writes, or later shared mutation.
 
 ### Checkpoint E: Editor-Family Rollout
 

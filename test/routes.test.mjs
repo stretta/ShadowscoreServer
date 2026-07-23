@@ -914,6 +914,66 @@ test("Block State write onboards displayed drafts just in time and copy remains 
   assert.ok(cleared.score.oscClips[written.clipId]);
 });
 
+test("Block State write atomically saves the displayed draft to every checked target", async () => {
+  const firstTarget = captureControlTarget();
+  const secondTarget = {
+    ...captureControlTarget(),
+    id: "rnbo-inst-3:listsequencer",
+    localId: "rnbo-inst-3:listsequencer",
+    label: "List Sequencer 3",
+    baseAddress: "/rnbo/inst/3",
+    instance: "aux",
+    parameters: [
+      { name: "Clock", address: "/rnbo/inst/3/params/Clock" },
+      { name: "GateTime", address: "/rnbo/inst/3/params/GateTime" }
+    ]
+  };
+  const context = createRouteContext({
+    runtime: {
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() { return [firstTarget, secondTarget]; }
+      }
+    }
+  });
+  const draft = { schemaVersion: 1, app: "listsequencer", params: { Clock: 1, GateTime: 0.4 }, inputPorts: { Steps: [1, 0, 1] } };
+  const written = await requestJson(context, "POST", "/osc/block-state/write", {
+    targets: [firstTarget.id, secondTarget.id],
+    blockId: "A",
+    expectedStructureRevision: 0,
+    snapshot: draft
+  });
+
+  assert.equal(written.targetCount, 2);
+  assert.deepEqual(written.writes.map((write) => write.targetId), ["heron:listsequencer:main", "heron:listsequencer:aux"]);
+  assert.deepEqual(written.writes.map((write) => write.roleId), ["listsequencer-1", "listsequencer-2"]);
+  assert.deepEqual(Object.values(written.score.mesostructure.A.oscLayers).map((layer) => layer.clipId).sort(),
+    ["a-listsequencer-1", "a-listsequencer-2"]);
+  assert.equal(written.score.structureRevision, 1);
+  assert.deepEqual(written.writes[0].clip.params, written.writes[1].clip.params);
+
+  const beforeRejectedReplace = context.store.getScore();
+  const rejected = await request(context, "POST", "/osc/block-state/write", {
+    targets: [firstTarget.id, secondTarget.id],
+    blockId: "A",
+    expectedStructureRevision: beforeRejectedReplace.structureRevision,
+    snapshot: { ...draft, params: { ...draft.params, GateTime: 0.8 } }
+  });
+  assert.equal(rejected.status, 409);
+  assert.deepEqual(context.store.getScore(), beforeRejectedReplace);
+
+  const replaced = await requestJson(context, "POST", "/osc/block-state/write", {
+    targets: [firstTarget.id, secondTarget.id],
+    blockId: "A",
+    expectedStructureRevision: beforeRejectedReplace.structureRevision,
+    replace: true,
+    snapshot: { ...draft, params: { ...draft.params, GateTime: 0.8 } }
+  });
+  assert.equal(replaced.score.structureRevision, 2);
+  assert.deepEqual(replaced.writes.map((write) => write.clip.params.GateTime), [0.8, 0.8]);
+});
+
 test("Block State write leaves compatible unresolved roles untouched for Admin resolution", async () => {
   const context = createRouteContext({
     runtime: {
@@ -4003,7 +4063,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
-  assert.match(response.body, /20260719-clear-state1/);
+  assert.match(response.body, /20260723-checked-write1/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -4042,7 +4102,7 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotDraft/);
   assert.match(response.body, /applySavedSnapshot/);
-  assert.match(response.body, /20260719-clear-state1/);
+  assert.match(response.body, /20260723-checked-write1/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -4128,7 +4188,7 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /20260719-clear-state1/, `${editor} should load the current shared snapshot client`);
+    assert.match(response.body, /20260723-checked-write1/, `${editor} should load the current shared snapshot client`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');
     const targetsIndex = response.body.indexOf('id="targets"');
@@ -4218,14 +4278,15 @@ test("shared OSC snapshot editor client is served as a static asset", async () =
   assert.match(response.body, /oscClockRecallNotice/);
   assert.match(response.body, /expectedStructureRevision/);
   assert.match(response.body, /osc\/block-state\/write/);
-  assert.match(response.body, /osc\/block-state\/copy/);
+  assert.doesNotMatch(response.body, /osc\/block-state\/copy/);
   assert.match(response.body, /osc\/block-state\/clear/);
   assert.match(response.body, /Clear State…/);
   assert.match(response.body, /This instance · this block/);
   assert.match(response.body, /All instances · this block/);
   assert.match(response.body, /All instances · all blocks/);
   assert.match(response.body, /Live output to:/);
-  assert.match(response.body, /Save Copy To/);
+  assert.doesNotMatch(response.body, /Save Copy To|data-snapshot-copy/);
+  assert.match(response.body, /Checked Instance/);
   assert.match(response.body, /Unwritten Draft/);
   assert.match(response.body, /resolveFocusedOscRole/);
   assert.match(response.body, /oscBlockSlotState/);

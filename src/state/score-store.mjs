@@ -389,6 +389,79 @@ export function createScoreStore(initialScore, options = {}) {
       }, options);
       return structuredClone(score);
     },
+    writeOscBlockStates(entries, blockId, options = {}) {
+      const blockIdNormalized = normalizeBlockId(blockId);
+      const block = score.mesostructure[blockIdNormalized];
+      if (!block) throw new Error(`unknown mesostructural block '${blockIdNormalized}'`);
+      if (!Array.isArray(entries) || entries.length === 0) {
+        throw new Error("OSC Block State writes must include at least one destination");
+      }
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+
+      const oscAssignments = { ...(score.oscAssignments ?? {}) };
+      const oscClips = { ...(score.oscClips ?? {}) };
+      const oscLayers = { ...(block.oscLayers ?? {}) };
+      const writes = [];
+      for (const entry of entries) {
+        const role = normalizeOscRoleId(entry.roleId);
+        const clipIdNormalized = normalizeOscClipId(entry.clipId);
+        const existingAssignment = oscAssignments[role];
+        const assignment = entry.assignment === undefined
+          ? existingAssignment
+          : normalizeOscAssignment(entry.assignment);
+        if (!assignment) throw new Error(`unknown OSC assignment role '${role}'`);
+        if (existingAssignment?.app && existingAssignment.app !== assignment.app) {
+          throw new Error(`OSC role '${role}' already belongs to app '${existingAssignment.app}'`);
+        }
+        if (existingAssignment?.deviceId && assignment.deviceId && existingAssignment.deviceId !== assignment.deviceId) {
+          throw new Error(`OSC role '${role}' already belongs to device '${existingAssignment.deviceId}'`);
+        }
+
+        const clip = normalizeOscClip(entry.clip);
+        if (assignment.app && assignment.app !== clip.app) {
+          throw new Error(`OSC clip '${clipIdNormalized}' app '${clip.app}' is incompatible with role '${role}' app '${assignment.app}'`);
+        }
+        const existingLayer = oscLayers[role];
+        if (existingLayer?.clipId && entry.replace !== true) {
+          const error = new Error(`${blockIdNormalized} is already Written for '${role}'`);
+          error.code = "OSC_BLOCK_STATE_WRITTEN";
+          throw error;
+        }
+        const occupiedClip = oscClips[clipIdNormalized];
+        if (occupiedClip && existingLayer?.clipId !== clipIdNormalized) {
+          throw new Error(`OSC clip '${clipIdNormalized}' already exists`);
+        }
+
+        oscAssignments[role] = assignment;
+        oscClips[clipIdNormalized] = clip;
+        oscLayers[role] = { clipId: clipIdNormalized };
+        writes.push({
+          roleId: role,
+          clipId: clipIdNormalized,
+          assignment,
+          clip,
+          createdRole: !existingAssignment,
+          replaced: Boolean(existingLayer)
+        });
+      }
+
+      score = {
+        ...score,
+        ...nextRevisionFields(score, { structure: true }),
+        oscAssignments,
+        oscClips,
+        mesostructure: {
+          ...score.mesostructure,
+          [blockIdNormalized]: { ...block, oscLayers }
+        }
+      };
+      emitChange(events, "osc.blockState.batchWritten", score, {
+        blockId: blockIdNormalized,
+        writes
+      }, options);
+      return { score: structuredClone(score), writes: structuredClone(writes) };
+    },
     clearOscBlockStates({ scope, blockId, roleId } = {}, options = {}) {
       const normalizedScope = String(scope ?? "").trim().toLowerCase();
       if (!new Set(["instance-block", "block", "all"]).has(normalizedScope)) {

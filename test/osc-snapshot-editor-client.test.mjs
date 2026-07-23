@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  checkedWriteActionLabel,
   createOscEditorSnapshot,
   oscBlockDraftKey,
   oscBlockDraftState,
@@ -33,7 +34,7 @@ test("shared OSC editor snapshot core normalizes parameter and list drafts", () 
   });
 });
 
-test("writing depends on focused context, draft completeness, and semantic dirtiness", () => {
+test("writing depends on checked destinations, draft completeness, and semantic dirtiness", () => {
   assert.deepEqual(oscWriteAvailability({ blockId: "A", targetId: "analog-1", complete: true, written: false, dirty: true }), { allowed: true, reason: "" });
   assert.deepEqual(oscWriteAvailability({ blockId: "A", targetId: "analog-1", complete: true, written: true, dirty: false }), {
     allowed: false,
@@ -43,7 +44,7 @@ test("writing depends on focused context, draft completeness, and semantic dirti
     allowed: false,
     reason: "Complete the displayed draft before writing"
   });
-  assert.deepEqual(oscWriteAvailability({ blockId: "B", complete: true }), { allowed: false, reason: "Focus an online instance" });
+  assert.deepEqual(oscWriteAvailability({ blockId: "B", complete: true }), { allowed: false, reason: "Check at least one live destination before writing" });
 });
 
 test("shared OSC editor snapshot core stores string enums as numeric option indexes", () => {
@@ -82,6 +83,17 @@ test("focused live instances resolve their score role without exposing role sele
   assert.equal(resolveFocusedOscRole({ app: "analogsequencer", targetId: "missing", targets, assignments }), "");
 });
 
+test("an unassigned same-device instance does not borrow another online instance's role", () => {
+  const assignments = {
+    "analog-a": { app: "analogsequencer", deviceId: "wren", oscTargetId: "wren:analogsequencer:5" }
+  };
+  const targets = [
+    { id: "wren:analogsequencer:5", app: "analogsequencer", deviceId: "wren" },
+    { id: "wren:analogsequencer:11", app: "analogsequencer", deviceId: "wren" }
+  ];
+  assert.equal(resolveFocusedOscRole({ app: "analogsequencer", targetId: targets[1].id, targets, assignments }), "");
+});
+
 test("focusing an instance makes it the sole live-send destination", () => {
   const inputs = [
     { checked: true, dataset: { target: "analog-5" } },
@@ -115,6 +127,8 @@ test("block slots distinguish unspecified state from explicitly written empty da
   assert.deepEqual(oscBlockSlotState(score, "B", "list-a"), { status: "Unspecified", clipId: "", clip: null });
   assert.equal(oscWriteActionLabel({ blockId: "A", written: true }), "Replace A State");
   assert.equal(oscWriteActionLabel({ blockId: "B", written: false }), "Write B State");
+  assert.equal(checkedWriteActionLabel("B", 2), "Write B State to 2 Checked Instances");
+  assert.equal(checkedWriteActionLabel("B", 1), "Write B State to 1 Checked Instance");
 });
 
 test("clear scope counts distinguish focused, block-wide, and score-wide Written states", () => {

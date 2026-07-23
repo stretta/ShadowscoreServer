@@ -21,7 +21,6 @@ export function mountOscSnapshotPanel(parent, options = {}) {
     <select data-snapshot-role hidden aria-hidden="true"></select>
     <div class="ss-osc-snapshot-footer">
       <div class="ss-osc-snapshot-actions"><div><button data-snapshot-capture class="primary" type="button">Write — State</button><button data-snapshot-load type="button">Reload Written State</button><button data-snapshot-recall type="button">Recall — Now</button></div></div>
-      <div class="ss-osc-snapshot-copy"><label><span>Save Copy To</span><select data-snapshot-copy-target aria-label="Copy Block State to instance"></select></label><button data-snapshot-copy type="button">Save Copy</button></div>
       <div class="ss-osc-snapshot-status"><div data-snapshot-state class="ss-osc-snapshot-state" role="status">Loading OSC clip state…</div><div data-snapshot-last class="ss-osc-snapshot-detail">No recall recorded</div></div>
     </div>
     <details class="ss-osc-snapshot-advanced">
@@ -67,8 +66,6 @@ export function mountOscSnapshotPanel(parent, options = {}) {
     assignButton: section.querySelector("[data-snapshot-assign]"),
     duplicateButton: section.querySelector("[data-snapshot-duplicate]"),
     recallButton: section.querySelector("[data-snapshot-recall]"),
-    copyTargetSelect: section.querySelector("[data-snapshot-copy-target]"),
-    copyButton: section.querySelector("[data-snapshot-copy]"),
     clearOpenButton: section.querySelector("[data-snapshot-clear-open]"),
     clearDialog: section.querySelector("[data-snapshot-clear-dialog]"),
     clearForm: section.querySelector("[data-snapshot-clear-form]"),
@@ -145,9 +142,7 @@ export function createOscSnapshotEditorClient(options) {
     elements.clipSelect?.addEventListener("change", renderStatus);
     elements.clipIdInput?.addEventListener("input", renderStatus);
     elements.clipNameInput?.addEventListener("input", renderStatus);
-    elements.copyTargetSelect?.addEventListener("change", renderStatus);
     elements.captureButton?.addEventListener("click", () => capture().catch(reportError));
-    elements.copyButton?.addEventListener("click", () => copy().catch(reportError));
     elements.loadButton?.addEventListener("click", () => load().catch(reportError));
     elements.assignButton?.addEventListener("click", () => assign().catch(reportError));
     elements.duplicateButton?.addEventListener("click", () => duplicate().catch(reportError));
@@ -159,7 +154,10 @@ export function createOscSnapshotEditorClient(options) {
       const scope = new FormData(elements.clearForm).get("snapshot-clear-scope");
       clearState(scope).catch(reportError);
     });
-    options.liveTargetRoot?.addEventListener("change", renderLiveRouting);
+    options.liveTargetRoot?.addEventListener("change", () => {
+      renderLiveRouting();
+      renderStatus();
+    });
   }
 
   async function refreshContext() {
@@ -208,7 +206,6 @@ export function createOscSnapshotEditorClient(options) {
     elements.clipSelect?.replaceChildren(...clips.map(([clipId, clip]) => optionFor(clipId, clip.name || clipId)));
     if (clips.some(([clipId]) => clipId === previousClip)) elements.clipSelect.value = previousClip;
     else selectLayerClip();
-    renderCopyTargets();
     synchronizeClipIdentity();
     renderPlayback();
     renderInstances();
@@ -226,13 +223,29 @@ export function createOscSnapshotEditorClient(options) {
     const sourceId = elements.sourceSelect?.value;
     const source = targets.find((target) => target.id === sourceId);
     const written = Boolean(layerClip);
+    const destinationIds = selectedLiveTargetIds(options.liveTargetRoot);
+    const destinationStates = destinationIds.map((targetId) => {
+      const destinationRoleId = resolveFocusedOscRole({ app, targetId, targets, assignments, resolutions });
+      return {
+        targetId,
+        roleId: destinationRoleId,
+        clip: destinationRoleId ? oscBlockSlotState(score, blockId, destinationRoleId).clip : null
+      };
+    });
     let draft = null;
     let draftError = "";
     try { draft = options.serializeDraft(); } catch (error) { draftError = error.message; }
     const baseline = savedDrafts.get(draftKey(roleId, sourceId, blockId)) ?? layerClip;
     const dirty = Boolean(draft && (!written || !sameOscSnapshot(draft, baseline)));
-    const writeAvailability = oscWriteAvailability({ blockId, targetId: sourceId, complete: Boolean(draft), written, dirty });
-    elements.captureButton.textContent = oscWriteActionLabel({ blockId, written, label: source?.label || assignment?.label || sourceId });
+    const destinationsDirty = Boolean(draft && destinationStates.some((destination) => !destination.clip || !sameOscSnapshot(draft, destination.clip)));
+    const writeAvailability = oscWriteAvailability({
+      blockId,
+      targetId: destinationIds[0],
+      complete: Boolean(draft),
+      written: destinationStates.length > 0 && destinationStates.every((destination) => destination.clip),
+      dirty: destinationsDirty
+    });
+    elements.captureButton.textContent = checkedWriteActionLabel(blockId, destinationIds.length);
     elements.recallButton.textContent = `Recall ${blockId || "—"} Now`;
     elements.captureButton.disabled = !writeAvailability.allowed;
     elements.loadButton.disabled = !layerClip;
@@ -240,9 +253,9 @@ export function createOscSnapshotEditorClient(options) {
     elements.duplicateButton.disabled = !(selected && elements.clipIdInput?.value.trim());
     elements.recallButton.disabled = !layerClip;
     renderClearAvailability();
-    if (elements.copyButton) elements.copyButton.disabled = !draft || !elements.copyTargetSelect?.value;
     if (!blockId) return setState("No mesostructural blocks available");
     if (!sourceId) return setState(`No online ${options.roleLabel || app} instance is focused`);
+    if (!destinationIds.length) return setState("Check at least one live destination before writing");
     if (draftError) return setState(`Draft incomplete: ${draftError}`);
     if (!writeAvailability.allowed) return setState(writeAvailability.reason);
     const routing = resolution?.status ? ` · role ${resolution.status}` : "";
@@ -255,50 +268,35 @@ export function createOscSnapshotEditorClient(options) {
 
   async function capture() {
     const blockId = elements.blockSelect.value;
-    const targetId = elements.sourceSelect.value;
-    const layer = selectedLayer();
+    const targetIds = selectedLiveTargetIds(options.liveTargetRoot);
+    if (!targetIds.length) throw new Error("Check at least one live destination before writing");
     const draft = options.serializeDraft();
+    const replacements = targetIds.flatMap((targetId) => {
+      const destinationRoleId = resolveFocusedOscRole({ app, targetId, targets, assignments, resolutions });
+      const clip = destinationRoleId ? oscBlockSlotState(score, blockId, destinationRoleId).clip : null;
+      return clip ? [targets.find((target) => target.id === targetId)?.label || targetId] : [];
+    });
+    if (replacements.length && !window.confirm(`Replace ${blockId} Written State for ${replacements.join(", ")} and write the displayed draft to all ${targetIds.length} checked instance${targetIds.length === 1 ? "" : "s"}?`)) return;
     elements.captureButton.disabled = true;
     const result = await fetchJson("/osc/block-state/write", {
       method: "POST",
       body: JSON.stringify({
         expectedStructureRevision: score?.structureRevision ?? 0,
-        targetId, blockId, snapshot: draft, replace: Boolean(layer)
+        targets: targetIds, blockId, snapshot: draft, replace: replacements.length > 0
       })
     });
     score = result.score;
     assignments = score.oscAssignments ?? {};
-    activeDraftKey = draftKey(result.roleId, targetId, blockId);
-    drafts.set(activeDraftKey, structuredClone(draft));
-    savedDrafts.set(activeDraftKey, structuredClone(draft));
+    for (const write of result.writes ?? []) {
+      const key = draftKey(write.roleId, write.targetId, blockId);
+      drafts.set(key, structuredClone(draft));
+      savedDrafts.set(key, structuredClone(draft));
+      if (write.targetId === elements.sourceSelect.value) activeDraftKey = key;
+    }
     renderContext();
-    elements.clipSelect.value = result.clipId;
-    options.setStatus?.(`${layer ? "Replaced" : "Wrote"} ${blockId} state for ${targets.find((target) => target.id === targetId)?.label || targetId}; no OSC was sent`);
-  }
-
-  async function copy() {
-    const targetId = elements.copyTargetSelect?.value;
-    if (!targetId) throw new Error("Choose an instance for Save Copy To");
-    const blockId = elements.blockSelect.value;
-    const draft = options.serializeDraft();
-    const destinationRole = resolveFocusedOscRole({ app, targetId, targets, assignments, resolutions });
-    const destinationWritten = Boolean(destinationRole && oscBlockSlotState(score, blockId, destinationRole).clip);
-    const replace = destinationWritten
-      ? window.confirm(`${blockId} is already Written for ${targets.find((target) => target.id === targetId)?.label || targetId}. Replace it with an independent copy?`)
-      : false;
-    if (destinationWritten && !replace) return;
-    elements.copyButton.disabled = true;
-    const result = await fetchJson("/osc/block-state/copy", {
-      method: "POST",
-      body: JSON.stringify({ expectedStructureRevision: score?.structureRevision ?? 0, targetId, blockId, snapshot: draft, replace })
-    });
-    score = result.score;
-    assignments = score.oscAssignments ?? {};
-    const destinationKey = draftKey(result.roleId, targetId, blockId);
-    drafts.set(destinationKey, structuredClone(draft));
-    savedDrafts.set(destinationKey, structuredClone(draft));
-    renderContext();
-    options.setStatus?.(`Saved an independent copy of ${blockId} state to ${targets.find((target) => target.id === targetId)?.label || targetId}; focus and live clients were unchanged`);
+    const sourceWrite = (result.writes ?? []).find((write) => write.targetId === elements.sourceSelect.value);
+    if (sourceWrite && elements.clipSelect) elements.clipSelect.value = sourceWrite.clipId;
+    options.setStatus?.(`Wrote ${blockId} state to ${targetIds.length} checked instance${targetIds.length === 1 ? "" : "s"}; no OSC was sent`);
   }
 
   function openClearDialog() {
@@ -450,7 +448,7 @@ export function createOscSnapshotEditorClient(options) {
     };
     for (const eventName of [
       "snapshot", "osc.clip.added", "osc.clip.captured", "osc.clip.replaced", "osc.clip.removed",
-      "osc.blockState.written", "osc.blockState.replaced", "osc.blockState.cleared",
+      "osc.blockState.written", "osc.blockState.replaced", "osc.blockState.batchWritten", "osc.blockState.cleared",
       "mesostructure.oscLayer.assigned", "mesostructure.oscLayer.removed",
       "structure.playhead.updated", "osc.assignment.replaced", "osc.assignment.removed",
       "osc.assignment.reconciled", "admin.reset", "admin.score.created", "admin.score.initialized", "admin.restore"
@@ -571,15 +569,6 @@ export function createOscSnapshotEditorClient(options) {
       card.append(focusLabel, state, ignore);
       return card;
     }));
-  }
-
-  function renderCopyTargets() {
-    if (!elements.copyTargetSelect) return;
-    const previous = elements.copyTargetSelect.value;
-    const focusedId = elements.sourceSelect?.value;
-    const destinations = targets.filter((target) => target.id !== focusedId);
-    elements.copyTargetSelect.replaceChildren(optionFor("", destinations.length ? "Choose instance…" : "No other instance"), ...destinations.map((target) => optionFor(target.id, target.label || target.id)));
-    if (destinations.some((target) => target.id === previous)) elements.copyTargetSelect.value = previous;
   }
 
   function selectedSnapshot() {
@@ -723,8 +712,11 @@ export function resolveFocusedOscRole({ app, targetId, targets = [], assignments
   const resolved = Object.entries(resolutions).find(([roleId, resolution]) => cleanToken(assignments[roleId]?.app) === normalizedApp
     && (resolution?.targetId === targetId || resolution?.target?.id === targetId));
   if (resolved) return resolved[0];
-  const compatible = Object.entries(assignments).filter(([, assignment]) => cleanToken(assignment.app) === normalizedApp
-    && assignment.deviceId === (target.deviceId || target.unitId));
+  const compatible = Object.entries(assignments).filter(([, assignment]) => {
+    if (cleanToken(assignment.app) !== normalizedApp || assignment.deviceId !== (target.deviceId || target.unitId)) return false;
+    const assignedTargetId = String(assignment.oscTargetId ?? "");
+    return !assignedTargetId || !targets.some((entry) => entry.id === assignedTargetId);
+  });
   return compatible.length === 1 ? compatible[0][0] : "";
 }
 
@@ -783,9 +775,15 @@ export function oscWriteActionLabel({ blockId, written, label = "" } = {}) {
   return written ? `Replace ${blockId} State${destination}` : `Write ${blockId} State${destination}`;
 }
 
+export function checkedWriteActionLabel(blockId = "", targetCount = 0) {
+  if (!blockId) return "Write to —";
+  if (!targetCount) return `Write ${blockId} State`;
+  return `Write ${blockId} State to ${targetCount} Checked Instance${targetCount === 1 ? "" : "s"}`;
+}
+
 export function oscWriteAvailability({ blockId = "", targetId = "", complete = false, written = false, dirty = false } = {}) {
   if (!blockId) return { allowed: false, reason: "Choose an EDITING block" };
-  if (!targetId) return { allowed: false, reason: "Focus an online instance" };
+  if (!targetId) return { allowed: false, reason: "Check at least one live destination before writing" };
   if (!complete) return { allowed: false, reason: "Complete the displayed draft before writing" };
   if (written && !dirty) return { allowed: false, reason: `${blockId} State is saved` };
   return { allowed: true, reason: "" };
@@ -811,6 +809,11 @@ export function selectExclusiveOscTarget(root, targetId) {
     matched ||= selected;
   }
   return matched;
+}
+
+function selectedLiveTargetIds(root) {
+  if (!root || typeof root.querySelectorAll !== "function") return [];
+  return Array.from(root.querySelectorAll("[data-target]:checked"), (input) => input.dataset?.target).filter(Boolean);
 }
 
 export function oscPlaybackWiperVisible({ editingBlockId = "", playingBlockId = "", running = false } = {}) {

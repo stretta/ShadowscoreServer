@@ -19,8 +19,14 @@ while Matrix Edit retains client stages as secondary execution diagnostics and
 no longer polls RNBO clients directly from the browser. The server stage
 collector now supplies cached, timestamped periodic observations to snapshot
 consumers, performing an immediate read only for a newly observed target (or
-when periodic polling is explicitly disabled). Phase 6 live cross-editor
-validation is next.
+when periodic polling is explicitly disabled).
+
+The implementation was deployed to `wren` and the perceived wiper smoothness
+was confirmed live on 2026-07-22. That establishes the primary Phase 6
+acceptance result without changing snapshot cadence. The wider scenario matrix
+below remains available for regression testing; block advancement was not
+evaluated in this pass because ShadowScore playback was stopped even though
+JACK remained rolling as a clock source.
 
 ## Non-goals
 
@@ -121,6 +127,10 @@ Make the RNBO stage collector the sole periodic owner of client-stage reads.
   configurable.
 
 ## Phase 6: Cross-editor validation
+
+Baseline live result: passed on `wren` on 2026-07-22. Perceived wiper motion was
+smooth at the existing snapshot rate. Extended edge-case coverage remains a
+regression task rather than a blocker for the completed implementation.
 
 Validate both editors together at multiple tempos and under normal network
 jitter. Exercise start, stop, seek, tempo change, block boundaries, editing a

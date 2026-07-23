@@ -5,8 +5,8 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>ShadowScore Matrix Edit</title>
     <link rel="stylesheet" href="/shared/shadowscore-style.css" />
-    <script type="module" crossorigin src="/matrix-edit/assets/index-8G87UaLc.js"></script>
-    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-DkWAktNw.css">
+    <script type="module" crossorigin src="/matrix-edit/assets/index-JIY8jMGt.js"></script>
+    <link rel="stylesheet" crossorigin href="/matrix-edit/assets/index-CsnyLnGA.css">
   </head>
   <body>
     <nav class="ss-route-tabs" aria-label="ShadowScore routes">
@@ -183,7 +183,10 @@
           <button id="edit-vary" type="button">Vary Events</button>
         </div>
       </div>
-      <canvas id="matrix" aria-label="RNBO matrix parameter"></canvas>
+      <div class="matrix-shell">
+        <canvas id="matrix" aria-label="RNBO matrix parameter"></canvas>
+        <div id="matrix-wiper" class="matrix-wiper" aria-hidden="true" hidden></div>
+      </div>
       <p id="status"></p>
     </main>
   </body>

@@ -11,6 +11,14 @@ This work also consolidates playback observation so browser count does not
 multiply direct RNBO client polling and both editors render the same musical
 position.
 
+## Status
+
+Phases 1 through 4 are implemented as of 2026-07-22. Piano Roll and Matrix Edit
+both freewheel lightweight wiper overlays from coherent playback snapshots,
+while Matrix Edit retains client stages as secondary execution diagnostics and
+no longer polls RNBO clients directly from the browser. Phase 5, consolidating
+server polling ownership behind cached timestamped observations, is next.
+
 ## Non-goals
 
 - Do not increase `/playback/snapshot`, JACK, or RNBO client polling rates to
@@ -131,4 +139,3 @@ Land narrow, independently testable checkpoints in this order:
 4. Matrix Edit overlay integration and export.
 5. Server polling consolidation.
 6. Cross-editor live validation.
-

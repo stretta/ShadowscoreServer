@@ -1843,12 +1843,16 @@ function nextMacroBlockId(score, activeBlockId) {
 async function coherentPlaybackSnapshot(runtime, store, config) {
   const score = store.getScore();
   let targets = await readAllRnboTargets(config, runtime);
-  if (runtime.rnboStageCollector?.refresh) {
+  if (runtime.rnboStageCollector?.ensureObservations) {
+    await runtime.rnboStageCollector.ensureObservations(targets);
+    targets = runtime.rnboStageCollector.targets(targets);
+  } else if (runtime.rnboStageCollector?.refresh) {
+    // Compatibility for injected collectors that predate server-owned polling.
     await runtime.rnboStageCollector.refresh(targets);
     targets = runtime.rnboStageCollector.targets(targets);
   }
-  // Capture the coherent snapshot boundary after peer polling completes so
-  // each target's stateAgeMs reflects when its readback actually arrived.
+  // Capture the coherent boundary after any first-observation refresh. Normal
+  // requests use the collector's cached, timestamped periodic observations.
   const observedAt = Date.now();
   targets = withRnboSendStatus(targets, runtime);
   const timingContracts = targets.map((target) => playbackTimingContractForTarget(score, config, target));

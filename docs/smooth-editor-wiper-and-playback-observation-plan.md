@@ -13,11 +13,14 @@ position.
 
 ## Status
 
-Phases 1 through 4 are implemented as of 2026-07-22. Piano Roll and Matrix Edit
+Phases 1 through 5 are implemented as of 2026-07-22. Piano Roll and Matrix Edit
 both freewheel lightweight wiper overlays from coherent playback snapshots,
 while Matrix Edit retains client stages as secondary execution diagnostics and
-no longer polls RNBO clients directly from the browser. Phase 5, consolidating
-server polling ownership behind cached timestamped observations, is next.
+no longer polls RNBO clients directly from the browser. The server stage
+collector now supplies cached, timestamped periodic observations to snapshot
+consumers, performing an immediate read only for a newly observed target (or
+when periodic polling is explicitly disabled). Phase 6 live cross-editor
+validation is next.
 
 ## Non-goals
 

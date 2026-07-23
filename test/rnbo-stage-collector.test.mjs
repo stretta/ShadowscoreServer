@@ -78,6 +78,48 @@ test("RNBO stage collector coalesces overlapping refreshes", async () => {
   assert.equal(calls, 1);
 });
 
+test("RNBO stage collector ensures the first observation without polling per consumer", async () => {
+  let calls = 0;
+  let scheduledRefresh;
+  const collector = createRnboStageCollector({
+    transport: { rnboClient: { pollIntervalMs: 125 } }
+  }, {
+    setInterval(callback) {
+      scheduledRefresh = callback;
+      return { unref() {} };
+    },
+    fetchImpl: async () => {
+      calls += 1;
+      return { ok: true, async json() { return { VALUE: [12] }; } };
+    }
+  });
+
+  await collector.ensureObservations([targets[0]]);
+  await collector.ensureObservations([targets[0]]);
+  assert.equal(calls, 1);
+
+  await scheduledRefresh();
+  assert.equal(calls, 2);
+  collector.close();
+});
+
+test("RNBO stage collector remains request-driven when periodic polling is disabled", async () => {
+  let calls = 0;
+  const collector = createRnboStageCollector({
+    transport: { rnboClient: { pollIntervalMs: 0 } }
+  }, {
+    autoStart: false,
+    fetchImpl: async () => {
+      calls += 1;
+      return { ok: true, async json() { return { VALUE: [12] }; } };
+    }
+  });
+
+  await collector.ensureObservations([targets[0]]);
+  await collector.ensureObservations([targets[0]]);
+  assert.equal(calls, 2);
+});
+
 test("RNBO current stage URL prefers advertised OSCQuery endpoints", () => {
   assert.equal(rnboCurrentStageUrl({
     oscQueryUrl: "http://finch.local:5678",

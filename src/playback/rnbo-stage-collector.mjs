@@ -29,6 +29,12 @@ export function createRnboStageCollector(config = {}, options = {}) {
         .finally(() => { refreshPromise = undefined; });
       return refreshPromise;
     },
+    ensureObservations(nextTargets = []) {
+      this.updateTargets(nextTargets);
+      const missingObservation = targets.some((target) => !observations.has(target.id));
+      if (settings.pollIntervalMs <= 0 || missingObservation) return this.refresh();
+      return refreshPromise ?? Promise.resolve();
+    },
     targets(nextTargets = []) {
       this.updateTargets(nextTargets);
       const observedAt = now();

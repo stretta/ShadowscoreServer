@@ -1932,6 +1932,29 @@ test("playback snapshot timestamps its boundary after peer stage collection", as
   assert.ok(snapshot.targets.finch.stateAgeMs >= 5);
 });
 
+test("playback snapshots consume server-owned stage observations without forcing refresh", async () => {
+  let ensureCalls = 0;
+  const context = createRouteContext({
+    runtime: {
+      rnboStageCollector: {
+        async ensureObservations() {
+          ensureCalls += 1;
+        },
+        async refresh() {
+          throw new Error("snapshot request forced a peer refresh");
+        },
+        targets(targets) {
+          return targets;
+        }
+      }
+    }
+  });
+
+  await requestJson(context, "GET", "/playback/snapshot");
+  await requestJson(context, "GET", "/playback/snapshot");
+  assert.equal(ensureCalls, 2);
+});
+
 test("playback updates route exposes the adapter's shared live-edit state", async () => {
   const context = createRouteContext({
     runtime: {

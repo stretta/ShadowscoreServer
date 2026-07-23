@@ -3,6 +3,7 @@ import { DEFAULT_SCALE, normalizeScale, normalizeTtid, reinterpretPitch, scaleTo
 import { reconcileOscAssignments as reconcileOscRoleAssignments } from "../osc/assignments.mjs";
 import { normalizeOscClip } from "../osc/snapshot-contract.mjs";
 import { createScoreInitializationPlan } from "./score-initialization.mjs";
+import { reconcilePlayerStructure } from "./player-structure.mjs";
 
 export function createInitialScore(config) {
   const voices = {};
@@ -100,13 +101,25 @@ export function createScoreStore(initialScore, options = {}) {
       const nextAssignments = { ...ensureAssignments(score, assignmentDefaults) };
       delete nextVoices[voiceId];
       delete nextAssignments[voiceId];
+      const playerStructure = reconcilePlayerStructure({
+        voices: nextVoices,
+        clips: score.clips,
+        mesostructure: score.mesostructure
+      });
       score = {
         ...score,
         ...nextRevisionFields(score, { structure: true }),
+        scoreInitialization: {
+          schemaVersion: score.scoreInitialization?.schemaVersion ?? 1,
+          name: score.scoreInitialization?.name ?? "",
+          exactPlayers: true
+        },
+        clips: playerStructure.clips,
+        mesostructure: playerStructure.mesostructure,
         assignments: nextAssignments,
         voices: nextVoices
       };
-      emitChange(events, "voice.removed", score, { voiceId }, options);
+      emitChange(events, "voice.removed", score, { voiceId, removedClipIds: playerStructure.removedClipIds }, options);
       return structuredClone(score);
     },
     updateContext(nextContext, options = {}) {
@@ -1314,10 +1327,13 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
       notes: structuredClone(voice.notes)
     };
   }
-  const voiceIds = [...new Set([
-    ...Object.keys(fallbackScore?.voices ?? {}),
-    ...Object.keys(restoredVoices)
-  ])];
+  const scoreInitialization = normalizeScoreInitialization(scoreDocument.scoreInitialization ?? fallbackScore?.scoreInitialization ?? null);
+  const voiceIds = scoreInitialization?.exactPlayers
+    ? Object.keys(restoredVoices)
+    : [...new Set([
+        ...Object.keys(fallbackScore?.voices ?? {}),
+        ...Object.keys(restoredVoices)
+      ])];
   const voices = Object.fromEntries(
     voiceIds.map((voiceId) => [
       voiceId,
@@ -1330,19 +1346,21 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
       assignments[voiceId] = normalizeAssignment(assignment);
     }
   }
+  const clips = normalizeClips(scoreDocument.clips ?? fallbackScore?.clips ?? {});
   const mesostructure = normalizeMesostructure(scoreDocument.mesostructure ?? fallbackScore?.mesostructure ?? createDefaultMesostructure());
+  const playerStructure = reconcilePlayerStructure({ voices, clips, mesostructure });
   const macrostructure = normalizeMacrostructure(scoreDocument.macrostructure ?? fallbackScore?.macrostructure ?? createDefaultMacrostructure());
   const normalized = {
     ensembleId: stringField(scoreDocument.ensembleId),
     version: Number.isFinite(scoreDocument.version) ? scoreDocument.version : 0,
     scoreRevision: scoreRevisionFor(scoreDocument),
     structureRevision: structureRevisionFor(scoreDocument),
-    scoreInitialization: normalizeScoreInitialization(scoreDocument.scoreInitialization ?? fallbackScore?.scoreInitialization ?? null),
+    scoreInitialization,
     context: structuredClone(scoreDocument.context),
-    clips: normalizeClips(scoreDocument.clips ?? fallbackScore?.clips ?? {}),
-    mesostructure,
+    clips: playerStructure.clips,
+    mesostructure: playerStructure.mesostructure,
     macrostructure,
-    structureState: normalizeStructureState(scoreDocument.structureState ?? fallbackScore?.structureState ?? createDefaultStructureState(), mesostructure, macrostructure),
+    structureState: normalizeStructureState(scoreDocument.structureState ?? fallbackScore?.structureState ?? createDefaultStructureState(), playerStructure.mesostructure, macrostructure),
     assignments,
     oscAssignments: normalizeOscAssignments(scoreDocument.oscAssignments ?? {}),
     oscClips: normalizeOscClips(scoreDocument.oscClips ?? {}),

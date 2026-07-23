@@ -37,6 +37,33 @@ test("playback wiper prefers the authoritative beat and exposes client execution
   assert.equal(executionBeatForVoice(options), 89 / 16);
 });
 
+test("playback wiper exposes a fresh client execution witness while macro playback is stopped", () => {
+  assert.equal(playbackBeatForVoice({
+    playback: { playing: false, activeBlockId: "A", beatIntoBlock: null },
+    blockId: "A",
+    voiceId: "player-1",
+    assignment: { rnboTargetId: "rnbo-inst-22:shadowscore" },
+    targets: [{ id: "rnbo-inst-22:shadowscore", online: true, fresh: true, blockId: "A", currentStage: 163 }],
+    contracts: [{ targetId: "rnbo-inst-22:shadowscore", assignedVoiceId: "player-1", timing: { blockId: "A", stagesPerBeat: 16 } }]
+  }), 163 / 16);
+});
+
+test("playback wiper rejects stale or wrong-block execution witnesses", () => {
+  const options = {
+    playback: { playing: false, activeBlockId: "A", beatIntoBlock: null },
+    blockId: "A",
+    voiceId: "player-1",
+    assignment: { rnboTargetId: "rnbo-inst-22:shadowscore" },
+    targets: [{ id: "rnbo-inst-22:shadowscore", online: true, fresh: false, blockId: "A", currentStage: 163 }],
+    contracts: [{ targetId: "rnbo-inst-22:shadowscore", assignedVoiceId: "player-1", timing: { blockId: "A", stagesPerBeat: 16 } }]
+  };
+  assert.equal(playbackBeatForVoice(options), undefined);
+  assert.equal(playbackBeatForVoice({
+    ...options,
+    targets: [{ ...options.targets[0], fresh: true, blockId: "B" }]
+  }), undefined);
+});
+
 test("playback wiper falls back to macro beat and remains gated to the active block", () => {
   const options = {
     playback: { playing: true, activeBlockId: "B", beatIntoBlock: 2.5 },

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { normalizeOscClip } from "../osc/snapshot-contract.mjs";
+import { reconcilePlayerStructure } from "./player-structure.mjs";
 
 export async function loadPersistedScore(config, fallbackScore) {
   if (!config.persistence?.enabled) {
@@ -185,6 +186,12 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
     }
   }
 
+  const playerStructure = reconcilePlayerStructure({
+    voices,
+    clips: normalizePersistedClips(persistedScore.clips ?? fallbackScore.clips ?? {}),
+    mesostructure: normalizePersistedMesostructure(persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {})
+  });
+
   return {
     ensembleId: config.ensemble.id,
     version: persistedScore.version,
@@ -194,8 +201,8 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
       ? null
       : structuredClone(persistedScore.scoreInitialization),
     context: structuredClone(persistedScore.context),
-    clips: normalizePersistedClips(persistedScore.clips ?? fallbackScore.clips ?? {}),
-    mesostructure: normalizePersistedMesostructure(persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}),
+    clips: playerStructure.clips,
+    mesostructure: playerStructure.mesostructure,
     macrostructure: structuredClone(persistedScore.macrostructure ?? fallbackScore.macrostructure ?? {}),
     structureState: normalizePersistedStructureState(persistedScore.structureState ?? fallbackScore.structureState ?? {}, persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}, persistedScore.macrostructure ?? fallbackScore.macrostructure ?? {}),
     assignments,

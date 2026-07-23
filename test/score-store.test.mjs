@@ -321,6 +321,33 @@ test("voices can be added and removed at runtime", () => {
   assert.equal(removed.assignments["player-12"], undefined);
 });
 
+test("removing a player atomically removes block slots and newly orphaned clips", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+
+  const removed = store.removeVoice("player-6");
+
+  assert.equal(removed.voices["player-6"], undefined);
+  assert.equal(removed.assignments["player-6"], undefined);
+  assert.equal(removed.scoreInitialization.exactPlayers, true);
+  for (const block of Object.values(removed.mesostructure)) {
+    assert.equal(block.players["player-6"], undefined);
+  }
+  assert.equal(removed.clips["a-player-6"], undefined);
+  assert.equal(removed.clips["f-player-6"], undefined);
+  assert.equal(Object.keys(removed.clips).length, 30);
+});
+
+test("removing a player preserves clips that remain assigned to another player", () => {
+  const initial = createInitialScore(defaultConfig);
+  initial.mesostructure.A.players["player-6"] = { clipId: "a-player-1" };
+  const store = createScoreStore(initial);
+
+  const removed = store.removeVoice("player-6");
+
+  assert.ok(removed.clips["a-player-1"]);
+  assert.equal(removed.mesostructure.A.players["player-1"].clipId, "a-player-1");
+});
+
 test("mesostructural blocks can be added, replaced, and removed at runtime", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
 
@@ -591,6 +618,27 @@ test("restore can import voices that are not in the current score", () => {
   assert.equal(restored.mesostructure.Intro.duration.bars, 4);
   assert.deepEqual(restored.macrostructure.blocks, ["Intro"]);
   assert.equal(restored.voices["player-1"].notes.length, 0);
+});
+
+test("restore honors an exact player set and removes dangling structural slots", () => {
+  const initial = createInitialScore(defaultConfig);
+  const restoredDocument = structuredClone(initial);
+  restoredDocument.scoreInitialization = { schemaVersion: 1, name: "Duo", exactPlayers: true };
+  restoredDocument.voices = {
+    "player-1": restoredDocument.voices["player-1"],
+    "player-2": restoredDocument.voices["player-2"]
+  };
+  restoredDocument.assignments = {
+    "player-1": restoredDocument.assignments["player-1"],
+    "player-2": restoredDocument.assignments["player-2"]
+  };
+  const store = createScoreStore(initial, { defaultScore: initial });
+
+  const restored = store.restore(restoredDocument);
+
+  assert.deepEqual(Object.keys(restored.voices), ["player-1", "player-2"]);
+  assert.deepEqual(Object.keys(restored.mesostructure.A.players), ["player-1", "player-2"]);
+  assert.equal(restored.clips["a-player-3"], undefined);
 });
 
 test("voice notes can reject stale collaboration writes", () => {

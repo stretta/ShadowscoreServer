@@ -13,17 +13,17 @@ export function gridStepsPerBeat(subdivision) {
 
 export function playbackBeatForVoice(options = {}) {
   const playback = options.playback;
-  if (!playback?.playing || playback.activeBlockId !== options.blockId) {
+  if (playback?.activeBlockId !== options.blockId) {
     return undefined;
   }
 
   const macroBeat = playback.beatIntoBlock == null ? NaN : Number(playback.beatIntoBlock);
-  return Number.isFinite(macroBeat) ? macroBeat : executionBeatForVoice(options);
+  return playback.playing && Number.isFinite(macroBeat) ? macroBeat : executionBeatForVoice(options);
 }
 
 export function executionBeatForVoice(options = {}) {
   const playback = options.playback;
-  if (!playback?.playing || playback.activeBlockId !== options.blockId) {
+  if (playback?.activeBlockId !== options.blockId) {
     return undefined;
   }
 
@@ -36,10 +36,14 @@ export function executionBeatForVoice(options = {}) {
   const stagesPerBeat = Number(contract?.timing?.stagesPerBeat);
   if (
     targetId
+    && target?.online !== false
+    && target?.fresh !== false
+    && target?.available !== false
     && Number.isFinite(currentStage)
     && currentStage >= 0
     && Number.isFinite(stagesPerBeat)
     && stagesPerBeat > 0
+    && (!target?.blockId || target.blockId === options.blockId)
     && (!contract?.timing?.blockId || contract.timing.blockId === options.blockId)
   ) {
     return currentStage / stagesPerBeat;

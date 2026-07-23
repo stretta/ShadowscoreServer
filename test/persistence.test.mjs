@@ -80,6 +80,10 @@ test("declaratively initialized exact players survive persistence reconciliation
 
   assert.deepEqual(Object.keys(reconciled.voices), playerIds);
   assert.equal(reconciled.assignments["player-5"], undefined);
+  assert.equal(reconciled.mesostructure.A.players["player-5"], undefined);
+  assert.equal(reconciled.mesostructure.A.players["player-6"], undefined);
+  assert.equal(reconciled.clips["a-player-5"], undefined);
+  assert.equal(reconciled.clips["a-player-6"], undefined);
   assert.deepEqual(reconciled.scoreInitialization, { schemaVersion: 1, name: "Quartet", exactPlayers: true });
 });
 

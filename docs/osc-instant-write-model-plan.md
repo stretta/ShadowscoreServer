@@ -1,10 +1,10 @@
 # OSC Instant-Write Model
 
 Status: accepted implementation plan. Checkpoint 1 completed the canonical
-Block State upsert contract. Checkpoint 2 completed the local shared write
-controller and AnalogSequencer conversion on 2026-07-24 with 393 passing
-tests; its live Wren canary is pending. Later checkpoints will convert the
-remaining editors, then remove the deprecated draft model and its UI.
+Block State upsert contract. Checkpoint 2 completed the shared write controller
+and AnalogSequencer conversion on 2026-07-24 with 393 passing tests and a live
+Wren canary. Later checkpoints will convert the remaining editors, then remove
+the deprecated draft model and its UI.
 
 ## Contract
 
@@ -70,6 +70,11 @@ short-lived bridge so the checked-in frontend and backend remain compatible.
 - If Chase advances during a gesture, bind the save to the old block, enqueue
   it at pointer-up, and then display the new playing block.
 - Verify locally, then perform the live Wren canary.
+
+Checkpoint 2 canary: on Wren block C, target 29 GateTime was changed through
+the editor from `0.50` to `0.51` and restored to `0.50`. The restore advanced
+the structure revision exactly once (`449` to `450`), while target 30 remained
+at `0.50`. Transport state was not changed.
 
 ## Checkpoint 3: Remaining OSC Editors
 

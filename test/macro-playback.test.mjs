@@ -224,6 +224,34 @@ test("JACK macro playback advances at anchored beat boundaries", () => {
   playback.close();
 });
 
+test("JACK macro playback does not reverse when Link rewrites BBT after a tempo change", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ tempo: 120, blocks: ["A", "B"] });
+  const jackTransport = createJackTransportState(defaultConfig, { now: () => 1000 });
+  const playback = createMacroPlayback(store, defaultConfig, { jackTransport });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack" });
+  jackTransport.update(jackSnapshot({ absoluteBeat: 104.25, beatsPerMinute: 60 }));
+
+  assert.equal(store.getScore().structureState.activeBlockId, "B");
+  assert.equal(playback.snapshot().compositionBeat, 4.25);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 101, beatsPerMinute: 60 }));
+  const preserved = playback.snapshot();
+  assert.equal(store.getScore().structureState.activeBlockId, "B");
+  assert.equal(preserved.compositionBeat, 4.25);
+  assert.equal(preserved.beatIntoBlock, 0.25);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 102, beatsPerMinute: 60 }));
+  assert.equal(playback.snapshot().compositionBeat, 5.25);
+  assert.equal(store.getScore().structureState.activeBlockId, "B");
+
+  playback.close();
+});
+
 test("JACK-derived block entry triggers one automatic snapshot recall", async () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });

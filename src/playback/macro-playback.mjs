@@ -258,7 +258,14 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       return;
     }
     const previousBlockEndBeat = activeBlockEndBeat;
-    const derivedCompositionBeat = witness.absoluteBeat - macroStartBeat + macroStartOffsetBeats;
+    let derivedCompositionBeat = witness.absoluteBeat - macroStartBeat + macroStartOffsetBeats;
+    if (Number.isFinite(compositionBeat) && derivedCompositionBeat < compositionBeat) {
+      // jack_transport_link can rewrite JACK BBT backward while adopting a new
+      // tempo. Preserve the arrangement's musical position and move the JACK
+      // anchor with that discontinuity instead of re-entering the prior block.
+      macroStartBeat = witness.absoluteBeat - compositionBeat + macroStartOffsetBeats;
+      derivedCompositionBeat = compositionBeat;
+    }
     const derived = deriveMacroPosition(score, derivedCompositionBeat);
     compositionBeat = derived.compositionBeat;
     beatIntoBlock = derived.beatIntoBlock;

@@ -682,7 +682,12 @@ Hands-on continuation, 2026-07-24:
 - Link-authority tempo application now requests BPM through
   `jack_transport_link`'s JACK metadata property
   `http://www.x37v.info/jack/metadata/bpm`. Direct JACK reposition remains the
-  behavior only when the server itself is configured as tempo authority.
+  behavior only when the server itself is configured as tempo authority; and
+- live follow-tempo testing then exposed `jack_transport_link` rewriting JACK
+  BBT backward while adopting the requested BPM. That briefly re-entered the
+  preceding arrangement block and created a tempo-recall feedback loop.
+  Beat-derived arrangement playback now preserves a monotonic composition beat
+  across those Link BBT discontinuities.
 
 ## Test Matrix
 

@@ -7,6 +7,8 @@ export function createJackTransportController(config = {}, options = {}) {
   const script = options.script ?? config.transport?.jack?.bridgeScript ?? DEFAULT_SCRIPT;
   const clientName = options.clientName ?? config.transport?.jack?.controlClientName ?? "shadowscore-jack-control";
   const library = options.library ?? config.transport?.jack?.library ?? "";
+  const tempoAuthority = options.tempoAuthority ?? config.transport?.tempoAuthority ?? "link";
+  const linkClientName = options.linkClientName ?? config.transport?.link?.clientName ?? "jack-transport-link";
   const cwd = options.cwd ?? process.cwd();
 
   return {
@@ -40,6 +42,9 @@ export function createJackTransportController(config = {}, options = {}) {
     }
     if (action === "tempo") {
       args.push("--bpm", String(positiveNumber(bpm, "bpm")));
+      if (tempoAuthority === "link") {
+        args.push("--tempo-request-client", linkClientName);
+      }
     }
     await spawnFile(python, args, { cwd });
     return {

@@ -17,6 +17,9 @@
   },
   "transport": {
     "tempoAuthority": "link",
+    "link": {
+      "clientName": "jack-transport-link"
+    },
     "jack": {
       "enabled": false,
       "host": "shadowbox-host",

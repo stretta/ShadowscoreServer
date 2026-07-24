@@ -20,6 +20,9 @@ export const defaultConfig = Object.freeze({
   },
   transport: {
     tempoAuthority: "link",
+    link: {
+      clientName: "jack-transport-link"
+    },
     jack: {
       enabled: false,
       host: "",

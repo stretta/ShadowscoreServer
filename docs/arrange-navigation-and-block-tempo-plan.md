@@ -674,7 +674,15 @@ Hands-on continuation, 2026-07-24:
 - Players Stop currently sends `Clock: 0` only to assigned ShadowScore playback
   clients. It does not override `Clock` on clock-capable OSC roles such as
   Analog Sequencer. Treat global OSC-instrument stopping as a documented
-  follow-up decision rather than silently changing block-owned snapshot state.
+  follow-up decision rather than silently changing block-owned snapshot state;
+- written tempos A=90, B=60, C=144, and D/E/F=120 were confirmed canonical,
+  but Follow Block Tempo initially left Link/JACK at 90 across B and C. The
+  server had been attempting a JACK transport reposition, which the active
+  `jack_transport_link` timebase immediately superseded; and
+- Link-authority tempo application now requests BPM through
+  `jack_transport_link`'s JACK metadata property
+  `http://www.x37v.info/jack/metadata/bpm`. Direct JACK reposition remains the
+  behavior only when the server itself is configured as tempo authority.
 
 ## Test Matrix
 

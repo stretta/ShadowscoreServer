@@ -18,6 +18,8 @@ from typing import Any, Callable
 
 JACK_POSITION_BBT = 0x10
 JACK_DEFAULT_LIBRARY = "libjack.so.0"
+JACK_LINK_TEMPO_KEY = "http://www.x37v.info/jack/metadata/bpm"
+JACK_DECIMAL_TYPE = "https://www.w3.org/2001/XMLSchema#decimal"
 JACK_STATE_NAMES = {
     0: "stopped",
     1: "rolling",
@@ -108,6 +110,24 @@ class JackTransportClient:
             ctypes.POINTER(JackPosition),
         ]
         self._jack.jack_transport_reposition.restype = ctypes.c_int
+        self._jack.jack_get_uuid_for_client_name.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_char_p,
+        ]
+        self._jack.jack_get_uuid_for_client_name.restype = ctypes.c_void_p
+        self._jack.jack_uuid_parse.argtypes = [
+            ctypes.c_char_p,
+            ctypes.POINTER(ctypes.c_uint64),
+        ]
+        self._jack.jack_uuid_parse.restype = ctypes.c_int
+        self._jack.jack_set_property.argtypes = [
+            ctypes.c_void_p,
+            ctypes.c_uint64,
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+            ctypes.c_char_p,
+        ]
+        self._jack.jack_set_property.restype = ctypes.c_int
         try:
             callback_type = ctypes.CFUNCTYPE(None, ctypes.c_void_p)
             self._shutdown_callback = callback_type(self._handle_shutdown)
@@ -179,6 +199,37 @@ class JackTransportClient:
         result = self._jack.jack_transport_reposition(self._client, ctypes.byref(position))
         if result != 0:
             raise RuntimeError(f"jack_transport_reposition failed with code {result}")
+
+    def request_tempo(self, authority_client_name: str, bpm: float) -> None:
+        """Ask a JACK metadata-aware timebase authority to adopt a tempo."""
+        if bpm <= 0:
+            raise ValueError("bpm must be positive")
+        uuid_text = self._jack.jack_get_uuid_for_client_name(
+            self._client,
+            authority_client_name.encode("utf-8"),
+        )
+        if not uuid_text:
+            raise RuntimeError(
+                f"JACK tempo authority client '{authority_client_name}' was not found"
+            )
+        authority_uuid = ctypes.c_uint64()
+        result = self._jack.jack_uuid_parse(
+            ctypes.cast(uuid_text, ctypes.c_char_p),
+            ctypes.byref(authority_uuid),
+        )
+        if result != 0:
+            raise RuntimeError(
+                f"could not parse JACK UUID for tempo authority '{authority_client_name}'"
+            )
+        result = self._jack.jack_set_property(
+            self._client,
+            authority_uuid,
+            JACK_LINK_TEMPO_KEY.encode("utf-8"),
+            format(float(bpm), ".15g").encode("utf-8"),
+            JACK_DECIMAL_TYPE.encode("utf-8"),
+        )
+        if result != 0:
+            raise RuntimeError(f"jack_set_property failed with code {result}")
 
 
 class JackTransportPoller:
@@ -319,6 +370,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--frame", type=int, default=0, help="frame for --control locate")
     parser.add_argument("--bpm", type=float, default=120.0, help="tempo for --control tempo")
     parser.add_argument(
+        "--tempo-request-client",
+        default="",
+        help="request tempo through this JACK metadata-aware authority instead of repositioning",
+    )
+    parser.add_argument(
         "--no-post",
         action="store_true",
         help="do not POST snapshots; useful with --print before server routes exist",
@@ -353,7 +409,10 @@ def run(args: argparse.Namespace) -> int:
             elif args.control == "tempo":
                 if args.bpm <= 0:
                     raise ValueError("--bpm must be positive")
-                client.tempo(args.bpm)
+                if args.tempo_request_client:
+                    client.request_tempo(args.tempo_request_client, args.bpm)
+                else:
+                    client.tempo(args.bpm)
             if args.print:
                 print(json.dumps({"ok": True, "action": args.control, "frame": args.frame, "bpm": args.bpm}, sort_keys=True), flush=True)
             return 0

@@ -3953,14 +3953,14 @@ test("Poland editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /function shouldCurve/);
   assert.match(response.body, /function valueToSliderPosition/);
   assert.match(response.body, /addEventListener\("input", \(\) => scheduleParamSend/);
-  assert.match(response.body, /addEventListener\("change", \(\) => flushParamSend/);
+  assert.match(response.body, /bindRangeCommit/);
   assert.match(response.body, /Instance focus/);
   assert.match(response.body, /async function getData/);
   assert.match(response.body, /OSCQuery parameter read failed/);
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
-  assert.match(response.body, /serializeSnapshotDraft/);
-  assert.match(response.body, /applySavedSnapshot/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
 });
 
 test("TTID editor route serves the OSC target integration page", async () => {
@@ -3984,8 +3984,8 @@ test("TTID editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /OSCQuery parameter read failed/);
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
-  assert.match(response.body, /serializeSnapshotDraft/);
-  assert.match(response.body, /applySavedSnapshot/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
 });
 
 test("Plate editor route serves the OSC target integration page", async () => {
@@ -4010,8 +4010,8 @@ test("Plate editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /OSCQuery parameter read failed/);
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
-  assert.match(response.body, /serializeSnapshotDraft/);
-  assert.match(response.body, /applySavedSnapshot/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
 });
 
 test("SoftPiano editor route serves the compact OSC control panel", async () => {
@@ -4038,8 +4038,8 @@ test("SoftPiano editor route serves the compact OSC control panel", async () => 
   assert.match(response.body, /OSCQuery parameter read failed/);
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
-  assert.match(response.body, /serializeSnapshotDraft/);
-  assert.match(response.body, /applySavedSnapshot/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
 });
 
 test("ListSequencer editor route serves the OSC target integration page", async () => {
@@ -4089,7 +4089,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
-  assert.match(response.body, /20260723-copy-checked1/);
+  assert.match(response.body, /20260724-instant-write1/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -4109,8 +4109,7 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /inputPort: inputPort\.name/);
   assert.match(response.body, /param: mapParam\.name/);
   assert.match(response.body, /sendPitchMap/);
-  assert.match(response.body, /schedulePitchMap/);
-  assert.match(response.body, /flushPitchMap/);
+  assert.doesNotMatch(response.body, /schedulePitchMap|flushPitchMap/);
   assert.match(response.body, /parseVelocityList/);
   assert.match(response.body, /collectGlobalParams/);
   assert.match(response.body, /renderGlobalParams/);
@@ -4126,9 +4125,9 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /OSCQuery parameter read failed/);
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
-  assert.match(response.body, /serializeSnapshotDraft/);
-  assert.match(response.body, /applySavedSnapshot/);
-  assert.match(response.body, /20260723-copy-checked1/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
+  assert.match(response.body, /20260724-instant-write1/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -4222,16 +4221,45 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, editor === "analogsequencer" ? /20260724-instant-write1/ : /20260723-copy-checked1/,
-      `${editor} should load its current shared snapshot client contract`);
+    assert.match(response.body, /20260724-instant-write1/,
+      `${editor} should load the instant-write snapshot client contract`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');
     const targetsIndex = response.body.indexOf('id="targets"');
     assert.ok(controlsIndex >= 0 && controlsIndex < blockStateIndex, `${editor} controls should precede Block State`);
     assert.ok(blockStateIndex < targetsIndex, `${editor} live destinations should follow Block State`);
-    assert.match(response.body, editor === "analogsequencer" ? /Live And Save Destinations/ : /Live Send Destinations/);
+    assert.match(response.body, /Live And Save Destinations/);
     assert.match(response.body, /liveTargetRoot: targetsEl/);
+    assert.match(response.body, /instantWrite: true/);
+    assert.match(response.body, /serializeState:/);
+    assert.match(response.body, /displayState:/);
+    assert.doesNotMatch(response.body, /draftChanged|serializeDraft|applySnapshot/);
   }
+});
+
+test("instant-write OSC editors expose their intended completion boundaries", async () => {
+  const context = createRouteContext();
+  for (const editor of ["analogsequencer", "softpiano", "plate", "poland"]) {
+    const response = await request(context, "GET", `/editors/${editor}`);
+    assert.match(response.body, /bindRangeCommit/);
+    assert.match(response.body, /pointerdown/);
+    assert.match(response.body, /pointerup/);
+    assert.match(response.body, /commitGesture/);
+  }
+
+  const list = await request(context, "GET", "/editors/listsequencer");
+  assert.match(list.body, /beginGesture/);
+  assert.match(list.body, /pointerup/);
+  assert.match(list.body, /commitGesture/);
+  assert.match(list.body, /sendAddress[\s\S]*commitEdit/);
+
+  const listVel = await request(context, "GET", "/editors/listvelsequencer");
+  assert.match(listVel.body, /async function sendRow[\s\S]*commitEdit/);
+  assert.match(listVel.body, /async function sendPitchMap[\s\S]*commitEdit/);
+  assert.doesNotMatch(listVel.body, /schedulePitchMap|flushPitchMap/);
+
+  const ttid = await request(context, "GET", "/editors/ttid");
+  assert.match(ttid.body, /setDraftParamValue\(param\.name, value\);\s+snapshotClient\?\.commitEdit\(\)/);
 });
 
 test("OSC volume tool route serves target selection and trim controls", async () => {

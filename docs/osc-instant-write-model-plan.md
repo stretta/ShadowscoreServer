@@ -3,8 +3,9 @@
 Status: accepted implementation plan. Checkpoint 1 completed the canonical
 Block State upsert contract. Checkpoint 2 completed the shared write controller
 and AnalogSequencer conversion on 2026-07-24 with 393 passing tests and a live
-Wren canary. Later checkpoints will convert the remaining editors, then remove
-the deprecated draft model and its UI.
+Wren canary. Checkpoint 3 converted the remaining six OSC editors with 394
+passing tests; its live Wren canary is pending. Checkpoint 4 will remove the
+deprecated draft model and its UI.
 
 ## Contract
 

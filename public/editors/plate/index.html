@@ -305,10 +305,10 @@
       <div id="controls" class="reverb-param-grid"></div>
     </section>
     <div id="snapshot-mount"></div>
-    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live Send Destinations</h2><span>Focus selects one. Check additional instances only when multi-output is intentional.</span></div><div id="targets" class="target-strip" aria-label="Plate targets"></div></section>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="target-strip" aria-label="Plate targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260723-copy-checked1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write1";
     const PLATE_GROUPS = [
       { title: "Time", key: "time", match: ["decay", "time", "size", "predelay", "pre-delay", "delay"] },
       { title: "Tone", key: "tone", match: ["damp", "damping", "diffusion", "diffuse", "brightness", "color", "tone", "low", "high", "cut", "filter"] },
@@ -349,8 +349,9 @@
       app: "plate",
       roleLabel: "Plate",
       elements: snapshotElements,
-      serializeDraft: serializeSnapshotDraft,
-      applySnapshot: applySavedSnapshot,
+      instantWrite: true,
+      serializeState: serializeSnapshotState,
+      displayState: displaySavedState,
       onFocusChange: getData,
       liveTargetRoot: targetsEl,
       setStatus
@@ -372,7 +373,6 @@
         renderReadSources();
         renderControls();
         setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online Plate targets");
-        snapshotClient?.draftChanged();
       } finally {
         refreshButton.disabled = false;
       }
@@ -440,7 +440,6 @@
           populated += 1;
         }
         renderControls();
-        snapshotClient?.draftChanged();
         setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
       } finally {
         getDataButton.disabled = targets.length === 0;
@@ -536,8 +535,8 @@
       input.dataset.curved = String(curved);
       input.dataset.param = param.name;
       input.addEventListener("input", () => scheduleParamSend(param.name, sliderValue(param, input, min, max)));
-      input.addEventListener("input", () => { paramState.get(param.name).value = sliderValue(param, input, min, max); snapshotClient?.draftChanged(); });
-      input.addEventListener("change", () => flushParamSend(param.name, sliderValue(param, input, min, max)));
+      input.addEventListener("input", () => { paramState.get(param.name).value = sliderValue(param, input, min, max); });
+      bindRangeCommit(input, () => flushParamSend(param.name, sliderValue(param, input, min, max)));
       return input;
     }
 
@@ -561,8 +560,8 @@
             option.dataset.active = String(option.dataset.value === String(value));
           }
           wrap.dispatchEvent(new CustomEvent("plate-choice"));
-          snapshotClient?.draftChanged();
           sendParam(param.name, parseChoiceValue(value));
+          snapshotClient?.commitEdit();
         });
         wrap.append(button);
       }
@@ -625,19 +624,38 @@
       return paramState.get(param.name)?.value ?? param.value ?? param.min ?? 0;
     }
 
-    function serializeSnapshotDraft() {
+    function bindRangeCommit(input, flushLive) {
+      let gesture = null;
+      input.addEventListener("pointerdown", () => { gesture = snapshotClient?.beginGesture() ?? null; });
+      input.addEventListener("pointerup", () => {
+        const completed = gesture;
+        if (completed) snapshotClient?.commitGesture(completed);
+        queueMicrotask(() => { if (gesture === completed) gesture = null; });
+      });
+      input.addEventListener("pointercancel", () => {
+        if (gesture) snapshotClient?.cancelGesture(gesture);
+        gesture = null;
+      });
+      input.addEventListener("change", () => {
+        flushLive();
+        if (gesture) snapshotClient?.commitGesture(gesture);
+        else snapshotClient?.commitEdit();
+        gesture = null;
+      });
+    }
+
+    function serializeSnapshotState() {
       return createOscEditorSnapshot({
         app: "plate",
         paramEntries: Array.from(paramState, ([name, param]) => ({ name, value: param.value, values: param.values }))
       });
     }
 
-    function applySavedSnapshot(snapshot) {
+    function displaySavedState(snapshot) {
       for (const [name, value] of Object.entries(snapshot.params ?? {})) {
         if (paramState.has(name)) paramState.get(name).value = oscEditorParamValue(paramState.get(name), value);
       }
       renderControls();
-      snapshotClient?.draftChanged();
     }
 
     function controlValue(control) {

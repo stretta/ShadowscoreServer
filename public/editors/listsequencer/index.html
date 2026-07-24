@@ -385,10 +385,10 @@
     <section id="inports" class="panel" aria-live="polite"></section>
     <section id="ttid" class="ttid-grid" aria-live="polite"></section>
     <div id="snapshot-mount"></div>
-    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live Send Destinations</h2><span>Focus selects one. Use All Targets only for intentional multi-output performance.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260723-copy-checked1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write1";
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
     let SCALES = Object.freeze({ ionian: [0, 2, 4, 5, 7, 9, 11] });
@@ -428,19 +428,14 @@
 
     refreshButton.addEventListener("click", () => refresh({ hydrate: true }).catch(reportError));
     selectAllButton.addEventListener("click", selectAllTargets);
-    document.querySelector("main").addEventListener("input", (event) => {
-      if (event.target.matches("[data-param], [data-inport]")) snapshotClient?.draftChanged();
-    });
-    document.querySelector("main").addEventListener("change", (event) => {
-      if (event.target.matches("[data-param], [data-inport]")) snapshotClient?.draftChanged();
-    });
     const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
     snapshotClient = createOscSnapshotEditorClient({
       app: "listsequencer",
       roleLabel: "ListSequencer",
       elements: snapshotElements,
-      serializeDraft: serializeSnapshotDraft,
-      applySnapshot: applySavedSnapshot,
+      instantWrite: true,
+      serializeState: serializeSnapshotState,
+      displayState: displaySavedState,
       onFocusChange: populateFields,
       readOnBlockChange: true,
       liveTargetRoot: targetsEl,
@@ -472,7 +467,6 @@
         hydrateBlockTtid();
         if (hydrate && targets.length) await populateFields();
         else setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListSequencer targets");
-        snapshotClient?.draftChanged();
       } finally {
         refreshButton.disabled = false;
       }
@@ -494,7 +488,7 @@
       return body;
     }
 
-    function serializeSnapshotDraft() {
+    function serializeSnapshotState() {
       const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
       const byParamName = new Map((source?.parameters || []).map((param) => [param.name, param]));
       const paramEntries = Array.from(document.querySelectorAll("[data-param]"))
@@ -516,7 +510,7 @@
       return createOscEditorSnapshot({ app: "listsequencer", paramEntries, inputPortEntries });
     }
 
-    async function applySavedSnapshot(snapshot) {
+    async function displaySavedState(snapshot) {
       for (const target of targets) {
         target.parameters = (target.parameters ?? []).map((param) => Object.hasOwn(snapshot.params ?? {}, param.name)
           ? { ...param, value: oscEditorParamValue(param, snapshot.params[param.name]) }
@@ -532,7 +526,6 @@
         const input = inportsEl.querySelector(`[data-inport="${cssSelectorValue(name)}"]`);
         if (input) input.value = values.join(" ");
       }
-      snapshotClient?.draftChanged();
     }
 
     function collectInputPorts(nextTargets) {
@@ -699,7 +692,7 @@
         max: param.max,
         className: "number-object",
         label: transposeLabel(param.name),
-        onChange: (value) => sendParam(param, value).catch(reportError)
+        onChange: (value, commit) => sendParam(param, value, { commit }).catch(reportError)
       });
       number.dataset.param = param.name;
       row.append(number, document.createElement("span"));
@@ -807,9 +800,9 @@
         max: rootParam?.max,
         className: "number-object root-number",
         label: rootParam ? `Root (${rangeText(rootParam)})` : "Root",
-        onChange: (value) => {
+        onChange: (value, commit) => {
           scale.root = value;
-          if (rootParam) sendParam(rootParam, value).catch(reportError);
+          if (rootParam) sendParam(rootParam, value, { commit }).catch(reportError);
         }
       });
       if (rootParam) rootNumber.dataset.param = rootParam.name;
@@ -878,6 +871,7 @@
     }
 
     async function sendAddress(inputPort, args) {
+      snapshotClient?.commitEdit();
       const selected = selectedTargetsFor(inputPort.targetIds);
       if (!selected.length) {
         setStatus("No targets selected");
@@ -941,7 +935,6 @@
       renderInports();
       renderTtid();
       hydrateBlockTtid();
-      snapshotClient?.draftChanged();
       return populated;
     }
 
@@ -994,7 +987,8 @@
       renderTtid();
     }
 
-    async function sendParam(param, value) {
+    async function sendParam(param, value, { commit = true } = {}) {
+      if (commit) snapshotClient?.commitEdit();
       const selected = selectedTargetsFor(param.targetIds);
       if (!selected.length) {
         setStatus("No targets selected");
@@ -1056,11 +1050,11 @@
       if (isReportedNumber(options.max)) input.setAttribute("aria-valuemax", String(options.max));
       let drag = null;
 
-      const commit = (nextValue) => {
+      const commit = (nextValue, save = true) => {
         const value = clampInteger(nextValue, options.min, options.max);
         input.value = String(value);
         input.setAttribute("aria-valuenow", String(value));
-        options.onChange(value);
+        options.onChange(value, save);
       };
       input.addEventListener("change", () => commit(input.value));
       input.addEventListener("keydown", (event) => {
@@ -1071,7 +1065,7 @@
       });
       input.addEventListener("pointerdown", (event) => {
         if (event.button !== 0) return;
-        drag = { id: event.pointerId, y: event.clientY, value: Number(input.value), last: Number(input.value) };
+        drag = { id: event.pointerId, y: event.clientY, value: Number(input.value), last: Number(input.value), gesture: snapshotClient?.beginGesture() ?? null };
         input.setPointerCapture(event.pointerId);
       });
       input.addEventListener("pointermove", (event) => {
@@ -1081,12 +1075,18 @@
         if (value === drag.last) return;
         drag.last = value;
         input.dataset.dragging = "true";
-        commit(value);
+        commit(value, false);
       });
       const endDrag = (event) => {
         if (!drag || drag.id !== event.pointerId) return;
+        const completed = drag;
         drag = null;
         input.dataset.dragging = "false";
+        if (event.type === "pointercancel") {
+          if (completed.gesture) snapshotClient?.cancelGesture(completed.gesture);
+        } else if (completed.gesture) {
+          snapshotClient?.commitGesture(completed.gesture);
+        }
       };
       input.addEventListener("pointerup", endDrag);
       input.addEventListener("pointercancel", endDrag);

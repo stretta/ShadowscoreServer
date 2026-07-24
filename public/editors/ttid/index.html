@@ -344,10 +344,10 @@
     </section>
     <section id="editors" class="editor-grid" aria-live="polite"></section>
     <div id="snapshot-mount"></div>
-    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live Send Destinations</h2><span>Focus selects one. Use All Targets only for intentional multi-output performance.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel } from "/shared/osc-snapshot-editor.js?v=20260723-copy-checked1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write1";
 
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
@@ -378,8 +378,9 @@
       app: "ttid",
       roleLabel: "TTID",
       elements: snapshotElements,
-      serializeDraft: serializeSnapshotDraft,
-      applySnapshot: applySavedSnapshot,
+      instantWrite: true,
+      serializeState: serializeSnapshotState,
+      displayState: displaySavedState,
       onFocusChange: getState,
       readOnBlockChange: true,
       liveTargetRoot: targetsEl,
@@ -410,7 +411,6 @@
       renderParamSelect();
       renderEditors();
       setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online TTID targets");
-      snapshotClient?.draftChanged();
       refreshButton.disabled = false;
     }
 
@@ -581,7 +581,7 @@
           const value = Number(input.value);
           if (!Number.isFinite(value)) return;
           setDraftParamValue(param.name, value);
-          snapshotClient?.draftChanged();
+          snapshotClient?.commitEdit();
           await sendParamToTargets(param, value, param.targetIds);
         });
         wrap.replaceChildren(label, input);
@@ -687,7 +687,6 @@
         renderParamSelect();
         renderEditors();
         await hydrateBlockTtid();
-        snapshotClient?.draftChanged();
         setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
       } finally {
         getStateButton.disabled = targets.length === 0;
@@ -725,7 +724,7 @@
       await hydrateBlockTtid(body.score);
     }
 
-    function serializeSnapshotDraft() {
+    function serializeSnapshotState() {
       const preferredTarget = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
       const paramEntries = [];
       for (const name of ["ChromaticTranspose", "ScalarTranspose"]) {
@@ -736,14 +735,13 @@
       return createOscEditorSnapshot({ app: "ttid", paramEntries });
     }
 
-    function applySavedSnapshot(snapshot) {
+    function displaySavedState(snapshot) {
       for (const [name, value] of Object.entries(snapshot.params ?? {})) {
         setDraftParamValue(name, value);
       }
       ttidParams = collectTtidParams(targets);
       renderParamSelect();
       renderEditors();
-      snapshotClient?.draftChanged();
     }
 
     async function hydrateBlockTtid(scoreOverride) {

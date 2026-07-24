@@ -89,10 +89,10 @@
     </section>
     <section id="rows" class="rows" aria-live="polite"></section>
     <div id="snapshot-mount"></div>
-    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live Send Destinations</h2><span>Focus selects one. Use All Targets only for intentional multi-output performance.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260723-copy-checked1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write1";
 
     const ROW_COUNT = 8;
     const GET_REQUEST = [-999];
@@ -108,7 +108,6 @@
     let globalParams = [];
     let draftParams = new Map();
     const rowValueState = new Map();
-    const mapSendTimers = new Map();
     let snapshotClient;
 
     const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
@@ -123,8 +122,9 @@
       app: "listvelsequencer",
       roleLabel: "ListVelSequencer",
       elements: snapshotElements,
-      serializeDraft: serializeSnapshotDraft,
-      applySnapshot: applySavedSnapshot,
+      instantWrite: true,
+      serializeState: serializeSnapshotState,
+      displayState: displaySavedState,
       onFocusChange: getData,
       readOnBlockChange: true,
       liveTargetRoot: targetsEl,
@@ -146,7 +146,6 @@
         renderRows();
         if (hydrate && targets.length) await getData();
         else setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online ListVelSequencer targets");
-        snapshotClient?.draftChanged();
       } finally {
         refreshButton.disabled = false;
       }
@@ -278,7 +277,6 @@
         select.value = String(draftValue ?? param.values[0]);
         select.addEventListener("change", () => {
           setDraftParamValue(entry.name, select.value);
-          snapshotClient?.draftChanged();
           sendGlobalParam(entry, select.value).catch(reportError);
         });
         control.append(select);
@@ -292,7 +290,6 @@
         toggle.addEventListener("change", () => {
           const value = toggle.checked ? 1 : 0;
           setDraftParamValue(entry.name, value);
-          snapshotClient?.draftChanged();
           sendGlobalParam(entry, value).catch(reportError);
         });
         label.append(toggle, document.createTextNode(" Enabled"));
@@ -314,7 +311,6 @@
         const commit = () => sendGlobalParam(entry, numeric ? Number(input.value) : input.value).catch(reportError);
         input.addEventListener("input", () => {
           setDraftParamValue(entry.name, numeric ? Number(input.value) : input.value);
-          snapshotClient?.draftChanged();
         });
         send.addEventListener("click", commit);
         input.addEventListener("keydown", (event) => {
@@ -330,7 +326,7 @@
 
     async function sendGlobalParam(entry, value) {
       setDraftParamValue(entry.name, value);
-      snapshotClient?.draftChanged();
+      snapshotClient?.commitEdit();
       const selected = selectedTargetIds().filter((id) => entry.paramsByTarget.has(id));
       if (!selected.length) throw new Error(`No checked target exposes ${entry.name}`);
       const results = await Promise.allSettled(selected.map((targetId) => {
@@ -375,19 +371,16 @@
       mapInput.addEventListener("input", () => {
         const name = mapParam?.name;
         if (name) setDraftParamValue(name, Number(mapInput.value));
-        snapshotClient?.draftChanged();
-        schedulePitchMap(row, mapInput.value);
       });
-      mapInput.addEventListener("change", () => flushPitchMap(row, mapInput.value).catch(reportError));
+      mapInput.addEventListener("change", () => sendPitchMap(row, mapInput.value).catch(reportError));
       mapInput.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
         event.preventDefault();
-        flushPitchMap(row, mapInput.value).catch(reportError);
+        sendPitchMap(row, mapInput.value).catch(reportError);
       });
       const rowInput = card.querySelector("[data-row-values]");
       rowInput.addEventListener("input", () => {
         rowValueState.set(row.number, rowInput.value);
-        snapshotClient?.draftChanged();
       });
       rowInput.addEventListener("keydown", (event) => {
         if (event.key !== "Enter") return;
@@ -417,7 +410,6 @@
         rowsEl.querySelector(`[data-row-map="${row.number}"]`).value = String(value);
         if (mapParam) setDraftParamValue(mapParam.name, value);
       }
-      snapshotClient?.draftChanged();
       setStatus(`Loaded row ${row.number} from ${target.label || target.id}`);
     }
 
@@ -458,12 +450,13 @@
           rowsEl.querySelector(`[data-row-values="${availableRows[index].number}"]`).value = formatted;
           populatedRows += 1;
         }
-        snapshotClient?.draftChanged();
         setStatus(`Got ${populatedParams} parameter${populatedParams === 1 ? "" : "s"} and ${populatedRows}/${availableRows.length} OSC row${availableRows.length === 1 ? "" : "s"} from ${target.label || target.id}`);
     }
 
     async function sendRow(row) {
       const values = parseVelocityList(rowsEl.querySelector(`[data-row-values="${row.number}"]`).value);
+      rowValueState.set(row.number, values.join(" "));
+      snapshotClient?.commitEdit();
       const selected = selectedTargetIds().filter((id) => row.portsByTarget.has(id));
       if (!selected.length) throw new Error(`No checked target exposes row ${row.number}`);
       setStatus(`Sending row ${row.number} to ${selected.length} target${selected.length === 1 ? "" : "s"}...`);
@@ -480,7 +473,7 @@
       const pitch = parsePitchMap(rawValue);
       const sourceParam = Array.from(row.mapsByTarget.values())[0];
       if (sourceParam) setDraftParamValue(sourceParam.name, pitch);
-      snapshotClient?.draftChanged();
+      snapshotClient?.commitEdit();
       const selected = selectedTargetIds().filter((id) => row.mapsByTarget.has(id));
       if (!selected.length) throw new Error(`No checked target exposes ${row.number}map`);
       const results = await Promise.allSettled(selected.map((targetId) => {
@@ -492,23 +485,7 @@
       if (sent !== selected.length) throw new Error(`${row.number}map failed on ${selected.length - sent} target${selected.length - sent === 1 ? "" : "s"}`);
     }
 
-    function schedulePitchMap(row, rawValue) {
-      clearTimeout(mapSendTimers.get(row.number));
-      const pitch = Number(rawValue);
-      if (!Number.isInteger(pitch) || pitch < 0 || pitch > 127) return;
-      mapSendTimers.set(row.number, setTimeout(() => {
-        mapSendTimers.delete(row.number);
-        sendPitchMap(row, pitch).catch(reportError);
-      }, 160));
-    }
-
-    function flushPitchMap(row, rawValue) {
-      clearTimeout(mapSendTimers.get(row.number));
-      mapSendTimers.delete(row.number);
-      return sendPitchMap(row, rawValue);
-    }
-
-    function serializeSnapshotDraft() {
+    function serializeSnapshotState() {
       const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
       const byParamName = new Map((source?.parameters || []).map((param) => [param.name, param]));
       const paramEntries = Array.from(draftParams, ([name, value]) => ({ name, value, values: byParamName.get(name)?.values }));
@@ -521,7 +498,7 @@
       return createOscEditorSnapshot({ app: "listvelsequencer", paramEntries, inputPortEntries });
     }
 
-    function applySavedSnapshot(snapshot) {
+    function displaySavedState(snapshot) {
       for (const [name, value] of Object.entries(snapshot.params ?? {})) {
         const param = targets.flatMap((target) => target.parameters || []).find((entry) => entry.name === name);
         setDraftParamValue(name, oscEditorParamValue(param, value));
@@ -534,7 +511,6 @@
       globalParams = collectGlobalParams(targets);
       renderGlobalParams();
       renderRows();
-      snapshotClient?.draftChanged();
     }
 
     function setDraftParamValue(name, value) {

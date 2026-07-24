@@ -308,7 +308,7 @@
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="target-strip" aria-label="Plate targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write2";
     const PLATE_GROUPS = [
       { title: "Time", key: "time", match: ["decay", "time", "size", "predelay", "pre-delay", "delay"] },
       { title: "Tone", key: "tone", match: ["damp", "damping", "diffusion", "diffuse", "brightness", "color", "tone", "low", "high", "cut", "filter"] },
@@ -349,7 +349,6 @@
       app: "plate",
       roleLabel: "Plate",
       elements: snapshotElements,
-      instantWrite: true,
       serializeState: serializeSnapshotState,
       displayState: displaySavedState,
       onFocusChange: getData,

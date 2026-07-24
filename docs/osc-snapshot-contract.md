@@ -55,7 +55,7 @@ resolved live export.
 The editor owns the allowlist. A version 1 editor snapshot may contain:
 
 - RNBO parameters presented as persistent editor state;
-- OSC message-inport lists held in the editor draft; and
+- OSC message-inport lists presented as persistent editor state; and
 - controls explicitly opted in with `meta.snapshot: true` or
   `meta.snapshot_state: true`.
 
@@ -64,7 +64,7 @@ The following are excluded unless a future export explicitly opts them in:
 - `RTZ`, reset, panic, probe, and `SetStage` commands;
 - ACK/get/readback ports and values;
 - current-stage, playback-debug, scope, meter, and other observed state; and
-- browser-only selection, routing, dirty-state, and status fields.
+- browser-only selection, routing, queue status, and error fields.
 
 TTID is always excluded and cannot be opted back into an OSC clip. Any live
 parameter whose `meta.editor` is `ttid` is block-owned harmonic state even when

@@ -437,14 +437,6 @@ td,
   color: var(--ss-accent);
 }
 
-.ss-osc-snapshot-slot.dirty span {
-  color: var(--ss-warning, #f59e0b);
-}
-
-.ss-osc-snapshot-slot.provisional {
-  border-style: dashed;
-}
-
 .ss-osc-snapshot-slot.editing {
   border-color: var(--ss-accent);
   box-shadow: 0 0 0 1px var(--ss-accent);

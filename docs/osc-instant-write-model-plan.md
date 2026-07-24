@@ -4,8 +4,9 @@ Status: accepted implementation plan. Checkpoint 1 completed the canonical
 Block State upsert contract. Checkpoint 2 completed the shared write controller
 and AnalogSequencer conversion on 2026-07-24 with 393 passing tests and a live
 Wren canary. Checkpoint 3 converted the remaining six OSC editors with 394
-passing tests and a successful live Wren canary. Checkpoint 4 will remove the
-deprecated draft model and its UI.
+passing tests and a successful live Wren canary. Checkpoint 4 removed the
+deprecated local-state model and its UI with 392 passing tests; live Wren
+verification is pending.
 
 ## Contract
 
@@ -96,6 +97,12 @@ after deploying commit `05e02f5`.
 - Retain only transient queued, saving, and failed write information.
 - Update the OSC authoring documentation and verify that draft terminology is
   absent from the OSC editor family. Piano Roll drafts are outside this scope.
+
+Checkpoint 4 result: the shared client now has one instant-write path. The
+separate Write and Reload controls, per-context caches, dirty/provisional
+rendering, compatibility options, obsolete helpers, styles, and tests were
+removed. Current OSC authoring documentation describes only canonical
+instant-write behavior.
 
 ## Acceptance
 

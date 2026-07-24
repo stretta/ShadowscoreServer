@@ -135,7 +135,7 @@ proves Prepared. Only a matching ACTIVE acknowledgement proves Active.
 | Event List | Notes and clip attributes remain local until separate **Save** actions. | Save can trigger RNBO preparation without proving activation. | Autosave validated row/attribute edits on blur or a short quiet window. Keep explicit confirmation for bulk replace/import and destructive operations. |
 | Structure Editor | Block assignments and song form use explicit Save; tempo already writes on change; duplicate, delete, cue, and transport actions are immediate. | Block and macro changes are mixed with playhead-driven client preparation. | Autosave valid structural edits as atomic documents. Treat cue/play/advance as performance actions, not saves. Show the shared playback state when an edit changes the playing or prepared block. |
 | TTID controls | Matrix Edit and TTID-capable editors write block TTID immediately. Some TTID routes can also audition selected OSC targets. | Score persistence, OSC audition, and RNBO score playback do not share one activation contract. | Keep canonical TTID autosave. Label direct OSC output **Audition**. Route playback-affecting application through the same block/target impact and boundary model. |
-| OSC snapshot editors | **Write State** stores a block snapshot; control gestures can go directly to checked instances; **Recall Now** is explicit. | Persistence and live recall are already visibly separate. | Preserve this model. Reuse its explicit Write/Recall vocabulary as a precedent, but do not merge OSC snapshot recall with RNBO note-table activation. |
+| OSC snapshot editors | Completed control gestures atomically save Block State to the same checked instances that receive live control changes; **Recall Now** remains explicit. | Per-control live sends accompany canonical saves, while full-state recall remains a distinct action. | Preserve instant Block State writes and explicit full-state recall; do not merge OSC snapshot recall with RNBO note-table activation. |
 | Admin | **Save score** creates a named library snapshot. Load, restore, reset, initialize, routing changes, and RNBO resend are explicit operator actions. | **Resend RNBO score** is an all-target recovery operation. | Rename the library action to **Save score copy** if needed for clarity. Keep resend as recovery, separate from author-facing `Apply next beat`. Whole-score replacement must invalidate playback state explicitly. |
 
 Consistency does not require every UI gesture to use the same debounce. It
@@ -538,7 +538,8 @@ Reserve **Unsaved** for a local draft or failed canonical write. Reserve
 
 ### OSC editors
 
-- Preserve the existing distinction between **Write State** and **Recall Now**.
+- Persist completed control gestures immediately while preserving **Recall
+  Now** as the distinct full-state send.
 - Do not put the RNBO note-table `Apply next beat` button inside every
   instrument-specific live-routing panel.
 - If an OSC snapshot change affects the playing block, use that subsystem's
@@ -625,8 +626,7 @@ three surfaces, including navigation and conflict cases.
 
 ### Phase 6: Admin, OSC semantics, and live fleet acceptance
 
-- Clarify score-library, restore, reset, resend, Write State, Recall, and
-  Audition labels.
+- Clarify score-library, restore, reset, resend, Recall, and Audition labels.
 - Audit every score mutation event against the impact table.
 - Run live four-bird tests with one dirty player, multiple dirty players,
   shared clips, an offline target, rapid edits, and missed preparation.

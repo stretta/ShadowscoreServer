@@ -347,7 +347,7 @@
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write2";
 
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
@@ -378,7 +378,6 @@
       app: "ttid",
       roleLabel: "TTID",
       elements: snapshotElements,
-      instantWrite: true,
       serializeState: serializeSnapshotState,
       displayState: displaySavedState,
       onFocusChange: getState,
@@ -580,7 +579,7 @@
         input.addEventListener("change", async () => {
           const value = Number(input.value);
           if (!Number.isFinite(value)) return;
-          setDraftParamValue(param.name, value);
+          setParameterValue(param.name, value);
           snapshotClient?.commitEdit();
           await sendParamToTargets(param, value, param.targetIds);
         });
@@ -737,7 +736,7 @@
 
     function displaySavedState(snapshot) {
       for (const [name, value] of Object.entries(snapshot.params ?? {})) {
-        setDraftParamValue(name, value);
+        setParameterValue(name, value);
       }
       ttidParams = collectTtidParams(targets);
       renderParamSelect();
@@ -763,7 +762,7 @@
       return Object.hasOwn(SCALES, name) ? name : "ionian";
     }
 
-    function setDraftParamValue(name, value) {
+    function setParameterValue(name, value) {
       for (const target of targets) {
         target.parameters = (target.parameters || []).map((param) => param.name === name ? { ...param, value } : param);
       }

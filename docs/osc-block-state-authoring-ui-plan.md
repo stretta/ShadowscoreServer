@@ -1,585 +1,99 @@
-# OSC Block-State Authoring UI Development Plan
+# OSC Block State Authoring UI
 
-Status: implemented and live-verified in the shared OSC editor workflow on
-2026-07-16, with checked-instance Block State writes adopted across the editor
-family on 2026-07-23. The
-normal editor now uses draft-backed Block State writes, just-in-time role
-creation, per-instance/block draft preservation, instance cards, role-level
-Ignore recall, and atomic writes to every checked instance. The acceptance gate
-was completed against the deployed wren rig; the prototype scenarios remain
-useful regression exercises rather than implementation gates.
+Status: implemented instant-write contract as of 2026-07-24.
 
-## Live Verification
+## Model
 
-Verified on the deployed wren host on 2026-07-16:
+Each persistent OSC editor control represents canonical Block State. Checked
+instances are both live-send destinations and save destinations; there is no
+live-only audition mode for persistent controls.
 
-- Written block navigation was silent: EDITING changed while PLAYING remained
-  independent, CHASE disengaged, the score version and structure revision did
-  not change, and all 40 observed live parameter values remained unchanged.
-- Exact assignments resolved correctly with two same-app instances on wren,
-  while instance focus and readback remained separate from live-send targets.
-- A legacy numeric enum value compiled into a complete 40-write recall plan
-  without an unsupported-control omission.
-- Written state loaded as clean after display normalization, with Replace
-  disabled until the displayed draft differs semantically from saved state.
-- The user completed the remaining live interaction and audible acceptance
-  checks and confirmed the workflow verified.
+The shared panel separates three concepts:
 
-## Purpose
+- **PLAYING**: the block currently selected by the score playhead;
+- **EDITING**: the block whose canonical OSC state is displayed and changed;
+- **Recall Now**: an explicit full-state send of the saved block state.
 
-Simplify initial authoring of mesostructural OSC state without weakening the
-instance-specific score model or turning Admin into a required stop in the
-normal creative workflow.
+When Chase is enabled, EDITING follows PLAYING. A block transition during a
+range gesture waits until that gesture completes, saves it to the block where
+it began, and then displays the newly playing block.
 
-ShadowScore currently has two broad kinds of composition data:
+## Save Boundaries
 
-1. note/event clips, which are edited directly by clip editors and sent to
-   ShadowScore playback clients; and
-2. persistent parameter and OSC-list state, which is captured or authored for
-   one RNBO instance and recalled as part of a mesostructural block.
+- Range controls send their live value during movement and atomically save the
+  complete editor state on pointer-up.
+- Keyboard and touch `change` events use the same completion path.
+- Toggles and selects save immediately after their completed change.
+- Text, numeric, and list controls save on their existing deliberate boundary,
+  such as Enter, blur, or a row Send action.
+- Batch actions such as Mutate and pitch-range clipping save once after the
+  batch completes.
+- Refresh, Read Instance, focus changes, block selection, score hydration, and
+  Chase hydration never save.
+- Momentary commands such as RTZ, Panic, Reset, Probe, Get, and SetStage are
+  never stored in Block State.
 
-This plan concerns only the second category. In the normal UI it should be
-called **Block State** rather than exposing OSC clip, role, layer, or snapshot
-bookkeeping.
+Every save uses one atomic request:
 
-The backend model remains:
+```http
+PUT /osc/block-state
+Content-Type: application/json
 
-```text
-focused live instance
-  -> logical OSC role
-    -> one independent OSC clip per Written block slot
-      -> block OSC layer
-        -> runtime assignment back to a live instance
+{
+  "expectedStructureRevision": 450,
+  "blockId": "C",
+  "targets": ["wren:analogsequencer:29"],
+  "snapshot": {
+    "schemaVersion": 1,
+    "app": "analogsequencer",
+    "params": {},
+    "inputPorts": {}
+  }
+}
 ```
 
-Two AnalogSequencer instances therefore have two independent Block State slots
-inside the same mesostructural block. Copying state between them must create an
-independent copy unless the user deliberately chooses an advanced shared-clip
-operation.
-
-## Product Boundaries To Preserve
-
-### Playing Is Not Editing
-
-- **PLAYING** identifies the mesostructural block currently being recalled by
-  playback.
-- **EDITING** identifies the block whose state is displayed and may be saved.
-- **CHASE** makes EDITING follow PLAYING.
-- Selecting an EDITING block is navigation. It must not send that block's
-  complete state to an RNBO client.
-- A playing-block transition recalls all Written role layers independently of
-  editor focus.
-
-### Focus Is Instance-Specific
-
-- Exactly one instance is in focus for score-state display, capture, and
-  destination identity.
-- The focused instance's role selects which independent slot is shown within
-  each block.
-- Changing focus must never make two instances share one OSC clip implicitly.
-- Direct live editor gestures remain distinct from block recall and score
-  persistence.
-
-### Unspecified Is Not Empty
-
-- A new authoring score defines blocks without predeclaring OSC roles or clips.
-- For an Available focused target, the editor presents each block as a
-  provisional **Unspecified** slot before any durable role exists.
-- First Write creates the just-in-time role and turns that provisional context
-  into a durable block/role slot with an assigned clip.
-- In an existing score, a durable block/role combination without a clip is also
-  **Unspecified**.
-- Playback does nothing to an Unspecified slot; it does not recall zeros,
-  silence, defaults, or an empty list.
-- An explicitly Written state may contain `Clock: 0`, empty persistent lists,
-  or other intentional values that must not be mistaken for Unspecified.
-
-### Admin Is For Resolution And Repair
-
-Initial authoring should not require Admin merely because a newly instantiated
-RNBO device has not appeared in the score before.
-
-Admin remains the correct surface for:
-
-- loading an existing score whose required destinations are absent;
-- resolving offline, stale, ambiguous, or multiply compatible assignments;
-- replacing one physical destination with another;
-- inspecting advanced clip, role, and routing details; and
-- deliberately sharing or restructuring reusable OSC clips.
-
-## Proposed Normal Editor
-
-### 1. Instance Cards
-
-Replace the separate focus selector with visible instance cards at the top of
-the editor. Each card shows:
-
-- a focus radio button;
-- friendly instance and device labels;
-- online and score-mapping status;
-- a compact Written-slot count or score-presence indicator; and
-- **Ignore recall**, associated directly with that instance's logical role.
-
-The focused card determines which instance-specific Block State slots appear
-below. Focus owns score capture and display only. Separate checkboxes retain
-live multi-target sends; changing those checkboxes must not change which role
-or block slot is read, displayed, or written.
-
-An online target that has not yet entered the score remains selectable and is
-shown as **Available** rather than forcing the user into Admin. Ignore Recall is
-visible but inactive on an Available card because there is no score recall path
-to mute until first Write creates the role.
-
-### 2. Block-State Strip
-
-Show every mesostructural block as a selectable state tile. Each tile shows at
-least:
-
-- block id or label;
-- **Written** or **Unspecified** for the focused instance;
-- PLAYING indication when applicable; and
-- EDITING selection.
-
-Current behavior is:
-
-- with CHASE on, EDITING equals PLAYING and follows every playing-block change;
-- selecting a non-playing tile disengages CHASE and makes that tile EDITING;
-- turning CHASE off without selecting another tile leaves EDITING on its
-  current block;
-- with CHASE off, selecting a tile changes EDITING without changing PLAYING,
-  sending OSC, or recalling state; and
-- turning CHASE on immediately returns EDITING to PLAYING.
-
-Choosing a different EDITING block is treated as an explicit request to stop
-following PLAYING. The automatic CHASE-off transition is the selected workflow.
-
-Proposed selection behavior:
-
-| Slot state | Proposed result |
-| --- | --- |
-| Written | Load the saved state into editor controls using Max-style `set` semantics. Send no OSC and perform no score mutation. |
-| Unspecified | Select the slot as EDITING without mutating the score. Display a complete focused-instance hydration as a provisional draft and enable the separate Write action. |
-
-Changing instance focus while a block remains selected applies the same
-Written-versus-Unspecified display rule to the newly focused instance's slot.
-It never writes merely because focus changed.
-
-### 3. Live Editing And Save
-
-Block selection itself is silent. Deliberate control gestures may still send
-immediately to selected live targets. The UI must make it clear that this is a
-live override of the currently sounding client, not a recall of the EDITING
-block.
-
-The primary persistence action should name both destinations:
-
-```text
-Save B State for AnalogSequencer 2
-```
-
-Write availability is derived from the focused block slot and editor draft:
-
-- **Unspecified** plus a complete draft: enable **Write B State**;
-- **Written** plus a clean draft: disable Write and show that B is saved;
-- **Written** plus a semantically different draft: enable **Replace B State**;
-- no focused instance or an incomplete draft: disable Write and explain what is
-  missing.
-
-Dirty comparison is always against the focused instance's Written clip in the
-EDITING block. It is never computed from another checked live-send target.
-
-Write persists the complete displayed draft. It does not recapture the focused
-client and does not send the draft before saving. A draft must be complete
-before Write is enabled.
-
-Provide one compact **Clear State…** action with three explicit scopes:
-
-- this instance in the EDITING block;
-- every instance in the EDITING block; and
-- every instance in every block.
-
-The dialog defaults to the narrowest available scope, reports the number of
-Written slots affected, and requires an additional confirmation for either
-multi-instance scope. Clear makes those slots Unspecified by removing their
-block-layer references atomically. It sends no OSC and preserves OSC clips,
-role assignments, and Ignore Recall settings.
-
-### 4. Write To Checked Instances
-
-Write uses the displayed focused-instance draft as its source and every checked
-instance as a destination. The operation sends no OSC, creates or replaces an
-independent clip for each destination role, and commits the complete destination
-set atomically. If any checked destination is already Written, one confirmation
-lists the states that will be replaced. The former Save Copy To control is
-removed because checked-instance writing now covers that workflow directly.
-
-### 5. Copy Checked State To Another Block
-
-**Copy Checked…** uses the current EDITING block as its source and copies each
-checked instance's own Written state into a selected destination block. Every
-destination receives an independent OSC clip; the operation does not make
-blocks share clip identity and sends no OSC.
-
-The batch is atomic. Every checked instance must already resolve to a score role
-and have Written state in the source block. If any checked source slot is
-Unspecified, the UI explains that the copy cannot proceed. Existing Written
-destination slots are counted in the dialog and require one replacement
-confirmation before the entire checked set is copied.
-
-## Initial Authoring And Just-In-Time Onboarding
-
-The first usable AnalogSequencer path should be:
-
-1. Start from a score containing its mesostructural blocks but no predeclared
-   OSC roles or clips.
-2. Instantiate an AnalogSequencer in RNBO.
-3. Open the AnalogSequencer editor and see the discovered instance card marked
-   Available.
-4. Focus that card and live-edit it without visiting Admin.
-5. Select an Unspecified block slot; this changes editing context but does not
-   mutate the score.
-6. Choose **Write State**. Atomically create or choose a logical role, map it to
-   the focused target, save the complete displayed draft into an independent
-   OSC clip, and assign the clip to the selected block.
-7. Continue writing distinct states into any block defined by the score.
-
-The existing `/osc/onboard` transaction proves the atomic mapping, clip
-creation, and layer-assignment shape, but it currently captures the target.
-Draft-backed authoring needs that transaction extended or complemented so Write
-can validate and persist the complete displayed snapshot without recapturing or
-sending it. The editor also needs a just-in-time policy for choosing or creating
-the logical role. Durable role creation and onboarding happen on Write, never
-on tile or focus selection.
-
-Safe resolution order:
-
-1. Reuse the role already mapped to the exact target.
-2. Consider an exactly-one compatible unassigned role, subject to the open
-   mapping-policy question below.
-3. If the score has no compatible role and is in initial authoring, create a
-   stable app-plus-ordinal role on first write.
-4. Never guess among multiple compatible or unresolved roles. Keep live editing
-   available, but direct the user to an inline choice or Admin for score
-   mapping.
-
-Focusing an Available target should not by itself mutate the score. The first
-write to an Unspecified slot is the earliest operation that necessarily needs
-a durable role and assignment.
-
-## Existing-Score Resolution
-
-When opening an existing score:
-
-- mapped online roles appear on their instance cards normally;
-- an expected but offline role remains visible as missing score data in Admin;
-- a compatible new target may be suggested but is not silently substituted
-  when the match is ambiguous;
-- Unspecified slots remain editable after a safe mapping is made;
-- Written data remains intact while its destination is offline; and
-- **Ignore recall** follows the score role, not a volatile RNBO instance number.
-
-The editor may offer a safe one-click binding only when one live target and one
-compatible unresolved role form an unambiguous pair. Admin remains the complete
-resolver.
-
-## Central State Tension
-
-Silent Written-slot selection creates a deliberate separation:
-
-```text
-PLAYING client state != displayed EDITING draft
-```
-
-This is correct for navigation, but it affects saving. Suppose block A is
-PLAYING, block B is EDITING, and B was loaded into the UI with `set`. Moving one
-control live changes only that control on the client. The client's other values
-may still belong to A, while the displayed draft's other values belong to B.
-
-The considered save contracts are not equivalent:
-
-1. **Capture live instance**: preserves the existing instance-authoritative
-   backend contract, but may save a hybrid of A and edited B values.
-2. **Save displayed draft**: saves exactly what the user sees for B, but changes
-   the established rule that score state is captured from the instance rather
-   than serialized from the editor.
-3. **Send full draft, then capture**: aligns the instance and draft before
-   capture, but effectively recalls or auditions B and can disturb PLAYING A.
-
-The selected contract is **Save displayed draft**. The rejected alternatives
-remain documented because live capture is still useful for initializing or
-refreshing a draft, while full-send-then-capture would collapse EDITING into a
-playback/audition action.
-
-## Open Questions For Review And Testing
-
-### Q1. Save Persists The Displayed Draft — Decided
-
-Write saves exactly the complete draft shown for the focused instance and
-EDITING block. It neither recaptures the focused client nor sends the complete
-draft before saving. This remains correct when the focused instance is not one
-of the checked live-send targets.
-
-Live instance readback initializes an Unspecified provisional draft or
-explicitly refreshes the editor. Once displayed, the draft is the source for
-Write and Replace State.
-
-Regression test: play A, edit B with CHASE off, check multiple destinations,
-save B, then recall B and confirm that the complete displayed draft—not the
-focused clients' A state—was independently persisted for every destination.
-
-### Q2. Selecting Unspecified Does Not Write — Decided
-
-Tile selection changes editing context only. An Unspecified slot displays a
-complete focused-instance hydration as a provisional draft. A separate Write
-button is enabled because the slot has no assigned clip. No role, clip, layer,
-or score revision changes until Write is pressed.
-
-For a Written slot, Write remains disabled while the displayed draft matches
-the saved clip and becomes **Replace State** only when the editor is dirty.
-
-### Q3. Focus And Checked Destinations Have Distinct Roles — Decided
-
-The focus radio owns score hydration, display, and the draft used as the write
-source. Checkboxes own destinations consistently: direct live gestures and
-Block State writes both fan out to every checked instance. Each destination
-receives an independent role and clip; focus does not change during the write.
-Named broadcast actions such as RTZ All and Clock All remain separate.
-
-### Q4. Existing Unresolved Roles Require Resolution — Decided
-
-First Write reuses only a role already mapped to the exact target. If a
-compatible unresolved role exists, the write remains non-mutating and directs
-the user to resolve the assignment. A new app-plus-ordinal role is created only
-when there is no unresolved compatible role; other same-app roles already
-mapped to distinct online instances do not block just-in-time onboarding.
-
-### Q5. Checked Writes Copy The Displayed Draft — Decided
-
-Write uses the same complete displayed draft selected in Q1 and creates an
-independent clip for every checked destination. A user who wants current live
-instance state must first use explicit instance readback to refresh the draft.
-The server validates every Unspecified or Written destination before committing
-the batch.
-
-### Q6. Ignore Recall Mutes Recall Data — Decided
-
-Ignore Recall is a data-routing mute for the instance's score role. Automatic
-and manual block recall send no saved Block State data to that client while it
-is enabled. The score data, role mapping, and block layers remain intact, and
-recall reports the role as ignored rather than failed.
-
-It is not an audio mute and does not duplicate the separate live-send
-checkboxes: direct editor gestures and explicit instance readback remain
-available. Card placement should make the muted recall path visible while the
-instance can still be live-edited.
-
-### Q7. What Terminology Belongs In The Normal UI?
-
-Proposed vocabulary:
-
-- Instance
-- PLAYING
-- EDITING
-- CHASE
-- Block State
-- Written
-- Unspecified
-- Save State
-- Checked instances
-- Ignore recall
-
-Keep OSC clip ids, logical roles, layers, capture diagnostics, and manual clip
-assignment under advanced tools or Admin.
-
-### Q8. Score Roles Are Created Just In Time — Decided
-
-Initial authoring scores declare blocks but do not predeclare OSC roles. An
-Available target can be focused and shown against provisional Unspecified block
-contexts without mutating the score. First Write creates its stable
-app-plus-ordinal role, assignment, independent clip, and selected block layer in
-one transaction.
-
-Loaded scores may already contain durable roles whose assignments need
-resolution. Those existing-score roles are preserved and follow the Q4 safety
-policy rather than being replaced by new just-in-time roles.
-
-### Q9. Explicit Tile Selection Disengages CHASE — Decided
-
-Selecting a non-playing block is an explicit decision to edit away from
-PLAYING. The editor therefore turns CHASE off automatically and makes the
-selected block EDITING. Turning CHASE on again immediately returns EDITING to
-PLAYING and resumes following block changes.
-
-### Q10. Preserve And Color-Code Dirty Drafts — Decided
-
-Dirty drafts are preserved per instance-and-block rather than discarded on
-navigation. Store them by logical role plus block, using a temporary target-id
-key before just-in-time onboarding creates the role. Returning to the same
-instance and block restores its draft and dirty state without sending OSC.
-
-Expose draft state on both block tiles and instance cards. Color supports quick
-scanning, but every state also needs a text label or icon for accessibility:
-
-- **Written / Saved**: stable saved-state treatment;
-- **Dirty**: warning/amber treatment plus a Dirty label or dot;
-- **Unspecified**: neutral treatment;
-- **Unspecified + Draft**: distinct provisional treatment plus an Unwritten
-  Draft label; and
-- an instance card may show a dirty-draft count when unsaved drafts exist in
-  blocks other than the one currently displayed.
-
-Prototype test: dirty B for instance 1, switch to C and then instance 2, return
-to instance 1/B, and confirm that the draft and its visible dirty indication
-survive every context change.
-
-## Prototype Scenarios
-
-Run these before freezing the interaction contract:
-
-1. **Fresh single instance**: create a score, instantiate one AnalogSequencer,
-   write distinct states to A, B, and C without opening Admin.
-2. **Fresh multiple instances**: instantiate three AnalogSequencers and confirm
-   each block exposes three independent states with no accidental clip sharing.
-3. **Written navigation**: switch blocks while stopped and while another block
-   is PLAYING; confirm selection sends no OSC.
-4. **Unspecified navigation**: switch focus and blocks rapidly; confirm no score
-   mutation occurs until the separately enabled Write action is pressed.
-5. **CHASE**: confirm PLAYING changes update EDITING controls with `set`, while
-   CHASE-off editing remains independent.
-6. **Live override**: edit B while A plays and determine whether the audible
-   effect and subsequent save are predictable.
-7. **Copy**: copy B from instance 1 to instance 2, replace an existing
-   destination after confirmation, and prove later edits remain independent.
-8. **Ignore recall**: manually edit an ignored instance and confirm playback
-   leaves it untouched while normal live editor gestures still work.
-9. **Offline return**: save a score, remove one instance, reload the score, and
-   resolve the returning or replacement instance through Admin.
-10. **Ambiguous mapping**: present two compatible instances for one unresolved
-    role and prove the editor never guesses.
-11. **List-based editor**: repeat the workflow with ListSequencer so ACK-backed
-    text/list hydration and incomplete capture are not hidden by the simpler
-    AnalogSequencer case.
-
-Record for each scenario:
-
-- whether block selection emitted OSC;
-- whether score revision changed;
-- which role and clip id changed;
-- whether the live instance, displayed draft, and saved state agree;
-- whether the user predicted the result before executing the action; and
-- whether recovery required Admin.
-
-## Development Checkpoints After Review
-
-### Checkpoint A: Pure Workflow Model
-
-- Encode focus, PLAYING, EDITING, CHASE, Written, Unspecified, and ignored state
-  transitions as pure tested functions.
-- Add no UI mutation beyond a developer harness.
-- Verify draft-backed Write without capture or OSC sends.
-- Exercise independent dirty drafts across instance and block context changes.
-
-Exit: the selected interaction rules are testable without a browser or live
-rig.
-
-### Checkpoint B: AnalogSequencer Canary
-
-- Replace its focus selector and destination presentation with instance cards.
-- Move Ignore recall onto the mapped instance card.
-- Implement silent Written selection and the chosen Unspecified behavior.
-- Implement draft-backed Write and Replace State.
-- Preserve direct live editing and named broadcast actions selected in Q3.
-
-Exit: initial AnalogSequencer authoring works without Admin and without losing
-PLAYING-versus-EDITING clarity.
-
-### Checkpoint C: Just-In-Time Mapping
-
-- Reuse exact assignments and safely resolve or create roles according to Q4
-  and Q8.
-- Keep onboarding atomic on capture or mapping failure.
-- Show Available, Mapped, Ignored, Offline, and Needs Assignment states on
-  cards.
-
-Exit: a newly instantiated AnalogSequencer can acquire independent states in
-any existing block, while ambiguous existing-score mappings remain untouched.
-
-### Checkpoint D: Atomic Checked-Instance Write
-
-- Write the displayed draft to every checked instance.
-- Clone rather than alias each destination OSC clip.
-- Add one revision check and explicit Written-destination replacement for the
-  complete batch.
-
-Exit: state can move to multiple instances in one block without recall, focus
-loss, partial writes, or later shared mutation.
-
-### Checkpoint E: Editor-Family Rollout
-
-- Apply the accepted shared workflow to ListSequencer and ListVelSequencer
-  first, including ACK/list capture diagnostics.
-- Roll out to Plate, Poland, SoftPiano, and TTID.
-- Keep app-specific controls and momentary exclusions intact.
-
-Exit: Block State authoring means the same thing across all bundled OSC
-editors.
-
-### Checkpoint F: Admin Resolution Pass
-
-- Remove initial-authoring steps made redundant by editor onboarding.
-- Preserve and clarify existing-score resolution, offline roles, ambiguity,
-  lock policy, clip inspection, and advanced sharing.
-- Add direct links from unresolved editor cards to the exact Admin resource.
-
-Exit: users visit Admin to resolve a score-to-rig mismatch, not to perform the
-first ordinary write.
-
-## Automated Coverage
-
-- Written selection updates the editor draft without OSC sends or score writes.
-- Unspecified selection never mutates the score and enables Write only with a
-  complete draft.
-- focus changes address the newly focused role without modifying another
-  instance's layer;
-- exact target reuse is idempotent;
-- ambiguous role mapping remains non-mutating;
-- Ignore recall follows the role and does not disable direct editor gestures;
-- copy creates a new clip id and independent payload;
-- Write persists the complete displayed draft even when the focused target is
-  unchecked for live sends;
-- replacing a Written copy destination requires the expected revision and an
-  explicit replacement intent;
-- PLAYING recall remains independent of focus and recalls every sendable
-  Written role;
-- Unspecified slots remain no-ops;
-- no normal workflow assigns one clip id to two instance roles accidentally;
-- incomplete list capture never creates or replaces a slot silently;
-- reload preserves roles, independent clips, layers, and unresolved routing;
-  and
-- dirty drafts never leak between instance/block contexts and follow the
-  selected Q10 navigation policy.
-
-## Acceptance Criteria
-
-The workflow is ready for editor-family rollout when a user can:
-
-1. instantiate an AnalogSequencer and begin score authoring without Admin;
-2. predict which instance and block a save will affect;
-3. navigate Written states without changing the sounding client;
-4. distinguish PLAYING from EDITING throughout the workflow;
-5. create intentional state for an Unspecified slot without confusing it with
-   empty data;
-6. author different state for several same-app instances in one block;
-7. copy state between those instances without recall or shared mutation;
-8. ignore playback recall while retaining deliberate live editing; and
-9. load an existing score and use Admin only when assignments genuinely need
-   resolution.
-
-## Explicitly Parked Work
-
-- RNBO-side staging and atomic commit;
-- automatic recall lead/lookahead;
-- sample-accurate server activation;
-- changing the semantic OSC snapshot payload contract;
-- combining OSC roles with ShadowScore player assignments; and
-- redesigning note/event clip editors.
+The server creates missing roles, clips, and layers on the first edit and
+replaces the independent target clips on later edits. A multi-target request is
+all-or-nothing. A stale structure revision is refreshed and retried once; a
+remaining failure stays visible and retryable without redirecting the edit.
+
+## Shared Panel
+
+The panel provides:
+
+- focused instance and checked destination summary;
+- instance cards with mapping, Written-state count, and Ignore Recall;
+- PLAYING, EDITING, and Chase controls;
+- one slot per block, labeled **Written** or **Unspecified**;
+- **Recall Now**;
+- **Copy Checked…** and **Clear State…** operations; and
+- advanced reusable-clip assignment and duplication tools.
+
+There is no separate Write or Reload action. Successful ordinary edits show
+queued, saving, or saved status. Failed writes show the error and retain the
+immutable failed job for retry.
+
+## Live And Canonical Semantics
+
+An individual control gesture sends the changed control to checked live
+instances and saves the complete canonical state for those same instances.
+This prevents a device from sounding different from the score merely because a
+separate save gesture was omitted.
+
+**Recall Now** remains explicit because it sends the entire saved state, which
+is different from the per-control live traffic caused by editing. `ignoreRecall`
+continues to suppress automatic block recall without preventing the editor from
+authoring canonical state.
+
+## Acceptance
+
+1. Pointer movement does not save before pointer-up.
+2. Pointer-up creates one semantic state write.
+3. Keyboard and touch completion save once.
+4. Discrete and list controls save at their deliberate completion boundary.
+5. Multiple checked instances are saved atomically.
+6. First edit onboards the required score resources.
+7. Hydration and navigation never write.
+8. A Chase transition never redirects an in-progress gesture.
+9. Failed and stale writes never silently lose or retarget state.
+10. The OSC editor family contains no separate unsaved-state workflow.

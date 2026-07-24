@@ -307,7 +307,7 @@
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="target-strip" aria-label="Poland targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write2";
     const POLAND_GROUPS = [
       { title: "MIDI", key: "midi", controls: ["TransposePoland"] },
       { title: "OSC A", key: "oscillator-a", controls: ["VolA", "PitchBiasCoarseA", "PitchBiasFineA", "WavetableA", "WaveBiasA", "WaveModVelA", "WaveModVelRandA", "WaveEnvModDistanceA", "WaveEnvModTimeA"] },
@@ -744,7 +744,7 @@
     }
 
     const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
-    snapshotClient = createOscSnapshotEditorClient({ app: "poland", roleLabel: "Poland", elements: snapshotElements, instantWrite: true, serializeState: serializeSnapshotState, displayState: displaySavedState, onFocusChange: getData, liveTargetRoot: targetsEl, setStatus });
+    snapshotClient = createOscSnapshotEditorClient({ app: "poland", roleLabel: "Poland", elements: snapshotElements, serializeState: serializeSnapshotState, displayState: displaySavedState, onFocusChange: getData, liveTargetRoot: targetsEl, setStatus });
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
   </script>
 </body>

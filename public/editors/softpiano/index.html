@@ -48,7 +48,7 @@
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-label="SoftPiano targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write2";
     const SOFTPIANO_GROUPS = [
       { title: "Output", controls: ["Volume"] },
       { title: "MIDI", controls: ["TransposeSoftPiano"] },
@@ -70,7 +70,7 @@
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     getDataButton.addEventListener("click", () => getData().catch(reportError));
     const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
-    snapshotClient = createOscSnapshotEditorClient({ app: "softpiano", roleLabel: "SoftPiano", elements: snapshotElements, instantWrite: true, serializeState: serializeSnapshotState, displayState: displaySavedState, onFocusChange: getData, liveTargetRoot: targetsEl, setStatus });
+    snapshotClient = createOscSnapshotEditorClient({ app: "softpiano", roleLabel: "SoftPiano", elements: snapshotElements, serializeState: serializeSnapshotState, displayState: displaySavedState, onFocusChange: getData, liveTargetRoot: targetsEl, setStatus });
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
     async function refresh() {

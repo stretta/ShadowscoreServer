@@ -1,11 +1,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  checkedWriteActionLabel,
   createOscEditorSnapshot,
   createOscStateWriteQueue,
-  oscBlockDraftKey,
-  oscBlockDraftState,
   oscBlockSlotState,
   oscClearStateScopes,
   oscCopyStateAvailability,
@@ -14,8 +11,6 @@ import {
   oscEditorParamValue,
   oscPlaybackWiperVisible,
   oscRecallSummary,
-  oscWriteActionLabel,
-  oscWriteAvailability,
   resolveFocusedOscRole,
   selectExclusiveOscTarget,
   sameOscSnapshot
@@ -69,7 +64,7 @@ test("instant state write queue retains a failed immutable job for retry", async
   assert.equal(queue.snapshot().failed, null);
 });
 
-test("shared OSC editor snapshot core normalizes parameter and list drafts", () => {
+test("shared OSC editor snapshot core normalizes parameter and list state", () => {
   assert.deepEqual(createOscEditorSnapshot({
     app: "AnalogSequencer",
     paramEntries: [{ name: "01StageValue", value: "64" }, { name: "Clock", value: 0 }],
@@ -82,19 +77,6 @@ test("shared OSC editor snapshot core normalizes parameter and list drafts", () 
     inputPorts: { Steps: [1, 0, 1] },
     recall: { rtzBeforePlay: true }
   });
-});
-
-test("writing depends on checked destinations, draft completeness, and semantic dirtiness", () => {
-  assert.deepEqual(oscWriteAvailability({ blockId: "A", targetId: "analog-1", complete: true, written: false, dirty: true }), { allowed: true, reason: "" });
-  assert.deepEqual(oscWriteAvailability({ blockId: "A", targetId: "analog-1", complete: true, written: true, dirty: false }), {
-    allowed: false,
-    reason: "A State is saved"
-  });
-  assert.deepEqual(oscWriteAvailability({ blockId: "B", targetId: "analog-1", complete: false }), {
-    allowed: false,
-    reason: "Complete the displayed draft before writing"
-  });
-  assert.deepEqual(oscWriteAvailability({ blockId: "B", complete: true }), { allowed: false, reason: "Check at least one live destination before writing" });
 });
 
 test("shared OSC editor snapshot core stores string enums as numeric option indexes", () => {
@@ -175,10 +157,6 @@ test("block slots distinguish unspecified state from explicitly written empty da
   };
   assert.deepEqual(oscBlockSlotState(score, "A", "list-a"), { status: "Written", clipId: "a-list", clip: emptyClip });
   assert.deepEqual(oscBlockSlotState(score, "B", "list-a"), { status: "Unspecified", clipId: "", clip: null });
-  assert.equal(oscWriteActionLabel({ blockId: "A", written: true }), "Replace A State");
-  assert.equal(oscWriteActionLabel({ blockId: "B", written: false }), "Write B State");
-  assert.equal(checkedWriteActionLabel("B", 2), "Write B State to 2 Checked Instances");
-  assert.equal(checkedWriteActionLabel("B", 1), "Write B State to 1 Checked Instance");
 });
 
 test("clear scope counts distinguish focused, block-wide, and score-wide Written states", () => {
@@ -235,16 +213,6 @@ test("copy checked state requires every checked role to be Written in the source
     targetIds: ["unmapped"],
     roleIds: []
   }).reason, /must have a score role/);
-});
-
-test("draft state is keyed independently by role and block and distinguishes dirty from provisional", () => {
-  const saved = { schemaVersion: 1, app: "plate", params: { Decay: 0.5 }, inputPorts: {} };
-  assert.equal(oscBlockDraftKey({ roleId: "plate-1", targetId: "live", blockId: "B" }), "role:plate-1|B");
-  assert.equal(oscBlockDraftKey({ targetId: "live", blockId: "B" }), "target:live|B");
-  assert.equal(oscBlockDraftState({ draft: null, saved }), "Written");
-  assert.equal(oscBlockDraftState({ draft: saved, saved }), "Saved");
-  assert.equal(oscBlockDraftState({ draft: { ...saved, params: { Decay: 0.7 } }, saved }), "Dirty");
-  assert.equal(oscBlockDraftState({ draft: saved, saved: null }), "Unwritten Draft");
 });
 
 test("chase hydrates only a newly playing written state", () => {

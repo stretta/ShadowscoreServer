@@ -20,7 +20,7 @@ export function mountOscSnapshotPanel(parent, options = {}) {
     <div data-snapshot-slots class="ss-osc-snapshot-slots" aria-label="Available block state slots"></div>
     <select data-snapshot-role hidden aria-hidden="true"></select>
     <div class="ss-osc-snapshot-footer">
-      <div class="ss-osc-snapshot-actions"><div><button data-snapshot-capture class="primary" type="button">Write — State</button><button data-snapshot-load type="button">Reload Written State</button><button data-snapshot-recall type="button">Recall — Now</button></div></div>
+      <div class="ss-osc-snapshot-actions"><div><button data-snapshot-recall type="button">Recall — Now</button></div></div>
       <div class="ss-osc-snapshot-status"><div data-snapshot-state class="ss-osc-snapshot-state" role="status">Loading OSC clip state…</div><div data-snapshot-last class="ss-osc-snapshot-detail">No recall recorded</div></div>
     </div>
     <details class="ss-osc-snapshot-advanced">
@@ -68,8 +68,6 @@ export function mountOscSnapshotPanel(parent, options = {}) {
     clipSelect: section.querySelector("[data-snapshot-clip]"),
     blockSelect: section.querySelector("[data-snapshot-block]"),
     roleSelect: section.querySelector("[data-snapshot-role]"),
-    captureButton: section.querySelector("[data-snapshot-capture]"),
-    loadButton: section.querySelector("[data-snapshot-load]"),
     assignButton: section.querySelector("[data-snapshot-assign]"),
     duplicateButton: section.querySelector("[data-snapshot-duplicate]"),
     recallButton: section.querySelector("[data-snapshot-recall]"),
@@ -101,13 +99,10 @@ export function mountOscSnapshotPanel(parent, options = {}) {
 export function createOscSnapshotEditorClient(options) {
   const app = cleanToken(options.app);
   const elements = options.elements ?? {};
-  const instantWrite = options.instantWrite === true;
-  const serializeState = instantWrite ? options.serializeState : options.serializeDraft;
-  const displayState = instantWrite ? options.displayState : options.applySnapshot;
+  const serializeState = options.serializeState;
+  const displayState = options.displayState;
   if (!app || typeof serializeState !== "function" || typeof displayState !== "function") {
-    throw new Error(instantWrite
-      ? "Instant-write OSC editor client requires app, serializeState, and displayState"
-      : "OSC snapshot editor client requires app, serializeDraft, and applySnapshot");
+    throw new Error("OSC snapshot editor client requires app, serializeState, and displayState");
   }
   let score = null;
   let assignments = {};
@@ -117,27 +112,19 @@ export function createOscSnapshotEditorClient(options) {
   let playback = { running: false, mode: "stopped", activeBlockId: "" };
   let playbackPoll = null;
   let chase = readChasePreference();
-  const drafts = new Map();
-  const savedDrafts = new Map();
-  let activeDraftKey = "";
-  let applyingDraft = false;
   let activeGesture = null;
   let deferredChase = null;
   let writeStatus = { state: "idle", error: "" };
   const submittedStates = new Map();
-  const writeQueue = instantWrite ? createOscStateWriteQueue({
+  const writeQueue = createOscStateWriteQueue({
     write: persistInstantState,
     onStatus(status) {
       writeStatus = status;
       renderStatus();
     }
-  }) : null;
+  });
 
   bindEvents();
-  if (instantWrite) {
-    if (elements.captureButton) elements.captureButton.hidden = true;
-    if (elements.loadButton) elements.loadButton.hidden = true;
-  }
 
   return {
     async init() {
@@ -146,24 +133,13 @@ export function createOscSnapshotEditorClient(options) {
       playbackPoll = window.setInterval(() => refreshPlayback().catch(reportError), 2000);
       return snapshotState();
     },
-    draftChanged() {
-      if (instantWrite) return;
-      synchronizeFocusedRole();
-      rememberDisplayedDraft();
-      synchronizeClipIdentity();
-      renderPlayback();
-      renderInstances();
-      renderSlots();
-      renderStatus();
-    },
     beginGesture() {
-      if (!instantWrite) return null;
       if (activeGesture && !activeGesture.completed) return activeGesture;
       activeGesture = instantWriteContext();
       return activeGesture;
     },
     commitGesture(gesture = activeGesture) {
-      if (!instantWrite || !gesture || gesture.completed) return false;
+      if (!gesture || gesture.completed) return false;
       gesture.completed = true;
       commitInstantState(gesture);
       if (activeGesture === gesture) activeGesture = null;
@@ -171,14 +147,13 @@ export function createOscSnapshotEditorClient(options) {
       return true;
     },
     cancelGesture(gesture = activeGesture) {
-      if (!instantWrite || !gesture || gesture.completed) return false;
+      if (!gesture || gesture.completed) return false;
       gesture.completed = true;
       if (activeGesture === gesture) activeGesture = null;
       flushDeferredChase().catch(reportError);
       return true;
     },
     commitEdit() {
-      if (!instantWrite) return false;
       commitInstantState(instantWriteContext());
       return true;
     },
@@ -198,7 +173,6 @@ export function createOscSnapshotEditorClient(options) {
   function bindEvents() {
     elements.blockSelect?.addEventListener("change", () => changeEditingBlock(elements.blockSelect.value).catch(reportError));
     elements.chaseInput?.addEventListener("change", () => {
-      rememberDisplayedDraft();
       setChase(elements.chaseInput.checked);
       if (chase) selectPlayingBlock();
       renderContext();
@@ -209,8 +183,6 @@ export function createOscSnapshotEditorClient(options) {
     elements.clipSelect?.addEventListener("change", renderStatus);
     elements.clipIdInput?.addEventListener("input", renderStatus);
     elements.clipNameInput?.addEventListener("input", renderStatus);
-    elements.captureButton?.addEventListener("click", () => capture().catch(reportError));
-    elements.loadButton?.addEventListener("click", () => load().catch(reportError));
     elements.assignButton?.addEventListener("click", () => assign().catch(reportError));
     elements.duplicateButton?.addEventListener("click", () => duplicate().catch(reportError));
     elements.recallButton?.addEventListener("click", () => recall().catch(reportError));
@@ -289,61 +261,6 @@ export function createOscSnapshotEditorClient(options) {
   }
 
   function renderStatus() {
-    if (instantWrite) return renderInstantStatus();
-    const blockId = elements.blockSelect.value;
-    const roleId = elements.roleSelect.value;
-    const assignment = assignments[roleId];
-    const resolution = resolutions[roleId];
-    const selected = selectedClip();
-    const layerClip = selectedLayerClip();
-    const sourceId = elements.sourceSelect?.value;
-    const source = targets.find((target) => target.id === sourceId);
-    const written = Boolean(layerClip);
-    const destinationIds = selectedLiveTargetIds(options.liveTargetRoot);
-    const destinationStates = destinationIds.map((targetId) => {
-      const destinationRoleId = resolveFocusedOscRole({ app, targetId, targets, assignments, resolutions });
-      return {
-        targetId,
-        roleId: destinationRoleId,
-        clip: destinationRoleId ? oscBlockSlotState(score, blockId, destinationRoleId).clip : null
-      };
-    });
-    let draft = null;
-    let draftError = "";
-    try { draft = serializeState(); } catch (error) { draftError = error.message; }
-    const baseline = savedDrafts.get(draftKey(roleId, sourceId, blockId)) ?? layerClip;
-    const dirty = Boolean(draft && (!written || !sameOscSnapshot(draft, baseline)));
-    const destinationsDirty = Boolean(draft && destinationStates.some((destination) => !destination.clip || !sameOscSnapshot(draft, destination.clip)));
-    const writeAvailability = oscWriteAvailability({
-      blockId,
-      targetId: destinationIds[0],
-      complete: Boolean(draft),
-      written: destinationStates.length > 0 && destinationStates.every((destination) => destination.clip),
-      dirty: destinationsDirty
-    });
-    elements.captureButton.textContent = checkedWriteActionLabel(blockId, destinationIds.length);
-    elements.recallButton.textContent = `Recall ${blockId || "—"} Now`;
-    elements.captureButton.disabled = !writeAvailability.allowed;
-    elements.loadButton.disabled = !layerClip;
-    elements.assignButton.disabled = !(blockId && roleId && selected);
-    elements.duplicateButton.disabled = !(selected && elements.clipIdInput?.value.trim());
-    elements.recallButton.disabled = !layerClip;
-    renderClearAvailability();
-    renderCopyAvailability();
-    if (!blockId) return setState("No mesostructural blocks available");
-    if (!sourceId) return setState(`No online ${options.roleLabel || app} instance is focused`);
-    if (!destinationIds.length) return setState("Check at least one live destination before writing");
-    if (draftError) return setState(`Draft incomplete: ${draftError}`);
-    if (!writeAvailability.allowed) return setState(writeAvailability.reason);
-    const routing = resolution?.status ? ` · role ${resolution.status}` : "";
-    const playbackNote = playback?.running ? ` · PLAYING ${playingBlockId()}; saving changes ${blockId}'s next recall only` : "";
-    if (!roleId) return setState(`${source?.label || sourceId} is Available · ${blockId} is Unspecified · first Write creates its score role${playbackNote}`);
-    if (!layerClip) return setState(`${blockId} is Unspecified for ${source?.label || assignment?.label || roleId}${draft ? " · Unwritten Draft" : ""}. Playback leaves this instance unchanged.${routing}${playbackNote}`);
-    const capture = oscClipCaptureSummary(layerClip);
-    setState(`${blockId} is Written for ${source?.label || assignment?.label || roleId}${routing}${capture ? ` · ${capture}` : ""}${dirty ? " · Dirty draft" : " · Saved"}${playbackNote}`);
-  }
-
-  function renderInstantStatus() {
     const blockId = elements.blockSelect?.value;
     const roleId = elements.roleSelect?.value;
     const sourceId = elements.sourceSelect?.value;
@@ -437,33 +354,6 @@ export function createOscSnapshotEditorClient(options) {
     deferredChase = null;
     await hydrateChasedPlayingBlock(pendingChase.previousBlockId, { force: pendingChase.force });
     await loadLastRecall();
-  }
-
-  async function capture() {
-    const blockId = elements.blockSelect.value;
-    const targetIds = selectedLiveTargetIds(options.liveTargetRoot);
-    if (!targetIds.length) throw new Error("Check at least one live destination before writing");
-    const draft = serializeState();
-    elements.captureButton.disabled = true;
-    const result = await fetchJson("/osc/block-state", {
-      method: "PUT",
-      body: JSON.stringify({
-        expectedStructureRevision: score?.structureRevision ?? 0,
-        targets: targetIds, blockId, snapshot: draft
-      })
-    });
-    score = result.score;
-    assignments = score.oscAssignments ?? {};
-    for (const write of result.writes ?? []) {
-      const key = draftKey(write.roleId, write.targetId, blockId);
-      drafts.set(key, structuredClone(draft));
-      savedDrafts.set(key, structuredClone(draft));
-      if (write.targetId === elements.sourceSelect.value) activeDraftKey = key;
-    }
-    renderContext();
-    const sourceWrite = (result.writes ?? []).find((write) => write.targetId === elements.sourceSelect.value);
-    if (sourceWrite && elements.clipSelect) elements.clipSelect.value = sourceWrite.clipId;
-    options.setStatus?.(`Wrote ${blockId} state to ${targetIds.length} checked instance${targetIds.length === 1 ? "" : "s"}; no OSC was sent`);
   }
 
   function openClearDialog() {
@@ -570,14 +460,6 @@ export function createOscSnapshotEditorClient(options) {
     }
   }
 
-  async function load() {
-    const clip = selectedLayerClip();
-    if (!clip) throw new Error("This instance is Unspecified in the editing block");
-    await displayState(structuredClone(clip));
-    renderStatus();
-    options.setStatus?.(`Loaded written ${elements.blockSelect.value} state into the editor; no OSC was sent`);
-  }
-
   async function assign() {
     const blockId = elements.blockSelect.value;
     const roleId = elements.roleSelect.value;
@@ -653,7 +535,6 @@ export function createOscSnapshotEditorClient(options) {
     const previousRunning = Boolean(playback?.running);
     playback = await fetchJson("/macrostructure/playback");
     if (chase && playingBlockId() !== previousPlaying) {
-      rememberDisplayedDraft();
       selectPlayingBlock();
       renderContext();
       await hydrateChasedPlayingBlock(previousPlaying);
@@ -696,7 +577,6 @@ export function createOscSnapshotEditorClient(options) {
   }
 
   async function changeEditingBlock(blockId) {
-    rememberDisplayedDraft();
     if (elements.blockSelect) elements.blockSelect.value = blockId;
     setChase(false);
     selectLayerClip();
@@ -704,23 +584,18 @@ export function createOscSnapshotEditorClient(options) {
     await hydrateEditingContext({ readLiveWhenUnspecified: !options.readOnBlockChange });
     if (options.readOnBlockChange) {
       await options.onFocusChange?.(elements.sourceSelect?.value);
-      rememberDisplayedDraft();
     }
     renderContext();
     await loadLastRecall();
   }
 
   async function changeFocusedInstance() {
-    rememberDisplayedDraft();
-    const roleId = synchronizeFocusedRole();
+    synchronizeFocusedRole();
     selectExclusiveOscTarget(options.liveTargetRoot, elements.sourceSelect?.value);
     selectLayerClip();
     synchronizeClipIdentity();
-    activeDraftKey = draftKey(roleId, elements.sourceSelect?.value, elements.blockSelect?.value);
-    applyingDraft = true;
-    try { await options.onFocusChange?.(elements.sourceSelect?.value); } finally { applyingDraft = false; }
+    await options.onFocusChange?.(elements.sourceSelect?.value);
     await hydrateEditingContext();
-    rememberDisplayedDraft();
     renderContext();
   }
 
@@ -730,40 +605,11 @@ export function createOscSnapshotEditorClient(options) {
     const roleId = synchronizeFocusedRole();
     if (!blockId || !targetId) return;
     const written = oscBlockSlotState(score, blockId, roleId).clip;
-    if (instantWrite) {
-      if (written) {
-        applyingDraft = true;
-        try { await displayState(structuredClone(written)); } finally { applyingDraft = false; }
-      } else if (readLiveWhenUnspecified) {
-        applyingDraft = true;
-        try { await options.onFocusChange?.(targetId); } finally { applyingDraft = false; }
-      }
-      return;
-    }
-    activeDraftKey = draftKey(roleId, targetId, blockId);
-    const cached = drafts.get(activeDraftKey);
-    if (cached) {
-      applyingDraft = true;
-      try { await displayState(structuredClone(cached)); } finally { applyingDraft = false; }
-      return;
-    }
     if (written) {
-      applyingDraft = true;
-      try { await displayState(structuredClone(written)); } finally { applyingDraft = false; }
-      const normalizedDraft = structuredClone(serializeState());
-      drafts.set(activeDraftKey, normalizedDraft);
-      savedDrafts.set(activeDraftKey, structuredClone(normalizedDraft));
-      return;
-    }
-    if (readLiveWhenUnspecified) {
+      await displayState(structuredClone(written));
+    } else if (readLiveWhenUnspecified) {
       await options.onFocusChange?.(targetId);
-      rememberDisplayedDraft();
     }
-  }
-
-  function rememberDisplayedDraft() {
-    if (instantWrite || !activeDraftKey || applyingDraft) return;
-    try { drafts.set(activeDraftKey, structuredClone(serializeState())); } catch {}
   }
 
   function renderInstances() {
@@ -774,13 +620,6 @@ export function createOscSnapshotEditorClient(options) {
       const roleId = resolveFocusedOscRole({ app, targetId: target.id, targets, assignments, resolutions });
       const assignment = assignments[roleId];
       const writtenCount = roleId ? blockIds.filter((blockId) => oscBlockSlotState(score, blockId, roleId).status === "Written").length : 0;
-      const keyPrefix = roleId ? `role:${roleId}|` : `target:${target.id}|`;
-      const dirtyCount = instantWrite ? 0 : Array.from(drafts.entries()).filter(([key, draft]) => {
-        if (!key.startsWith(keyPrefix)) return false;
-        const blockId = key.slice(key.lastIndexOf("|") + 1);
-        const saved = savedDrafts.get(key) ?? (roleId ? oscBlockSlotState(score, blockId, roleId).clip : null);
-        return !saved || !sameOscSnapshot(draft, saved);
-      }).length;
       const card = document.createElement("div");
       card.className = `ss-osc-instance-card${target.id === focusedId ? " focused" : ""}`;
       const focusLabel = document.createElement("label");
@@ -800,7 +639,7 @@ export function createOscSnapshotEditorClient(options) {
       focusLabel.append(radio, title);
       const state = document.createElement("span");
       state.className = "ss-osc-instance-state";
-      state.textContent = roleId ? `${assignment?.ignoreRecall ? "Ignored" : "Mapped"} · ${writtenCount}/${blockIds.length} Written${dirtyCount ? ` · ${dirtyCount} draft${dirtyCount === 1 ? "" : "s"}` : ""}` : `Available${dirtyCount ? ` · ${dirtyCount} unwritten draft${dirtyCount === 1 ? "" : "s"}` : ""}`;
+      state.textContent = roleId ? `${assignment?.ignoreRecall ? "Ignored" : "Mapped"} · ${writtenCount}/${blockIds.length} Written` : "Available";
       const ignore = document.createElement("label");
       ignore.className = "ss-osc-instance-ignore";
       const checkbox = document.createElement("input");
@@ -860,20 +699,14 @@ export function createOscSnapshotEditorClient(options) {
     const roleId = elements.roleSelect?.value;
     const editingBlock = elements.blockSelect?.value;
     const playingBlock = playingBlockId();
-    const targetId = elements.sourceSelect?.value;
     elements.slots.replaceChildren(...Object.keys(score?.mesostructure ?? {}).map((blockId) => {
       const slot = oscBlockSlotState(score, blockId, roleId);
-      const key = draftKey(roleId, targetId, blockId);
-      const draft = instantWrite ? null : drafts.get(key);
-      const baseline = instantWrite ? slot.clip : savedDrafts.get(key) ?? slot.clip;
-      const dirty = Boolean(!instantWrite && draft && (!slot.clip || !sameOscSnapshot(draft, baseline)));
-      const displayStatus = slot.status === "Written" ? (dirty ? "Dirty" : "Written") : (draft ? "Unwritten Draft" : "Unspecified");
       const button = document.createElement("button");
       button.type = "button";
-      button.className = `ss-osc-snapshot-slot ${slot.status.toLowerCase()}${dirty ? " dirty" : ""}${draft && !slot.clip ? " provisional" : ""}${blockId === editingBlock ? " editing" : ""}${blockId === playingBlock ? " playing" : ""}`;
+      button.className = `ss-osc-snapshot-slot ${slot.status.toLowerCase()}${blockId === editingBlock ? " editing" : ""}${blockId === playingBlock ? " playing" : ""}`;
       button.dataset.blockId = blockId;
       button.setAttribute("aria-pressed", String(blockId === editingBlock));
-      button.innerHTML = `<strong>${escapeText(blockId)}</strong><span>${escapeText(displayStatus)}</span>`;
+      button.innerHTML = `<strong>${escapeText(blockId)}</strong><span>${escapeText(slot.status)}</span>`;
       button.addEventListener("click", () => changeEditingBlock(blockId).catch(reportError));
       return button;
     }));
@@ -884,7 +717,6 @@ export function createOscSnapshotEditorClient(options) {
   }
   async function hydrateChasedPlayingBlock(previousBlockId, { force = false } = {}) {
     const blockId = playingBlockId();
-    const targetId = elements.sourceSelect?.value;
     const roleId = synchronizeFocusedRole();
     const hydration = oscChaseHydration({
       score,
@@ -896,28 +728,15 @@ export function createOscSnapshotEditorClient(options) {
       force
     });
     if (hydration.status !== "Written") return hydration;
-    if (instantWrite && activeGesture && !activeGesture.completed) {
+    if (activeGesture && !activeGesture.completed) {
       deferredChase = { previousBlockId, force };
       return { status: "Deferred", clip: null };
     }
     const focusedTargetId = elements.sourceSelect?.value;
-    if (instantWrite) {
-      applyingDraft = true;
-      try { await displayState(structuredClone(hydration.clip)); } finally { applyingDraft = false; }
-      if (elements.sourceSelect?.value !== focusedTargetId) elements.sourceSelect.value = focusedTargetId;
-      renderContext();
-      options.setStatus?.(`Chased PLAYING ${blockId} saved state into the editor; no OSC was sent by the editor`);
-      return hydration;
-    }
-    activeDraftKey = draftKey(roleId, targetId, blockId);
-    applyingDraft = true;
-    try { await displayState(structuredClone(hydration.clip)); } finally { applyingDraft = false; }
+    await displayState(structuredClone(hydration.clip));
     if (elements.sourceSelect?.value !== focusedTargetId) elements.sourceSelect.value = focusedTargetId;
-    const normalizedDraft = structuredClone(serializeState());
-    drafts.set(activeDraftKey, normalizedDraft);
-    savedDrafts.set(activeDraftKey, structuredClone(normalizedDraft));
     renderContext();
-    options.setStatus?.(`Chased PLAYING ${blockId} written state into the editor; no OSC was sent by the editor`);
+    options.setStatus?.(`Chased PLAYING ${blockId} saved state into the editor; no OSC was sent by the editor`);
     return hydration;
   }
   function playingBlockId() {
@@ -1119,37 +938,6 @@ export function oscChaseHydration({
     : { status: "Unspecified", clip: null };
 }
 
-export function oscWriteActionLabel({ blockId, written, label = "" } = {}) {
-  if (!blockId) return "Write to —";
-  const destination = label ? ` for ${label}` : "";
-  return written ? `Replace ${blockId} State${destination}` : `Write ${blockId} State${destination}`;
-}
-
-export function checkedWriteActionLabel(blockId = "", targetCount = 0) {
-  if (!blockId) return "Write to —";
-  if (!targetCount) return `Write ${blockId} State`;
-  return `Write ${blockId} State to ${targetCount} Checked Instance${targetCount === 1 ? "" : "s"}`;
-}
-
-export function oscWriteAvailability({ blockId = "", targetId = "", complete = false, written = false, dirty = false } = {}) {
-  if (!blockId) return { allowed: false, reason: "Choose an EDITING block" };
-  if (!targetId) return { allowed: false, reason: "Check at least one live destination before writing" };
-  if (!complete) return { allowed: false, reason: "Complete the displayed draft before writing" };
-  if (written && !dirty) return { allowed: false, reason: `${blockId} State is saved` };
-  return { allowed: true, reason: "" };
-}
-
-export function oscBlockDraftKey({ roleId = "", targetId = "", blockId = "" } = {}) {
-  const identity = roleId ? `role:${roleId}` : `target:${targetId}`;
-  return `${identity}|${blockId}`;
-}
-
-export function oscBlockDraftState({ draft = null, saved = null } = {}) {
-  if (!draft) return saved ? "Written" : "Unspecified";
-  if (!saved) return "Unwritten Draft";
-  return sameOscSnapshot(draft, saved) ? "Saved" : "Dirty";
-}
-
 export function selectExclusiveOscTarget(root, targetId) {
   if (!root || !targetId || typeof root.querySelectorAll !== "function") return false;
   let matched = false;
@@ -1173,10 +961,6 @@ export function oscPlaybackWiperVisible({ editingBlockId = "", playingBlockId = 
 function generatedClipId(blockId, roleId) {
   if (!blockId || !roleId) return "";
   return `${blockId}-${roleId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-}
-
-function draftKey(roleId, targetId, blockId) {
-  return oscBlockDraftKey({ roleId, targetId, blockId });
 }
 
 export function createOscEditorSnapshot({ app, paramEntries = [], inputPortEntries = [], recall = {} } = {}) {

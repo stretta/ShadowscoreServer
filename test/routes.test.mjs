@@ -4089,7 +4089,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
-  assert.match(response.body, /20260724-instant-write1/);
+  assert.match(response.body, /20260724-instant-write2/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -4127,7 +4127,7 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotState/);
   assert.match(response.body, /displaySavedState/);
-  assert.match(response.body, /20260724-instant-write1/);
+  assert.match(response.body, /20260724-instant-write2/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -4191,7 +4191,6 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
-  assert.match(response.body, /instantWrite: true/);
   assert.match(response.body, /serializeSnapshotState/);
   assert.match(response.body, /displaySavedState/);
   assert.match(response.body, /bindRangeCommit/);
@@ -4200,7 +4199,7 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /commitGesture/);
   assert.match(response.body, /commitEdit/);
   assert.doesNotMatch(response.body, /draftChanged/);
-  assert.match(response.body, /20260724-instant-write1/);
+  assert.match(response.body, /20260724-instant-write2/);
   assert.match(response.body, /dataset\.snapshotValue/);
   assert.match(response.body, /id="rtz-before-play"/);
   assert.match(response.body, /On block change, send RTZ before play/);
@@ -4221,7 +4220,7 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /20260724-instant-write1/,
+    assert.match(response.body, /20260724-instant-write2/,
       `${editor} should load the instant-write snapshot client contract`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');
@@ -4230,7 +4229,6 @@ test("OSC editors place controls above Block State and live destinations below i
     assert.ok(blockStateIndex < targetsIndex, `${editor} live destinations should follow Block State`);
     assert.match(response.body, /Live And Save Destinations/);
     assert.match(response.body, /liveTargetRoot: targetsEl/);
-    assert.match(response.body, /instantWrite: true/);
     assert.match(response.body, /serializeState:/);
     assert.match(response.body, /displayState:/);
     assert.doesNotMatch(response.body, /draftChanged|serializeDraft|applySnapshot/);
@@ -4259,7 +4257,7 @@ test("instant-write OSC editors expose their intended completion boundaries", as
   assert.doesNotMatch(listVel.body, /schedulePitchMap|flushPitchMap/);
 
   const ttid = await request(context, "GET", "/editors/ttid");
-  assert.match(ttid.body, /setDraftParamValue\(param\.name, value\);\s+snapshotClient\?\.commitEdit\(\)/);
+  assert.match(ttid.body, /setParameterValue\(param\.name, value\);\s+snapshotClient\?\.commitEdit\(\)/);
 });
 
 test("OSC volume tool route serves target selection and trim controls", async () => {
@@ -4333,7 +4331,7 @@ test("shared OSC snapshot editor client is served as a static asset", async () =
   assert.match(response.body, /PLAYING/);
   assert.match(response.body, /EDITING/);
   assert.match(response.body, /CHASE/);
-  assert.match(response.body, /Write — State/);
+  assert.doesNotMatch(response.body, /Write — State|Reload Written State/);
   assert.match(response.body, /Unspecified/);
   assert.match(response.body, /Advanced clip tools/);
   assert.match(response.body, /Assign Selected Clip/);
@@ -4353,14 +4351,14 @@ test("shared OSC snapshot editor client is served as a static asset", async () =
   assert.match(response.body, /data-snapshot-copy-open/);
   assert.match(response.body, /osc\/block-state\/duplicate/);
   assert.match(response.body, /Copy Checked Block State/);
-  assert.match(response.body, /Checked Instance/);
-  assert.match(response.body, /Unwritten Draft/);
+  assert.match(response.body, /checked instance/i);
+  assert.doesNotMatch(response.body, /Unwritten Draft|Dirty Draft|dirty draft|serializeDraft|applySnapshot/);
   assert.match(response.body, /resolveFocusedOscRole/);
   assert.match(response.body, /oscBlockSlotState/);
   assert.match(response.body, /hydrateChasedPlayingBlock\(previousPlaying\)/);
   assert.match(response.body, /elements\.sourceSelect\?\.value !== focusedTargetId/);
   assert.match(response.body, /roles: \[roleId\]/);
-  assert.match(response.body, /Loaded .* into the editor; no OSC was sent/);
+  assert.match(response.body, /Chased PLAYING .* saved state into the editor/);
   assert.match(response.body, /captured from .*complete/);
 });
 

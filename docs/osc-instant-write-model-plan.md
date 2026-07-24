@@ -1,9 +1,10 @@
 # OSC Instant-Write Model
 
-Status: accepted implementation plan. Checkpoint 1 was completed locally on
-2026-07-24 with the canonical Block State upsert contract and 391 passing
-tests. Later checkpoints will convert editor gestures, then remove the
-deprecated draft model and its UI.
+Status: accepted implementation plan. Checkpoint 1 completed the canonical
+Block State upsert contract. Checkpoint 2 completed the local shared write
+controller and AnalogSequencer conversion on 2026-07-24 with 393 passing
+tests; its live Wren canary is pending. Later checkpoints will convert the
+remaining editors, then remove the deprecated draft model and its UI.
 
 ## Contract
 

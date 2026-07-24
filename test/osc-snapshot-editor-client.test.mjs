@@ -3,6 +3,7 @@ import test from "node:test";
 import {
   checkedWriteActionLabel,
   createOscEditorSnapshot,
+  createOscStateWriteQueue,
   oscBlockDraftKey,
   oscBlockDraftState,
   oscBlockSlotState,
@@ -19,6 +20,54 @@ import {
   selectExclusiveOscTarget,
   sameOscSnapshot
 } from "../public/shared/osc-snapshot-editor.js";
+
+test("instant state write queue serializes contexts and coalesces unsent replacements", async () => {
+  const writes = [];
+  const statuses = [];
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve; });
+  const queue = createOscStateWriteQueue({
+    async write(job) {
+      writes.push(job);
+      if (writes.length === 1) await firstGate;
+    },
+    onStatus(status) { statuses.push(status.state); }
+  });
+
+  queue.enqueue({ key: "A|analog-1", blockId: "A", targetIds: ["analog-1"], snapshot: { app: "analogsequencer", params: { Gate: 0.1 } } });
+  queue.enqueue({ key: "A|analog-1", blockId: "A", targetIds: ["analog-1"], snapshot: { app: "analogsequencer", params: { Gate: 0.2 } } });
+  queue.enqueue({ key: "A|analog-1", blockId: "A", targetIds: ["analog-1"], snapshot: { app: "analogsequencer", params: { Gate: 0.3 } } });
+  queue.enqueue({ key: "B|analog-1", blockId: "B", targetIds: ["analog-1"], snapshot: { app: "analogsequencer", params: { Gate: 0.4 } } });
+  releaseFirst();
+  await queue.whenIdle();
+
+  assert.deepEqual(writes.map((job) => [job.blockId, job.snapshot.params.Gate]), [
+    ["A", 0.1],
+    ["A", 0.3],
+    ["B", 0.4]
+  ]);
+  assert.equal(queue.snapshot().running, false);
+  assert.deepEqual(queue.snapshot().queued, []);
+  assert.ok(statuses.includes("saving"));
+  assert.equal(statuses.at(-1), "saved");
+});
+
+test("instant state write queue retains a failed immutable job for retry", async () => {
+  let attempts = 0;
+  const queue = createOscStateWriteQueue({
+    async write() {
+      attempts += 1;
+      if (attempts === 1) throw new Error("offline");
+    }
+  });
+  queue.enqueue({ key: "A|analog-1", blockId: "A", targetIds: ["analog-1"], snapshot: { app: "analogsequencer", params: { Gate: 0.5 } } });
+  await queue.whenIdle();
+  assert.equal(queue.snapshot().failed.snapshot.params.Gate, 0.5);
+  assert.equal(queue.retry(), true);
+  await queue.whenIdle();
+  assert.equal(attempts, 2);
+  assert.equal(queue.snapshot().failed, null);
+});
 
 test("shared OSC editor snapshot core normalizes parameter and list drafts", () => {
   assert.deepEqual(createOscEditorSnapshot({

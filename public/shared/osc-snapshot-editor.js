@@ -101,8 +101,13 @@ export function mountOscSnapshotPanel(parent, options = {}) {
 export function createOscSnapshotEditorClient(options) {
   const app = cleanToken(options.app);
   const elements = options.elements ?? {};
-  if (!app || typeof options.serializeDraft !== "function" || typeof options.applySnapshot !== "function") {
-    throw new Error("OSC snapshot editor client requires app, serializeDraft, and applySnapshot");
+  const instantWrite = options.instantWrite === true;
+  const serializeState = instantWrite ? options.serializeState : options.serializeDraft;
+  const displayState = instantWrite ? options.displayState : options.applySnapshot;
+  if (!app || typeof serializeState !== "function" || typeof displayState !== "function") {
+    throw new Error(instantWrite
+      ? "Instant-write OSC editor client requires app, serializeState, and displayState"
+      : "OSC snapshot editor client requires app, serializeDraft, and applySnapshot");
   }
   let score = null;
   let assignments = {};
@@ -116,8 +121,23 @@ export function createOscSnapshotEditorClient(options) {
   const savedDrafts = new Map();
   let activeDraftKey = "";
   let applyingDraft = false;
+  let activeGesture = null;
+  let deferredChase = null;
+  let writeStatus = { state: "idle", error: "" };
+  const submittedStates = new Map();
+  const writeQueue = instantWrite ? createOscStateWriteQueue({
+    write: persistInstantState,
+    onStatus(status) {
+      writeStatus = status;
+      renderStatus();
+    }
+  }) : null;
 
   bindEvents();
+  if (instantWrite) {
+    if (elements.captureButton) elements.captureButton.hidden = true;
+    if (elements.loadButton) elements.loadButton.hidden = true;
+  }
 
   return {
     async init() {
@@ -127,6 +147,7 @@ export function createOscSnapshotEditorClient(options) {
       return snapshotState();
     },
     draftChanged() {
+      if (instantWrite) return;
       synchronizeFocusedRole();
       rememberDisplayedDraft();
       synchronizeClipIdentity();
@@ -134,6 +155,38 @@ export function createOscSnapshotEditorClient(options) {
       renderInstances();
       renderSlots();
       renderStatus();
+    },
+    beginGesture() {
+      if (!instantWrite) return null;
+      if (activeGesture && !activeGesture.completed) return activeGesture;
+      activeGesture = instantWriteContext();
+      return activeGesture;
+    },
+    commitGesture(gesture = activeGesture) {
+      if (!instantWrite || !gesture || gesture.completed) return false;
+      gesture.completed = true;
+      commitInstantState(gesture);
+      if (activeGesture === gesture) activeGesture = null;
+      flushDeferredChase().catch(reportError);
+      return true;
+    },
+    cancelGesture(gesture = activeGesture) {
+      if (!instantWrite || !gesture || gesture.completed) return false;
+      gesture.completed = true;
+      if (activeGesture === gesture) activeGesture = null;
+      flushDeferredChase().catch(reportError);
+      return true;
+    },
+    commitEdit() {
+      if (!instantWrite) return false;
+      commitInstantState(instantWriteContext());
+      return true;
+    },
+    whenIdle() {
+      return writeQueue?.whenIdle() ?? Promise.resolve();
+    },
+    retrySave() {
+      return writeQueue?.retry() ?? false;
     },
     snapshotState,
     close() {
@@ -236,6 +289,7 @@ export function createOscSnapshotEditorClient(options) {
   }
 
   function renderStatus() {
+    if (instantWrite) return renderInstantStatus();
     const blockId = elements.blockSelect.value;
     const roleId = elements.roleSelect.value;
     const assignment = assignments[roleId];
@@ -256,7 +310,7 @@ export function createOscSnapshotEditorClient(options) {
     });
     let draft = null;
     let draftError = "";
-    try { draft = options.serializeDraft(); } catch (error) { draftError = error.message; }
+    try { draft = serializeState(); } catch (error) { draftError = error.message; }
     const baseline = savedDrafts.get(draftKey(roleId, sourceId, blockId)) ?? layerClip;
     const dirty = Boolean(draft && (!written || !sameOscSnapshot(draft, baseline)));
     const destinationsDirty = Boolean(draft && destinationStates.some((destination) => !destination.clip || !sameOscSnapshot(draft, destination.clip)));
@@ -289,11 +343,107 @@ export function createOscSnapshotEditorClient(options) {
     setState(`${blockId} is Written for ${source?.label || assignment?.label || roleId}${routing}${capture ? ` · ${capture}` : ""}${dirty ? " · Dirty draft" : " · Saved"}${playbackNote}`);
   }
 
+  function renderInstantStatus() {
+    const blockId = elements.blockSelect?.value;
+    const roleId = elements.roleSelect?.value;
+    const sourceId = elements.sourceSelect?.value;
+    const source = targets.find((target) => target.id === sourceId);
+    const destinationIds = selectedLiveTargetIds(options.liveTargetRoot);
+    const layerClip = selectedLayerClip();
+    elements.recallButton.textContent = `Recall ${blockId || "—"} Now`;
+    elements.recallButton.disabled = !layerClip;
+    elements.assignButton.disabled = !(blockId && roleId && selectedClip());
+    elements.duplicateButton.disabled = !(selectedClip() && elements.clipIdInput?.value.trim());
+    renderClearAvailability();
+    renderCopyAvailability();
+    if (writeStatus.state === "failed") return setState(`Save failed: ${writeStatus.error}`);
+    if (writeStatus.state === "saving") return setState(`Saving ${writeStatus.job.blockId} state…`);
+    if (writeStatus.state === "queued") return setState(`${writeStatus.job.blockId} state queued…`);
+    if (!blockId) return setState("No mesostructural blocks available");
+    if (!sourceId) return setState(`No online ${options.roleLabel || app} instance is focused`);
+    if (!destinationIds.length) return setState("Check at least one destination before editing");
+    const playbackNote = playback?.running ? ` · PLAYING ${playingBlockId()}` : "";
+    if (!roleId || !layerClip) {
+      return setState(`${source?.label || sourceId} · ${blockId} has no saved state · the first edit will create it${playbackNote}`);
+    }
+    setState(`${blockId} state saved for ${destinationIds.length} checked instance${destinationIds.length === 1 ? "" : "s"}${playbackNote}`);
+  }
+
+  function instantWriteContext() {
+    return {
+      blockId: elements.blockSelect?.value || "",
+      targetIds: selectedLiveTargetIds(options.liveTargetRoot),
+      completed: false
+    };
+  }
+
+  function commitInstantState(context) {
+    if (!context?.blockId) return reportError(new Error("Choose an EDITING block before changing state"));
+    if (!context.targetIds?.length) return reportError(new Error("Check at least one destination before editing"));
+    let snapshot;
+    try {
+      snapshot = structuredClone(serializeState());
+    } catch (error) {
+      return reportError(error);
+    }
+    const targetIds = [...new Set(context.targetIds)].sort();
+    const key = `${context.blockId}|${targetIds.join(",")}`;
+    if (sameOscSnapshot(submittedStates.get(key), snapshot)) return;
+    submittedStates.set(key, structuredClone(snapshot));
+    writeQueue.enqueue({ key, blockId: context.blockId, targetIds, snapshot });
+  }
+
+  async function persistInstantState(job) {
+    const send = () => fetchJson("/osc/block-state", {
+      method: "PUT",
+      body: JSON.stringify({
+        expectedStructureRevision: score?.structureRevision ?? 0,
+        targets: job.targetIds,
+        blockId: job.blockId,
+        snapshot: job.snapshot
+      })
+    });
+    let result;
+    try {
+      result = await send();
+    } catch (error) {
+      if (error?.code !== "stale_structure_revision") {
+        if (sameOscSnapshot(submittedStates.get(job.key), job.snapshot)) submittedStates.delete(job.key);
+        throw error;
+      }
+      score = await fetchJson("/score");
+      assignments = score.oscAssignments ?? {};
+      if (!score.mesostructure?.[job.blockId]) {
+        if (sameOscSnapshot(submittedStates.get(job.key), job.snapshot)) submittedStates.delete(job.key);
+        throw new Error(`Cannot save: block ${job.blockId} no longer exists`);
+      }
+      try {
+        result = await send();
+      } catch (retryError) {
+        if (sameOscSnapshot(submittedStates.get(job.key), job.snapshot)) submittedStates.delete(job.key);
+        throw retryError;
+      }
+    }
+    score = result.score;
+    assignments = score.oscAssignments ?? {};
+    renderContext();
+    options.setStatus?.(`Saved ${job.blockId} state to ${job.targetIds.length} checked instance${job.targetIds.length === 1 ? "" : "s"}`);
+    return result;
+  }
+
+  async function flushDeferredChase() {
+    if ((activeGesture && !activeGesture.completed) || !deferredChase) return;
+    const pendingChase = deferredChase;
+    deferredChase = null;
+    await hydrateChasedPlayingBlock(pendingChase.previousBlockId, { force: pendingChase.force });
+    await loadLastRecall();
+  }
+
   async function capture() {
     const blockId = elements.blockSelect.value;
     const targetIds = selectedLiveTargetIds(options.liveTargetRoot);
     if (!targetIds.length) throw new Error("Check at least one live destination before writing");
-    const draft = options.serializeDraft();
+    const draft = serializeState();
     elements.captureButton.disabled = true;
     const result = await fetchJson("/osc/block-state", {
       method: "PUT",
@@ -423,7 +573,7 @@ export function createOscSnapshotEditorClient(options) {
   async function load() {
     const clip = selectedLayerClip();
     if (!clip) throw new Error("This instance is Unspecified in the editing block");
-    await options.applySnapshot(structuredClone(clip));
+    await displayState(structuredClone(clip));
     renderStatus();
     options.setStatus?.(`Loaded written ${elements.blockSelect.value} state into the editor; no OSC was sent`);
   }
@@ -579,18 +729,28 @@ export function createOscSnapshotEditorClient(options) {
     const targetId = elements.sourceSelect?.value;
     const roleId = synchronizeFocusedRole();
     if (!blockId || !targetId) return;
+    const written = oscBlockSlotState(score, blockId, roleId).clip;
+    if (instantWrite) {
+      if (written) {
+        applyingDraft = true;
+        try { await displayState(structuredClone(written)); } finally { applyingDraft = false; }
+      } else if (readLiveWhenUnspecified) {
+        applyingDraft = true;
+        try { await options.onFocusChange?.(targetId); } finally { applyingDraft = false; }
+      }
+      return;
+    }
     activeDraftKey = draftKey(roleId, targetId, blockId);
     const cached = drafts.get(activeDraftKey);
     if (cached) {
       applyingDraft = true;
-      try { await options.applySnapshot(structuredClone(cached)); } finally { applyingDraft = false; }
+      try { await displayState(structuredClone(cached)); } finally { applyingDraft = false; }
       return;
     }
-    const written = oscBlockSlotState(score, blockId, roleId).clip;
     if (written) {
       applyingDraft = true;
-      try { await options.applySnapshot(structuredClone(written)); } finally { applyingDraft = false; }
-      const normalizedDraft = structuredClone(options.serializeDraft());
+      try { await displayState(structuredClone(written)); } finally { applyingDraft = false; }
+      const normalizedDraft = structuredClone(serializeState());
       drafts.set(activeDraftKey, normalizedDraft);
       savedDrafts.set(activeDraftKey, structuredClone(normalizedDraft));
       return;
@@ -602,8 +762,8 @@ export function createOscSnapshotEditorClient(options) {
   }
 
   function rememberDisplayedDraft() {
-    if (!activeDraftKey || applyingDraft) return;
-    try { drafts.set(activeDraftKey, structuredClone(options.serializeDraft())); } catch {}
+    if (instantWrite || !activeDraftKey || applyingDraft) return;
+    try { drafts.set(activeDraftKey, structuredClone(serializeState())); } catch {}
   }
 
   function renderInstances() {
@@ -615,7 +775,7 @@ export function createOscSnapshotEditorClient(options) {
       const assignment = assignments[roleId];
       const writtenCount = roleId ? blockIds.filter((blockId) => oscBlockSlotState(score, blockId, roleId).status === "Written").length : 0;
       const keyPrefix = roleId ? `role:${roleId}|` : `target:${target.id}|`;
-      const dirtyCount = Array.from(drafts.entries()).filter(([key, draft]) => {
+      const dirtyCount = instantWrite ? 0 : Array.from(drafts.entries()).filter(([key, draft]) => {
         if (!key.startsWith(keyPrefix)) return false;
         const blockId = key.slice(key.lastIndexOf("|") + 1);
         const saved = savedDrafts.get(key) ?? (roleId ? oscBlockSlotState(score, blockId, roleId).clip : null);
@@ -704,9 +864,9 @@ export function createOscSnapshotEditorClient(options) {
     elements.slots.replaceChildren(...Object.keys(score?.mesostructure ?? {}).map((blockId) => {
       const slot = oscBlockSlotState(score, blockId, roleId);
       const key = draftKey(roleId, targetId, blockId);
-      const draft = drafts.get(key);
-      const baseline = savedDrafts.get(key) ?? slot.clip;
-      const dirty = Boolean(draft && (!slot.clip || !sameOscSnapshot(draft, baseline)));
+      const draft = instantWrite ? null : drafts.get(key);
+      const baseline = instantWrite ? slot.clip : savedDrafts.get(key) ?? slot.clip;
+      const dirty = Boolean(!instantWrite && draft && (!slot.clip || !sameOscSnapshot(draft, baseline)));
       const displayStatus = slot.status === "Written" ? (dirty ? "Dirty" : "Written") : (draft ? "Unwritten Draft" : "Unspecified");
       const button = document.createElement("button");
       button.type = "button";
@@ -736,12 +896,24 @@ export function createOscSnapshotEditorClient(options) {
       force
     });
     if (hydration.status !== "Written") return hydration;
+    if (instantWrite && activeGesture && !activeGesture.completed) {
+      deferredChase = { previousBlockId, force };
+      return { status: "Deferred", clip: null };
+    }
     const focusedTargetId = elements.sourceSelect?.value;
+    if (instantWrite) {
+      applyingDraft = true;
+      try { await displayState(structuredClone(hydration.clip)); } finally { applyingDraft = false; }
+      if (elements.sourceSelect?.value !== focusedTargetId) elements.sourceSelect.value = focusedTargetId;
+      renderContext();
+      options.setStatus?.(`Chased PLAYING ${blockId} saved state into the editor; no OSC was sent by the editor`);
+      return hydration;
+    }
     activeDraftKey = draftKey(roleId, targetId, blockId);
     applyingDraft = true;
-    try { await options.applySnapshot(structuredClone(hydration.clip)); } finally { applyingDraft = false; }
+    try { await displayState(structuredClone(hydration.clip)); } finally { applyingDraft = false; }
     if (elements.sourceSelect?.value !== focusedTargetId) elements.sourceSelect.value = focusedTargetId;
-    const normalizedDraft = structuredClone(options.serializeDraft());
+    const normalizedDraft = structuredClone(serializeState());
     drafts.set(activeDraftKey, normalizedDraft);
     savedDrafts.set(activeDraftKey, structuredClone(normalizedDraft));
     renderContext();
@@ -770,7 +942,8 @@ export function createOscSnapshotEditorClient(options) {
       playingBlockId: playingBlockId(),
       chase,
       playback: structuredClone(playback),
-      snapshot: structuredClone(selectedSnapshot())
+      snapshot: structuredClone(selectedSnapshot()),
+      write: writeQueue?.snapshot() ?? null
     };
   }
 
@@ -864,6 +1037,64 @@ export function oscCopyStateAvailability({
     replacementCount,
     summary: `Copy ${roleIds.length} Written state${roleIds.length === 1 ? "" : "s"} from ${sourceBlockId} to ${destinationBlockId}${replacementCount ? ` · replace ${replacementCount}` : ""}`
   };
+}
+
+export function createOscStateWriteQueue({ write, onStatus = () => {} } = {}) {
+  if (typeof write !== "function") throw new Error("OSC state write queue requires a write function");
+  const queue = [];
+  const idleResolvers = [];
+  let running = false;
+  let sequence = 0;
+  let failedJob = null;
+
+  return {
+    enqueue(job) {
+      const next = { ...structuredClone(job), sequence: ++sequence };
+      const existingIndex = queue.findIndex((entry) => entry.key === next.key);
+      if (existingIndex >= 0) queue[existingIndex] = next;
+      else queue.push(next);
+      onStatus({ state: "queued", job: structuredClone(next), error: "" });
+      drain();
+      return next.sequence;
+    },
+    retry() {
+      if (!failedJob) return false;
+      const job = failedJob;
+      failedJob = null;
+      this.enqueue(job);
+      return true;
+    },
+    whenIdle() {
+      if (!running && queue.length === 0) return Promise.resolve();
+      return new Promise((resolve) => idleResolvers.push(resolve));
+    },
+    snapshot() {
+      return {
+        running,
+        queued: queue.map((entry) => structuredClone(entry)),
+        failed: failedJob ? structuredClone(failedJob) : null
+      };
+    }
+  };
+
+  async function drain() {
+    if (running) return;
+    running = true;
+    while (queue.length) {
+      const job = queue.shift();
+      onStatus({ state: "saving", job: structuredClone(job), error: "" });
+      try {
+        await write(structuredClone(job));
+        failedJob = null;
+        onStatus({ state: "saved", job: structuredClone(job), error: "" });
+      } catch (error) {
+        failedJob = structuredClone(job);
+        onStatus({ state: "failed", job: structuredClone(job), error: error?.message || String(error) });
+      }
+    }
+    running = false;
+    for (const resolve of idleResolvers.splice(0)) resolve();
+  }
 }
 
 function writtenStateCountLabel(count) {
@@ -1078,7 +1309,13 @@ async function fetchJson(url, options = {}) {
     headers: { ...(options.body ? { "Content-Type": "application/json" } : {}), ...(options.headers ?? {}) }
   });
   const body = await response.json().catch(() => ({}));
-  if (!response.ok || body.ok === false) throw new Error(body.error || `${url}: ${response.status} ${response.statusText}`);
+  if (!response.ok || body.ok === false) {
+    const error = new Error(body.error || `${url}: ${response.status} ${response.statusText}`);
+    error.status = response.status;
+    error.code = body.code;
+    error.body = body;
+    throw error;
+  }
   return body;
 }
 

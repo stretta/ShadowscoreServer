@@ -4192,8 +4192,16 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
-  assert.match(response.body, /serializeSnapshotDraft/);
-  assert.match(response.body, /applySavedSnapshot/);
+  assert.match(response.body, /instantWrite: true/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
+  assert.match(response.body, /bindRangeCommit/);
+  assert.match(response.body, /pointerdown/);
+  assert.match(response.body, /pointerup/);
+  assert.match(response.body, /commitGesture/);
+  assert.match(response.body, /commitEdit/);
+  assert.doesNotMatch(response.body, /draftChanged/);
+  assert.match(response.body, /20260724-instant-write1/);
   assert.match(response.body, /dataset\.snapshotValue/);
   assert.match(response.body, /id="rtz-before-play"/);
   assert.match(response.body, /On block change, send RTZ before play/);
@@ -4214,13 +4222,14 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /20260723-copy-checked1/, `${editor} should load the current shared snapshot client`);
+    assert.match(response.body, editor === "analogsequencer" ? /20260724-instant-write1/ : /20260723-copy-checked1/,
+      `${editor} should load its current shared snapshot client contract`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');
     const targetsIndex = response.body.indexOf('id="targets"');
     assert.ok(controlsIndex >= 0 && controlsIndex < blockStateIndex, `${editor} controls should precede Block State`);
     assert.ok(blockStateIndex < targetsIndex, `${editor} live destinations should follow Block State`);
-    assert.match(response.body, /Live Send Destinations/);
+    assert.match(response.body, editor === "analogsequencer" ? /Live And Save Destinations/ : /Live Send Destinations/);
     assert.match(response.body, /liveTargetRoot: targetsEl/);
   }
 });

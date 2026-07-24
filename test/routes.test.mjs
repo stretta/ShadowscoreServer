@@ -4125,6 +4125,10 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /Players Play/);
   assert.match(response.body, /Arrangement Hold/);
   assert.match(response.body, /Follow Block Tempo/);
+  assert.match(response.body, /liveTempoDirty: false/);
+  assert.match(response.body, /els\.liveTempo\.addEventListener\("input", \(\) => \{\s+state\.liveTempoDirty = true/);
+  assert.match(response.body, /if \(!state\.liveTempoDirty\) \{\s+els\.liveTempo\.value = String\(state\.tempoPolicy\.live \?\? 120\)/);
+  assert.match(response.body, /state\.liveTempoDirty = false;\s+renderMacroPlaybackStatus\(\)/);
   assert.match(response.body, /draggable = true/);
   assert.match(response.body, /reorderChain/);
   assert.match(response.body, /Move occurrence .* left/);

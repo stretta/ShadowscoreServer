@@ -557,6 +557,7 @@
       macroPlayback: undefined,
       performanceControls: undefined,
       tempoPolicy: undefined,
+      liveTempoDirty: false,
       macroPlaybackTimer: undefined,
       playbackPollTimer: undefined,
       playbackRequest: undefined,
@@ -657,6 +658,9 @@
       els.playersStop.addEventListener("click", () => void runPerformanceAction("/transport/players/stop", {}, "Stopping players..."));
       els.arrangementRun.addEventListener("click", () => void runPerformanceAction("/transport/arrangement/run", { mode: "auto" }, "Running arrangement..."));
       els.arrangementHold.addEventListener("click", () => void runPerformanceAction("/transport/arrangement/hold", {}, "Holding arrangement..."));
+      els.liveTempo.addEventListener("input", () => {
+        state.liveTempoDirty = true;
+      });
       els.liveTempo.addEventListener("change", () => void setLiveTempo());
       els.followBlockTempo.addEventListener("change", () => void setFollowBlockTempo());
       els.useBlockTempo.addEventListener("click", () => void useBlockTempo());
@@ -918,7 +922,9 @@
       const arrangementRunning = Boolean(state.performanceControls?.arrangement?.running ?? playback?.running);
       els.macroPlaybackState.textContent = `${playersPlaying ? "Players playing" : "Players stopped"} · ${arrangementRunning ? "Arrangement running" : "Arrangement held"}`;
       if (state.tempoPolicy) {
-        els.liveTempo.value = String(state.tempoPolicy.live ?? 120);
+        if (!state.liveTempoDirty) {
+          els.liveTempo.value = String(state.tempoPolicy.live ?? 120);
+        }
         els.followBlockTempo.checked = Boolean(state.tempoPolicy.followBlockTempo);
       }
       if (!playback?.running) {
@@ -1331,7 +1337,10 @@
 
     async function setLiveTempo() {
       const bpm = numberValue(els.liveTempo.value, state.tempoPolicy?.live ?? 120);
-      await updateTempoPolicy("/transport/tempo", { bpm }, `Live tempo ${bpm} BPM.`);
+      if (await updateTempoPolicy("/transport/tempo", { bpm }, `Live tempo ${bpm} BPM.`)) {
+        state.liveTempoDirty = false;
+        renderMacroPlaybackStatus();
+      }
     }
 
     async function setFollowBlockTempo() {
@@ -1343,12 +1352,15 @@
     }
 
     async function useBlockTempo() {
-      await updateTempoPolicy("/transport/tempo/use-block", {}, "Recalled the active block's written tempo.");
+      if (await updateTempoPolicy("/transport/tempo/use-block", {}, "Recalled the active block's written tempo.")) {
+        state.liveTempoDirty = false;
+        renderMacroPlaybackStatus();
+      }
     }
 
     async function updateTempoPolicy(path, body, successMessage) {
       if (!state.score) {
-        return;
+        return false;
       }
       try {
         state.saving = true;
@@ -1361,9 +1373,11 @@
         adoptPerformanceTransport(result.transport);
         renderPlayheadControls();
         setStatus(successMessage);
+        return true;
       } catch (error) {
         renderMacroPlaybackStatus();
         setStatus(`Tempo update failed: ${error.message}`);
+        return false;
       } finally {
         state.saving = false;
         updateButtons();

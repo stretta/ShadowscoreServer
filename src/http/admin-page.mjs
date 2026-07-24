@@ -6,6 +6,7 @@ export function adminPage() {
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Shadowscore Lab Admin</title>
   <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <script type="module" src="/shared/shadowscore-nav.js"></script>
   <style>
     :root {
       background: var(--ss-bg);
@@ -182,15 +183,11 @@ export function adminPage() {
   </style>
 </head>
 <body>
-  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
-    <a href="/">Dashboard</a>
-    <a href="/structure-editor">Structure</a>
-    <a href="/matrix-edit">Matrix</a>
-    <a href="/piano-roll">Piano Roll</a>
-    <a href="/event-list">Event List</a>
-    <a href="/editors">OSC Generators</a>
-    <a href="/admin" aria-current="page">Admin</a>
-    <a href="/transport/status">Transport</a>
+  <nav class="ss-route-tabs" aria-label="ShadowScore navigation" data-shadow-nav>
+    <a href="/piano-roll">ShadowScore</a>
+    <a href="/structure-editor">Arrange</a>
+    <a href="/editors">OSC</a>
+    <a href="/" aria-current="page">Setup</a>
   </nav>
   <main>
     <div class="toolbar">
@@ -236,7 +233,7 @@ export function adminPage() {
       </div>
       <div class="score-list" id="saved-scores"></div>
     </section>
-    <section class="targets">
+    <section class="targets" id="routing">
       <h2>Discovered RNBO targets</h2>
       <div class="rnbo-send-state" id="rnbo-send-state"></div>
       <div class="target-list" id="targets"></div>

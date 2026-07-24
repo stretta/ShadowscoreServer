@@ -3942,7 +3942,7 @@ test("root route serves view index", async () => {
   assert.doesNotMatch(rootNav, /\/tools\/osc-macros/);
   assert.match(response.body, /\/structure-editor/);
   assert.match(response.body, /\/matrix-edit/);
-  assert.match(response.body, /<a href="\/piano-roll">Piano Roll<\/a>/);
+  assert.match(response.body, /<a href="\/piano-roll">ShadowScore<\/a>/);
   assert.match(response.body, /\/event-list/);
   assert.match(response.body, /\/admin/);
   assert.match(response.body, /\/transport\/status/);
@@ -4517,8 +4517,8 @@ test("OSC volume tool route serves target selection and trim controls", async ()
   assert.match(response.body, /mappedValue/);
   assert.match(response.body, /data-trim/);
   assert.match(response.body, /Zero Trims/);
-  assert.match(response.body, /<a href="\/tools\/osc-volume" aria-current="page">OSC Volume<\/a>/);
-  assert.match(response.body, /<a href="\/tools\/osc-macros">OSC Macros<\/a>/);
+  assert.match(response.body, /data-shadow-nav/);
+  assert.match(response.body, /<a href="\/editors" aria-current="page">OSC<\/a>/);
 });
 
 test("OSC macro tool route serves builder and validation controls", async () => {
@@ -4534,8 +4534,8 @@ test("OSC macro tool route serves builder and validation controls", async () => 
   assert.match(response.body, /id="step-param"/);
   assert.match(response.body, /Dry Run/);
   assert.match(response.body, /validation-row/);
-  assert.match(response.body, /<a href="\/tools\/osc-volume">OSC Volume<\/a>/);
-  assert.match(response.body, /<a href="\/tools\/osc-macros" aria-current="page">OSC Macros<\/a>/);
+  assert.match(response.body, /data-shadow-nav/);
+  assert.match(response.body, /<a href="\/editors" aria-current="page">OSC<\/a>/);
 });
 
 test("shared client state module is served as a static asset", async () => {
@@ -4613,6 +4613,48 @@ test("shared ShadowScore stylesheet is served as a static asset", async () => {
   assert.match(response.headers["Content-Type"], /text\/css/);
   assert.match(response.body, /--ss-bg/);
   assert.match(response.body, /ss-route-tabs/);
+});
+
+test("shared grouped navigation defines and reaches every hosted user-facing page", async () => {
+  const context = createRouteContext();
+  const asset = await request(context, "GET", "/shared/shadowscore-nav.js");
+
+  assert.equal(asset.status, 200);
+  assert.match(asset.headers["Content-Type"], /text\/javascript/);
+  for (const label of ["ShadowScore", "Arrange", "OSC", "Setup"]) {
+    assert.match(asset.body, new RegExp(`label: "${label}"`));
+  }
+  for (const route of [
+    "/piano-roll",
+    "/matrix-edit",
+    "/event-list",
+    "/structure-editor",
+    "/editors",
+    "/editors/analogsequencer",
+    "/editors/listsequencer",
+    "/editors/listvelsequencer",
+    "/editors/poland",
+    "/editors/plate",
+    "/editors/softpiano",
+    "/editors/ttid",
+    "/tools/osc-volume",
+    "/tools/osc-macros",
+    "/",
+    "/admin",
+    "/transport/status"
+  ]) {
+    assert.match(asset.body, new RegExp(`href: "${route.replaceAll("/", "\\/")}"`));
+    const page = await request(context, "GET", route);
+    assert.equal(page.status, 200, `${route} should resolve`);
+    assert.match(page.body, /data-shadow-nav/, `${route} should expose the shared navigation mount`);
+    const fallback = page.body.match(/<nav class="ss-route-tabs"[^>]*data-shadow-nav[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
+    for (const group of ["ShadowScore", "Arrange", "OSC", "Setup"]) {
+      assert.match(fallback, new RegExp(`>${group}<`), `${route} should retain the ${group} fallback`);
+    }
+  }
+  assert.match(asset.body, /pointerdown/);
+  assert.match(asset.body, /event\.key !== "Escape"/);
+  assert.match(asset.body, /aria-current/);
 });
 
 test("OSC target route normalizes, filters, and reports stale targets", async () => {

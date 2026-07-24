@@ -161,6 +161,13 @@ playback snapshot reports `arrangementAdoption.pending`, the pending score
 revision, and pending block order. JACK look-ahead and activation preparation
 target the pending order's next block before the runner adopts it.
 
+All hosted pages use `/shared/shadowscore-nav.js` as the navigation source of
+truth. The four primary destinations are ShadowScore (Piano Roll, Matrix, Event
+List), Arrange, OSC (all bundled OSC editors and tools), and Setup (System
+Overview, routing, Admin, Transport Status). Native `details` menus support
+pointer, touch, and keyboard activation; each page retains a four-link fallback
+if the enhancement module cannot load.
+
 The `/editors` route serves the registered OSC-generator index from
 `public/editors`, and `/editors/manifest` exposes the generator manifest JSON.
 The bundled ListSequencer, ListVelSequencer, AnalogSequencer, Plate, Poland,

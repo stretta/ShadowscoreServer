@@ -12,10 +12,11 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
   assert.match(html, /<script type="module" crossorigin src="\/matrix-edit\/assets\/[^"]+\.js"><\/script>/);
   assert.match(html, /<link rel="stylesheet" crossorigin href="\/matrix-edit\/assets\/[^"]+\.css">/);
   assert.match(html, /<link rel="stylesheet" href="\/shared\/shadowscore-style\.css"\s*\/?>/);
-  assert.match(html, /<nav class="ss-route-tabs" aria-label="ShadowScore routes">/);
-  assert.match(html, /<a href="\/matrix-edit" aria-current="page">Matrix<\/a>/);
-  assert.match(html, /<a href="\/piano-roll">Piano Roll<\/a>/);
-  assert.match(html, /<a href="\/editors">OSC Generators<\/a>/);
+  assert.match(html, /<nav class="ss-route-tabs" aria-label="ShadowScore navigation" data-shadow-nav>/);
+  assert.match(html, /<a href="\/piano-roll" aria-current="page">ShadowScore<\/a>/);
+  assert.match(html, /<a href="\/structure-editor">Arrange<\/a>/);
+  assert.match(html, /<a href="\/editors">OSC<\/a>/);
+  assert.match(html, /<a href="\/">Setup<\/a>/);
   assert.doesNotMatch(html, /fonts\.googleapis\.com/);
   assert.match(html, /id="start-transport"/);
   assert.match(html, /id="stop-transport"/);
@@ -39,6 +40,7 @@ test("Matrix Edit static app is an exported Vite app with /matrix-edit assets", 
 test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   const { html, js, css } = await readBuiltApp();
 
+  assert.match(js, /\/shared\/shadowscore-nav\.js/);
   assert.match(html, /<span class="voice-combobox">/);
   assert.match(html, /<select id="voice" class="native-voice-select" aria-label="ShadowScore player" tabindex="-1"><\/select>/);
   assert.match(html, /id="voice-menu-button"/);
@@ -96,7 +98,7 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(css, /advanced-panel/);
   assert.match(css, /voice-menu-option/);
   assert.match(css, /--ss-bg:\s*#111821/);
-  assert.match(css, /ss-route-tabs/);
+  assert.doesNotMatch(css, /ss-route-tabs/);
   assert.match(css, /routing-status/);
   assert.match(css, /routing-status\.ambiguous/);
   assert.match(css, /ttid-selector/);

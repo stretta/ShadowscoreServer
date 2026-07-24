@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Plate Editor</title>
   <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <script type="module" src="/shared/shadowscore-nav.js"></script>
   <style>
     body {
       background:
@@ -285,10 +286,9 @@
   </style>
 </head>
 <body>
-  <nav class="ss-route-tabs" aria-label="ShadowScore routes">
-    <a href="/">Dashboard</a><a href="/structure-editor">Structure</a><a href="/matrix-edit">Matrix</a>
-    <a href="/piano-roll">Piano Roll</a><a href="/event-list">Event List</a>
-    <a href="/editors" aria-current="page">OSC Generators</a><a href="/admin">Admin</a><a href="/transport/status">Transport</a>
+  <nav class="ss-route-tabs" aria-label="ShadowScore navigation" data-shadow-nav>
+    <a href="/piano-roll">ShadowScore</a><a href="/structure-editor">Arrange</a>
+    <a href="/editors" aria-current="page">OSC</a><a href="/">Setup</a>
   </nav>
   <main>
     <header class="editor-header">

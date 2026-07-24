@@ -8,9 +8,12 @@ const jsUrl = new URL("../public/piano-roll/app.js", import.meta.url);
 test("Piano Roll exposes autosave recovery and editing surfaces", async () => {
   const html = await readFile(htmlUrl, "utf8");
   assert.match(html, /<title>ShadowScore Piano Roll<\/title>/);
-  assert.match(html, /<a href="\/piano-roll" aria-current="page">Piano Roll<\/a>/);
-  assert.match(html, /<a href="\/editors">OSC Generators<\/a>/);
-  assert.match(html, /<a href="\/transport\/status">Transport<\/a>/);
+  assert.match(html, /data-shadow-nav/);
+  assert.match(html, /<a href="\/piano-roll" aria-current="page">ShadowScore<\/a>/);
+  assert.match(html, /<a href="\/structure-editor">Arrange<\/a>/);
+  assert.match(html, /<a href="\/editors">OSC<\/a>/);
+  assert.match(html, /<a href="\/">Setup<\/a>/);
+  assert.match(html, /\/shared\/shadowscore-nav\.js/);
   assert.doesNotMatch(html, /id="save"/);
   assert.match(html, /Completed gestures save automatically/);
   assert.match(html, /id="revert"[^>]*disabled/);

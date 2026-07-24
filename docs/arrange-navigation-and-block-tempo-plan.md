@@ -4,9 +4,9 @@
 
 Implementation in progress.
 
-- Phases 1–4 (Schema And Migration, Runtime Live Tempo Policy, Split Player And
-  Arrangement Controls, Arrange Surface) are implemented locally and covered
-  by the full server test suite.
+- Phases 1–5 (Schema And Migration, Runtime Live Tempo Policy, Split Player And
+  Arrangement Controls, Arrange Surface, Navigation Consolidation) are
+  implemented locally and covered by the full server test suite.
 - The Arrange surface includes the horizontal
   occurrence strip, drag and keyboard reorder, explicit performance controls,
   written/live tempo controls, duration-proportional occurrences, and the
@@ -14,7 +14,7 @@ Implementation in progress.
   provide touch access, while selection remains independent of playback.
   Running traversal latches canonical arrangement edits until the next block
   boundary, and JACK look-ahead prepares the pending successor.
-- Phases 5–7 remain pending.
+- Phases 6–7 remain pending.
 
 ## Goal
 

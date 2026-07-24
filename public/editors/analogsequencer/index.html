@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AnalogSequencer Editor</title>
   <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <script type="module" src="/shared/shadowscore-nav.js"></script>
   <style>
     body { margin: 0; min-height: 100vh; }
     main { display: grid; gap: 12px; margin: 0 auto; padding: 16px 0 32px; width: min(1440px, calc(100vw - 28px)); }
@@ -63,7 +64,7 @@
 </head>
 <body>
   <header class="ss-top-strip"><div class="top"><div><h1>AnalogSequencer Editor</h1><p class="subtitle">16-stage pitch and step controls</p></div><div id="status" class="status" role="status">Loading targets...</div></div></header>
-  <nav class="ss-route-tabs" aria-label="ShadowScore routes"><a href="/">Dashboard</a><a href="/structure-editor">Structure</a><a href="/matrix-edit">Matrix</a><a href="/piano-roll">Piano Roll</a><a href="/event-list">Event List</a><a href="/editors" aria-current="page">OSC Generators</a><a href="/admin">Admin</a></nav>
+  <nav class="ss-route-tabs" aria-label="ShadowScore navigation" data-shadow-nav><a href="/piano-roll">ShadowScore</a><a href="/structure-editor">Arrange</a><a href="/editors" aria-current="page">OSC</a><a href="/">Setup</a></nav>
   <main>
     <section class="toolbar"><strong>Focus selects one safe live destination · multi-select below when intentional</strong><div class="toolbar-actions"><label for="read-source">Instance focus</label><select id="read-source" aria-label="Instance focus"></select><button id="get-data" type="button">Read Instance</button><button id="clock-all-off" type="button">Clock Selected Off</button><button id="rtz" class="primary" type="button">RTZ Selected</button><button id="clock-all-on" type="button">Clock Selected On</button><button id="refresh" type="button">Refresh</button></div></section>
     <section class="sequencer">

@@ -139,29 +139,124 @@ header h1 {
 
 .ss-route-tabs {
   align-items: center;
+  background: rgba(17, 24, 33, 0.94);
+  border-bottom: 1px solid var(--ss-border);
   display: flex;
   gap: 4px;
-  overflow-x: auto;
+  min-height: 38px;
+  overflow: visible;
   padding: 0 18px;
-  border-bottom: 1px solid var(--ss-border);
-  background: rgba(17, 24, 33, 0.86);
+  position: relative;
+  z-index: 100;
 }
 
-.ss-route-tabs a {
+.ss-route-tabs .ss-nav-primary,
+.ss-route-tabs:not([data-enhanced="true"]) > a {
+  align-items: center;
+  background: transparent;
+  border: 0;
   border-bottom: 2px solid transparent;
+  border-radius: 0;
   color: var(--ss-muted);
   display: inline-flex;
   font-size: 12px;
   font-weight: 750;
+  line-height: 1;
   min-height: 36px;
   padding: 10px 9px 8px;
   text-decoration: none;
   white-space: nowrap;
 }
 
-.ss-route-tabs a[aria-current="page"] {
+.ss-route-tabs .ss-nav-primary[aria-current="page"],
+.ss-route-tabs:not([data-enhanced="true"]) > a[aria-current="page"] {
   border-color: var(--ss-accent);
   color: var(--ss-text);
+}
+
+.ss-nav-group {
+  position: relative;
+}
+
+.ss-nav-group > summary {
+  cursor: pointer;
+  list-style: none;
+}
+
+.ss-nav-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.ss-nav-group > summary::after {
+  content: "▾";
+  font-size: 9px;
+  margin-left: 6px;
+}
+
+.ss-nav-group[open] > summary {
+  color: var(--ss-text);
+}
+
+.ss-nav-menu {
+  background: #0f1720;
+  border: 1px solid var(--ss-border-strong);
+  border-radius: var(--ss-radius-control);
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.38);
+  display: grid;
+  left: 0;
+  min-width: 220px;
+  padding: 5px;
+  position: absolute;
+  top: calc(100% + 4px);
+}
+
+.ss-nav-menu a {
+  border-radius: 4px;
+  color: var(--ss-muted);
+  font-size: 13px;
+  font-weight: 650;
+  min-height: 34px;
+  padding: 9px 10px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.ss-nav-menu a:hover,
+.ss-nav-menu a:focus-visible {
+  background: var(--ss-surface);
+  color: var(--ss-text);
+}
+
+.ss-nav-menu a[aria-current="page"] {
+  background: rgba(80, 200, 120, 0.12);
+  color: var(--ss-accent);
+}
+
+@media (max-width: 620px) {
+  .ss-route-tabs {
+    gap: 0;
+    justify-content: space-between;
+    overflow-x: visible;
+    padding: 0 6px;
+  }
+
+  .ss-route-tabs .ss-nav-primary,
+  .ss-route-tabs:not([data-enhanced="true"]) > a {
+    justify-content: center;
+    padding-left: 7px;
+    padding-right: 7px;
+  }
+
+  .ss-nav-group:last-child .ss-nav-menu {
+    left: auto;
+    right: 0;
+  }
+
+  .ss-nav-menu {
+    max-height: calc(100vh - 54px);
+    max-width: calc(100vw - 12px);
+    overflow-y: auto;
+  }
 }
 
 .ss-panel,

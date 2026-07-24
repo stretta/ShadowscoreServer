@@ -689,7 +689,10 @@ Hands-on continuation, 2026-07-24:
   Beat-derived arrangement playback now preserves a monotonic composition beat
   across those Link BBT discontinuities; and
 - the operator confirmed on the deployed fix that arrangement transitions no
-  longer bounce backward while Follow Block Tempo changes the live BPM.
+  longer bounce backward while Follow Block Tempo changes the live BPM; and
+- the operator confirmed that `Use Block Tempo Now` immediately adopts an
+  edited written tempo for the active playing block. A selected non-playing
+  block remains an editing context and is not treated as a live-tempo audition.
 
 ## Test Matrix
 

@@ -242,8 +242,12 @@ For the session-day operator flow, see
 - `POST /transport/tempo`: set runtime live tempo immediately with `{ "bpm": 108 }` without rewriting the active block.
 - `POST /transport/tempo/follow-block`: enable or disable written-tempo recall at the next block boundary with `{ "follow": true }`. Enabling it does not jump tempo mid-block.
 - `POST /transport/tempo/use-block`: explicitly recall the active block's written tempo now.
-- `POST /transport/play`: user-facing Play facade. Waits for queued RNBO score preparation and rejects explicit ACK failures; reasserts runtime live tempo to the configured authority; starts JACK; writes `SetStage 0` to assigned clients by default; then sends `Clock 1` so each client starts on its next synchronized beat. Playhead-only updates do not retransmit an already committed active block.
-- `POST /transport/stop`: user-facing Stop facade. Stops macrostructure playback, writes assigned-client playback stop controls, and returns aggregate transport readiness.
+- `POST /transport/players/play`: start assigned players while preserving the requested Arrangement Run/Hold mode. Waits for queued RNBO score preparation and rejects explicit ACK failures; reasserts runtime live tempo to the configured authority; starts JACK; writes `SetStage 0` to assigned clients by default; then sends `Clock 1` so each client starts on its next synchronized beat. Playhead-only updates do not retransmit an already committed active block.
+- `POST /transport/players/stop`: silence assigned players and stop JACK while preserving the current arrangement location and requested Run/Hold mode.
+- `POST /transport/arrangement/run`: start or resume arrangement movement while Players are playing. Returns `409` if Players are stopped.
+- `POST /transport/arrangement/hold`: hold arrangement movement on the current block without stopping JACK or assigned players.
+- `POST /transport/play`: compatibility facade for Players Play plus Arrangement Run.
+- `POST /transport/stop`: compatibility facade for Players Stop.
 - `POST /transport/return-to-start`: reset the macro playhead to the first section, write `SetStage: 0` to playback targets, and return aggregate transport readiness.
 - `GET /transport`: current JACK bridge freshness, latest BBT snapshot, tempo authority, and runtime live/written/follow policy.
 - `GET /transport/events`: SSE stream for transport updates.

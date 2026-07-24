@@ -4,9 +4,10 @@
 
 Implementation in progress.
 
-- Phases 1–2 (Schema And Migration, Runtime Live Tempo Policy) are implemented
-  locally and covered by the full server test suite.
-- Phases 3–7 remain pending.
+- Phases 1–3 (Schema And Migration, Runtime Live Tempo Policy, Split Player And
+  Arrangement Controls) are implemented locally and covered by the full server
+  test suite.
+- Phases 4–7 remain pending.
 
 ## Goal
 

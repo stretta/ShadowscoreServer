@@ -134,8 +134,12 @@ export function transportPage() {
   </nav>
   <main>
     <div class="toolbar">
-      <button class="primary" id="play" type="button">Play</button>
-      <button class="danger" id="stop" type="button">Stop</button>
+      <strong>Players</strong>
+      <button class="primary" id="players-play" type="button">Play</button>
+      <button class="danger" id="players-stop" type="button">Stop</button>
+      <strong>Arrangement</strong>
+      <button class="primary" id="arrangement-run" type="button">Run</button>
+      <button id="arrangement-hold" type="button">Hold</button>
       <button id="reset" type="button">Return to Start</button>
       <button id="advance" type="button">Next Section</button>
       <button id="reanchor" type="button">Re-sync</button>
@@ -201,11 +205,13 @@ export function transportPage() {
     let refreshPending = false;
     let lastPlaybackGeneration = 0;
 
-    fields.play.addEventListener("click", () => runAction(() => startPlayback("auto")));
+    fields["players-play"].addEventListener("click", () => runAction(() => startPlayers("auto")));
+    fields["players-stop"].addEventListener("click", () => runAction(stopPlayers));
+    fields["arrangement-run"].addEventListener("click", () => runAction(() => runArrangement("auto")));
+    fields["arrangement-hold"].addEventListener("click", () => runAction(holdArrangement));
     fields["start-jack"].addEventListener("click", () => runAction(() => startPlayback("jack")));
     fields["start-timer"].addEventListener("click", () => runAction(() => startPlayback("timer")));
     fields.reanchor.addEventListener("click", () => runAction(() => startPlayback("jack", { phaseReset: true })));
-    fields.stop.addEventListener("click", () => runAction(stopPlayback));
     fields.advance.addEventListener("click", () => runAction(() => postJson("/macrostructure/advance", {})));
     fields.reset.addEventListener("click", () => runAction(resetToA));
     fields["jack-start"].addEventListener("click", () => runAction(() => postJson("/transport/jack/start", {})));
@@ -232,7 +238,7 @@ export function transportPage() {
         lastPlaybackGeneration = snapshot.generation;
         lastTransport = snapshot.transport?.jack || {};
         renderTransport(lastTransport);
-        renderPlayback(snapshot.playback || {});
+        renderPlayback(snapshot.playback || {}, snapshot.controls || {});
         renderContracts(snapshot.timingContracts || []);
         const age = Math.max(0, Date.now() - Date.parse(snapshot.observedAt));
         fields.status.textContent = "JACK authority · snapshot " + snapshot.generation + " · " + age + " ms old";
@@ -248,8 +254,23 @@ export function transportPage() {
       await refreshAll();
     }
 
-    async function stopPlayback() {
-      await postJson("/transport/stop", {});
+    async function startPlayers(mode) {
+      await postJson("/transport/players/play", { mode });
+      await refreshAll();
+    }
+
+    async function stopPlayers() {
+      await postJson("/transport/players/stop", {});
+      await refreshAll();
+    }
+
+    async function runArrangement(mode) {
+      await postJson("/transport/arrangement/run", { mode });
+      await refreshAll();
+    }
+
+    async function holdArrangement() {
+      await postJson("/transport/arrangement/hold", {});
       await refreshAll();
     }
 
@@ -299,8 +320,12 @@ export function transportPage() {
       fields["tempo-authority"].textContent = transport.tempoAuthority || "-";
     }
 
-    function renderPlayback(playback) {
-      fields["macro-mode"].textContent = playback.running ? "playing" : "stopped";
+    function renderPlayback(playback, controls) {
+      const players = controls.players?.playing ? "Players playing" : "Players stopped";
+      const arrangement = controls.arrangement?.running
+        ? "Arrangement running"
+        : "Arrangement held" + (playback.activeBlockId ? " on " + playback.activeBlockId : "");
+      fields["macro-mode"].textContent = players + " · " + arrangement;
       fields["beat-witness"].textContent = witnessLabel(playback.witness);
       fields["beat-witness"].className = "value small " + (playback.witness?.usable ? "ok" : playback.witness?.degraded ? "warn" : "bad");
       fields["beat-witness-detail"].textContent = witnessDetail(playback.witness);

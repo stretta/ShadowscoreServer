@@ -22,6 +22,10 @@ test("playback snapshot keeps JACK playhead separate from target execution witne
       source: "manual",
       activeBlockId: "D"
     },
+    controls: {
+      players: { playing: true },
+      arrangement: { running: false, mode: "hold", requestedMode: "hold", activeBlockId: "D", macroIndex: 7 }
+    },
     playback: {
       running: true,
       activeBlockId: "D",
@@ -61,6 +65,8 @@ test("playback snapshot keeps JACK playhead separate from target execution witne
   assert.equal(snapshot.transport.authority, "jack");
   assert.equal(snapshot.transport.tempo, 108);
   assert.equal(snapshot.tempo.source, "manual");
+  assert.equal(snapshot.controls.players.playing, true);
+  assert.equal(snapshot.controls.arrangement.mode, "hold");
   assert.equal(snapshot.transport.beatIntoBlock, 40.25);
   assert.equal(snapshot.targets.finch.beatIntoBlock, 40);
   assert.equal(snapshot.targets.finch.phaseErrorBeats, -0.25);

@@ -513,7 +513,10 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/transport/play") {
     try {
       const body = await readJson(request);
-      const result = await startUnifiedTransport(store, config, runtime, body, "transport");
+      const result = await startUnifiedTransport(store, config, runtime, {
+        ...body,
+        forceArrangementRun: true
+      }, "transport");
       writeJson(response, 200, {
         ok: true,
         action: "play",
@@ -538,6 +541,69 @@ export async function routeRequest(request, response, store, config, runtime = {
       });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/players/play") {
+    try {
+      const body = await readJson(request);
+      const result = await startUnifiedTransport(store, config, runtime, body, "players");
+      writeJson(response, 200, {
+        ok: true,
+        action: "players-play",
+        ...result,
+        transport: await transportFacadeStatus(store, config, runtime)
+      });
+    } catch (error) {
+      writeError(response, error, error?.statusCode ?? 400);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/players/stop") {
+    try {
+      const body = await readJson(request);
+      const result = await stopUnifiedTransport(store, config, runtime, body);
+      writeJson(response, 200, {
+        ok: true,
+        action: "players-stop",
+        ...result,
+        transport: await transportFacadeStatus(store, config, runtime)
+      });
+    } catch (error) {
+      writeError(response, error, error?.statusCode ?? 400);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/arrangement/run") {
+    try {
+      const body = await readJson(request);
+      const result = await runArrangement(store, config, runtime, body);
+      writeJson(response, 200, {
+        ok: true,
+        action: "arrangement-run",
+        ...result,
+        transport: await transportFacadeStatus(store, config, runtime)
+      });
+    } catch (error) {
+      writeError(response, error, error?.statusCode ?? 400);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/arrangement/hold") {
+    try {
+      const result = holdArrangement(runtime);
+      writeJson(response, 200, {
+        ok: true,
+        action: "arrangement-hold",
+        ...result,
+        transport: await transportFacadeStatus(store, config, runtime)
+      });
+    } catch (error) {
+      writeError(response, error, error?.statusCode ?? 400);
     }
     return;
   }
@@ -1194,6 +1260,7 @@ export async function routeRequest(request, response, store, config, runtime = {
       const body = await readJson(request);
       const result = await startUnifiedTransport(store, config, runtime, {
         phaseReset: false,
+        forceArrangementRun: true,
         ...body
       }, "http");
       writeJson(response, 200, {
@@ -1880,6 +1947,40 @@ function tempoPolicyFor(store, config, runtime) {
   return runtime.tempoPolicy;
 }
 
+function performanceTransportFor(runtime) {
+  if (!runtime.performanceTransport) {
+    runtime.performanceTransport = {
+      playersPlaying: false,
+      arrangementRequestedMode: "run"
+    };
+  }
+  return runtime.performanceTransport;
+}
+
+function performanceTransportSnapshot(runtime, playback = runtime.macroPlayback?.snapshot?.() ?? {}) {
+  const performance = performanceTransportFor(runtime);
+  return {
+    players: {
+      playing: Boolean(performance.playersPlaying)
+    },
+    arrangement: {
+      running: Boolean(playback.running),
+      mode: playback.running ? "run" : "hold",
+      requestedMode: performance.arrangementRequestedMode,
+      activeBlockId: playback.activeBlockId ?? "",
+      macroIndex: playback.macroIndex ?? 0
+    }
+  };
+}
+
+function performanceStateText(controls) {
+  const players = controls.players.playing ? "Players playing" : "Players stopped";
+  const arrangement = controls.arrangement.running
+    ? "Arrangement running"
+    : `Arrangement held${controls.arrangement.activeBlockId ? ` on ${controls.arrangement.activeBlockId}` : ""}`;
+  return `${players} · ${arrangement}`;
+}
+
 function requireJackTransport(runtime) {
   if (!runtime.jackTransport) {
     throw new Error("JACK transport state is not available");
@@ -2040,6 +2141,7 @@ async function coherentPlaybackSnapshot(runtime, store, config) {
     score,
     playback,
     tempo: tempoPolicyFor(store, config, runtime).snapshot(),
+    controls: performanceTransportSnapshot(runtime, playback),
     jack: transportSnapshot(config, runtime),
     targets,
     timingContracts,
@@ -2091,12 +2193,16 @@ async function transportFacadeStatus(store, config, runtime) {
   if (playback.running && witness.usable === false && witness.reason) {
     warnings.push(witness.reason);
   }
+  const controls = performanceTransportSnapshot(runtime, playback);
   return {
-    playing: Boolean(playback.running),
+    playing: controls.players.playing,
     activeBlockId: playback.activeBlockId ?? score.structureState?.activeBlockId ?? "",
     macroIndex: playback.macroIndex ?? score.structureState?.macroIndex ?? 0,
     beatIntoBlock: playback.beatIntoBlock ?? null,
     tempo: tempoPolicyFor(store, config, runtime).snapshot(),
+    players: controls.players,
+    arrangement: controls.arrangement,
+    stateText: performanceStateText(controls),
     sync: {
       source: syncSource,
       fresh: Boolean(witness.fresh ?? witness.usable),
@@ -2115,6 +2221,31 @@ async function transportFacadeStatus(store, config, runtime) {
 
 async function startUnifiedTransport(store, config, runtime, body = {}, sourceClientId = "transport") {
   const playback = requireMacroPlayback(runtime);
+  const performance = performanceTransportFor(runtime);
+  const requestedArrangementMode = body.forceArrangementRun
+    ? "run"
+    : performance.arrangementRequestedMode;
+  if (body.forceArrangementRun) performance.arrangementRequestedMode = "run";
+  if (performance.playersPlaying) {
+    if (requestedArrangementMode === "run" && !playback.snapshot().running) {
+      const mode = await playbackStartMode(store.getScore(), config, runtime, optionalString(body.mode));
+      playback.start({ mode, reset: Boolean(body.reset), sourceClientId });
+    }
+    return {
+      idempotent: true,
+      mode: playback.snapshot().mode,
+      rnboReadiness: null,
+      jackStart: null,
+      jackTempo: null,
+      tempoWrites: [],
+      ttidDistribution: null,
+      snapshotRecall: null,
+      playbackUpdate: null,
+      activations: [],
+      clockWrites: [],
+      phaseWrites: []
+    };
+  }
   const score = store.getScore();
   const targetId = optionalString(body.targetId);
   if (runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.prepareBlock === "function") {
@@ -2141,11 +2272,16 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     : runtime.rnboAdapter?.schedulePreparedActivations?.({ targetId, initialStage: 0 }) ?? [];
   const clockWrites = await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId });
   const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
-  playback.start({
-    mode,
-    reset: Boolean(body.reset),
-    sourceClientId
-  });
+  if (requestedArrangementMode === "run") {
+    playback.start({
+      mode,
+      reset: Boolean(body.reset),
+      sourceClientId
+    });
+  } else {
+    playback.stop();
+  }
+  performance.playersPlaying = true;
   const activations = playbackUpdate?.activations ?? (activationSchedule.length
     ? await runtime.rnboAdapter.confirmPreparedActivations(activationSchedule, {
       tempo
@@ -2180,13 +2316,53 @@ async function awaitRnboPlaybackReady(runtime) {
 
 async function stopUnifiedTransport(store, config, runtime, body = {}) {
   const playback = requireMacroPlayback(runtime);
+  const performance = performanceTransportFor(runtime);
+  if (!performance.playersPlaying) {
+    playback.stop();
+    return { idempotent: true, jackStop: null, clockWrites: [] };
+  }
   const targetId = optionalString(body.targetId);
   const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 0 }, { targetId });
   playback.stop();
   const jackStop = await maybeStopJack(runtime);
+  performance.playersPlaying = false;
   return {
     jackStop,
     clockWrites
+  };
+}
+
+async function runArrangement(store, config, runtime, body = {}) {
+  const playback = requireMacroPlayback(runtime);
+  const performance = performanceTransportFor(runtime);
+  performance.arrangementRequestedMode = "run";
+  if (!performance.playersPlaying) {
+    const error = new Error("Players are stopped; start Players before running the arrangement");
+    error.statusCode = 409;
+    throw error;
+  }
+  if (playback.snapshot().running) {
+    return { idempotent: true, playback: playback.snapshot() };
+  }
+  const mode = await playbackStartMode(store.getScore(), config, runtime, optionalString(body.mode));
+  return {
+    idempotent: false,
+    playback: playback.start({
+      mode,
+      reset: Boolean(body.reset),
+      sourceClientId: "arrangement"
+    })
+  };
+}
+
+function holdArrangement(runtime) {
+  const playback = requireMacroPlayback(runtime);
+  const performance = performanceTransportFor(runtime);
+  performance.arrangementRequestedMode = "hold";
+  const wasRunning = Boolean(playback.snapshot().running);
+  return {
+    idempotent: !wasRunning,
+    playback: playback.stop()
   };
 }
 

@@ -495,7 +495,10 @@ test("transport status page exposes host transport controls", async () => {
   assert.match(response.body, /id="reanchor"/);
   assert.match(response.body, /id="advance"/);
   assert.match(response.body, /id="reset"/);
-  assert.match(response.body, /id="stop"/);
+  assert.match(response.body, /id="players-play"/);
+  assert.match(response.body, /id="players-stop"/);
+  assert.match(response.body, /id="arrangement-run"/);
+  assert.match(response.body, /id="arrangement-hold"/);
   assert.match(response.body, /id="composition-beat"/);
   assert.match(response.body, /id="beat-into-block"/);
   assert.match(response.body, /transport\.tempo\?\.live/);
@@ -507,8 +510,10 @@ test("transport status page exposes host transport controls", async () => {
   assert.match(response.body, /lastPlaybackGeneration/);
   assert.match(response.body, /Disagrees on/);
   assert.match(response.body, /\/transport\/events/);
-  assert.match(response.body, /\/transport\/play/);
-  assert.match(response.body, /\/transport\/stop/);
+  assert.match(response.body, /\/transport\/players\/play/);
+  assert.match(response.body, /\/transport\/players\/stop/);
+  assert.match(response.body, /\/transport\/arrangement\/run/);
+  assert.match(response.body, /\/transport\/arrangement\/hold/);
   assert.match(response.body, /\/macrostructure\/advance/);
   assert.match(response.body, /\/macrostructure\/reset/);
 });
@@ -1541,6 +1546,136 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     value: 0
   });
   assert.deepEqual(jackCalls, [["tempo", 120], ["start"], ["stop"]]);
+});
+
+test("player and arrangement controls remain distinct and idempotent", async () => {
+  const writes = [];
+  const jackCalls = [];
+  let running = false;
+  let mode = "stopped";
+  let startCount = 0;
+  let stopCount = 0;
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [{
+          id: "source-client",
+          host: "192.168.68.96",
+          port: 9000,
+          address: "/rnbo/inst/2/messages/in/shadowscore"
+        }]
+      }
+    }),
+    runtime: {
+      jackController: {
+        async tempo(bpm) {
+          jackCalls.push(["tempo", bpm]);
+          return { ok: true, bpm };
+        },
+        async start() {
+          jackCalls.push(["start"]);
+          return { ok: true };
+        },
+        async stop() {
+          jackCalls.push(["stop"]);
+          return { ok: true };
+        }
+      },
+      rnboParamWriter: async (write) => writes.push(write),
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          mode,
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: { source: mode, usable: running }
+        }),
+        start: (options) => {
+          startCount += 1;
+          running = true;
+          mode = options.mode;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => {
+          stopCount += 1;
+          running = false;
+          mode = "stopped";
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  const blocked = await request(context, "POST", "/transport/arrangement/run", {});
+  assert.equal(blocked.status, 409);
+  assert.match(blocked.body, /Players are stopped/);
+
+  const played = await requestJson(context, "POST", "/transport/players/play", { mode: "timer" });
+  assert.equal(played.transport.players.playing, true);
+  assert.equal(played.transport.arrangement.running, true);
+  assert.equal(played.transport.stateText, "Players playing · Arrangement running");
+
+  const writesAfterPlay = writes.length;
+  const jackAfterPlay = jackCalls.length;
+  const held = await requestJson(context, "POST", "/transport/arrangement/hold", {});
+  assert.equal(held.transport.players.playing, true);
+  assert.equal(held.transport.arrangement.running, false);
+  assert.equal(held.transport.stateText, "Players playing · Arrangement held on A");
+  assert.equal(writes.length, writesAfterPlay);
+  assert.equal(jackCalls.length, jackAfterPlay);
+
+  const repeatedPlay = await requestJson(context, "POST", "/transport/players/play", {});
+  assert.equal(repeatedPlay.idempotent, true);
+  assert.equal(repeatedPlay.transport.arrangement.running, false);
+  assert.equal(writes.length, writesAfterPlay);
+
+  const resumed = await requestJson(context, "POST", "/transport/arrangement/run", { mode: "timer" });
+  assert.equal(resumed.transport.arrangement.running, true);
+  assert.equal(writes.length, writesAfterPlay);
+
+  const stopped = await requestJson(context, "POST", "/transport/players/stop", {});
+  assert.equal(stopped.transport.players.playing, false);
+  assert.equal(stopped.transport.arrangement.running, false);
+  const writesAfterStop = writes.length;
+  const jackAfterStop = jackCalls.length;
+
+  const repeatedStop = await requestJson(context, "POST", "/transport/players/stop", {});
+  assert.equal(repeatedStop.idempotent, true);
+  assert.equal(writes.length, writesAfterStop);
+  assert.equal(jackCalls.length, jackAfterStop);
+  assert.equal(startCount, 2);
+  assert.ok(stopCount >= 2);
+});
+
+test("Players Play respects a held arrangement mode", async () => {
+  let running = false;
+  const context = createRouteContext({
+    runtime: {
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          mode: running ? "timer" : "stopped",
+          activeBlockId: "A",
+          macroIndex: 0
+        }),
+        start: () => {
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => {
+          running = false;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  await requestJson(context, "POST", "/transport/arrangement/hold", {});
+  const played = await requestJson(context, "POST", "/transport/players/play", { mode: "timer" });
+
+  assert.equal(played.transport.players.playing, true);
+  assert.equal(played.transport.arrangement.running, false);
+  assert.equal(played.transport.arrangement.requestedMode, "hold");
 });
 
 test("transport auto mode selects JACK after the controller starts rolling", async () => {

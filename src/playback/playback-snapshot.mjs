@@ -14,6 +14,7 @@ export function buildPlaybackSnapshot({
   score = {},
   playback = {},
   tempo = null,
+  controls = null,
   jack = {},
   targets = [],
   timingContracts = [],
@@ -91,6 +92,7 @@ export function buildPlaybackSnapshot({
     scoreRevision: score.scoreRevision ?? score.version ?? 0,
     structureRevision: score.structureRevision ?? 0,
     tempo,
+    controls,
     transport: {
       authority: "jack",
       running: Boolean(playback.running),

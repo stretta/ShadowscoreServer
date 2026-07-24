@@ -692,7 +692,13 @@ Hands-on continuation, 2026-07-24:
   longer bounce backward while Follow Block Tempo changes the live BPM; and
 - the operator confirmed that `Use Block Tempo Now` immediately adopts an
   edited written tempo for the active playing block. A selected non-playing
-  block remains an editing context and is not treated as a live-tempo audition.
+  block remains an editing context and is not treated as a live-tempo audition;
+  and
+- the operator confirmed repeated-block Arrange editing end to end: adding
+  another occurrence reuses the existing block, reordering preserves shared
+  block data, a running near-boundary edit leaves the current block stable and
+  adopts the new order at the next boundary, and removing the extra occurrence
+  does not delete the referenced block.
 
 ## Test Matrix
 

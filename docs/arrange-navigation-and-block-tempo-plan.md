@@ -600,6 +600,19 @@ Acceptance:
 - active traversal is stable during live edits; and
 - mobile and keyboard workflows are complete.
 
+Layout refinement, 2026-07-24:
+
+- Arrangement is a primary overview, so it spans the full workspace above the
+  block library and inspector instead of occupying a narrow side column;
+- the complete macrostructure scales into one duration-proportional strip so
+  form and relative progress remain visible without horizontal keyhole
+  scrolling;
+- occurrence cards contain only their block label, selection, active state, and
+  wiper; and
+- drag handles reordering, while Backspace/Delete removes the focused
+  occurrence. Per-occurrence move and remove buttons and numbered selects are
+  intentionally absent.
+
 ### Phase 5: Navigation Consolidation
 
 - implement the shared grouped navigation;

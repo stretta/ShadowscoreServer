@@ -4131,8 +4131,10 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /state\.liveTempoDirty = false;\s+renderMacroPlaybackStatus\(\)/);
   assert.match(response.body, /draggable = true/);
   assert.match(response.body, /reorderChain/);
-  assert.match(response.body, /Move occurrence .* left/);
-  assert.match(response.body, /Move occurrence .* right/);
+  assert.match(response.body, /Press Backspace or Delete to remove/);
+  assert.match(response.body, /removeChainEntry/);
+  assert.doesNotMatch(response.body, /occurrence-actions/);
+  assert.doesNotMatch(response.body, /Alt plus arrow keys/);
   assert.match(response.body, /data-selected/);
   assert.match(response.body, /updateArrangementSelection/);
   assert.match(response.body, /createWiperEstimator/);
@@ -4160,7 +4162,8 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /\.panel-body > \* \{\s+min-width: 0;/);
   assert.match(response.body, /formatRemaining/);
   assert.match(response.body, /Create new clip/);
-  assert.match(response.body, /persistMacrostructure\("Updating playback chain/);
+  assert.match(response.body, /row\.style\.flexGrow = String\(blockDurationBeats/);
+  assert.match(response.body, /blocks: chainRows\(\)\.map\(\(row\) => row\.dataset\.blockId\)/);
   assert.match(response.body, /\/mesostructure\/\$\{encodeURIComponent\(sourceBlockId\)\}\/duplicate/);
   assert.match(response.body, /\/mesostructure\/\$\{encodeURIComponent\(nextId\)\}/);
   assert.match(response.body, /\/clips\/\$\{encodeURIComponent\(clipId\)\}/);

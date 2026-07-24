@@ -161,6 +161,21 @@ test("persisted OSC clips migrate legacy TTID parameters out of snapshot ownersh
   assert.deepEqual(persisted.oscClips.legacy.params, { Clock: 1, Scale: 2741, "T-T-I-D": 4095 });
 });
 
+test("persisted macrostructure tempo migrates into missing block tempos", () => {
+  const persisted = createInitialScore(defaultConfig);
+  persisted.macrostructure.tempo = 96;
+  delete persisted.mesostructure.A.tempo;
+  persisted.mesostructure.B.tempo = 84;
+
+  const migrated = migratePersistedScore(persisted);
+
+  assert.equal(migrated.mesostructure.A.tempo, 96);
+  assert.equal(migrated.mesostructure.B.tempo, 84);
+  assert.equal(migrated.macrostructure.tempo, undefined);
+  assert.equal(persisted.macrostructure.tempo, 96);
+  assert.equal(persisted.mesostructure.A.tempo, undefined);
+});
+
 test("legacy persisted scores load through the mesostructural TTID cutover", async () => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-persist-"));
   const config = configFor(directory);

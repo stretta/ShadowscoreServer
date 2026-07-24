@@ -7,7 +7,8 @@ export function createScoreInitializationPlan(request, options = {}) {
 
   const players = requiredArray(request.players, "players").map(normalizePlayer);
   const clips = optionalArray(request.clips, "clips").map(normalizeClip);
-  const blocks = requiredArray(request.blocks, "blocks").map(normalizeBlock);
+  const legacyTempo = normalizeLegacyTempo(request.macrostructure?.tempo);
+  const blocks = requiredArray(request.blocks, "blocks").map((block, index) => normalizeBlock(block, index, legacyTempo));
   const oscRoles = optionalArray(request.oscRoles, "oscRoles").map(normalizeOscRole);
 
   assertUnique(players, "player");
@@ -118,7 +119,7 @@ function normalizeClip(document, index) {
   };
 }
 
-function normalizeBlock(document, index) {
+function normalizeBlock(document, index, fallbackTempo = 120) {
   if (!isObject(document)) throw new Error(`blocks[${index}] must be an object`);
   const id = validId(document.id, `blocks[${index}].id`);
   if (document.duration !== undefined && !isObject(document.duration)) throw new Error(`block '${id}' duration must be an object`);
@@ -130,6 +131,7 @@ function normalizeBlock(document, index) {
   ]));
   return {
     id,
+    tempo: positiveTempo(document.tempo, `block '${id}' tempo`, fallbackTempo),
     duration: structuredClone(document.duration ?? { bars: 1 }),
     scale: normalizeScale(document.scale ?? DEFAULT_SCALE),
     ttid: document.ttid === undefined ? scaleToTtid(document.scale ?? DEFAULT_SCALE) : normalizeTtid(document.ttid),
@@ -161,9 +163,18 @@ function normalizeMacrostructure(document, defaultBlocks) {
   if (document !== undefined && !isObject(document)) throw new Error("macrostructure must be an object");
   const value = document ?? {};
   const blocks = value.blocks === undefined ? defaultBlocks : requiredArray(value.blocks, "macrostructure.blocks").map((id, index) => validId(id, `macrostructure.blocks[${index}]`));
-  const tempo = value.tempo === undefined ? 120 : Number(value.tempo);
-  if (!Number.isFinite(tempo) || tempo <= 0) throw new Error("macrostructure tempo must be a positive number");
-  return { tempo, blocks };
+  return { blocks };
+}
+
+function normalizeLegacyTempo(value) {
+  if (value === undefined || value === null || value === "") return 120;
+  return positiveTempo(value, "macrostructure tempo", 120);
+}
+
+function positiveTempo(value, field, fallback) {
+  const candidate = value === undefined || value === null || value === "" ? fallback : Number(value);
+  if (!Number.isFinite(candidate) || candidate <= 0) throw new Error(`${field} must be a positive number`);
+  return candidate;
 }
 
 function assertUnique(entries, label) {

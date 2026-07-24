@@ -45,10 +45,10 @@ test("timer macro playback triggers one automatic snapshot recall at block entry
   playback.close();
 });
 
-test("macro playback uses beat durations directly", () => {
+test("macro playback uses beat durations and the active block written tempo", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
-  store.replaceMesoBlock("A", { duration: { beats: 3 }, players: {} });
-  store.updateMacrostructure({ tempo: 60, blocks: ["A"] });
+  store.replaceMesoBlock("A", { tempo: 60, duration: { beats: 3 }, players: {} });
+  store.updateMacrostructure({ blocks: ["A"] });
 
   assert.equal(macroBlockDurationMs(store.getScore(), defaultConfig), 3000);
 });

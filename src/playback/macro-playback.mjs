@@ -1,4 +1,5 @@
 import { selectBeatWitness } from "./beat-witness.mjs";
+import { activeWrittenTempo } from "./tempo.mjs";
 
 export function createMacroPlayback(store, config = {}, options = {}) {
   const timers = options.timers ?? globalThis;
@@ -445,7 +446,7 @@ export function macroBlockDurationMs(score, config = {}) {
 }
 
 function durationMsFromBeats(beats, score, config = {}) {
-  const tempo = finiteNumber(score.macrostructure?.tempo, finiteNumber(config.rnbo?.transport?.Tempo, 120));
+  const tempo = activeWrittenTempo(score, finiteNumber(config.rnbo?.transport?.Tempo, 120));
   if (beats <= 0 || tempo <= 0) {
     return 0;
   }

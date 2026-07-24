@@ -103,9 +103,9 @@ matching stable `deviceId`.
 Use Structure Editor for:
 
 - selecting the active block;
-- editing block durations;
+- editing block durations and written tempos;
 - assigning clips to players;
-- setting macrostructure tempo and block order.
+- setting the ordered macrostructure block occurrences.
 
 Use Event List for:
 

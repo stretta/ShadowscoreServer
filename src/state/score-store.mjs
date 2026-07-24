@@ -220,6 +220,7 @@ export function createScoreStore(initialScore, options = {}) {
       const existing = score.mesostructure[id];
       const block = normalizeMesoBlock({
         ...blockDocument,
+        tempo: blockDocument.tempo ?? existing?.tempo,
         scale: blockDocument.scale ?? existing?.scale ?? DEFAULT_SCALE,
         ttid: blockDocument.ttid ?? existing?.ttid
       });
@@ -1126,11 +1127,13 @@ function nextRevisionFields(score, options = {}) {
 }
 
 function withRevisionDefaults(score) {
+  const legacyTempo = legacyMacroTempo(score.macrostructure);
   const normalized = {
     ...score,
     scoreRevision: scoreRevisionFor(score),
     structureRevision: structureRevisionFor(score),
-    mesostructure: normalizeMesostructure(score.mesostructure ?? {}),
+    mesostructure: normalizeMesostructure(score.mesostructure ?? {}, legacyTempo),
+    macrostructure: normalizeMacrostructure(score.macrostructure ?? createDefaultMacrostructure()),
     oscAssignments: normalizeOscAssignments(score.oscAssignments ?? {}),
     oscClips: normalizeOscClips(score.oscClips ?? {})
   };
@@ -1197,6 +1200,7 @@ function createDefaultMesostructure(voiceIds = []) {
     DEFAULT_BLOCK_IDS.map((blockId) => [
       blockId,
       {
+        tempo: 120,
         duration: { bars: 4 },
         scale: structuredClone(DEFAULT_SCALE),
         ttid: scaleToTtid(DEFAULT_SCALE),
@@ -1211,7 +1215,6 @@ function createDefaultMesostructure(voiceIds = []) {
 
 function createDefaultMacrostructure() {
   return {
-    tempo: 120,
     blocks: DEFAULT_BLOCK_IDS
   };
 }
@@ -1361,9 +1364,14 @@ function normalizeScoreDocument(scoreDocument, assignmentDefaults = {}, fallback
     }
   }
   const clips = normalizeClips(scoreDocument.clips ?? fallbackScore?.clips ?? {});
-  const mesostructure = normalizeMesostructure(scoreDocument.mesostructure ?? fallbackScore?.mesostructure ?? createDefaultMesostructure());
+  const macrostructureDocument = scoreDocument.macrostructure ?? fallbackScore?.macrostructure ?? createDefaultMacrostructure();
+  const fallbackTempo = activeBlockTempo(fallbackScore, 120);
+  const mesostructure = normalizeMesostructure(
+    scoreDocument.mesostructure ?? fallbackScore?.mesostructure ?? createDefaultMesostructure(),
+    legacyMacroTempo(macrostructureDocument, fallbackTempo)
+  );
   const playerStructure = reconcilePlayerStructure({ voices, clips, mesostructure });
-  const macrostructure = normalizeMacrostructure(scoreDocument.macrostructure ?? fallbackScore?.macrostructure ?? createDefaultMacrostructure());
+  const macrostructure = normalizeMacrostructure(macrostructureDocument);
   const normalized = {
     ensembleId: stringField(scoreDocument.ensembleId),
     version: Number.isFinite(scoreDocument.version) ? scoreDocument.version : 0,
@@ -1513,19 +1521,19 @@ function uniqueId(base, existing) {
   return `${cleanBase}-${index}`;
 }
 
-function normalizeMesostructure(mesostructureDocument) {
+function normalizeMesostructure(mesostructureDocument, fallbackTempo = 120) {
   if (!isPlainObject(mesostructureDocument)) {
     throw new Error("mesostructure must be an object");
   }
   return Object.fromEntries(
     Object.entries(mesostructureDocument).map(([blockId, block]) => [
       normalizeBlockId(blockId),
-      normalizeMesoBlock(block)
+      normalizeMesoBlock(block, fallbackTempo)
     ])
   );
 }
 
-function normalizeMesoBlock(blockDocument) {
+function normalizeMesoBlock(blockDocument, fallbackTempo = 120) {
   if (!isPlainObject(blockDocument)) {
     throw new Error("mesostructural block must be an object");
   }
@@ -1543,6 +1551,7 @@ function normalizeMesoBlock(blockDocument) {
     : DEFAULT_SCALE;
   const scale = normalizeScale(scaleDocument);
   return {
+    tempo: normalizeBlockTempo(blockDocument.tempo, fallbackTempo),
     duration: structuredClone(blockDocument.duration),
     scale,
     ttid: blockDocument.ttid === undefined ? scaleToTtid(scale) : normalizeTtid(blockDocument.ttid),
@@ -1616,17 +1625,41 @@ function normalizeMacrostructure(macrostructureDocument) {
   if (!isPlainObject(macrostructureDocument)) {
     throw new Error("macrostructure must be an object");
   }
-  if (!Number.isFinite(macrostructureDocument.tempo)) {
-    throw new Error("macrostructure tempo must be numeric");
-  }
   if (!Array.isArray(macrostructureDocument.blocks)) {
     throw new Error("macrostructure blocks must be an array");
   }
   return {
-    ...structuredClone(macrostructureDocument),
-    tempo: Number(macrostructureDocument.tempo),
     blocks: macrostructureDocument.blocks.map((blockId) => normalizeBlockId(blockId))
   };
+}
+
+function normalizeBlockTempo(value, fallbackTempo = 120) {
+  if (value === undefined || value === null || value === "") {
+    return positiveTempo(fallbackTempo, 120);
+  }
+  const tempo = Number(value);
+  if (!Number.isFinite(tempo) || tempo <= 0) {
+    throw new Error("mesostructural block tempo must be a positive number");
+  }
+  return tempo;
+}
+
+function legacyMacroTempo(macrostructure, fallbackTempo = 120) {
+  return positiveTempo(macrostructure?.tempo, fallbackTempo);
+}
+
+function activeBlockTempo(score, fallbackTempo = 120) {
+  const blockId = score?.structureState?.activeBlockId
+    ?? score?.macrostructure?.blocks?.[score?.structureState?.macroIndex ?? 0]
+    ?? score?.macrostructure?.blocks?.[0];
+  return positiveTempo(score?.mesostructure?.[blockId]?.tempo, fallbackTempo);
+}
+
+function positiveTempo(value, fallbackTempo = 120) {
+  const tempo = Number(value);
+  if (Number.isFinite(tempo) && tempo > 0) return tempo;
+  const fallback = Number(fallbackTempo);
+  return Number.isFinite(fallback) && fallback > 0 ? fallback : 120;
 }
 
 function normalizeStructureState(structureStateDocument = {}, mesostructure = {}, macrostructure = createDefaultMacrostructure()) {

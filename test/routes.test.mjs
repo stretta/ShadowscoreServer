@@ -1745,7 +1745,7 @@ test("transport play prefers atomic block activation for continuing clients", as
   assert.equal(started.activations[0].acknowledgement.status, "active");
 });
 
-test("macrostructure tempo save sends JACK tempo when control is available", async () => {
+test("written block tempo save does not silently change live JACK tempo", async () => {
   const jackCalls = [];
   const context = createRouteContext({
     runtime: {
@@ -1758,13 +1758,15 @@ test("macrostructure tempo save sends JACK tempo when control is available", asy
     }
   });
 
-  const score = await requestJson(context, "POST", "/macrostructure", {
-    tempo: 137.25,
-    blocks: ["A"]
+  const current = context.store.getScore();
+  const score = await requestJson(context, "POST", "/mesostructure/A", {
+    ...current.mesostructure.A,
+    tempo: 137.25
   });
 
-  assert.equal(score.macrostructure.tempo, 137.25);
-  assert.deepEqual(jackCalls, [["tempo", 137.25]]);
+  assert.equal(score.mesostructure.A.tempo, 137.25);
+  assert.equal(score.macrostructure.tempo, undefined);
+  assert.deepEqual(jackCalls, []);
 });
 
 test("transport return-to-start resets the macro playhead and phase", async () => {

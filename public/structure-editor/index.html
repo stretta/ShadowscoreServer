@@ -377,6 +377,9 @@
             <label>Duration
               <input id="duration-value" type="number" min="0.001" step="0.001" value="8">
             </label>
+            <label>Written Tempo
+              <input id="tempo" type="number" min="20" max="400" step="0.01" value="120">
+            </label>
             <label>Rendered Root (Matrix Edit)
               <select id="scale-root">
               </select>
@@ -414,9 +417,6 @@
           <button id="add-chain" type="button">Add</button>
         </div>
         <div class="panel-body">
-          <label>Tempo
-            <input id="tempo" type="number" min="20" max="400" step="0.01" value="120">
-          </label>
           <div class="playhead" aria-label="Transport">
             <label>Playing Block
               <select id="active-block"></select>
@@ -442,6 +442,8 @@
   </main>
 
   <script type="module">
+    import { suggestedDuplicateBlockId } from "/shared/block-id.js";
+
     import { createShadowScoreClientState } from "../shared/shadowscore-client-state.js";
     import { createPlaybackUpdateControl } from "../shared/playback-update-control.js";
 
@@ -544,21 +546,13 @@
       els.resetBlock.addEventListener("click", resetBlock);
       els.startMacro.addEventListener("click", startMacroPlayback);
       els.stopMacro.addEventListener("click", stopMacroPlayback);
-      [els.blockId, els.durationUnit, els.durationValue, els.scaleRoot, els.scaleName, els.blockTtid].forEach((el) => {
+      [els.blockId, els.durationUnit, els.durationValue, els.tempo, els.scaleRoot, els.scaleName, els.blockTtid].forEach((el) => {
         el.addEventListener("input", () => {
           markBlockDirty();
         });
         el.addEventListener("change", () => {
           markBlockDirty();
         });
-      });
-      els.tempo.addEventListener("input", () => {
-        state.macroDirty = true;
-        updateButtons();
-        queueStructureAutosave();
-      });
-      els.tempo.addEventListener("change", () => {
-        void persistMacrostructure("Saving tempo...", "Saved tempo.");
       });
     }
 
@@ -731,6 +725,7 @@
       if (!block) {
         els.blockId.value = "";
         els.durationValue.value = "8";
+        els.tempo.value = "120";
         els.harmonicWarning.hidden = true;
         els.playersEmpty.hidden = false;
         updateButtons();
@@ -740,6 +735,7 @@
       els.blockId.value = state.selectedBlockId;
       els.durationUnit.value = durationUnit;
       els.durationValue.value = String(durationValue);
+      els.tempo.value = String(block.tempo ?? 120);
       els.scaleRoot.value = Number.isFinite(block.scale?.root_note) ? String(block.scale.root_note) : "";
       els.scaleName.value = block.scale?.scale_name ?? "";
       els.blockTtid.value = String(block.ttid ?? 2741);
@@ -768,8 +764,7 @@
     }
 
     function renderMacroEditor() {
-      const macro = state.score?.macrostructure ?? { tempo: 120, blocks: [] };
-      els.tempo.value = String(macro.tempo ?? 120);
+      const macro = state.score?.macrostructure ?? { blocks: [] };
       renderPlayheadControls();
       els.chain.innerHTML = "";
       (macro.blocks ?? []).forEach((blockId, index) => {
@@ -957,7 +952,10 @@
         return;
       }
       const sourceBlockId = state.selectedBlockId;
-      const targetBlockId = normalizeId(window.prompt(`Duplicate block ${sourceBlockId} as`, nextBlockId()));
+      const targetBlockId = normalizeId(window.prompt(
+        `Duplicate block ${sourceBlockId} as`,
+        suggestedDuplicateBlockId(sourceBlockId, Object.keys(state.score?.mesostructure ?? {}))
+      ));
       if (!targetBlockId) {
         return;
       }
@@ -1058,7 +1056,6 @@
       }
       const macrostructure = {
         ...state.score.macrostructure,
-        tempo: numberValue(els.tempo.value, 120),
         blocks: chainSelects().map((select) => select.value).filter(Boolean)
       };
       setStatus(savingMessage);
@@ -1201,6 +1198,7 @@
       });
       return {
         ...currentBlock(),
+        tempo: numberValue(els.tempo.value, 120),
         duration: { [unit]: numberValue(els.durationValue.value, 8) },
         scale,
         ttid: Math.max(0, Math.min(4095, Math.round(numberValue(els.blockTtid.value, 2741)))),

@@ -35,7 +35,8 @@ test("score initialization builds an exact device-free score skeleton", () => {
   assert.deepEqual(plan.score.mesostructure.A.oscLayers, {});
   assert.equal(plan.score.mesostructure.A.scale.scale_name, "Ionian");
   assert.equal(plan.score.mesostructure.A.ttid, 2741);
-  assert.deepEqual(plan.score.macrostructure, { tempo: 96, blocks: ["A", "A"] });
+  assert.equal(plan.score.mesostructure.A.tempo, 96);
+  assert.deepEqual(plan.score.macrostructure, { blocks: ["A", "A"] });
   assert.deepEqual(plan.score.structureState, { activeBlockId: "A", macroIndex: 0 });
   assert.equal(plan.summary.emptyOscLayerSlotCount, 2);
   assert.equal(plan.summary.deviceMappingCount, 0);
@@ -50,6 +51,10 @@ test("score initialization rejects broken references before producing a score", 
   assert.throws(
     () => createScoreInitializationPlan({ ...request, macrostructure: { tempo: 120, blocks: ["B"] } }),
     /macrostructure references unknown block 'B'/
+  );
+  assert.throws(
+    () => createScoreInitializationPlan({ ...request, blocks: [{ ...request.blocks[0], tempo: 0 }] }),
+    /block 'A' tempo must be a positive number/
   );
   assert.throws(
     () => createScoreInitializationPlan({ ...request, players: [...request.players, request.players[0]] }),

@@ -10,7 +10,7 @@ The server owns reusable clips, the mesostructural blocks that assign those clip
 - `clips`: reusable ShadowScore note documents. Clip-owned metadata includes duration, time signature, playback type, and behavior flags.
 - `mesostructure`: section-sized blocks with durations, required rooted scale
   context, required block-owned TTID, and per-player clip assignments.
-- `macrostructure`: the ordered chain of mesostructural blocks plus macro tempo.
+- `macrostructure`: the ordered chain of mesostructural block occurrences.
 - `structureState`: the active block and macro-chain index used for editing and playback.
 - Per-voice `notes`: legacy ShadowScore note documents retained for compatibility and migration.
 - Per-voice `assignments`: lab-facing player/device/client labels for each voice. Multiple browser or RNBO clients can refer to the same assignment when a performer manages more than one surface.
@@ -145,7 +145,7 @@ Event List because assignments belong to mesostructural blocks.
 
 The `/structure-editor` route serves a dedicated meso/macro editor from
 `public/structure-editor`. It edits score-owned mesostructural block parameters,
-per-player clip assignments, macrostructure tempo, and the ordered macro chain
+per-player clip assignments, block-owned written tempos, and the ordered macro chain
 without changing the Matrix Edit or Event List surfaces.
 
 The `/editors` route serves the registered OSC-generator index from
@@ -239,7 +239,7 @@ For the session-day operator flow, see
 - `POST /transport/jack/stop`: stop JACK transport through a configured JACK controller.
 - `POST /transport/jack/locate`: locate JACK transport to a frame with `{ "frame": 0 }`; this does not write RNBO `Clock`.
 - `POST /transport/jack/tempo`: set JACK transport tempo through a configured JACK controller with `{ "bpm": 120 }`.
-- `POST /transport/play`: user-facing Play facade. Waits for queued RNBO score preparation and rejects explicit ACK failures; reasserts the Shadowscore macrostructure tempo to JACK; starts JACK; writes `SetStage 0` to assigned clients by default; then sends `Clock 1` so each client starts on its next synchronized beat. Playhead-only updates do not retransmit an already committed active block.
+- `POST /transport/play`: user-facing Play facade. Waits for queued RNBO score preparation and rejects explicit ACK failures; reasserts the active block's written tempo to JACK; starts JACK; writes `SetStage 0` to assigned clients by default; then sends `Clock 1` so each client starts on its next synchronized beat. Playhead-only updates do not retransmit an already committed active block.
 - `POST /transport/stop`: user-facing Stop facade. Stops macrostructure playback, writes assigned-client playback stop controls, and returns aggregate transport readiness.
 - `POST /transport/return-to-start`: reset the macro playhead to the first section, write `SetStage: 0` to playback targets, and return aggregate transport readiness.
 - `GET /transport`: current JACK bridge freshness, latest BBT snapshot, and tempo authority.
@@ -278,7 +278,7 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `DELETE /mesostructure/:blockId/osc-layers/:roleId`: remove one block layer without deleting its OSC clip.
 - `POST /mesostructure/:blockId/osc-layers/recall`: compile and best-effort dispatch the clips assigned to a block. Optional `roles` scopes logical roles and `dryRun` returns the complete plan without sending.
 - `GET /mesostructure/:blockId/osc-layers/recall`: bounded recall diagnostics for one block.
-- `POST /macrostructure`: merge macrostructure fields such as `{ "tempo": 120, "blocks": ["A", "B"] }`; use `?replace=1` to replace the macrostructure document.
+- `POST /macrostructure`: set ordered block occurrences such as `{ "blocks": ["A", "B"] }`; use `?replace=1` to replace the macrostructure document. Written tempo is stored on each mesostructural block.
 - `POST /structure/playhead`: select the active mesostructural block.
 - `POST /macrostructure/advance`: advance the active block to the next macro chain entry.
 - `POST /macrostructure/reset`: reset the active block to the beginning of the macro chain.

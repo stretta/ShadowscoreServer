@@ -12,7 +12,9 @@ export async function loadPersistedScore(config, fallbackScore) {
   const scorePath = resolvePath(config.persistence.path);
   try {
     const raw = await fs.readFile(scorePath, "utf8");
-    const persisted = migratePersistedScore(JSON.parse(raw));
+    const persisted = migratePersistedScore(JSON.parse(raw), {
+      fallbackTempo: config.rnbo?.transport?.Tempo
+    });
     assertScoreShape(persisted);
     return reconcileScore(config, fallbackScore, persisted);
   } catch (error) {
@@ -23,9 +25,23 @@ export async function loadPersistedScore(config, fallbackScore) {
   }
 }
 
-export function migratePersistedScore(score) {
+export function migratePersistedScore(score, options = {}) {
   if (!isPlainObject(score)) return score;
   const migrated = structuredClone(score);
+  const legacyTempo = positiveTempo(
+    migrated.macrostructure?.tempo,
+    positiveTempo(options.fallbackTempo, 120)
+  );
+  if (isPlainObject(migrated.mesostructure)) {
+    for (const block of Object.values(migrated.mesostructure)) {
+      if (isPlainObject(block) && (block.tempo === undefined || block.tempo === null || block.tempo === "")) {
+        block.tempo = legacyTempo;
+      }
+    }
+  }
+  if (isPlainObject(migrated.macrostructure)) {
+    delete migrated.macrostructure.tempo;
+  }
   for (const clip of Object.values(migrated.oscClips ?? {})) {
     if (!isPlainObject(clip?.params)) continue;
     clip.params = Object.fromEntries(
@@ -203,7 +219,9 @@ export function reconcileScore(config, fallbackScore, persistedScore) {
     context: structuredClone(persistedScore.context),
     clips: playerStructure.clips,
     mesostructure: playerStructure.mesostructure,
-    macrostructure: structuredClone(persistedScore.macrostructure ?? fallbackScore.macrostructure ?? {}),
+    macrostructure: {
+      blocks: structuredClone((persistedScore.macrostructure ?? fallbackScore.macrostructure ?? {}).blocks ?? [])
+    },
     structureState: normalizePersistedStructureState(persistedScore.structureState ?? fallbackScore.structureState ?? {}, persistedScore.mesostructure ?? fallbackScore.mesostructure ?? {}, persistedScore.macrostructure ?? fallbackScore.macrostructure ?? {}),
     assignments,
     oscAssignments: normalizePersistedOscAssignments(persistedScore.oscAssignments ?? {}),
@@ -247,11 +265,11 @@ export function assertScoreShape(score) {
     throw new Error("score.structureState must be an object");
   }
   if (score.macrostructure !== undefined) {
-    if (!Number.isFinite(score.macrostructure.tempo)) {
-      throw new Error("score.macrostructure.tempo must be numeric");
-    }
     if (!Array.isArray(score.macrostructure.blocks)) {
       throw new Error("score.macrostructure.blocks must be an array");
+    }
+    if (score.macrostructure.tempo !== undefined) {
+      throw new Error("score.macrostructure.tempo is legacy data; tempo belongs to mesostructural blocks");
     }
   }
   if (!isPlainObject(score.voices)) {
@@ -321,6 +339,9 @@ export function assertScoreShape(score) {
     if (!isPlainObject(block)) {
       throw new Error(`mesostructural block ${blockId} must be an object`);
     }
+    if (!Number.isFinite(block.tempo) || block.tempo <= 0) {
+      throw new Error(`mesostructural block ${blockId}.tempo must be a positive number`);
+    }
     if (block.oscLayers !== undefined && !isPlainObject(block.oscLayers)) {
       throw new Error(`mesostructural block ${blockId}.oscLayers must be an object`);
     }
@@ -345,7 +366,7 @@ export function assertScoreShape(score) {
 
 async function readScoreSnapshot(scorePath) {
   const raw = await fs.readFile(scorePath, "utf8");
-  const score = JSON.parse(raw);
+  const score = migratePersistedScore(JSON.parse(raw));
   assertScoreShape(score);
   return score;
 }
@@ -421,6 +442,7 @@ function normalizePersistedMesostructure(mesostructure) {
   return Object.fromEntries(Object.entries(mesostructure).map(([blockId, block]) => [
     blockId,
     {
+      tempo: positiveTempo(block?.tempo, 120),
       duration: isPlainObject(block?.duration) ? structuredClone(block.duration) : {},
       scale: isPlainObject(block?.scale) ? structuredClone(block.scale) : {},
       ...(block?.ttid === undefined ? {} : { ttid: block.ttid }),
@@ -436,6 +458,13 @@ function normalizePersistedMesostructure(mesostructure) {
 function normalizePersistedOscClips(clips) {
   if (!isPlainObject(clips)) return {};
   return Object.fromEntries(Object.entries(clips).map(([clipId, clip]) => [clipId, normalizeOscClip(clip)]));
+}
+
+function positiveTempo(value, fallback) {
+  const tempo = Number(value);
+  if (Number.isFinite(tempo) && tempo > 0) return tempo;
+  const fallbackTempo = Number(fallback);
+  return Number.isFinite(fallbackTempo) && fallbackTempo > 0 ? fallbackTempo : 120;
 }
 
 function normalizePersistedOscAssignments(assignments) {

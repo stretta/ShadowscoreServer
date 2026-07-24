@@ -4,6 +4,7 @@ import { encodeOscMessage } from "./osc.mjs";
 import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 import { impactAffectsRnbo, impactVoicesForBlock, scoreMutationImpact } from "../playback/score-mutation-impact.mjs";
+import { activeWrittenTempo } from "../playback/tempo.mjs";
 
 const OPCODES = Object.freeze({
   BEGIN_REPLACE: 1,
@@ -336,7 +337,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
           });
         }));
         const activations = await adapter.confirmPreparedActivations(requests, {
-          tempo: canonical.macrostructure?.tempo,
+          tempo: activeWrittenTempo(canonical),
           fetchImpl: options.fetchImpl
         });
         const finalUpdates = await adapter.playbackUpdates(selectedBlockId);

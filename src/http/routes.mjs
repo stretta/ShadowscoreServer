@@ -6,6 +6,7 @@ import { configuredRnboTargets, discoverRnboControlTargets, discoverRnboDevices,
 import { editorManifests } from "../editors/manifest.mjs";
 import { distributeBlockTtid } from "../harmonic/distribution.mjs";
 import { harmonicDrift, scaleCatalog } from "../harmonic/scale.mjs";
+import { activeWrittenTempo } from "../playback/tempo.mjs";
 import { resolveOscAssignments } from "../osc/assignments.mjs";
 import { findOscMacro, listOscMacros, resolveMacroStepAddress, saveOscMacro, validateMacro } from "../osc/macros.mjs";
 import { sendOscMessage } from "../osc/send.mjs";
@@ -1065,13 +1066,11 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/macrostructure") {
     try {
       const body = await readJson(request);
-      const previousTempo = store.getScore().macrostructure?.tempo;
       const macrostructure = body.macrostructure ?? withoutControlFields(body, ["replace", ...REVISION_CONTROL_FIELDS]);
       const score = store.updateMacrostructure(macrostructure, {
         ...revisionOptions(body),
         replace: url.searchParams.get("replace") === "1" || Boolean(body.replace)
       });
-      await maybeSendJackTempo(runtime, score.macrostructure?.tempo, previousTempo);
       writeJson(response, 200, score);
     } catch (error) {
       writeError(response, error);
@@ -1912,7 +1911,7 @@ function assertApplyNextBeatSafe(playback, score, config, blockId) {
   const insideJackGuard = Number.isFinite(beatsRemaining) && beatsRemaining > 0 && beatsRemaining <= leadBeats;
 
   const nextAdvanceAt = Number(playback.nextAdvanceAt);
-  const tempo = Number(score.macrostructure?.tempo ?? config.rnbo?.transport?.Tempo ?? 120);
+  const tempo = activeWrittenTempo(score, config.rnbo?.transport?.Tempo);
   const timerGuardMs = tempo > 0 ? leadBeats * 60000 / tempo : 0;
   const insideTimerGuard = playback.mode === "timer" && Number.isFinite(nextAdvanceAt) && nextAdvanceAt > 0 &&
     nextAdvanceAt - Date.now() <= timerGuardMs;
@@ -2049,7 +2048,8 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
       activationMode: "now",
       expectedScoreRevision: score.scoreRevision ?? score.version
     });
-  const jackTempo = await maybeSendJackTempo(runtime, score.macrostructure?.tempo);
+  const tempo = activeWrittenTempo(score, config.rnbo?.transport?.Tempo);
+  const jackTempo = await maybeSendJackTempo(runtime, tempo);
   const jackStart = await maybeStartJack(runtime);
   const ttidDistribution = await distributeTtidForBlock(score, config, runtime, score.structureState?.activeBlockId);
   const snapshotRecall = await recallOscSnapshotsForBlock(store, config, runtime, score.structureState?.activeBlockId);
@@ -2068,7 +2068,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   });
   const activations = playbackUpdate?.activations ?? (activationSchedule.length
     ? await runtime.rnboAdapter.confirmPreparedActivations(activationSchedule, {
-      tempo: score.macrostructure?.tempo
+      tempo
     })
     : []);
   return {

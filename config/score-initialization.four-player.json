@@ -39,15 +39,14 @@
     { "id": "f-player-4", "notes": [], "duration": { "bars": 1 }, "playbackType": "looped" }
   ],
   "blocks": [
-    { "id": "A", "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "a-player-1", "player-2": "a-player-2", "player-3": "a-player-3", "player-4": "a-player-4" } },
-    { "id": "B", "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "b-player-1", "player-2": "b-player-2", "player-3": "b-player-3", "player-4": "b-player-4" } },
-    { "id": "C", "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "c-player-1", "player-2": "c-player-2", "player-3": "c-player-3", "player-4": "c-player-4" } },
-    { "id": "D", "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "d-player-1", "player-2": "d-player-2", "player-3": "d-player-3", "player-4": "d-player-4" } },
-    { "id": "E", "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "e-player-1", "player-2": "e-player-2", "player-3": "e-player-3", "player-4": "e-player-4" } },
-    { "id": "F", "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "f-player-1", "player-2": "f-player-2", "player-3": "f-player-3", "player-4": "f-player-4" } }
+    { "id": "A", "tempo": 120, "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "a-player-1", "player-2": "a-player-2", "player-3": "a-player-3", "player-4": "a-player-4" } },
+    { "id": "B", "tempo": 120, "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "b-player-1", "player-2": "b-player-2", "player-3": "b-player-3", "player-4": "b-player-4" } },
+    { "id": "C", "tempo": 120, "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "c-player-1", "player-2": "c-player-2", "player-3": "c-player-3", "player-4": "c-player-4" } },
+    { "id": "D", "tempo": 120, "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "d-player-1", "player-2": "d-player-2", "player-3": "d-player-3", "player-4": "d-player-4" } },
+    { "id": "E", "tempo": 120, "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "e-player-1", "player-2": "e-player-2", "player-3": "e-player-3", "player-4": "e-player-4" } },
+    { "id": "F", "tempo": 120, "duration": { "bars": 1 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "players": { "player-1": "f-player-1", "player-2": "f-player-2", "player-3": "f-player-3", "player-4": "f-player-4" } }
   ],
   "macrostructure": {
-    "tempo": 120,
     "blocks": ["A", "B", "C", "D", "E", "F"]
   },
   "oscRoles": [

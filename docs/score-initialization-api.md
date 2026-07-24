@@ -8,9 +8,9 @@ The request owns structural intent only:
 - `players`: stable player ids plus optional labels, colors, and assignees;
 - `clips`: reusable note clips with notes, loop duration, playback type,
   context, and behavior;
-- `blocks`: mesostructural ids, durations, required rooted scale context,
+- `blocks`: mesostructural ids, written tempos, durations, required rooted scale context,
   required 12-bit `ttid`, and player-to-clip assignments;
-- `macrostructure`: tempo and ordered block occurrences;
+- `macrostructure`: ordered block occurrences;
 - `oscRoles`: stable logical ids, app capabilities, labels, and recall policy.
 
 The canonical block harmonic shape is:
@@ -26,9 +26,12 @@ The canonical block harmonic shape is:
 }
 ```
 
-Initialization normalizes omitted new-score values to this C Ionian default,
-but every stored block contains both fields. OSC roles may independently set
-`ignoreRecall` and `ignoreScale`.
+Initialization normalizes omitted new-score harmonic values to this C Ionian
+default and omitted written tempo to 120 BPM. Every stored block contains all
+three fields. OSC roles may independently set `ignoreRecall` and `ignoreScale`.
+
+Legacy requests that still provide `macrostructure.tempo` use it only to fill
+missing block tempos. The normalized score removes that legacy field.
 
 Live `deviceId`, RNBO target, and OSC target fields are rejected. Rig discovery
 and OSC onboarding fill those mappings after the skeleton exists. Likewise,

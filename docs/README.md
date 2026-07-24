@@ -42,6 +42,10 @@ Design and implementation notes:
 - [`transport-and-matrix-ui-ux-plan.md`](transport-and-matrix-ui-ux-plan.md):
   DAW-like transport facade, Matrix Edit simplification, and ownership
   boundaries for setup versus performance.
+- [`arrange-navigation-and-block-tempo-plan.md`](arrange-navigation-and-block-tempo-plan.md):
+  grouped navigation, the combined Arrange surface, block-owned written tempo
+  with live follow policy, distinct player/form controls, graphical block
+  arrangement, duplicate naming, and disclosed transport events.
 - [`smooth-editor-wiper-and-playback-observation-plan.md`](smooth-editor-wiper-and-playback-observation-plan.md):
   display-rate browser wiper interpolation, shared Matrix/Piano Roll playback
   observation, and server-owned RNBO polling consolidation.

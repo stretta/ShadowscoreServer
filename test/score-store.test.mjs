@@ -15,7 +15,7 @@ test("initial score creates configured voices", () => {
   assert.deepEqual(Object.keys(score.mesostructure), ["A", "B", "C", "D", "E", "F"]);
   assert.deepEqual(score.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
   assert.equal(Object.keys(score.clips).length, 36);
-  assert.equal(score.macrostructure.tempo, 120);
+  assert.equal(score.macrostructure.tempo, undefined);
   assert.deepEqual(score.structureState, { activeBlockId: "A", macroIndex: 0 });
   assert.equal(score.assignments["player-1"].label, "Player 1");
   assert.equal(score.assignments["player-1"].color, "#d1453b");
@@ -25,6 +25,7 @@ test("initial score creates configured voices", () => {
   assert.equal(score.clips["a-player-1"].notes.length, 2);
   assert.equal(score.clips["a-player-1"].playbackType, "looped");
   for (const block of Object.values(score.mesostructure)) {
+    assert.equal(block.tempo, 120);
     assert.deepEqual(block.duration, { bars: 4 });
     assert.equal(block.scale.scale_name, "Ionian");
     assert.equal(block.ttid, 2741);
@@ -35,6 +36,29 @@ test("initial score creates configured voices", () => {
       assert.ok(score.clips[assignment.clipId].notes.length > 0);
     }
   }
+});
+
+test("legacy macrostructure tempo migrates into blocks and canonical macrostructure only owns order", () => {
+  const legacy = createInitialScore(defaultConfig);
+  legacy.macrostructure.tempo = 96;
+  delete legacy.mesostructure.A.tempo;
+  legacy.mesostructure.B.tempo = 84;
+
+  const score = createScoreStore(legacy).getScore();
+
+  assert.equal(score.mesostructure.A.tempo, 96);
+  assert.equal(score.mesostructure.B.tempo, 84);
+  assert.deepEqual(score.macrostructure, { blocks: ["A", "B", "C", "D", "E", "F"] });
+  assert.throws(
+    () => createScoreStore({
+      ...legacy,
+      mesostructure: {
+        ...legacy.mesostructure,
+        A: { ...legacy.mesostructure.A, tempo: 0 }
+      }
+    }),
+    /mesostructural block tempo must be a positive number/
+  );
 });
 
 test("OSC clips are reusable and block layers are revision-aware", () => {
@@ -380,10 +404,12 @@ test("mesostructural blocks can be added, replaced, and removed at runtime", () 
 
 test("mesostructural blocks can be duplicated with independent assigned clips", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceMesoBlock("A", { ...store.getScore().mesostructure.A, tempo: 96 });
 
   const duplicated = store.duplicateMesoBlock("A", "G");
-  assert.equal(duplicated.scoreRevision, 1);
-  assert.equal(duplicated.structureRevision, 1);
+  assert.equal(duplicated.scoreRevision, 2);
+  assert.equal(duplicated.structureRevision, 2);
+  assert.equal(duplicated.mesostructure.G.tempo, 96);
   assert.deepEqual(duplicated.mesostructure.G.duration, duplicated.mesostructure.A.duration);
   assert.equal(duplicated.mesostructure.A.players["player-1"].clipId, "a-player-1");
   assert.equal(duplicated.mesostructure.G.players["player-1"].clipId, "g-player-1");
@@ -399,6 +425,10 @@ test("mesostructural blocks can be duplicated with independent assigned clips", 
   });
   assert.equal(edited.clips["g-player-1"].notes[0].pitch, 36);
   assert.notEqual(edited.clips["a-player-1"].notes[0].pitch, 36);
+
+  const tempoEdited = store.replaceMesoBlock("G", { ...store.getScore().mesostructure.G, tempo: 84 });
+  assert.equal(tempoEdited.mesostructure.G.tempo, 84);
+  assert.equal(tempoEdited.mesostructure.A.tempo, 96);
 });
 
 test("block TTID edits are non-destructive and scale transforms commit notes, metadata, scale, and TTID atomically", () => {

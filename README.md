@@ -155,6 +155,12 @@ display-rate estimator over the normal 250 ms playback snapshot cadence.
 Arrange also exposes the shared Players Play/Stop, Arrangement Run/Hold, live
 tempo, Follow Block Tempo, and Use Block Tempo Now controls.
 
+Arrangement edits save canonically while playback is running, but the macro
+runner latches the sounding traversal until its next block boundary. Its
+playback snapshot reports `arrangementAdoption.pending`, the pending score
+revision, and pending block order. JACK look-ahead and activation preparation
+target the pending order's next block before the runner adopts it.
+
 The `/editors` route serves the registered OSC-generator index from
 `public/editors`, and `/editors/manifest` exposes the generator manifest JSON.
 The bundled ListSequencer, ListVelSequencer, AnalogSequencer, Plate, Poland,

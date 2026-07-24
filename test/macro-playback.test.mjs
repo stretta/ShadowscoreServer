@@ -93,6 +93,99 @@ test("editing written block tempo does not restart running timer playback", () =
   playback.close();
 });
 
+test("timer playback adopts an edited arrangement at the next block boundary", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceMesoBlock("C", { tempo: 120, duration: { beats: 2 }, players: {} });
+  store.updateMacrostructure({ blocks: ["A", "B", "C"] });
+  const timers = createFakeTimers();
+  const playback = createMacroPlayback(store, defaultConfig, { timers });
+
+  playback.start();
+  const originalTimer = timers.pending[0];
+  store.updateMacrostructure({ blocks: ["B", "A", "C"] });
+
+  assert.equal(timers.pending.length, 1);
+  assert.equal(timers.pending[0], originalTimer);
+  assert.deepEqual(playback.snapshot().arrangementAdoption, {
+    pending: true,
+    scoreRevision: store.getScore().scoreRevision,
+    blocks: ["B", "A", "C"]
+  });
+  assert.equal(playback.snapshot().traversalBlockId, "A");
+
+  timers.fire(0);
+
+  assert.equal(store.getScore().structureState.activeBlockId, "C");
+  assert.equal(playback.snapshot().traversalBlockId, "C");
+  assert.equal(playback.snapshot().arrangementAdoption.pending, false);
+  assert.equal(timers.pending.length, 1);
+  playback.close();
+});
+
+test("JACK playback holds its latched occurrence until an edited arrangement boundary", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceMesoBlock("A", { tempo: 120, duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { tempo: 120, duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("C", { tempo: 120, duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ blocks: ["A", "B", "C"] });
+  const jackTransport = createJackTransportState(defaultConfig, { now: () => 1000 });
+  const playback = createMacroPlayback(store, defaultConfig, { jackTransport });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack" });
+  store.updateMacrostructure({ blocks: ["B", "A", "C"] });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 102 }));
+  let snapshot = playback.snapshot();
+  assert.equal(snapshot.activeBlockId, "A");
+  assert.equal(snapshot.traversalBlockId, "A");
+  assert.equal(snapshot.activeBlockEndBeat, 104);
+  assert.equal(snapshot.arrangementAdoption.pending, true);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 104 }));
+  snapshot = playback.snapshot();
+  assert.equal(snapshot.activeBlockId, "C");
+  assert.equal(snapshot.traversalBlockId, "C");
+  assert.equal(snapshot.activeBlockStartBeat, 104);
+  assert.equal(snapshot.activeBlockEndBeat, 108);
+  assert.equal(snapshot.arrangementAdoption.pending, false);
+  playback.close();
+});
+
+test("JACK look-ahead prepares the pending arrangement's next block", async () => {
+  const config = {
+    ...defaultConfig,
+    rnbo: { ...defaultConfig.rnbo, lookAheadBeats: 2 }
+  };
+  const store = createScoreStore(createInitialScore(config));
+  store.replaceMesoBlock("A", { tempo: 120, duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { tempo: 120, duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("C", { tempo: 120, duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ blocks: ["A", "B", "C"] });
+  const jackTransport = createJackTransportState(config, { now: () => 1000 });
+  const prepared = [];
+  const playback = createMacroPlayback(store, config, {
+    jackTransport,
+    beforeAdvance: async (detail) => {
+      prepared.push(detail);
+      return { prepared: detail.nextBlockId };
+    }
+  });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack" });
+  store.updateMacrostructure({ blocks: ["B", "A", "C"] });
+  jackTransport.update(jackSnapshot({ absoluteBeat: 102.1 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(prepared.length, 1);
+  assert.equal(prepared[0].activeBlockId, "A");
+  assert.equal(prepared[0].nextBlockId, "C");
+  assert.equal(prepared[0].nextMacroIndex, 2);
+  playback.close();
+});
+
 test("JACK macro playback advances at anchored beat boundaries", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });

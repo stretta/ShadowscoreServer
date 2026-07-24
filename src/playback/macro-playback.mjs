@@ -35,10 +35,27 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   let lastActivationArmKey = "";
   let activationArmPending = false;
   let lastActivationArm = null;
+  let traversalBlocks = [];
+  let traversalMacroIndex = 0;
+  let traversalBlockId = "";
+  let pendingArrangement = null;
 
   const onChange = (event) => {
     if (!running) {
       return;
+    }
+    if (event.type === "macrostructure.updated") {
+      pendingArrangement = {
+        blocks: [...(event.score?.macrostructure?.blocks ?? store.getScore().macrostructure?.blocks ?? [])],
+        scoreRevision: event.score?.scoreRevision ?? event.score?.version ?? store.getScore().scoreRevision ?? store.getScore().version ?? 0
+      };
+      lastLookAheadKey = "";
+      lastActivationArmKey = "";
+      return;
+    }
+    if (event.type === "structure.playhead.updated") {
+      latchTraversal(event.score ?? store.getScore());
+      pendingArrangement = null;
     }
     if (shouldReschedule(event)) {
       if (mode === "jack") {
@@ -76,6 +93,8 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       clearTimer();
       mode = requestedMode;
       running = true;
+      latchTraversal(store.getScore());
+      pendingArrangement = null;
       lastLookAheadKey = "";
       lookAheadPending = false;
       lastActivationArmKey = "";
@@ -98,6 +117,10 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       clearTimer();
       nextAdvanceAt = null;
       currentBlockDurationMs = 0;
+      pendingArrangement = null;
+      traversalBlocks = [];
+      traversalMacroIndex = 0;
+      traversalBlockId = "";
       clearTimerAnchor();
       clearBeatAnchor();
       return snapshot();
@@ -148,6 +171,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
         return;
       }
       try {
+        adoptPendingArrangement();
         store.advanceStructurePlayhead({ sourceClientId: "macro-playback" });
       } catch (error) {
         running = false;
@@ -184,10 +208,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
 
   function anchorBeatDerivedPlayback(snapshotOptions = {}) {
     clearTimer();
-    const score = store.getScore();
+    const score = traversalScore(store.getScore());
     const witness = selectedWitness(snapshotOptions);
-    const current = currentMacroPosition(score);
-    macroStartIndex = current.macroIndex;
+    macroStartIndex = traversalMacroIndex;
     macroStartOffsetBeats = cumulativeBeatsBeforeIndex(score, macroStartIndex);
     activeBlockDurationBeats = macroBlockDurationBeats(score, config);
     currentBlockDurationMs = durationMsAtTempo(activeBlockDurationBeats, effectiveTempo(score));
@@ -229,11 +252,12 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   }
 
   function deriveMacroLocation(witness) {
-    const score = store.getScore();
+    const score = traversalScore(store.getScore());
     const timeline = macroTimeline(score);
     if (timeline.totalBeats <= 0 || !timeline.entries.length) {
       return;
     }
+    const previousBlockEndBeat = activeBlockEndBeat;
     const derivedCompositionBeat = witness.absoluteBeat - macroStartBeat + macroStartOffsetBeats;
     const derived = deriveMacroPosition(score, derivedCompositionBeat);
     compositionBeat = derived.compositionBeat;
@@ -245,8 +269,16 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     runBeforeAdvance(score, derived, witness);
     runArmAdvance(score, derived, witness);
 
-    const current = currentMacroPosition(score);
+    const current = {
+      macroIndex: traversalMacroIndex,
+      activeBlockId: traversalBlockId
+    };
     if (derived.macroIndex === current.macroIndex && derived.activeBlockId === current.activeBlockId) {
+      return;
+    }
+
+    if (pendingArrangement) {
+      adoptPendingArrangementAtBeatBoundary(witness, derived, previousBlockEndBeat);
       return;
     }
 
@@ -262,6 +294,8 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       console.error(`[macro-playback] beat-derived advance failed: ${messageForError(error)}`);
       return;
     }
+    traversalMacroIndex = derived.macroIndex;
+    traversalBlockId = derived.activeBlockId;
     runAfterBeatDerivedAdvance({
       anchorBeat: activeBlockStartBeat,
       boundaryBeat: activeBlockStartBeat,
@@ -270,6 +304,87 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       beatIntoBlock,
       witnessSource: witness.source
     });
+  }
+
+  function adoptPendingArrangementAtBeatBoundary(witness, derived, previousBlockEndBeat) {
+    const boundaryBeat = Number.isFinite(previousBlockEndBeat)
+      ? previousBlockEndBeat
+      : macroStartBeat + derived.blockStartBeat - macroStartOffsetBeats;
+    try {
+      adoptPendingArrangement();
+      store.advanceStructurePlayhead({ sourceClientId: "macro-playback" });
+    } catch (error) {
+      running = false;
+      mode = "stopped";
+      clearBeatAnchor();
+      console.error(`[macro-playback] arrangement adoption failed: ${messageForError(error)}`);
+      return;
+    }
+
+    const score = traversalScore(store.getScore());
+    macroStartIndex = traversalMacroIndex;
+    macroStartOffsetBeats = cumulativeBeatsBeforeIndex(score, macroStartIndex);
+    macroStartBeat = boundaryBeat;
+    activeBlockStartBeat = boundaryBeat;
+    activeBlockDurationBeats = macroBlockDurationBeats(score, config);
+    activeBlockEndBeat = boundaryBeat + activeBlockDurationBeats;
+    const overshootBeats = Math.max(0, witness.absoluteBeat - boundaryBeat);
+    compositionBeat = macroStartOffsetBeats + overshootBeats;
+    beatIntoBlock = Math.min(activeBlockDurationBeats, overshootBeats);
+    currentBlockDurationMs = durationMsAtTempo(activeBlockDurationBeats, effectiveTempo(score));
+    lastLookAheadKey = "";
+    lastActivationArmKey = "";
+    runAfterBeatDerivedAdvance({
+      anchorBeat: boundaryBeat,
+      boundaryBeat,
+      absoluteBeat: witness.absoluteBeat,
+      compositionBeat,
+      beatIntoBlock,
+      witnessSource: witness.source,
+      arrangementAdopted: true
+    });
+  }
+
+  function adoptPendingArrangement() {
+    if (!pendingArrangement) {
+      return false;
+    }
+    traversalBlocks = [...pendingArrangement.blocks];
+    pendingArrangement = null;
+    latchTraversal(store.getScore(), { preserveBlocks: true });
+    lastLookAheadKey = "";
+    lastActivationArmKey = "";
+    return true;
+  }
+
+  function latchTraversal(score, options = {}) {
+    if (!options.preserveBlocks) {
+      traversalBlocks = [...(score.macrostructure?.blocks ?? [])];
+    }
+    const current = currentMacroPosition({
+      ...score,
+      macrostructure: {
+        ...score.macrostructure,
+        blocks: traversalBlocks
+      }
+    });
+    traversalMacroIndex = current.macroIndex;
+    traversalBlockId = current.activeBlockId;
+  }
+
+  function traversalScore(score) {
+    return {
+      ...score,
+      macrostructure: {
+        ...score.macrostructure,
+        blocks: traversalBlocks
+      },
+      structureState: {
+        ...score.structureState,
+        macroIndex: traversalMacroIndex,
+        activeBlockId: traversalBlockId
+      }
+    };
   }
 
   function clearBeatAnchor() {
@@ -306,6 +421,13 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       activeBlockStartBeat,
       activeBlockEndBeat,
       activeBlockDurationBeats,
+      traversalMacroIndex,
+      traversalBlockId,
+      arrangementAdoption: {
+        pending: Boolean(pendingArrangement),
+        scoreRevision: pendingArrangement?.scoreRevision ?? null,
+        blocks: pendingArrangement ? [...pendingArrangement.blocks] : null
+      },
       macroStartBeat,
       macroStartIndex,
       macroStartOffsetBeats,
@@ -399,10 +521,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     const threshold = Math.max(0, Number(config.rnbo?.lookAheadBeats ?? 12));
     const beatsRemaining = Math.max(0, derived.durationBeats - derived.beatIntoBlock);
     if (beatsRemaining > threshold) return;
-    const blocks = score.macrostructure?.blocks ?? [];
-    if (blocks.length < 2) return;
-    const nextMacroIndex = (derived.macroIndex + 1) % blocks.length;
-    const nextBlockId = blocks[nextMacroIndex];
+    const next = nextArrangementEntry(score, derived);
+    if (!next) return;
+    const { nextMacroIndex, nextBlockId } = next;
     const boundaryCompositionBeat = derived.compositionBeat - derived.beatIntoBlock + derived.durationBeats;
     const key = `${boundaryCompositionBeat}:${derived.macroIndex}:${nextMacroIndex}:${nextBlockId}`;
     if (key === lastLookAheadKey) return;
@@ -446,10 +567,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     const leadBeats = Math.min(0.999, Math.max(0, Number(config.rnbo?.activation?.armLeadBeats ?? 0.75)));
     const beatsRemaining = Math.max(0, derived.durationBeats - derived.beatIntoBlock);
     if (beatsRemaining <= 0 || beatsRemaining > leadBeats) return;
-    const blocks = score.macrostructure?.blocks ?? [];
-    if (blocks.length < 2) return;
-    const nextMacroIndex = (derived.macroIndex + 1) % blocks.length;
-    const nextBlockId = blocks[nextMacroIndex];
+    const next = nextArrangementEntry(score, derived);
+    if (!next) return;
+    const { nextMacroIndex, nextBlockId } = next;
     if (
       lastLookAhead?.ok !== true ||
       lastLookAhead.activeBlockId !== derived.activeBlockId ||
@@ -493,6 +613,29 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       };
       console.error(`[macro-playback] activation arm failed: ${messageForError(error)}`);
     });
+  }
+
+  function nextArrangementEntry(traversal, derived) {
+    if (pendingArrangement) {
+      const canonical = store.getScore();
+      const blocks = pendingArrangement.blocks;
+      if (blocks.length < 2) return null;
+      const currentIndex = Number.isInteger(canonical.structureState?.macroIndex)
+        ? Math.min(blocks.length - 1, Math.max(0, canonical.structureState.macroIndex))
+        : Math.max(0, blocks.indexOf(canonical.structureState?.activeBlockId));
+      const nextMacroIndex = (currentIndex + 1) % blocks.length;
+      return {
+        nextMacroIndex,
+        nextBlockId: blocks[nextMacroIndex]
+      };
+    }
+    const blocks = traversal.macrostructure?.blocks ?? [];
+    if (blocks.length < 2) return null;
+    const nextMacroIndex = (derived.macroIndex + 1) % blocks.length;
+    return {
+      nextMacroIndex,
+      nextBlockId: blocks[nextMacroIndex]
+    };
   }
 }
 
@@ -579,7 +722,6 @@ export function macroTimeline(score) {
 function shouldReschedule(event) {
   return (
     event.type === "structure.playhead.updated" ||
-    event.type === "macrostructure.updated" ||
     event.type === "mesostructure.block.duplicated" ||
     event.type === "mesostructure.block.removed" ||
     (event.type === "admin.reset" && event.detail?.structure)

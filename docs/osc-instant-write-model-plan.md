@@ -4,7 +4,7 @@ Status: accepted implementation plan. Checkpoint 1 completed the canonical
 Block State upsert contract. Checkpoint 2 completed the shared write controller
 and AnalogSequencer conversion on 2026-07-24 with 393 passing tests and a live
 Wren canary. Checkpoint 3 converted the remaining six OSC editors with 394
-passing tests; its live Wren canary is pending. Checkpoint 4 will remove the
+passing tests and a successful live Wren canary. Checkpoint 4 will remove the
 deprecated draft model and its UI.
 
 ## Contract
@@ -82,6 +82,9 @@ at `0.50`. Transport state was not changed.
 Apply the same contract to ListSequencer, ListVelSequencer, SoftPiano, Plate,
 Poland, and TTID. Text and list controls commit on their existing deliberate
 completion boundary such as Enter, blur, or row commit.
+
+Checkpoint 3 canary: the converted editors were tested successfully on Wren
+after deploying commit `05e02f5`.
 
 ## Checkpoint 4: Deprecated Draft Cleanup
 

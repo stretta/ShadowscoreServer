@@ -163,7 +163,7 @@ export function transportPage() {
         <div class="metric"><div class="label">BPM</div><div class="value" id="bpm">-</div></div>
       </div>
     </section>
-    <details class="toolbar-details">
+    <details class="toolbar-details" id="transport-diagnostics">
       <summary>Transport diagnostics</summary>
       <section>
       <h2>JACK</h2>
@@ -190,11 +190,13 @@ export function transportPage() {
       <h2>Timing Contract</h2>
       <div class="contract-list" id="timing-contracts"></div>
       </section>
+      <details class="toolbar-details" id="recent-transport-events">
+        <summary>Recent Transport Events <span class="status" id="transport-events-status">Connecting…</span></summary>
+        <section>
+          <div class="log" id="log"></div>
+        </section>
+      </details>
     </details>
-    <section>
-      <h2>Events</h2>
-      <div class="log" id="log"></div>
-    </section>
   </main>
   <script>
     const fields = Object.fromEntries(Array.from(document.querySelectorAll("[id]")).map((el) => [el.id, el]));
@@ -221,10 +223,14 @@ export function transportPage() {
     const transportEvents = new EventSource("/transport/events");
     transportEvents.addEventListener("snapshot", (event) => {
       const payload = JSON.parse(event.data);
+      fields["transport-events-status"].textContent = "Connected";
       log("transport event " + payload.transport.status + " " + formatNumber(payload.transport.latest?.absoluteBeat, 3));
       refreshAll();
     });
-    transportEvents.onerror = () => log("transport events disconnected");
+    transportEvents.onerror = () => {
+      fields["transport-events-status"].textContent = "Disconnected";
+      log("transport events disconnected");
+    };
 
     async function refreshAll() {
       if (refreshPending) return;

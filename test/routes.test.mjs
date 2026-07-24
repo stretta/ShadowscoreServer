@@ -510,6 +510,13 @@ test("transport status page exposes host transport controls", async () => {
   assert.match(response.body, /lastPlaybackGeneration/);
   assert.match(response.body, /Disagrees on/);
   assert.match(response.body, /\/transport\/events/);
+  assert.match(response.body, /<details class="toolbar-details" id="transport-diagnostics">/);
+  assert.match(response.body, /<details class="toolbar-details" id="recent-transport-events">/);
+  assert.match(response.body, /Recent Transport Events/);
+  assert.doesNotMatch(response.body, /<details[^>]+id="transport-diagnostics"[^>]+open/);
+  assert.doesNotMatch(response.body, /<details[^>]+id="recent-transport-events"[^>]+open/);
+  assert.match(response.body, /transport-events-status/);
+  assert.match(response.body, /transportEvents\.onerror = \(\) => \{\s+fields\["transport-events-status"\]\.textContent = "Disconnected"/);
   assert.match(response.body, /\/transport\/players\/play/);
   assert.match(response.body, /\/transport\/players\/stop/);
   assert.match(response.body, /\/transport\/arrangement\/run/);

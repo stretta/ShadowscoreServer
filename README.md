@@ -168,6 +168,11 @@ Overview, routing, Admin, Transport Status). Native `details` menus support
 pointer, touch, and keyboard activation; each page retains a four-link fallback
 if the enhancement module cannot load.
 
+Transport Status keeps JACK, timing-contract, and recent transport-event
+details inside its closed Transport Diagnostics disclosure. The bounded
+eight-line event log continues collecting while closed; EventSource failures
+update only the nested diagnostic connection indicator.
+
 The `/editors` route serves the registered OSC-generator index from
 `public/editors`, and `/editors/manifest` exposes the generator manifest JSON.
 The bundled ListSequencer, ListVelSequencer, AnalogSequencer, Plate, Poland,

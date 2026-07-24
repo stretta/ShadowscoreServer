@@ -687,7 +687,9 @@ Hands-on continuation, 2026-07-24:
   BBT backward while adopting the requested BPM. That briefly re-entered the
   preceding arrangement block and created a tempo-recall feedback loop.
   Beat-derived arrangement playback now preserves a monotonic composition beat
-  across those Link BBT discontinuities.
+  across those Link BBT discontinuities; and
+- the operator confirmed on the deployed fix that arrangement transitions no
+  longer bounce backward while Follow Block Tempo changes the live BPM.
 
 ## Test Matrix
 

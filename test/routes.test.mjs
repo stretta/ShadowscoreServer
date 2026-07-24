@@ -4145,6 +4145,7 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /Slider Pitch Range/);
   assert.match(response.body, /id="pitch-range-min"/);
   assert.match(response.body, /id="pitch-range-max"/);
+  assert.match(response.body, /pitchRange = \{ min: 24, max: 72 \}/);
   assert.match(response.body, /populatePitchRangeControls/);
   assert.match(response.body, /applyPitchRange/);
   assert.match(response.body, /stagePitchBounds/);

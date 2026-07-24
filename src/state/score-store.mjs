@@ -330,65 +330,6 @@ export function createScoreStore(initialScore, options = {}) {
       }, options);
       return structuredClone(score);
     },
-    writeOscBlockState(roleId, assignmentDocument, clipId, clipDocument, blockId, options = {}) {
-      const role = normalizeOscRoleId(roleId);
-      const clipIdNormalized = normalizeOscClipId(clipId);
-      const blockIdNormalized = normalizeBlockId(blockId);
-      const block = score.mesostructure[blockIdNormalized];
-      if (!block) throw new Error(`unknown mesostructural block '${blockIdNormalized}'`);
-      assertExpectedScoreVersion(score, options.expectedVersion);
-      assertExpectedRevisions(score, options);
-
-      const existingAssignment = score.oscAssignments?.[role];
-      const assignment = assignmentDocument === undefined
-        ? existingAssignment
-        : normalizeOscAssignment(assignmentDocument);
-      if (!assignment) throw new Error(`unknown OSC assignment role '${role}'`);
-      if (existingAssignment?.app && existingAssignment.app !== assignment.app) {
-        throw new Error(`OSC role '${role}' already belongs to app '${existingAssignment.app}'`);
-      }
-      if (existingAssignment?.deviceId && assignment.deviceId && existingAssignment.deviceId !== assignment.deviceId) {
-        throw new Error(`OSC role '${role}' already belongs to device '${existingAssignment.deviceId}'`);
-      }
-
-      const clip = normalizeOscClip(clipDocument);
-      if (assignment.app && assignment.app !== clip.app) {
-        throw new Error(`OSC clip '${clipIdNormalized}' app '${clip.app}' is incompatible with role '${role}' app '${assignment.app}'`);
-      }
-      const existingLayer = block.oscLayers?.[role];
-      if (existingLayer?.clipId && options.replace !== true) {
-        const error = new Error(`${blockIdNormalized} is already Written for '${role}'`);
-        error.code = "OSC_BLOCK_STATE_WRITTEN";
-        throw error;
-      }
-      const occupiedClip = score.oscClips?.[clipIdNormalized];
-      if (occupiedClip && existingLayer?.clipId !== clipIdNormalized) {
-        throw new Error(`OSC clip '${clipIdNormalized}' already exists`);
-      }
-
-      score = {
-        ...score,
-        ...nextRevisionFields(score, { structure: true }),
-        oscAssignments: { ...(score.oscAssignments ?? {}), [role]: assignment },
-        oscClips: { ...(score.oscClips ?? {}), [clipIdNormalized]: clip },
-        mesostructure: {
-          ...score.mesostructure,
-          [blockIdNormalized]: {
-            ...block,
-            oscLayers: { ...(block.oscLayers ?? {}), [role]: { clipId: clipIdNormalized } }
-          }
-        }
-      };
-      emitChange(events, existingLayer ? "osc.blockState.replaced" : "osc.blockState.written", score, {
-        roleId: role,
-        clipId: clipIdNormalized,
-        blockId: blockIdNormalized,
-        assignment,
-        clip,
-        createdRole: !existingAssignment
-      }, options);
-      return structuredClone(score);
-    },
     writeOscBlockStates(entries, blockId, options = {}) {
       const blockIdNormalized = normalizeBlockId(blockId);
       const block = score.mesostructure[blockIdNormalized];

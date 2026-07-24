@@ -229,6 +229,69 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "PUT" && url.pathname === "/osc/block-state") {
+    try {
+      const body = await readJson(request);
+      const blockId = requiredString(body.blockId, "blockId");
+      const requestedTargetIds = Array.isArray(body.targets)
+        ? Array.from(new Set(body.targets.map((targetId) => requiredString(targetId, "targets[]"))))
+        : [];
+      if (!requestedTargetIds.length) throw new Error("targets must include at least one checked instance");
+      const snapshot = body.snapshot;
+      if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) throw new Error("snapshot is required");
+      const currentScore = store.getScore();
+      if (!currentScore.mesostructure?.[blockId]) throw new Error(`unknown mesostructural block '${blockId}'`);
+      const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+      let planningScore = currentScore;
+      const plans = [];
+      for (const requestedTargetId of requestedTargetIds) {
+        const target = targets.find((entry) => entry.id === requestedTargetId || entry.rnboTargetId === requestedTargetId);
+        if (!target) throw new Error(`unknown OSC target '${requestedTargetId}'`);
+        if (target.status !== "online" || !target.sendable) throw new Error(`OSC target '${target.id}' is not online and sendable`);
+        const role = blockStateRoleForTarget(planningScore, target, targets);
+        const existingLayer = planningScore.mesostructure[blockId].oscLayers?.[role.roleId];
+        const baseClipId = `${blockId}-${role.roleId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+        const clipId = existingLayer?.clipId || uniqueOscClipId(planningScore, baseClipId);
+        const label = role.assignment.label || target.label || role.roleId;
+        const clip = { ...snapshot, name: optionalString(body.name) || `${blockId} · ${label}` };
+        plans.push({
+          targetId: target.id,
+          roleId: role.roleId,
+          assignment: role.assignment,
+          clipId,
+          clip,
+          replace: Boolean(existingLayer?.clipId)
+        });
+        planningScore = {
+          ...planningScore,
+          oscAssignments: { ...(planningScore.oscAssignments ?? {}), [role.roleId]: role.assignment },
+          oscClips: { ...(planningScore.oscClips ?? {}), [clipId]: clip },
+          mesostructure: {
+            ...planningScore.mesostructure,
+            [blockId]: {
+              ...planningScore.mesostructure[blockId],
+              oscLayers: {
+                ...(planningScore.mesostructure[blockId].oscLayers ?? {}),
+                [role.roleId]: { clipId }
+              }
+            }
+          }
+        };
+      }
+      const result = store.writeOscBlockStates(plans, blockId, revisionOptions(body));
+      writeJson(response, 200, {
+        ok: true,
+        blockId,
+        targetCount: plans.length,
+        writes: result.writes.map((write, index) => ({ ...write, targetId: plans[index].targetId })),
+        score: result.score
+      });
+    } catch (error) {
+      writeError(response, error, new Set(["OSC_ROLE_ASSIGNMENT_REQUIRED", "stale_structure_revision"]).has(error?.code) ? 409 : 400);
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/osc/block-state/duplicate") {
     try {
       const body = await readJson(request);
@@ -307,118 +370,6 @@ export async function routeRequest(request, response, store, config, runtime = {
       });
     } catch (error) {
       writeError(response, error, error?.code === "OSC_BLOCK_STATE_WRITTEN" ? 409 : 400);
-    }
-    return;
-  }
-
-  if (request.method === "POST" && (url.pathname === "/osc/block-state/write" || url.pathname === "/osc/block-state/copy")) {
-    try {
-      const body = await readJson(request);
-      const requestedTargetIds = Array.isArray(body.targets)
-        ? Array.from(new Set(body.targets.map((targetId) => requiredString(targetId, "targets[]"))))
-        : [];
-      if (url.pathname === "/osc/block-state/write" && requestedTargetIds.length) {
-        const blockId = requiredString(body.blockId, "blockId");
-        const currentScore = store.getScore();
-        if (!currentScore.mesostructure?.[blockId]) throw new Error(`unknown mesostructural block '${blockId}'`);
-        const targets = buildOscTargets(await readAllOscTargets(config, runtime));
-        const snapshot = body.snapshot ?? body.draft ?? body.clip;
-        if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) throw new Error("snapshot is required");
-        const replace = Boolean(body.replace);
-        let planningScore = currentScore;
-        const plans = [];
-        for (const requestedTargetId of requestedTargetIds) {
-          const target = targets.find((entry) => entry.id === requestedTargetId || entry.rnboTargetId === requestedTargetId);
-          if (!target) throw new Error(`unknown OSC target '${requestedTargetId}'`);
-          if (target.status !== "online" || !target.sendable) throw new Error(`OSC target '${target.id}' is not online and sendable`);
-          const role = blockStateRoleForTarget(planningScore, target, targets);
-          const existingLayer = planningScore.mesostructure[blockId].oscLayers?.[role.roleId];
-          if (existingLayer?.clipId && !replace) {
-            const error = new Error(`${blockId} is already Written for '${role.roleId}'; replacement intent is required`);
-            error.code = "OSC_BLOCK_STATE_WRITTEN";
-            throw error;
-          }
-          const baseClipId = `${blockId}-${role.roleId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-          const clipId = existingLayer?.clipId || uniqueOscClipId(planningScore, baseClipId);
-          const label = role.assignment.label || target.label || role.roleId;
-          const clip = { ...snapshot, name: optionalString(body.name) || `${blockId} · ${label}` };
-          plans.push({
-            targetId: target.id,
-            roleId: role.roleId,
-            assignment: role.assignment,
-            clipId,
-            clip,
-            replace
-          });
-          planningScore = {
-            ...planningScore,
-            oscAssignments: { ...(planningScore.oscAssignments ?? {}), [role.roleId]: role.assignment },
-            oscClips: { ...(planningScore.oscClips ?? {}), [clipId]: clip },
-            mesostructure: {
-              ...planningScore.mesostructure,
-              [blockId]: {
-                ...planningScore.mesostructure[blockId],
-                oscLayers: {
-                  ...(planningScore.mesostructure[blockId].oscLayers ?? {}),
-                  [role.roleId]: { clipId }
-                }
-              }
-            }
-          };
-        }
-        const result = store.writeOscBlockStates(plans, blockId, revisionOptions(body));
-        writeJson(response, 200, {
-          ok: true,
-          blockId,
-          targetCount: plans.length,
-          writes: result.writes.map((write, index) => ({ ...write, targetId: plans[index].targetId })),
-          score: result.score
-        });
-        return;
-      }
-      const targetId = requiredString(body.targetId, "targetId");
-      const blockId = requiredString(body.blockId, "blockId");
-      const currentScore = store.getScore();
-      if (!currentScore.mesostructure?.[blockId]) throw new Error(`unknown mesostructural block '${blockId}'`);
-      const targets = buildOscTargets(await readAllOscTargets(config, runtime));
-      const target = targets.find((entry) => entry.id === targetId || entry.rnboTargetId === targetId);
-      if (!target) throw new Error(`unknown OSC target '${targetId}'`);
-      if (target.status !== "online" || !target.sendable) throw new Error(`OSC target '${target.id}' is not online and sendable`);
-      const role = blockStateRoleForTarget(currentScore, target, targets);
-      const roleId = role.roleId;
-      const existingLayer = currentScore.mesostructure[blockId].oscLayers?.[roleId];
-      const copying = url.pathname.endsWith("/copy");
-      const replace = Boolean(body.replace);
-      if (existingLayer?.clipId && !replace) {
-        const error = new Error(`${blockId} is already Written for '${roleId}'; replacement intent is required`);
-        error.code = "OSC_BLOCK_STATE_WRITTEN";
-        throw error;
-      }
-      const baseClipId = `${blockId}-${roleId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
-      const clipId = copying
-        ? uniqueOscClipId(currentScore, `${baseClipId}-copy`)
-        : existingLayer?.clipId || uniqueOscClipId(currentScore, baseClipId);
-      const snapshot = body.snapshot ?? body.draft ?? body.clip;
-      if (!snapshot || typeof snapshot !== "object" || Array.isArray(snapshot)) throw new Error("snapshot is required");
-      const label = role.assignment.label || target.label || roleId;
-      const clip = { ...snapshot, name: optionalString(body.name) || `${blockId} · ${label}` };
-      const score = store.writeOscBlockState(roleId, role.assignment, clipId, clip, blockId, {
-        ...revisionOptions(body),
-        replace
-      });
-      writeJson(response, existingLayer ? 200 : 201, {
-        ok: true,
-        blockId,
-        roleId,
-        clipId,
-        createdRole: role.created,
-        copied: copying,
-        assignment: score.oscAssignments[roleId],
-        clip: score.oscClips[clipId],
-        score
-      });
-    } catch (error) {
-      writeError(response, error, error?.code === "OSC_BLOCK_STATE_WRITTEN" || error?.code === "OSC_ROLE_ASSIGNMENT_REQUIRED" ? 409 : 400);
     }
     return;
   }

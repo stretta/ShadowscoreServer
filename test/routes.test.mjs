@@ -836,85 +836,73 @@ test("OSC onboarding atomically creates and idempotently reuses a role, clip, an
   assert.equal(context.store.getScore().oscClips["other-clip"], undefined);
 });
 
-test("Block State write onboards displayed drafts just in time and copy remains independent", async () => {
+test("Block State upsert onboards state just in time and replaces it in place", async () => {
   const firstTarget = captureControlTarget();
-  const secondTarget = {
-    ...captureControlTarget(),
-    id: "rnbo-inst-3:listsequencer",
-    localId: "rnbo-inst-3:listsequencer",
-    label: "List Sequencer 3",
-    baseAddress: "/rnbo/inst/3",
-    instance: "aux",
-    parameters: [
-      { name: "Clock", address: "/rnbo/inst/3/params/Clock" },
-      { name: "GateTime", address: "/rnbo/inst/3/params/GateTime" }
-    ]
-  };
   const context = createRouteContext({
     runtime: {
       manualOscQueryDevices: {
         async rnboTargets() { return []; },
         async rnboDevices() { return []; },
-        async oscTargets() { return [firstTarget, secondTarget]; }
+        async oscTargets() { return [firstTarget]; }
       }
     }
   });
-  const draft = { schemaVersion: 1, app: "listsequencer", params: { Clock: 0, GateTime: 0.4 }, inputPorts: { Steps: [] } };
+  const snapshot = { schemaVersion: 1, app: "listsequencer", params: { Clock: 0, GateTime: 0.4 }, inputPorts: { Steps: [] } };
 
-  const written = await requestJson(context, "POST", "/osc/block-state/write", {
-    targetId: "heron:listsequencer:main",
+  const written = await requestJson(context, "PUT", "/osc/block-state", {
+    targets: [firstTarget.id],
     blockId: "A",
     expectedStructureRevision: 0,
-    snapshot: draft
+    snapshot
   });
-  assert.equal(written.createdRole, true);
-  assert.equal(written.roleId, "listsequencer-1");
-  assert.deepEqual(written.clip.params, draft.params);
-  assert.equal(written.score.oscAssignments[written.roleId].oscTargetId, "heron:listsequencer:main");
-  assert.equal(written.score.mesostructure.A.oscLayers[written.roleId].clipId, written.clipId);
+  assert.equal(written.targetCount, 1);
+  assert.equal(written.writes[0].createdRole, true);
+  assert.equal(written.writes[0].roleId, "listsequencer-1");
+  assert.deepEqual(written.writes[0].clip.params, snapshot.params);
+  assert.equal(written.score.oscAssignments[written.writes[0].roleId].oscTargetId, "heron:listsequencer:main");
+  assert.equal(written.score.mesostructure.A.oscLayers[written.writes[0].roleId].clipId, written.writes[0].clipId);
 
-  const copied = await requestJson(context, "POST", "/osc/block-state/copy", {
-    targetId: "heron:listsequencer:aux",
+  const replaced = await requestJson(context, "PUT", "/osc/block-state", {
+    targets: [firstTarget.id],
     blockId: "A",
     expectedStructureRevision: written.score.structureRevision,
-    snapshot: draft
+    snapshot: { ...snapshot, params: { ...snapshot.params, GateTime: 0.8 } }
   });
-  assert.equal(copied.roleId, "listsequencer-2");
-  assert.notEqual(copied.clipId, written.clipId);
-  assert.deepEqual(copied.clip.params, written.clip.params);
-
-  const rejected = await request(context, "POST", "/osc/block-state/copy", {
-    targetId: "heron:listsequencer:aux",
-    blockId: "A",
-    expectedStructureRevision: copied.score.structureRevision,
-    snapshot: { ...draft, params: { ...draft.params, GateTime: 0.8 } }
-  });
-  assert.equal(rejected.status, 409);
-  assert.match(rejected.body, /replacement intent is required/);
-
-  const replaced = await requestJson(context, "POST", "/osc/block-state/copy", {
-    targetId: "heron:listsequencer:aux",
-    blockId: "A",
-    expectedStructureRevision: copied.score.structureRevision,
-    replace: true,
-    snapshot: { ...draft, params: { ...draft.params, GateTime: 0.8 } }
-  });
-  assert.notEqual(replaced.clipId, copied.clipId);
-  assert.equal(replaced.clip.params.GateTime, 0.8);
-  assert.equal(replaced.score.oscClips[written.clipId].params.GateTime, 0.4);
+  assert.equal(replaced.writes[0].createdRole, false);
+  assert.equal(replaced.writes[0].replaced, true);
+  assert.equal(replaced.writes[0].clipId, written.writes[0].clipId);
+  assert.equal(replaced.writes[0].clip.params.GateTime, 0.8);
+  assert.equal(Object.keys(replaced.score.oscClips).length, 1);
 
   const cleared = await requestJson(context, "POST", "/osc/block-state/clear", {
     scope: "block",
     blockId: "A",
     expectedStructureRevision: replaced.score.structureRevision
   });
-  assert.equal(cleared.clearedCount, 2);
+  assert.equal(cleared.clearedCount, 1);
   assert.deepEqual(cleared.score.mesostructure.A.oscLayers, {});
-  assert.ok(cleared.score.oscAssignments[written.roleId]);
-  assert.ok(cleared.score.oscClips[written.clipId]);
+  assert.ok(cleared.score.oscAssignments[written.writes[0].roleId]);
+  assert.ok(cleared.score.oscClips[written.writes[0].clipId]);
+
+  const legacyRoute = await request(context, "POST", "/osc/block-state/write", {
+    targets: [firstTarget.id],
+    blockId: "A",
+    expectedStructureRevision: cleared.score.structureRevision,
+    snapshot
+  });
+  assert.equal(legacyRoute.status, 404);
+
+  const legacyPayload = await request(context, "PUT", "/osc/block-state", {
+    targetId: firstTarget.id,
+    blockId: "A",
+    expectedStructureRevision: cleared.score.structureRevision,
+    draft: snapshot
+  });
+  assert.equal(legacyPayload.status, 400);
+  assert.match(legacyPayload.body, /targets must include at least one checked instance/);
 });
 
-test("Block State write atomically saves the displayed draft to every checked target", async () => {
+test("Block State upsert atomically saves the displayed state to every checked target", async () => {
   const firstTarget = captureControlTarget();
   const secondTarget = {
     ...captureControlTarget(),
@@ -937,12 +925,12 @@ test("Block State write atomically saves the displayed draft to every checked ta
       }
     }
   });
-  const draft = { schemaVersion: 1, app: "listsequencer", params: { Clock: 1, GateTime: 0.4 }, inputPorts: { Steps: [1, 0, 1] } };
-  const written = await requestJson(context, "POST", "/osc/block-state/write", {
+  const snapshot = { schemaVersion: 1, app: "listsequencer", params: { Clock: 1, GateTime: 0.4 }, inputPorts: { Steps: [1, 0, 1] } };
+  const written = await requestJson(context, "PUT", "/osc/block-state", {
     targets: [firstTarget.id, secondTarget.id],
     blockId: "A",
     expectedStructureRevision: 0,
-    snapshot: draft
+    snapshot
   });
 
   assert.equal(written.targetCount, 2);
@@ -952,6 +940,17 @@ test("Block State write atomically saves the displayed draft to every checked ta
     ["a-listsequencer-1", "a-listsequencer-2"]);
   assert.equal(written.score.structureRevision, 1);
   assert.deepEqual(written.writes[0].clip.params, written.writes[1].clip.params);
+
+  const beforeStale = context.store.getScore();
+  const stale = await request(context, "PUT", "/osc/block-state", {
+    targets: [firstTarget.id, secondTarget.id],
+    blockId: "A",
+    expectedStructureRevision: 0,
+    snapshot: { ...snapshot, params: { ...snapshot.params, GateTime: 0.6 } }
+  });
+  assert.equal(stale.status, 409);
+  assert.match(stale.body, /stale structure revision 0; current structure revision is 1/);
+  assert.deepEqual(context.store.getScore(), beforeStale);
 
   const duplicated = await requestJson(context, "POST", "/osc/block-state/duplicate", {
     targets: [firstTarget.id, secondTarget.id],
@@ -966,7 +965,7 @@ test("Block State write atomically saves the displayed draft to every checked ta
     ["b-listsequencer-1", "b-listsequencer-2"]);
   assert.notEqual(duplicated.score.mesostructure.B.oscLayers["listsequencer-1"].clipId,
     duplicated.score.mesostructure.A.oscLayers["listsequencer-1"].clipId);
-  assert.deepEqual(duplicated.copies.map((copy) => copy.clip.params), [draft.params, draft.params]);
+  assert.deepEqual(duplicated.copies.map((copy) => copy.clip.params), [snapshot.params, snapshot.params]);
   assert.equal(duplicated.score.structureRevision, 2);
 
   const beforeRejectedDuplicate = context.store.getScore();
@@ -989,28 +988,19 @@ test("Block State write atomically saves the displayed draft to every checked ta
   assert.equal(duplicateReplaced.copiedCount, 2);
   assert.equal(duplicateReplaced.score.structureRevision, 3);
 
-  const beforeRejectedReplace = context.store.getScore();
-  const rejected = await request(context, "POST", "/osc/block-state/write", {
+  const beforeReplace = context.store.getScore();
+  const replaced = await requestJson(context, "PUT", "/osc/block-state", {
     targets: [firstTarget.id, secondTarget.id],
     blockId: "A",
-    expectedStructureRevision: beforeRejectedReplace.structureRevision,
-    snapshot: { ...draft, params: { ...draft.params, GateTime: 0.8 } }
-  });
-  assert.equal(rejected.status, 409);
-  assert.deepEqual(context.store.getScore(), beforeRejectedReplace);
-
-  const replaced = await requestJson(context, "POST", "/osc/block-state/write", {
-    targets: [firstTarget.id, secondTarget.id],
-    blockId: "A",
-    expectedStructureRevision: beforeRejectedReplace.structureRevision,
-    replace: true,
-    snapshot: { ...draft, params: { ...draft.params, GateTime: 0.8 } }
+    expectedStructureRevision: beforeReplace.structureRevision,
+    snapshot: { ...snapshot, params: { ...snapshot.params, GateTime: 0.8 } }
   });
   assert.equal(replaced.score.structureRevision, 4);
   assert.deepEqual(replaced.writes.map((write) => write.clip.params.GateTime), [0.8, 0.8]);
+  assert.deepEqual(replaced.writes.map((write) => write.replaced), [true, true]);
 });
 
-test("Block State write leaves compatible unresolved roles untouched for Admin resolution", async () => {
+test("Block State upsert leaves compatible unresolved roles untouched for Admin resolution", async () => {
   const context = createRouteContext({
     runtime: {
       manualOscQueryDevices: {
@@ -1026,8 +1016,8 @@ test("Block State write leaves compatible unresolved roles untouched for Admin r
     oscTargetId: "heron:listsequencer:offline"
   });
   const before = context.store.getScore();
-  const rejected = await request(context, "POST", "/osc/block-state/write", {
-    targetId: "heron:listsequencer:main",
+  const rejected = await request(context, "PUT", "/osc/block-state", {
+    targets: ["heron:listsequencer:main"],
     blockId: "A",
     expectedStructureRevision: before.structureRevision,
     snapshot: { schemaVersion: 1, app: "listsequencer", params: { Clock: 0 }, inputPorts: { Steps: [] } }
@@ -4313,7 +4303,8 @@ test("shared OSC snapshot editor client is served as a static asset", async () =
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /oscClockRecallNotice/);
   assert.match(response.body, /expectedStructureRevision/);
-  assert.match(response.body, /osc\/block-state\/write/);
+  assert.match(response.body, /osc\/block-state"/);
+  assert.doesNotMatch(response.body, /osc\/block-state\/write/);
   assert.doesNotMatch(response.body, /osc\/block-state\/copy/);
   assert.match(response.body, /osc\/block-state\/clear/);
   assert.match(response.body, /Clear State…/);

@@ -294,18 +294,12 @@ export function createOscSnapshotEditorClient(options) {
     const targetIds = selectedLiveTargetIds(options.liveTargetRoot);
     if (!targetIds.length) throw new Error("Check at least one live destination before writing");
     const draft = options.serializeDraft();
-    const replacements = targetIds.flatMap((targetId) => {
-      const destinationRoleId = resolveFocusedOscRole({ app, targetId, targets, assignments, resolutions });
-      const clip = destinationRoleId ? oscBlockSlotState(score, blockId, destinationRoleId).clip : null;
-      return clip ? [targets.find((target) => target.id === targetId)?.label || targetId] : [];
-    });
-    if (replacements.length && !window.confirm(`Replace ${blockId} Written State for ${replacements.join(", ")} and write the displayed draft to all ${targetIds.length} checked instance${targetIds.length === 1 ? "" : "s"}?`)) return;
     elements.captureButton.disabled = true;
-    const result = await fetchJson("/osc/block-state/write", {
-      method: "POST",
+    const result = await fetchJson("/osc/block-state", {
+      method: "PUT",
       body: JSON.stringify({
         expectedStructureRevision: score?.structureRevision ?? 0,
-        targets: targetIds, blockId, snapshot: draft, replace: replacements.length > 0
+        targets: targetIds, blockId, snapshot: draft
       })
     });
     score = result.score;

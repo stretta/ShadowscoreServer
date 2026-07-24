@@ -288,6 +288,7 @@
       grid-template-columns: auto 1fr;
       min-width: 150px;
       padding: 9px;
+      position: relative;
     }
 
     .chain-row[data-active="true"] {
@@ -309,6 +310,24 @@
 
     .chain-row button {
       min-height: 30px;
+    }
+
+    .arrangement-wiper {
+      background: #ffd166;
+      bottom: 0;
+      box-shadow: 0 0 4px rgba(255, 209, 102, 0.45);
+      left: 0;
+      pointer-events: none;
+      position: absolute;
+      top: 0;
+      transform: translate3d(0, 0, 0);
+      width: 2px;
+      will-change: transform;
+      z-index: 2;
+    }
+
+    .arrangement-wiper[hidden] {
+      display: none;
     }
 
     .chain-row > * {
@@ -504,11 +523,13 @@
 
   <script type="module">
     import { suggestedDuplicateBlockId } from "/shared/block-id.js";
+    import { createWiperEstimator } from "/shared/wiper-estimator.js";
 
     import { createShadowScoreClientState } from "../shared/shadowscore-client-state.js";
     import { createPlaybackUpdateControl } from "../shared/playback-update-control.js";
 
     const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const wiperEstimator = createWiperEstimator({ staleAfterMs: 750, correctionMs: 180, snapThresholdBeats: 0.25 });
     const state = {
       score: undefined,
       session: undefined,
@@ -522,6 +543,10 @@
       performanceControls: undefined,
       tempoPolicy: undefined,
       macroPlaybackTimer: undefined,
+      playbackPollTimer: undefined,
+      playbackRequest: undefined,
+      playbackGeneration: 0,
+      wiperFrame: undefined,
       draggedChainIndex: undefined,
       blockDirty: false,
       macroDirty: false,
@@ -669,6 +694,7 @@
       }
       closeEvents();
       state.serverUrl = serverUrl;
+      state.playbackGeneration = 0;
       els.server.value = serverUrl;
       setStatus(`Loading ${serverUrl}...`);
       try {
@@ -702,6 +728,7 @@
         els.serverSelect.value = serverUrl;
         renderAll();
         await refreshPerformanceSnapshot();
+        startPlaybackPolling();
         connectEvents();
         setStatus(`Connected to ${serverLabel(serverUrl, state.session)}.`);
       } catch (error) {
@@ -853,6 +880,7 @@
         empty.textContent = "No playback chain entries.";
         els.chain.append(empty);
       }
+      scheduleWiperFrame();
       updateButtons();
     }
 
@@ -938,6 +966,9 @@
       row.tabIndex = 0;
       row.dataset.chainIndex = String(index);
       row.dataset.active = String(index === Number(state.score?.structureState?.macroIndex));
+      row.style.flexBasis = `${Math.max(150, blockDurationBeats(state.score?.mesostructure?.[blockId]) * 18)}px`;
+      row.style.flexGrow = "0";
+      row.style.flexShrink = "0";
       row.setAttribute("aria-label", `Arrangement occurrence ${index + 1}: ${blockId}. Drag or use Alt plus arrow keys to reorder.`);
       const number = document.createElement("div");
       number.className = "chain-index";
@@ -996,7 +1027,11 @@
           void reorderChain(from, to);
         }
       });
-      row.append(number, select, remove);
+      const wiper = document.createElement("div");
+      wiper.className = "arrangement-wiper";
+      wiper.setAttribute("aria-hidden", "true");
+      wiper.hidden = true;
+      row.append(number, select, remove, wiper);
       return row;
     }
 
@@ -1308,23 +1343,102 @@
     }
 
     async function refreshPerformanceSnapshot() {
-      if (!state.serverUrl) {
+      if (!state.serverUrl || state.playbackRequest) {
         return;
       }
+      const controller = new AbortController();
+      state.playbackRequest = controller;
       try {
-        const snapshot = await fetchJson(`${state.serverUrl}/playback/snapshot`);
+        const response = await fetch(`${state.serverUrl}/playback/snapshot`, {
+          cache: "no-store",
+          signal: controller.signal
+        });
+        if (!response.ok) {
+          return;
+        }
+        const snapshot = await response.json();
+        if (!Number.isInteger(snapshot.generation) || snapshot.generation <= state.playbackGeneration) {
+          return;
+        }
+        state.playbackGeneration = snapshot.generation;
         state.performanceControls = snapshot.controls;
         state.tempoPolicy = snapshot.tempo;
         state.macroPlayback = snapshot.playback ?? state.macroPlayback;
-        renderPlayheadControls();
+        const beat = Number(snapshot.playback?.beatIntoBlock);
+        if (Number.isFinite(beat)) {
+          wiperEstimator.update({
+            beat,
+            tempo: snapshot.transport?.tempo,
+            running: Boolean(snapshot.controls?.arrangement?.running),
+            blockId: snapshot.playback?.activeBlockId,
+            observedAt: snapshot.observedAt
+          }, Date.now());
+        } else {
+          wiperEstimator.clear();
+        }
+        applyPlaybackSnapshotToStrip();
+        renderMacroPlaybackStatus();
         updateButtons();
-      } catch {
+        scheduleWiperFrame();
+      } catch (error) {
+        if (error?.name !== "AbortError") {
+          console.warn("Arrange playback snapshot refresh failed", error);
+        }
         // The next score/session refresh will recover playback display state.
+      } finally {
+        if (state.playbackRequest === controller) {
+          state.playbackRequest = undefined;
+        }
       }
     }
 
     async function refreshMacroPlayback() {
       await refreshPerformanceSnapshot();
+    }
+
+    function startPlaybackPolling() {
+      window.clearInterval(state.playbackPollTimer);
+      state.playbackPollTimer = window.setInterval(() => void refreshPerformanceSnapshot(), 250);
+    }
+
+    function applyPlaybackSnapshotToStrip() {
+      const activeIndex = Number(state.macroPlayback?.macroIndex ?? state.score?.structureState?.macroIndex);
+      els.chain.querySelectorAll(".chain-row").forEach((row, index) => {
+        row.dataset.active = String(index === activeIndex);
+      });
+    }
+
+    function scheduleWiperFrame() {
+      if (state.wiperFrame !== undefined) {
+        return;
+      }
+      state.wiperFrame = window.requestAnimationFrame(() => {
+        state.wiperFrame = undefined;
+        const view = renderArrangementWiper();
+        if (view?.running && !view.stale) {
+          scheduleWiperFrame();
+        }
+      });
+    }
+
+    function renderArrangementWiper() {
+      const view = wiperEstimator.estimate();
+      const activeIndex = Number(state.macroPlayback?.macroIndex ?? state.score?.structureState?.macroIndex);
+      const row = els.chain.querySelector(`.chain-row[data-chain-index="${activeIndex}"]`);
+      const wipers = els.chain.querySelectorAll(".arrangement-wiper");
+      wipers.forEach((wiper) => {
+        wiper.hidden = true;
+      });
+      if (!view || !row || view.blockId !== row.querySelector("select")?.value) {
+        return view;
+      }
+      const duration = Number(state.macroPlayback?.activeBlockDurationBeats)
+        || blockDurationBeats(state.score?.mesostructure?.[view.blockId]);
+      const ratio = Math.max(0, Math.min(1, view.beat / Math.max(duration, 0.001)));
+      const wiper = row.querySelector(".arrangement-wiper");
+      wiper.style.transform = `translate3d(${ratio * row.clientWidth}px, 0, 0)`;
+      wiper.hidden = false;
+      return view;
     }
 
     async function updatePlayhead(path, body, options = {}) {
@@ -1579,6 +1693,14 @@
       return `${value} ${unit}`;
     }
 
+    function blockDurationBeats(block) {
+      if (Number.isFinite(Number(block?.duration?.beats))) {
+        return Math.max(0.001, Number(block.duration.beats));
+      }
+      const beatsPerBar = Math.max(1, Number(state.score?.context?.clip?.TimeSignature?.numerator) || 4);
+      return Math.max(0.001, Number(block?.duration?.bars) || 1) * beatsPerBar;
+    }
+
     function renumberChain() {
       els.chain.querySelectorAll(".chain-row").forEach((row, index) => {
         row.querySelector(".chain-index").textContent = String(index + 1);
@@ -1632,6 +1754,16 @@
       state.eventSource?.close();
       state.eventSource = undefined;
       state.client?.close();
+      state.playbackRequest?.abort();
+      state.playbackRequest = undefined;
+      window.clearInterval(state.playbackPollTimer);
+      state.playbackPollTimer = undefined;
+      if (state.wiperFrame !== undefined) {
+        window.cancelAnimationFrame(state.wiperFrame);
+        state.wiperFrame = undefined;
+      }
+      wiperEstimator.clear();
+      state.playbackGeneration = 0;
       stopMacroPlaybackTimer();
     }
 

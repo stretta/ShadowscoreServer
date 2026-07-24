@@ -9,7 +9,8 @@ Implementation in progress.
   test suite.
 - Phase 4 is in progress: the first Arrange surface slice adds the horizontal
   occurrence strip, drag and keyboard reorder, explicit performance controls,
-  and written/live tempo controls.
+  written/live tempo controls, duration-proportional occurrences, and the
+  display-rate interpolated arrangement wiper.
 - Phases 5–7 remain pending.
 
 ## Goal

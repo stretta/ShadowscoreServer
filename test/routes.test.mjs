@@ -4120,6 +4120,10 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /Follow Block Tempo/);
   assert.match(response.body, /draggable = true/);
   assert.match(response.body, /reorderChain/);
+  assert.match(response.body, /createWiperEstimator/);
+  assert.match(response.body, /requestAnimationFrame/);
+  assert.match(response.body, /setInterval\(\(\) => void refreshPerformanceSnapshot\(\), 250\)/);
+  assert.match(response.body, /activeBlockDurationBeats/);
   assert.match(response.body, /id="block-list"/);
   assert.match(response.body, /id="players"/);
   assert.match(response.body, /id="duplicate-block"/);

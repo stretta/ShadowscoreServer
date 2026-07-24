@@ -10,7 +10,8 @@ Implementation in progress.
 - Phase 4 is in progress: the first Arrange surface slice adds the horizontal
   occurrence strip, drag and keyboard reorder, explicit performance controls,
   written/live tempo controls, duration-proportional occurrences, and the
-  display-rate interpolated arrangement wiper.
+  display-rate interpolated arrangement wiper. Visible occurrence move controls
+  provide touch access, while selection remains independent of playback.
 - Phases 5–7 remain pending.
 
 ## Goal

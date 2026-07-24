@@ -296,6 +296,12 @@
       box-shadow: inset 0 3px 0 var(--focus);
     }
 
+    .chain-row[data-selected="true"] {
+      background: rgba(105, 199, 223, 0.12);
+      outline: 2px solid rgba(105, 199, 223, 0.55);
+      outline-offset: -2px;
+    }
+
     .chain-row.dragging {
       opacity: 0.45;
     }
@@ -310,6 +316,18 @@
 
     .chain-row button {
       min-height: 30px;
+    }
+
+    .occurrence-actions {
+      display: grid;
+      gap: 5px;
+      grid-column: 1 / -1;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .occurrence-actions button {
+      min-width: 0;
+      padding: 0 7px;
     }
 
     .arrangement-wiper {
@@ -966,6 +984,7 @@
       row.tabIndex = 0;
       row.dataset.chainIndex = String(index);
       row.dataset.active = String(index === Number(state.score?.structureState?.macroIndex));
+      row.dataset.selected = String(blockId === state.selectedBlockId);
       row.style.flexBasis = `${Math.max(150, blockDurationBeats(state.score?.mesostructure?.[blockId]) * 18)}px`;
       row.style.flexGrow = "0";
       row.style.flexShrink = "0";
@@ -983,8 +1002,25 @@
       });
       select.value = blockId;
       select.addEventListener("change", () => {
+        row.dataset.selected = String(select.value === state.selectedBlockId);
         void persistMacrostructure("Updating playback chain...", "Updated playback chain.");
       });
+      const occurrenceActions = document.createElement("div");
+      occurrenceActions.className = "occurrence-actions";
+      const moveLeft = document.createElement("button");
+      moveLeft.type = "button";
+      moveLeft.textContent = "←";
+      moveLeft.title = "Move occurrence left";
+      moveLeft.setAttribute("aria-label", `Move occurrence ${index + 1} left`);
+      moveLeft.disabled = index === 0;
+      moveLeft.addEventListener("click", () => void reorderChain(Number(row.dataset.chainIndex), Number(row.dataset.chainIndex) - 1));
+      const moveRight = document.createElement("button");
+      moveRight.type = "button";
+      moveRight.textContent = "→";
+      moveRight.title = "Move occurrence right";
+      moveRight.setAttribute("aria-label", `Move occurrence ${index + 1} right`);
+      moveRight.disabled = index === (state.score?.macrostructure?.blocks?.length ?? 0) - 1;
+      moveRight.addEventListener("click", () => void reorderChain(Number(row.dataset.chainIndex), Number(row.dataset.chainIndex) + 1));
       const remove = document.createElement("button");
       remove.type = "button";
       remove.className = "danger";
@@ -993,6 +1029,12 @@
         row.remove();
         renumberChain();
         void persistMacrostructure("Removing playback chain entry...", "Removed playback chain entry.");
+      });
+      occurrenceActions.append(moveLeft, moveRight, remove);
+      row.addEventListener("click", (event) => {
+        if (event.target === row || event.target === number) {
+          void selectBlock(select.value);
+        }
       });
       row.addEventListener("dragstart", () => {
         state.draggedChainIndex = Number(row.dataset.chainIndex);
@@ -1031,7 +1073,7 @@
       wiper.className = "arrangement-wiper";
       wiper.setAttribute("aria-hidden", "true");
       wiper.hidden = true;
-      row.append(number, select, remove, wiper);
+      row.append(number, select, occurrenceActions, wiper);
       return row;
     }
 
@@ -1062,6 +1104,7 @@
       state.client?.revertDraft(blockDraftKey(blockId));
       renderBlockList();
       renderBlockEditor();
+      updateArrangementSelection();
     }
 
     async function addBlock() {
@@ -1702,11 +1745,17 @@
     }
 
     function renumberChain() {
-      els.chain.querySelectorAll(".chain-row").forEach((row, index) => {
+      const rows = [...els.chain.querySelectorAll(".chain-row")];
+      rows.forEach((row, index) => {
         row.querySelector(".chain-index").textContent = String(index + 1);
         row.querySelector("select").dataset.chainIndex = String(index);
         row.dataset.chainIndex = String(index);
         row.setAttribute("aria-label", `Arrangement occurrence ${index + 1}: ${row.querySelector("select").value}. Drag or use Alt plus arrow keys to reorder.`);
+        const buttons = row.querySelectorAll(".occurrence-actions button");
+        buttons[0].disabled = index === 0;
+        buttons[0].setAttribute("aria-label", `Move occurrence ${index + 1} left`);
+        buttons[1].disabled = index === rows.length - 1;
+        buttons[1].setAttribute("aria-label", `Move occurrence ${index + 1} right`);
       });
       if (!chainSelects().length) {
         const empty = document.createElement("div");
@@ -1718,6 +1767,12 @@
 
     function chainSelects() {
       return [...els.chain.querySelectorAll("select[data-chain-index]")];
+    }
+
+    function updateArrangementSelection() {
+      els.chain.querySelectorAll(".chain-row").forEach((row) => {
+        row.dataset.selected = String(row.querySelector("select")?.value === state.selectedBlockId);
+      });
     }
 
     function updateButtons() {

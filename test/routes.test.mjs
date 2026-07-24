@@ -4120,6 +4120,10 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /Follow Block Tempo/);
   assert.match(response.body, /draggable = true/);
   assert.match(response.body, /reorderChain/);
+  assert.match(response.body, /Move occurrence .* left/);
+  assert.match(response.body, /Move occurrence .* right/);
+  assert.match(response.body, /data-selected/);
+  assert.match(response.body, /updateArrangementSelection/);
   assert.match(response.body, /createWiperEstimator/);
   assert.match(response.body, /requestAnimationFrame/);
   assert.match(response.body, /setInterval\(\(\) => void refreshPerformanceSnapshot\(\), 250\)/);

@@ -148,6 +148,8 @@ The `/structure-editor` route serves the Arrange workspace from
 per-player clip assignments, block-owned written tempos, and the ordered
 arrangement without changing the Matrix Edit or Event List surfaces. The
 arrangement strip supports drag reorder and Alt+Left/Right keyboard reorder.
+Its visible left/right occurrence controls provide the same operation on touch
+screens, and block selection remains visually separate from playback position.
 Occurrence widths follow musical duration, and its playhead uses the shared
 display-rate estimator over the normal 250 ms playback snapshot cadence.
 Arrange also exposes the shared Players Play/Stop, Arrangement Run/Hold, live

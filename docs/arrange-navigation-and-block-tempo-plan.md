@@ -658,9 +658,23 @@ Implementation checkpoint, 2026-07-24:
   Arrangement was held, so no transport-changing action was issued; and
 - both RNBO targets were online and fresh, but their prepared score updates
   remained `saved-not-active` because post-restart preparation received
-  transaction IDs ahead of the server expectation. Live player, arrangement,
-  OSC recall, and wiper motion scenarios therefore remain an explicit
-  authorized-session validation task.
+  transaction IDs ahead of the server expectation. At that checkpoint, live
+  player, arrangement, OSC recall, and wiper motion scenarios remained an
+  explicit authorized-session validation task.
+
+Hands-on continuation, 2026-07-24:
+
+- the earlier RNBO acknowledgement failure was traced to the audio device
+  disappearing and stopping JACK/DSP processing; after the device and JACK
+  returned, both clients again produced matching READY and ACTIVE
+  acknowledgements;
+- the operator confirmed Return to Start, Players Play with Arrangement Run,
+  arrangement-wiper movement, block advance, Arrangement Hold while player
+  stages continued, Arrangement Run resume, and Players Stop; and
+- Players Stop currently sends `Clock: 0` only to assigned ShadowScore playback
+  clients. It does not override `Clock` on clock-capable OSC roles such as
+  Analog Sequencer. Treat global OSC-instrument stopping as a documented
+  follow-up decision rather than silently changing block-owned snapshot state.
 
 ## Test Matrix
 

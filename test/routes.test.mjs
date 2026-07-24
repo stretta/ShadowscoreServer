@@ -4131,6 +4131,10 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /state\.liveTempoDirty = false;\s+renderMacroPlaybackStatus\(\)/);
   assert.match(response.body, /draggable = true/);
   assert.match(response.body, /reorderChain/);
+  assert.match(response.body, /drop-before/);
+  assert.match(response.body, /drop-after/);
+  assert.match(response.body, /event\.clientX < bounds\.left \+ \(bounds\.width \/ 2\)/);
+  assert.doesNotMatch(response.body, /drag-target/);
   assert.match(response.body, /Press Backspace or Delete to remove/);
   assert.match(response.body, /removeChainEntry/);
   assert.doesNotMatch(response.body, /occurrence-actions/);

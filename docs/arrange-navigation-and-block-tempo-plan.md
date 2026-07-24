@@ -610,7 +610,9 @@ Layout refinement, 2026-07-24:
 - occurrence cards contain only their block label, selection, active state, and
   wiper; and
 - drag handles reordering, while Backspace/Delete removes the focused
-  occurrence. Per-occurrence move and remove buttons and numbered selects are
+  occurrence. Drag feedback marks the insertion gap before or after an
+  occurrence rather than highlighting an occurrence as though it will be
+  replaced. Per-occurrence move and remove buttons and numbered selects are
   intentionally absent.
 
 ### Phase 5: Navigation Consolidation

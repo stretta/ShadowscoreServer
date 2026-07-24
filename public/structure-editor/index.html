@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ShadowScore Structure Editor</title>
+  <title>ShadowScore Arrange</title>
   <link rel="stylesheet" href="/shared/shadowscore-style.css">
   <style>
     :root {
@@ -236,16 +236,19 @@
     }
 
     .chain {
-      display: grid;
+      align-items: stretch;
+      display: flex;
       gap: 8px;
       min-width: 0;
+      overflow-x: auto;
+      padding: 2px 2px 10px;
     }
 
     .playhead {
       align-items: end;
       display: grid;
       gap: 8px;
-      grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
       min-width: 0;
     }
 
@@ -275,11 +278,37 @@
     }
 
     .chain-row {
-      align-items: center;
+      align-content: start;
+      background: rgba(15, 23, 32, 0.72);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      cursor: grab;
       display: grid;
       gap: 8px;
-      grid-template-columns: 34px minmax(0, 1fr) auto;
-      min-width: 0;
+      grid-template-columns: auto 1fr;
+      min-width: 150px;
+      padding: 9px;
+    }
+
+    .chain-row[data-active="true"] {
+      border-color: var(--focus);
+      box-shadow: inset 0 3px 0 var(--focus);
+    }
+
+    .chain-row.dragging {
+      opacity: 0.45;
+    }
+
+    .chain-row.drag-target {
+      border-color: var(--accent);
+    }
+
+    .chain-row select {
+      grid-column: 1 / -1;
+    }
+
+    .chain-row button {
+      min-height: 30px;
     }
 
     .chain-row > * {
@@ -289,7 +318,27 @@
     .chain-index {
       color: var(--muted);
       font-variant-numeric: tabular-nums;
-      text-align: right;
+      line-height: 30px;
+    }
+
+    .tempo-controls {
+      align-items: end;
+      display: grid;
+      gap: 8px;
+      grid-column: 1 / -1;
+      grid-template-columns: minmax(110px, 1fr) auto auto;
+    }
+
+    .check-control {
+      align-items: center;
+      display: flex;
+      gap: 7px;
+      min-height: 34px;
+    }
+
+    .check-control input {
+      min-height: 0;
+      width: auto;
     }
 
     .empty {
@@ -325,7 +374,7 @@
 <body>
   <nav class="ss-route-tabs" aria-label="ShadowScore routes">
     <a href="/">Dashboard</a>
-    <a href="/structure-editor" aria-current="page">Structure</a>
+    <a href="/structure-editor" aria-current="page">Arrange</a>
     <a href="/matrix-edit">Matrix</a>
     <a href="/piano-roll">Piano Roll</a>
     <a href="/event-list">Event List</a>
@@ -350,7 +399,7 @@
       <section class="panel" aria-label="Blocks">
         <div class="panel-header">
           <h2>Blocks</h2>
-          <button id="add-block" type="button">Add Block</button>
+          <button id="add-block" type="button">New Block</button>
         </div>
         <div class="panel-body">
           <div class="list" id="block-list"></div>
@@ -411,10 +460,10 @@
         </div>
       </section>
 
-      <section class="panel macro-panel" aria-label="Song form">
+      <section class="panel macro-panel" aria-label="Arrangement">
         <div class="panel-header">
-          <h2>Song Form</h2>
-          <button id="add-chain" type="button">Add</button>
+          <h2>Arrangement</h2>
+          <button id="add-chain" type="button">Add to Arrangement</button>
         </div>
         <div class="panel-body">
           <div class="playhead" aria-label="Transport">
@@ -424,10 +473,22 @@
             <button id="set-active-block" type="button">Cue Section</button>
             <button id="advance-block" type="button">Next Section</button>
             <button id="reset-block" type="button">Return to Start</button>
-            <button id="start-macro" type="button">Play</button>
-            <button id="stop-macro" type="button">Stop</button>
+            <button class="primary" id="players-play" type="button">Players Play</button>
+            <button id="players-stop" type="button">Players Stop</button>
+            <button class="primary" id="arrangement-run" type="button">Arrangement Run</button>
+            <button id="arrangement-hold" type="button">Arrangement Hold</button>
+            <div class="tempo-controls" aria-label="Live tempo">
+              <label>Live Tempo
+                <input id="live-tempo" type="number" min="20" max="400" step="0.01" value="120">
+              </label>
+              <label class="check-control">
+                <input id="follow-block-tempo" type="checkbox" checked>
+                Follow Block Tempo
+              </label>
+              <button id="use-block-tempo" type="button">Use Block Tempo Now</button>
+            </div>
             <div class="playback-status" id="macro-playback-status">
-              <strong id="macro-playback-state">Stopped</strong>
+              <strong id="macro-playback-state">Players stopped · Arrangement held</strong>
               <span id="macro-playback-detail">A · 1/6 · -- remaining</span>
             </div>
           </div>
@@ -458,7 +519,10 @@
       eventSource: undefined,
       selectedBlockId: "",
       macroPlayback: undefined,
+      performanceControls: undefined,
+      tempoPolicy: undefined,
       macroPlaybackTimer: undefined,
+      draggedChainIndex: undefined,
       blockDirty: false,
       macroDirty: false,
       saving: false,
@@ -490,8 +554,13 @@
       setActiveBlock: document.querySelector("#set-active-block"),
       advanceBlock: document.querySelector("#advance-block"),
       resetBlock: document.querySelector("#reset-block"),
-      startMacro: document.querySelector("#start-macro"),
-      stopMacro: document.querySelector("#stop-macro"),
+      playersPlay: document.querySelector("#players-play"),
+      playersStop: document.querySelector("#players-stop"),
+      arrangementRun: document.querySelector("#arrangement-run"),
+      arrangementHold: document.querySelector("#arrangement-hold"),
+      liveTempo: document.querySelector("#live-tempo"),
+      followBlockTempo: document.querySelector("#follow-block-tempo"),
+      useBlockTempo: document.querySelector("#use-block-tempo"),
       macroPlaybackStatus: document.querySelector("#macro-playback-status"),
       macroPlaybackState: document.querySelector("#macro-playback-state"),
       macroPlaybackDetail: document.querySelector("#macro-playback-detail"),
@@ -544,8 +613,13 @@
       els.setActiveBlock.addEventListener("click", setActiveBlock);
       els.advanceBlock.addEventListener("click", advanceBlock);
       els.resetBlock.addEventListener("click", resetBlock);
-      els.startMacro.addEventListener("click", startMacroPlayback);
-      els.stopMacro.addEventListener("click", stopMacroPlayback);
+      els.playersPlay.addEventListener("click", () => void runPerformanceAction("/transport/players/play", { mode: "auto" }, "Starting players..."));
+      els.playersStop.addEventListener("click", () => void runPerformanceAction("/transport/players/stop", {}, "Stopping players..."));
+      els.arrangementRun.addEventListener("click", () => void runPerformanceAction("/transport/arrangement/run", { mode: "auto" }, "Running arrangement..."));
+      els.arrangementHold.addEventListener("click", () => void runPerformanceAction("/transport/arrangement/hold", {}, "Holding arrangement..."));
+      els.liveTempo.addEventListener("change", () => void setLiveTempo());
+      els.followBlockTempo.addEventListener("change", () => void setFollowBlockTempo());
+      els.useBlockTempo.addEventListener("click", () => void useBlockTempo());
       [els.blockId, els.durationUnit, els.durationValue, els.tempo, els.scaleRoot, els.scaleName, els.blockTtid].forEach((el) => {
         el.addEventListener("input", () => {
           markBlockDirty();
@@ -616,6 +690,8 @@
         }
         state.score = state.client.effectiveScore();
         state.macroPlayback = state.session.macroPlayback;
+        state.performanceControls = undefined;
+        state.tempoPolicy = undefined;
         state.blockDirty = false;
         state.macroDirty = false;
         state.selectedBlockId = firstBlockId();
@@ -625,6 +701,7 @@
         renderServerOptions();
         els.serverSelect.value = serverUrl;
         renderAll();
+        await refreshPerformanceSnapshot();
         connectEvents();
         setStatus(`Connected to ${serverLabel(serverUrl, state.session)}.`);
       } catch (error) {
@@ -716,7 +793,7 @@
     function renderBlockEditor() {
       const block = currentBlock();
       const enabled = Boolean(block);
-      [els.blockId, els.durationUnit, els.durationValue, els.scaleRoot, els.scaleName, els.blockTtid].forEach((el) => {
+      [els.blockId, els.durationUnit, els.durationValue, els.tempo, els.scaleRoot, els.scaleName, els.blockTtid].forEach((el) => {
         el.disabled = !enabled;
       });
       els.scaleRoot.disabled = true;
@@ -794,13 +871,18 @@
 
     function renderMacroPlaybackStatus() {
       const playback = state.macroPlayback;
+      const playersPlaying = Boolean(state.performanceControls?.players?.playing);
+      const arrangementRunning = Boolean(state.performanceControls?.arrangement?.running ?? playback?.running);
+      els.macroPlaybackState.textContent = `${playersPlaying ? "Players playing" : "Players stopped"} · ${arrangementRunning ? "Arrangement running" : "Arrangement held"}`;
+      if (state.tempoPolicy) {
+        els.liveTempo.value = String(state.tempoPolicy.live ?? 120);
+        els.followBlockTempo.checked = Boolean(state.tempoPolicy.followBlockTempo);
+      }
       if (!playback?.running) {
         stopMacroPlaybackTimer();
-        els.macroPlaybackState.textContent = "Stopped";
         els.macroPlaybackDetail.textContent = playbackDetailText(playback);
         return;
       }
-      els.macroPlaybackState.textContent = "Playing";
       els.macroPlaybackDetail.textContent = playbackDetailText(playback);
       startMacroPlaybackTimer();
     }
@@ -852,6 +934,11 @@
     function chainRow(index, blockId) {
       const row = document.createElement("div");
       row.className = "chain-row";
+      row.draggable = true;
+      row.tabIndex = 0;
+      row.dataset.chainIndex = String(index);
+      row.dataset.active = String(index === Number(state.score?.structureState?.macroIndex));
+      row.setAttribute("aria-label", `Arrangement occurrence ${index + 1}: ${blockId}. Drag or use Alt plus arrow keys to reorder.`);
       const number = document.createElement("div");
       number.className = "chain-index";
       number.textContent = String(index + 1);
@@ -876,8 +963,58 @@
         renumberChain();
         void persistMacrostructure("Removing playback chain entry...", "Removed playback chain entry.");
       });
+      row.addEventListener("dragstart", () => {
+        state.draggedChainIndex = Number(row.dataset.chainIndex);
+        row.classList.add("dragging");
+      });
+      row.addEventListener("dragover", (event) => {
+        event.preventDefault();
+        row.classList.add("drag-target");
+      });
+      row.addEventListener("dragleave", () => row.classList.remove("drag-target"));
+      row.addEventListener("drop", (event) => {
+        event.preventDefault();
+        row.classList.remove("drag-target");
+        const targetIndex = Number(row.dataset.chainIndex);
+        if (Number.isInteger(state.draggedChainIndex) && state.draggedChainIndex !== targetIndex) {
+          void reorderChain(state.draggedChainIndex, targetIndex);
+        }
+      });
+      row.addEventListener("dragend", () => {
+        state.draggedChainIndex = undefined;
+        row.classList.remove("dragging");
+        els.chain.querySelectorAll(".drag-target").forEach((entry) => entry.classList.remove("drag-target"));
+      });
+      row.addEventListener("keydown", (event) => {
+        if (!event.altKey || !["ArrowLeft", "ArrowRight"].includes(event.key)) {
+          return;
+        }
+        event.preventDefault();
+        const from = Number(row.dataset.chainIndex);
+        const to = event.key === "ArrowLeft" ? from - 1 : from + 1;
+        if (to >= 0 && to < chainSelects().length) {
+          void reorderChain(from, to);
+        }
+      });
       row.append(number, select, remove);
       return row;
+    }
+
+    async function reorderChain(fromIndex, toIndex) {
+      const rows = [...els.chain.querySelectorAll(".chain-row")];
+      const moving = rows[fromIndex];
+      const target = rows[toIndex];
+      if (!moving || !target || moving === target) {
+        return;
+      }
+      if (fromIndex < toIndex) {
+        target.after(moving);
+      } else {
+        target.before(moving);
+      }
+      renumberChain();
+      await persistMacrostructure("Reordering arrangement...", "Reordered arrangement.");
+      els.chain.querySelector(`.chain-row[data-chain-index="${toIndex}"]`)?.focus();
     }
 
     async function selectBlock(blockId) {
@@ -904,6 +1041,7 @@
           ...state.score.mesostructure,
           [id]: {
             duration: { bars: 4 },
+            tempo: 120,
             scale: { root_note: 0, scale_name: "Ionian", scale_intervals: [0, 2, 4, 5, 7, 9, 11] },
             ttid: 2741,
             players: {}
@@ -1094,61 +1232,99 @@
       await updatePlayhead("/macrostructure/reset", {});
     }
 
-    async function startMacroPlayback() {
+    async function runPerformanceAction(path, body, pendingMessage) {
       if (!state.score) {
         return;
       }
-      setStatus("Starting playback...");
+      setStatus(pendingMessage);
       try {
         state.saving = true;
-        const result = await fetchJson(`${state.serverUrl}/macrostructure/playback/start`, undefined, {
+        const result = await fetchJson(`${state.serverUrl}${path}`, undefined, {
           method: "POST",
-          body: { mode: "auto" }
+          body
         });
-        state.macroPlayback = result.playback;
+        adoptPerformanceTransport(result.transport);
         renderPlayheadControls();
-        setStatus("Playback started.");
+        setStatus(result.transport?.stateText ?? "Updated performance transport.");
       } catch (error) {
-        setStatus(`Playback start failed: ${error.message}`);
+        setStatus(`Transport update failed: ${error.message}`);
       } finally {
         state.saving = false;
         updateButtons();
       }
     }
 
-    async function stopMacroPlayback() {
+    async function setLiveTempo() {
+      const bpm = numberValue(els.liveTempo.value, state.tempoPolicy?.live ?? 120);
+      await updateTempoPolicy("/transport/tempo", { bpm }, `Live tempo ${bpm} BPM.`);
+    }
+
+    async function setFollowBlockTempo() {
+      await updateTempoPolicy(
+        "/transport/tempo/follow-block",
+        { follow: els.followBlockTempo.checked },
+        els.followBlockTempo.checked ? "Following written block tempo at boundaries." : "Live tempo is latched across block boundaries."
+      );
+    }
+
+    async function useBlockTempo() {
+      await updateTempoPolicy("/transport/tempo/use-block", {}, "Recalled the active block's written tempo.");
+    }
+
+    async function updateTempoPolicy(path, body, successMessage) {
       if (!state.score) {
         return;
       }
-      setStatus("Stopping playback...");
       try {
         state.saving = true;
-        const result = await fetchJson(`${state.serverUrl}/macrostructure/playback/stop`, undefined, {
+        updateButtons();
+        const result = await fetchJson(`${state.serverUrl}${path}`, undefined, {
           method: "POST",
-          body: {}
+          body
         });
-        state.macroPlayback = result.playback;
+        state.tempoPolicy = result.tempo ?? result.transport?.tempo;
+        adoptPerformanceTransport(result.transport);
         renderPlayheadControls();
-        setStatus("Playback stopped.");
+        setStatus(successMessage);
       } catch (error) {
-        setStatus(`Playback stop failed: ${error.message}`);
+        renderMacroPlaybackStatus();
+        setStatus(`Tempo update failed: ${error.message}`);
       } finally {
         state.saving = false;
         updateButtons();
       }
     }
 
-    async function refreshMacroPlayback() {
+    function adoptPerformanceTransport(transport) {
+      if (!transport) {
+        return;
+      }
+      state.performanceControls = {
+        players: transport.players,
+        arrangement: transport.arrangement
+      };
+      state.tempoPolicy = transport.tempo ?? state.tempoPolicy;
+      state.macroPlayback = transport.playback ?? state.macroPlayback;
+    }
+
+    async function refreshPerformanceSnapshot() {
       if (!state.serverUrl) {
         return;
       }
       try {
-        state.macroPlayback = await fetchJson(`${state.serverUrl}/macrostructure/playback`);
+        const snapshot = await fetchJson(`${state.serverUrl}/playback/snapshot`);
+        state.performanceControls = snapshot.controls;
+        state.tempoPolicy = snapshot.tempo;
+        state.macroPlayback = snapshot.playback ?? state.macroPlayback;
         renderPlayheadControls();
         updateButtons();
       } catch {
         // The next score/session refresh will recover playback display state.
       }
+    }
+
+    async function refreshMacroPlayback() {
+      await refreshPerformanceSnapshot();
     }
 
     async function updatePlayhead(path, body, options = {}) {
@@ -1407,6 +1583,8 @@
       els.chain.querySelectorAll(".chain-row").forEach((row, index) => {
         row.querySelector(".chain-index").textContent = String(index + 1);
         row.querySelector("select").dataset.chainIndex = String(index);
+        row.dataset.chainIndex = String(index);
+        row.setAttribute("aria-label", `Arrangement occurrence ${index + 1}: ${row.querySelector("select").value}. Drag or use Alt plus arrow keys to reorder.`);
       });
       if (!chainSelects().length) {
         const empty = document.createElement("div");
@@ -1435,8 +1613,15 @@
       els.setActiveBlock.disabled = !hasScore || state.saving || !els.activeBlock.value;
       els.advanceBlock.disabled = !hasScore || state.saving || !(state.score?.macrostructure?.blocks ?? []).length;
       els.resetBlock.disabled = !hasScore || state.saving;
-      els.startMacro.disabled = !hasScore || state.saving || Boolean(state.macroPlayback?.running) || !(state.score?.macrostructure?.blocks ?? []).length;
-      els.stopMacro.disabled = !hasScore || state.saving || !state.macroPlayback?.running;
+      const playersPlaying = Boolean(state.performanceControls?.players?.playing);
+      const arrangementRunning = Boolean(state.performanceControls?.arrangement?.running ?? state.macroPlayback?.running);
+      els.playersPlay.disabled = !hasScore || state.saving || playersPlaying;
+      els.playersStop.disabled = !hasScore || state.saving || !playersPlaying;
+      els.arrangementRun.disabled = !hasScore || state.saving || !playersPlaying || arrangementRunning || !(state.score?.macrostructure?.blocks ?? []).length;
+      els.arrangementHold.disabled = !hasScore || state.saving || !arrangementRunning;
+      els.liveTempo.disabled = !hasScore || state.saving;
+      els.followBlockTempo.disabled = !hasScore || state.saving;
+      els.useBlockTempo.disabled = !hasScore || state.saving || !hasBlock;
     }
 
     function confirmDiscard() {

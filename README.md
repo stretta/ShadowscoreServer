@@ -143,10 +143,13 @@ attributes include duration, time signature, playback type, behavior flags,
 transpose mode, and note counts. Player assignment is intentionally outside
 Event List because assignments belong to mesostructural blocks.
 
-The `/structure-editor` route serves a dedicated meso/macro editor from
+The `/structure-editor` route serves the Arrange workspace from
 `public/structure-editor`. It edits score-owned mesostructural block parameters,
-per-player clip assignments, block-owned written tempos, and the ordered macro chain
-without changing the Matrix Edit or Event List surfaces.
+per-player clip assignments, block-owned written tempos, and the ordered
+arrangement without changing the Matrix Edit or Event List surfaces. The
+arrangement strip supports drag reorder and Alt+Left/Right keyboard reorder.
+Arrange also exposes the shared Players Play/Stop, Arrangement Run/Hold, live
+tempo, Follow Block Tempo, and Use Block Tempo Now controls.
 
 The `/editors` route serves the registered OSC-generator index from
 `public/editors`, and `/editors/manifest` exposes the generator manifest JSON.
@@ -185,8 +188,9 @@ play.
 
 ## Editing Model
 
-- **Structure Editor** owns mesostructure, macrostructure, active block
-  selection, timed macro playback, and player-to-clip assignment.
+- **Arrange** owns mesostructure, macrostructure, active block selection,
+  Players/Arrangement performance controls, live and written tempo policy, and
+  player-to-clip assignment.
 - **Event List** owns canonical clip editing: clip selection, clip attributes,
   clip time signature, playback type, behavior flags, and note events.
 - **Matrix Edit** owns block-context interlock editing: select a block, edit one

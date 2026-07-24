@@ -7,7 +7,10 @@ Implementation in progress.
 - Phases 1–3 (Schema And Migration, Runtime Live Tempo Policy, Split Player And
   Arrangement Controls) are implemented locally and covered by the full server
   test suite.
-- Phases 4–7 remain pending.
+- Phase 4 is in progress: the first Arrange surface slice adds the horizontal
+  occurrence strip, drag and keyboard reorder, explicit performance controls,
+  and written/live tempo controls.
+- Phases 5–7 remain pending.
 
 ## Goal
 

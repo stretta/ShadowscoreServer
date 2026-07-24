@@ -3,6 +3,7 @@ import { activeWrittenTempo } from "./tempo.mjs";
 
 export function createMacroPlayback(store, config = {}, options = {}) {
   const timers = options.timers ?? globalThis;
+  const now = options.now ?? Date.now;
   const jackTransport = options.jackTransport;
   const afterAdvance = options.afterAdvance;
   const beforeAdvance = options.beforeAdvance;
@@ -12,6 +13,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   let timer = undefined;
   let nextAdvanceAt = null;
   let currentBlockDurationMs = 0;
+  let timerTempo = null;
+  let timerElapsedBeats = 0;
+  let timerBlockStartedAt = null;
   let activeBlockStartBeat = null;
   let activeBlockEndBeat = null;
   let activeBlockDurationBeats = 0;
@@ -94,7 +98,21 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       clearTimer();
       nextAdvanceAt = null;
       currentBlockDurationMs = 0;
+      clearTimerAnchor();
       clearBeatAnchor();
+      return snapshot();
+    },
+    tempoChanged() {
+      if (!running) return snapshot();
+      if (mode === "timer") {
+        reanchorTimerTempo();
+      } else {
+        const score = store.getScore();
+        currentBlockDurationMs = durationMsAtTempo(
+          macroBlockDurationBeats(score, config),
+          effectiveTempo(score)
+        );
+      }
       return snapshot();
     },
     snapshot,
@@ -111,9 +129,19 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     clearTimer();
     clearBeatAnchor();
     const score = store.getScore();
-    currentBlockDurationMs = macroBlockDurationMs(score, config);
-    const delayMs = Math.max(1, currentBlockDurationMs);
-    nextAdvanceAt = Date.now() + delayMs;
+    const durationBeats = macroBlockDurationBeats(score, config);
+    scheduleTimer(durationBeats, 0, effectiveTempo(score));
+  }
+
+  function scheduleTimer(durationBeats, elapsedBeats, tempo) {
+    clearTimer();
+    timerTempo = tempo;
+    timerElapsedBeats = Math.max(0, Math.min(durationBeats, elapsedBeats));
+    timerBlockStartedAt = now();
+    currentBlockDurationMs = durationMsAtTempo(durationBeats, tempo);
+    const remainingBeats = Math.max(0, durationBeats - timerElapsedBeats);
+    const delayMs = Math.max(1, durationMsAtTempo(remainingBeats, tempo));
+    nextAdvanceAt = timerBlockStartedAt + delayMs;
     timer = timers.setTimeout(() => {
       timer = undefined;
       if (!running) {
@@ -130,11 +158,28 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     }, delayMs);
   }
 
+  function reanchorTimerTempo() {
+    const score = store.getScore();
+    const durationBeats = macroBlockDurationBeats(score, config);
+    const observedAt = now();
+    const elapsedSinceAnchor = timerBlockStartedAt === null || !Number.isFinite(timerTempo)
+      ? 0
+      : Math.max(0, observedAt - timerBlockStartedAt) * timerTempo / 60000;
+    const elapsedBeats = Math.max(0, Math.min(durationBeats, timerElapsedBeats + elapsedSinceAnchor));
+    scheduleTimer(durationBeats, elapsedBeats, effectiveTempo(score));
+  }
+
   function clearTimer() {
     if (timer !== undefined) {
       timers.clearTimeout(timer);
       timer = undefined;
     }
+  }
+
+  function clearTimerAnchor() {
+    timerTempo = null;
+    timerElapsedBeats = 0;
+    timerBlockStartedAt = null;
   }
 
   function anchorBeatDerivedPlayback(snapshotOptions = {}) {
@@ -145,7 +190,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     macroStartIndex = current.macroIndex;
     macroStartOffsetBeats = cumulativeBeatsBeforeIndex(score, macroStartIndex);
     activeBlockDurationBeats = macroBlockDurationBeats(score, config);
-    currentBlockDurationMs = macroBlockDurationMs(score, config);
+    currentBlockDurationMs = durationMsAtTempo(activeBlockDurationBeats, effectiveTempo(score));
     compositionBeat = macroStartOffsetBeats;
     beatIntoBlock = 0;
     if (!witness.usable || !Number.isFinite(witness.absoluteBeat)) {
@@ -196,7 +241,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     activeBlockStartBeat = macroStartBeat + derived.blockStartBeat - macroStartOffsetBeats;
     activeBlockEndBeat = macroStartBeat + derived.blockEndBeat - macroStartOffsetBeats;
     activeBlockDurationBeats = derived.durationBeats;
-    currentBlockDurationMs = durationMsFromBeats(derived.durationBeats, score, config);
+    currentBlockDurationMs = durationMsAtTempo(derived.durationBeats, effectiveTempo(score));
     runBeforeAdvance(score, derived, witness);
     runArmAdvance(score, derived, witness);
 
@@ -248,7 +293,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     const witness = selectedWitness(snapshotOptions);
     const beatsRemaining = mode === "jack" && activeBlockEndBeat !== null && beatIntoBlock !== null
       ? Math.max(0, activeBlockDurationBeats - beatIntoBlock)
-      : null;
+      : mode === "timer"
+        ? timerBeatsRemaining(score)
+        : null;
     return {
       running,
       mode,
@@ -284,6 +331,21 @@ export function createMacroPlayback(store, config = {}, options = {}) {
         last: lastActivationArm
       }
     };
+  }
+
+  function timerBeatsRemaining(score) {
+    const durationBeats = macroBlockDurationBeats(score, config);
+    const elapsedSinceAnchor = timerBlockStartedAt === null || !Number.isFinite(timerTempo)
+      ? 0
+      : Math.max(0, now() - timerBlockStartedAt) * timerTempo / 60000;
+    return Math.max(0, durationBeats - timerElapsedBeats - elapsedSinceAnchor);
+  }
+
+  function effectiveTempo(score) {
+    const runtimeTempo = Number(options.getTempo?.());
+    return Number.isFinite(runtimeTempo) && runtimeTempo > 0
+      ? runtimeTempo
+      : activeWrittenTempo(score, finiteNumber(config.rnbo?.transport?.Tempo, 120));
   }
 
   function selectedWitness(snapshotOptions = {}) {
@@ -447,6 +509,10 @@ export function macroBlockDurationMs(score, config = {}) {
 
 function durationMsFromBeats(beats, score, config = {}) {
   const tempo = activeWrittenTempo(score, finiteNumber(config.rnbo?.transport?.Tempo, 120));
+  return durationMsAtTempo(beats, tempo);
+}
+
+function durationMsAtTempo(beats, tempo) {
   if (beats <= 0 || tempo <= 0) {
     return 0;
   }
@@ -514,7 +580,6 @@ function shouldReschedule(event) {
   return (
     event.type === "structure.playhead.updated" ||
     event.type === "macrostructure.updated" ||
-    event.type === "mesostructure.block.replaced" ||
     event.type === "mesostructure.block.duplicated" ||
     event.type === "mesostructure.block.removed" ||
     (event.type === "admin.reset" && event.detail?.structure)

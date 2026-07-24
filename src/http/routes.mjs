@@ -17,6 +17,7 @@ import { buildOscResourceReport } from "../osc/resources.mjs";
 import { runAutomaticOscOnboarding } from "../osc/onboarding.mjs";
 import { selectBeatWitness } from "../playback/beat-witness.mjs";
 import { buildPlaybackSnapshot, nextPlaybackSnapshotGeneration } from "../playback/playback-snapshot.mjs";
+import { createTempoPolicy } from "../playback/tempo-policy.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
@@ -493,11 +494,13 @@ export async function routeRequest(request, response, store, config, runtime = {
   }
 
   if (request.method === "GET" && url.pathname === "/transport") {
+    tempoPolicyFor(store, config, runtime);
     writeJson(response, 200, transportSnapshot(config, runtime));
     return;
   }
 
   if (request.method === "GET" && url.pathname === "/transport/events") {
+    tempoPolicyFor(store, config, runtime);
     openTransportEventStream(request, response, config, runtime);
     return;
   }
@@ -558,10 +561,67 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/transport/tempo") {
+    try {
+      const body = await readJson(request);
+      const policy = tempoPolicyFor(store, config, runtime);
+      policy.setLiveTempo(positiveNumber(body.bpm ?? body.tempo, "bpm"));
+      await policy.flush();
+      writeJson(response, 200, {
+        ok: true,
+        action: "tempo",
+        tempo: policy.snapshot(),
+        transport: await transportFacadeStatus(store, config, runtime)
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/tempo/follow-block") {
+    try {
+      const body = await readJson(request);
+      if (typeof body.follow !== "boolean") throw new Error("follow must be boolean");
+      const policy = tempoPolicyFor(store, config, runtime);
+      policy.setFollowBlockTempo(body.follow);
+      writeJson(response, 200, {
+        ok: true,
+        action: "follow-block-tempo",
+        tempo: policy.snapshot(),
+        transport: await transportFacadeStatus(store, config, runtime)
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/tempo/use-block") {
+    try {
+      const policy = tempoPolicyFor(store, config, runtime);
+      policy.useBlockTempo();
+      await policy.flush();
+      writeJson(response, 200, {
+        ok: true,
+        action: "use-block-tempo",
+        tempo: policy.snapshot(),
+        transport: await transportFacadeStatus(store, config, runtime)
+      });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   if (request.method === "POST" && url.pathname === "/transport/jack/snapshot") {
     try {
       const transport = requireJackTransport(runtime);
-      transport.update(await readJson(request));
+      const body = await readJson(request);
+      transport.update(body);
+      if (Number.isFinite(Number(body.beatsPerMinute)) && Number(body.beatsPerMinute) > 0) {
+        tempoPolicyFor(store, config, runtime).observeExternalTempo(body.beatsPerMinute);
+      }
       writeJson(response, 200, {
         ok: true,
         transport: transportSnapshot(config, runtime)
@@ -607,7 +667,10 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const controller = requireJackController(runtime);
       const body = await readJson(request);
-      writeJson(response, 200, await controller.tempo(positiveNumber(body.bpm ?? body.tempo, "bpm")));
+      const bpm = positiveNumber(body.bpm ?? body.tempo, "bpm");
+      const result = await controller.tempo(bpm);
+      tempoPolicyFor(store, config, runtime).observeExternalTempo(bpm);
+      writeJson(response, 200, result);
     } catch (error) {
       writeJson(response, jackControllerStatus(error), { ok: false, error: messageForError(error) });
     }
@@ -1807,6 +1870,16 @@ function requireMacroPlayback(runtime) {
   return runtime.macroPlayback;
 }
 
+function tempoPolicyFor(store, config, runtime) {
+  if (!runtime.tempoPolicy) {
+    runtime.tempoPolicy = createTempoPolicy(store, config, {
+      applyTempo: (tempo) => applyLiveTempo(store, config, runtime, tempo),
+      onTempoChanged: () => runtime.macroPlayback?.tempoChanged?.()
+    });
+  }
+  return runtime.tempoPolicy;
+}
+
 function requireJackTransport(runtime) {
   if (!runtime.jackTransport) {
     throw new Error("JACK transport state is not available");
@@ -1840,15 +1913,18 @@ function jackTransportSnapshot(runtime) {
 function transportSnapshot(config, runtime) {
   return {
     ...jackTransportSnapshot(runtime),
-    tempoAuthority: config.transport?.tempoAuthority === "server" ? "server" : "link"
+    tempoAuthority: config.transport?.tempoAuthority === "server" ? "server" : "link",
+    tempo: runtime.tempoPolicy?.snapshot?.() ?? null
   };
 }
 
 async function macroPlaybackSnapshot(runtime, store, config, witnessContext) {
+  const tempo = tempoPolicyFor(store, config, runtime).snapshot();
   if (runtime.macroPlayback?.snapshot) {
     const context = witnessContext ?? await readBeatWitnessContext(store.getScore(), config, runtime);
     return {
       ...runtime.macroPlayback.snapshot(context),
+      tempo,
       oscSnapshotRecall: automaticOscSnapshotRecallStatus(runtime)
     };
   }
@@ -1877,6 +1953,7 @@ async function macroPlaybackSnapshot(runtime, store, config, witnessContext) {
       fresh: false,
       reason: "macro playback is not available"
     },
+    tempo,
     jack: {
       status: "unusable",
       state: "",
@@ -1911,7 +1988,7 @@ function assertApplyNextBeatSafe(playback, score, config, blockId) {
   const insideJackGuard = Number.isFinite(beatsRemaining) && beatsRemaining > 0 && beatsRemaining <= leadBeats;
 
   const nextAdvanceAt = Number(playback.nextAdvanceAt);
-  const tempo = activeWrittenTempo(score, config.rnbo?.transport?.Tempo);
+  const tempo = Number(playback.tempo?.live ?? activeWrittenTempo(score, config.rnbo?.transport?.Tempo));
   const timerGuardMs = tempo > 0 ? leadBeats * 60000 / tempo : 0;
   const insideTimerGuard = playback.mode === "timer" && Number.isFinite(nextAdvanceAt) && nextAdvanceAt > 0 &&
     nextAdvanceAt - Date.now() <= timerGuardMs;
@@ -1962,6 +2039,7 @@ async function coherentPlaybackSnapshot(runtime, store, config) {
     observedAt,
     score,
     playback,
+    tempo: tempoPolicyFor(store, config, runtime).snapshot(),
     jack: transportSnapshot(config, runtime),
     targets,
     timingContracts,
@@ -2018,6 +2096,7 @@ async function transportFacadeStatus(store, config, runtime) {
     activeBlockId: playback.activeBlockId ?? score.structureState?.activeBlockId ?? "",
     macroIndex: playback.macroIndex ?? score.structureState?.macroIndex ?? 0,
     beatIntoBlock: playback.beatIntoBlock ?? null,
+    tempo: tempoPolicyFor(store, config, runtime).snapshot(),
     sync: {
       source: syncSource,
       fresh: Boolean(witness.fresh ?? witness.usable),
@@ -2048,8 +2127,9 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
       activationMode: "now",
       expectedScoreRevision: score.scoreRevision ?? score.version
     });
-  const tempo = activeWrittenTempo(score, config.rnbo?.transport?.Tempo);
-  const jackTempo = await maybeSendJackTempo(runtime, tempo);
+  const tempo = tempoPolicyFor(store, config, runtime).snapshot().live;
+  const tempoApplication = await applyLiveTempo(store, config, runtime, tempo);
+  const jackTempo = tempoApplication.jack;
   const jackStart = await maybeStartJack(runtime);
   const ttidDistribution = await distributeTtidForBlock(score, config, runtime, score.structureState?.activeBlockId);
   const snapshotRecall = await recallOscSnapshotsForBlock(store, config, runtime, score.structureState?.activeBlockId);
@@ -2076,6 +2156,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     rnboReadiness,
     jackStart,
     jackTempo,
+    tempoWrites: tempoApplication.rnboWrites,
     ttidDistribution,
     snapshotRecall,
     playbackUpdate,
@@ -2133,6 +2214,22 @@ async function maybeSendJackTempo(runtime, tempo, previousTempo) {
     return null;
   }
   return runtime.jackController.tempo(bpm);
+}
+
+export async function applyLiveTempo(store, config, runtime, tempo) {
+  const bpm = positiveNumber(tempo, "bpm");
+  const jack = await maybeSendJackTempo(runtime, bpm);
+  let rnboWrites = [];
+  if (config.transport?.tempoAuthority === "server") {
+    rememberRnboTransportControls(config, { Tempo: bpm });
+    rnboWrites = await writeTransportControlsToPlaybackTargets(
+      store.getScore(),
+      config,
+      runtime,
+      { Tempo: bpm }
+    );
+  }
+  return { jack, rnboWrites };
 }
 
 function syncLabel(source) {

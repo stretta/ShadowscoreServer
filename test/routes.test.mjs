@@ -498,6 +498,7 @@ test("transport status page exposes host transport controls", async () => {
   assert.match(response.body, /id="stop"/);
   assert.match(response.body, /id="composition-beat"/);
   assert.match(response.body, /id="beat-into-block"/);
+  assert.match(response.body, /transport\.tempo\?\.live/);
   assert.match(response.body, /id="macro-anchor"/);
   assert.match(response.body, /id="phase-reset"/);
   assert.match(response.body, /id="timing-contracts"/);
@@ -1767,6 +1768,91 @@ test("written block tempo save does not silently change live JACK tempo", async 
   assert.equal(score.mesostructure.A.tempo, 137.25);
   assert.equal(score.macrostructure.tempo, undefined);
   assert.deepEqual(jackCalls, []);
+});
+
+test("live tempo routes expose manual, follow-block, and explicit recall policy", async () => {
+  const jackCalls = [];
+  const context = createRouteContext({
+    runtime: {
+      jackController: {
+        async tempo(bpm) {
+          jackCalls.push(bpm);
+          return { ok: true, bpm };
+        }
+      }
+    }
+  });
+  context.store.replaceMesoBlock("B", {
+    ...context.store.getScore().mesostructure.B,
+    tempo: 96
+  });
+
+  const manual = await requestJson(context, "POST", "/transport/tempo", { bpm: 108 });
+  assert.equal(manual.transport.tempo.live, 108);
+  assert.equal(manual.transport.tempo.source, "manual");
+
+  await requestJson(context, "POST", "/transport/tempo/follow-block", { follow: false });
+  context.store.advanceStructurePlayhead();
+  assert.equal(context.runtime.tempoPolicy.snapshot().live, 108);
+  assert.equal(context.runtime.tempoPolicy.snapshot().written, 96);
+
+  const enabled = await requestJson(context, "POST", "/transport/tempo/follow-block", { follow: true });
+  assert.equal(enabled.tempo.live, 108);
+  const recalled = await requestJson(context, "POST", "/transport/tempo/use-block", {});
+  assert.equal(recalled.tempo.live, 96);
+  assert.equal(recalled.tempo.source, "block");
+
+  await requestJson(context, "POST", "/transport/tempo", { bpm: 104 });
+  context.store.resetStructurePlayhead();
+  await context.runtime.tempoPolicy.flush();
+  assert.equal(context.runtime.tempoPolicy.snapshot().live, 120);
+  assert.deepEqual(jackCalls, [108, 96, 104, 120]);
+
+  const snapshot = await requestJson(context, "GET", "/playback/snapshot");
+  assert.equal(snapshot.tempo.live, 120);
+  assert.equal(snapshot.transport.tempo, 120);
+});
+
+test("live tempo routes reject invalid tempo policy requests", async () => {
+  const context = createRouteContext();
+
+  const tempo = await request(context, "POST", "/transport/tempo", { bpm: 0 });
+  const follow = await request(context, "POST", "/transport/tempo/follow-block", { follow: "yes" });
+
+  assert.equal(tempo.status, 400);
+  assert.match(tempo.body, /bpm must be a positive number/);
+  assert.equal(follow.status, 400);
+  assert.match(follow.body, /follow must be boolean/);
+});
+
+test("server tempo authority sends live tempo to RNBO message inports", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      transport: { tempoAuthority: "server" },
+      rnbo: {
+        targets: [{
+          id: "source-client",
+          host: "192.168.68.96",
+          port: 9000,
+          address: "/rnbo/inst/2/messages/in/shadowscore"
+        }]
+      }
+    }),
+    runtime: {
+      rnboParamWriter: async (write) => writes.push(write)
+    }
+  });
+
+  await requestJson(context, "POST", "/transport/tempo", { bpm: 111 });
+
+  assert.equal(context.config.rnbo.transport.Tempo, 111);
+  assert.deepEqual(writes, [{
+    host: "192.168.68.96",
+    port: 9000,
+    path: "/rnbo/inst/2/messages/in/Tempo",
+    value: 111
+  }]);
 });
 
 test("transport return-to-start resets the macro playhead and phase", async () => {

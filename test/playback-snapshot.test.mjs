@@ -15,6 +15,13 @@ test("playback snapshot keeps JACK playhead separate from target execution witne
     generation: 8,
     observedAt: Date.parse("2026-07-20T13:07:42.125Z"),
     score: { scoreRevision: 14, structureRevision: 5 },
+    tempo: {
+      live: 108,
+      written: 96,
+      followBlockTempo: false,
+      source: "manual",
+      activeBlockId: "D"
+    },
     playback: {
       running: true,
       activeBlockId: "D",
@@ -52,6 +59,8 @@ test("playback snapshot keeps JACK playhead separate from target execution witne
   });
 
   assert.equal(snapshot.transport.authority, "jack");
+  assert.equal(snapshot.transport.tempo, 108);
+  assert.equal(snapshot.tempo.source, "manual");
   assert.equal(snapshot.transport.beatIntoBlock, 40.25);
   assert.equal(snapshot.targets.finch.beatIntoBlock, 40);
   assert.equal(snapshot.targets.finch.phaseErrorBeats, -0.25);

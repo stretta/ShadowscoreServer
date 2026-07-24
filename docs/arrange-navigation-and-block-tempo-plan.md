@@ -4,9 +4,9 @@
 
 Implementation in progress.
 
-- Phase 1 (Schema And Migration) is implemented locally and covered by the
-  full server test suite.
-- Phases 2–7 remain pending.
+- Phases 1–2 (Schema And Migration, Runtime Live Tempo Policy) are implemented
+  locally and covered by the full server test suite.
+- Phases 3–7 remain pending.
 
 ## Goal
 

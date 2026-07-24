@@ -293,7 +293,7 @@ export function transportPage() {
       fields["bridge-status"].className = "value " + (transport.fresh ? "ok" : transport.status === "stale" ? "warn" : "bad");
       fields["bridge-detail"].textContent = transport.reason || (Number.isFinite(transport.ageMs) ? transport.ageMs + " ms old" : "");
       fields["jack-state"].textContent = latest.state || "-";
-      fields.bpm.textContent = formatNumber(latest.beatsPerMinute, 2);
+      fields.bpm.textContent = formatNumber(transport.tempo?.live ?? latest.beatsPerMinute, 2);
       fields["absolute-beat"].textContent = formatNumber(latest.absoluteBeat, 3);
       fields.bbt.textContent = latest.bbtValid ? [latest.bar, latest.beat, formatNumber(latest.tick, 0)].join(":") : "-";
       fields["tempo-authority"].textContent = transport.tempoAuthority || "-";

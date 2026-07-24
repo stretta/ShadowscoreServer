@@ -336,8 +336,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
             boundary: request.boundary
           });
         }));
+        const runtimeTempo = Number(runtime.getTempo?.());
         const activations = await adapter.confirmPreparedActivations(requests, {
-          tempo: activeWrittenTempo(canonical),
+          tempo: Number.isFinite(runtimeTempo) && runtimeTempo > 0 ? runtimeTempo : activeWrittenTempo(canonical),
           fetchImpl: options.fetchImpl
         });
         const finalUpdates = await adapter.playbackUpdates(selectedBlockId);

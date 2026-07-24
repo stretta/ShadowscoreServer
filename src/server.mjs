@@ -3,8 +3,9 @@ import http from "node:http";
 import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
-import { distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "./http/routes.mjs";
+import { applyLiveTempo, distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
+import { createTempoPolicy } from "./playback/tempo-policy.mjs";
 import { createRnboStageCollector } from "./playback/rnbo-stage-collector.mjs";
 import { createOscSnapshotAutoRecall } from "./osc/snapshot-auto-recall.mjs";
 import { createManualOscQueryDeviceRegistry } from "./oscquery/manual-device-registry.mjs";
@@ -23,7 +24,11 @@ const persistence = createScorePersistence(store, config);
 const peerRegistry = createPeerRegistry(config);
 const manualOscQueryDevices = createManualOscQueryDeviceRegistry(config);
 const oscSnapshotRecall = createOscSnapshotRecallService();
-const rnbo = createRnboOscAdapter(config, { peerRegistry });
+let tempoPolicy;
+const rnbo = createRnboOscAdapter(config, {
+  peerRegistry,
+  getTempo: () => tempoPolicy?.snapshot().live
+});
 const jackTransport = createJackTransportState(config);
 const rnboStageCollector = createRnboStageCollector(config);
 const jackController = config.transport?.jack?.enabled
@@ -38,8 +43,14 @@ const runtime = {
   rnboAdapter: rnbo,
   rnboStageCollector
 };
+tempoPolicy = createTempoPolicy(store, config, {
+  applyTempo: (tempo) => applyLiveTempo(store, config, runtime, tempo),
+  onTempoChanged: () => runtime.macroPlayback?.tempoChanged?.()
+});
+runtime.tempoPolicy = tempoPolicy;
 const macroPlayback = createMacroPlayback(store, config, {
   jackTransport,
+  getTempo: () => runtime.tempoPolicy.snapshot().live,
   beforeAdvance: ({ nextBlockId }) => rnbo.prepareBlock(nextBlockId),
   armAdvance: async ({ nextBlockId }) => {
     const update = await rnbo.applyBlockUpdate(nextBlockId, {

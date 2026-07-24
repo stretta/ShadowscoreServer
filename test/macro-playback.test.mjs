@@ -53,6 +53,46 @@ test("macro playback uses beat durations and the active block written tempo", ()
   assert.equal(macroBlockDurationMs(store.getScore(), defaultConfig), 3000);
 });
 
+test("timer playback re-anchors musical progress when live tempo changes", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceMesoBlock("A", { ...store.getScore().mesostructure.A, tempo: 120, duration: { beats: 4 } });
+  store.updateMacrostructure({ blocks: ["A"] });
+  const timers = createFakeTimers();
+  let observedAt = 0;
+  let liveTempo = 120;
+  const playback = createMacroPlayback(store, defaultConfig, {
+    timers,
+    now: () => observedAt,
+    getTempo: () => liveTempo
+  });
+
+  playback.start();
+  assert.equal(timers.pending[0].delayMs, 2000);
+
+  observedAt = 500;
+  liveTempo = 60;
+  playback.tempoChanged();
+
+  assert.equal(timers.pending.length, 1);
+  assert.equal(timers.pending[0].delayMs, 3000);
+  assert.equal(playback.snapshot().beatsRemaining, 3);
+  playback.close();
+});
+
+test("editing written block tempo does not restart running timer playback", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const timers = createFakeTimers();
+  const playback = createMacroPlayback(store, defaultConfig, { timers });
+
+  playback.start();
+  const scheduled = timers.pending[0];
+  store.replaceMesoBlock("A", { ...store.getScore().mesostructure.A, tempo: 88 });
+
+  assert.equal(timers.pending.length, 1);
+  assert.equal(timers.pending[0], scheduled);
+  playback.close();
+});
+
 test("JACK macro playback advances at anchored beat boundaries", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });

@@ -239,10 +239,13 @@ For the session-day operator flow, see
 - `POST /transport/jack/stop`: stop JACK transport through a configured JACK controller.
 - `POST /transport/jack/locate`: locate JACK transport to a frame with `{ "frame": 0 }`; this does not write RNBO `Clock`.
 - `POST /transport/jack/tempo`: set JACK transport tempo through a configured JACK controller with `{ "bpm": 120 }`.
-- `POST /transport/play`: user-facing Play facade. Waits for queued RNBO score preparation and rejects explicit ACK failures; reasserts the active block's written tempo to JACK; starts JACK; writes `SetStage 0` to assigned clients by default; then sends `Clock 1` so each client starts on its next synchronized beat. Playhead-only updates do not retransmit an already committed active block.
+- `POST /transport/tempo`: set runtime live tempo immediately with `{ "bpm": 108 }` without rewriting the active block.
+- `POST /transport/tempo/follow-block`: enable or disable written-tempo recall at the next block boundary with `{ "follow": true }`. Enabling it does not jump tempo mid-block.
+- `POST /transport/tempo/use-block`: explicitly recall the active block's written tempo now.
+- `POST /transport/play`: user-facing Play facade. Waits for queued RNBO score preparation and rejects explicit ACK failures; reasserts runtime live tempo to the configured authority; starts JACK; writes `SetStage 0` to assigned clients by default; then sends `Clock 1` so each client starts on its next synchronized beat. Playhead-only updates do not retransmit an already committed active block.
 - `POST /transport/stop`: user-facing Stop facade. Stops macrostructure playback, writes assigned-client playback stop controls, and returns aggregate transport readiness.
 - `POST /transport/return-to-start`: reset the macro playhead to the first section, write `SetStage: 0` to playback targets, and return aggregate transport readiness.
-- `GET /transport`: current JACK bridge freshness, latest BBT snapshot, and tempo authority.
+- `GET /transport`: current JACK bridge freshness, latest BBT snapshot, tempo authority, and runtime live/written/follow policy.
 - `GET /transport/events`: SSE stream for transport updates.
 - `GET /transport/status`: host transport status and macro playback control page.
 - `POST /rnbo/targets/:targetId/transport-controls`: set playback transport RNBO controls for a target. `Clock` is written to the RNBO param path, while `Tempo`, `MaxSteps`, `ClockInterval`, `SetStage`, and `Stage` are written to message inports, for example `{ "controls": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`. Editor transport start/stop uses this route with `{ "controls": { "Clock": 1 } }` or `{ "controls": { "Clock": 0 } }`; sending the off/on message to one target is sufficient for the linked transport. Routine score-data resends reassert `ClockInterval` and score-derived `MaxSteps`; they only send `Tempo` when `transport.tempoAuthority` is set to `"server"`. Stage/step reset or direct advancement controls should be sent only by explicit sync/direct-drive operations. The older `/rnbo/targets/:targetId/params` route remains available as a compatibility alias.

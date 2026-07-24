@@ -15,7 +15,10 @@ Implementation in progress.
   provide touch access, while selection remains independent of playback.
   Running traversal latches canonical arrangement edits until the next block
   boundary, and JACK look-ahead prepares the pending successor.
-- Phase 7 remains pending.
+- Phase 7 source-first export, deployment, hardware smoke, and read-only live
+  UI/API validation are complete. Transport-changing live acceptance remains
+  pending explicit session authorization and a clean RNBO prepared-transaction
+  acknowledgement.
 
 ## Goal
 
@@ -637,6 +640,27 @@ Acceptance:
 - verify served pages, navigation, tempo behavior, duplication, arrangement
   hold/run, player stop/play, OSC recall, and wiper behavior; and
 - leave live transport safely stopped after validation.
+
+Implementation checkpoint, 2026-07-24:
+
+- Matrix Edit source commit `cd73e5e` was exported with clean provenance before
+  the server deployment;
+- server commit `30e0069` was deployed from a clean detached worktree to
+  `wren.local`, excluding unrelated local OSC editor changes;
+- the service restart, standard route checks, `/structure-editor`,
+  `/transport/status`, and the hardware smoke test passed;
+- live read-only UI validation confirmed grouped deep-link navigation,
+  duration-sized and keyboard-labeled arrangement occurrences, separate
+  stopped Players and held Arrangement state, external live tempo distinct from
+  written block tempo, a closed diagnostic disclosure, and an eight-entry
+  event buffer that continues updating while closed;
+- JACK remained rolling independently while Players were stopped and
+  Arrangement was held, so no transport-changing action was issued; and
+- both RNBO targets were online and fresh, but their prepared score updates
+  remained `saved-not-active` because post-restart preparation received
+  transaction IDs ahead of the server expectation. Live player, arrangement,
+  OSC recall, and wiper motion scenarios therefore remain an explicit
+  authorized-session validation task.
 
 ## Test Matrix
 

@@ -954,8 +954,8 @@ function selectedLiveTargetIds(root) {
   return Array.from(root.querySelectorAll("[data-target]:checked"), (input) => input.dataset?.target).filter(Boolean);
 }
 
-export function oscPlaybackWiperVisible({ editingBlockId = "", playingBlockId = "", running = false } = {}) {
-  return Boolean(running && editingBlockId && editingBlockId === playingBlockId);
+export function oscPlaybackWiperVisible({ editingBlockId = "", playingBlockId = "" } = {}) {
+  return Boolean(editingBlockId && editingBlockId === playingBlockId);
 }
 
 function generatedClipId(blockId, roleId) {

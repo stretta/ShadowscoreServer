@@ -139,10 +139,10 @@ test("focusing an instance makes it the sole live-send destination", () => {
   assert.deepEqual(inputs.map(({ checked }) => checked), [false, false, false]);
 });
 
-test("the playback wiper is visible only when PLAYING and EDITING match", () => {
+test("the playback wiper follows a matching live client stage even when macro transport is stopped", () => {
   assert.equal(oscPlaybackWiperVisible({ editingBlockId: "E", playingBlockId: "E", running: true }), true);
   assert.equal(oscPlaybackWiperVisible({ editingBlockId: "A", playingBlockId: "E", running: true }), false);
-  assert.equal(oscPlaybackWiperVisible({ editingBlockId: "E", playingBlockId: "E", running: false }), false);
+  assert.equal(oscPlaybackWiperVisible({ editingBlockId: "E", playingBlockId: "E", running: false }), true);
   assert.equal(oscPlaybackWiperVisible({ editingBlockId: "", playingBlockId: "E", running: true }), false);
 });
 

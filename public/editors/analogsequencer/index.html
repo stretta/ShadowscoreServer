@@ -82,7 +82,7 @@
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-live="polite"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, oscPlaybackWiperVisible } from "/shared/osc-snapshot-editor.js?v=20260724-instant-write2";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, oscPlaybackWiperVisible } from "/shared/osc-snapshot-editor.js?v=20260724-live-stage-witness1";
     const targetsEl = document.querySelector("#targets");
     const stagesEl = document.querySelector("#stages");
     const parametersEl = document.querySelector("#parameters");
@@ -390,7 +390,7 @@
     function selectedTargetIds() { return Array.from(targetsEl.querySelectorAll("[data-target]:checked"), input => input.dataset.target).filter(Boolean); }
     function oscQueryHost(target) { return isLoopback(target.host) ? location.hostname : target.host; }
     function firstDefined(values, fallback) { return values.find(value => value !== undefined && value !== null) ?? fallback; }
-    function setPlayingStage(number) { const state = snapshotClient?.snapshotState(); const visible = oscPlaybackWiperVisible({ editingBlockId: state?.blockId, playingBlockId: state?.playingBlockId, running: state?.playback?.running }); for (const stage of stagesEl.querySelectorAll(".stage")) { const playing = visible && Number(stage.dataset.stage) === number; stage.classList.toggle("playing", playing); if (playing) stage.setAttribute("aria-current", "step"); else stage.removeAttribute("aria-current"); } }
+    function setPlayingStage(number) { const state = snapshotClient?.snapshotState(); const visible = oscPlaybackWiperVisible({ editingBlockId: state?.blockId, playingBlockId: state?.playingBlockId }); for (const stage of stagesEl.querySelectorAll(".stage")) { const playing = visible && Number(stage.dataset.stage) === number; stage.classList.toggle("playing", playing); if (playing) stage.setAttribute("aria-current", "step"); else stage.removeAttribute("aria-current"); } }
     function applyMaxCount(maxCount) { for (const stage of stagesEl.querySelectorAll(".stage")) { const unused = Number(stage.dataset.stage) > maxCount; stage.classList.toggle("unused", unused); for (const input of stage.querySelectorAll("input")) input.disabled = unused || stage.classList.contains("missing"); } }
     function maxCountValue(target) { return maxCountParamValue((target.parameters || []).find(isMaxCountParam)); }
     function maxCountParamValue(param) { return clamp(integerValue(param?.value, 16), 1, 16); }

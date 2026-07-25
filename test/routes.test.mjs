@@ -4355,7 +4355,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
-  assert.match(response.body, /20260724-instant-write2/);
+  assert.match(response.body, /20260724-live-stage-witness1/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -4393,7 +4393,7 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotState/);
   assert.match(response.body, /displaySavedState/);
-  assert.match(response.body, /20260724-instant-write2/);
+  assert.match(response.body, /20260724-live-stage-witness1/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -4466,7 +4466,7 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /commitGesture/);
   assert.match(response.body, /commitEdit/);
   assert.doesNotMatch(response.body, /draftChanged/);
-  assert.match(response.body, /20260724-instant-write2/);
+  assert.match(response.body, /20260724-live-stage-witness1/);
   assert.match(response.body, /dataset\.snapshotValue/);
   assert.match(response.body, /id="rtz-before-play"/);
   assert.match(response.body, /On block change, send RTZ before play/);
@@ -4487,7 +4487,7 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /20260724-instant-write2/,
+    assert.match(response.body, /20260724-live-stage-witness1/,
       `${editor} should load the instant-write snapshot client contract`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');

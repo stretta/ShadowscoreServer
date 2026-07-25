@@ -1689,6 +1689,66 @@ test("Players Play respects a held arrangement mode", async () => {
   assert.equal(played.transport.arrangement.requestedMode, "hold");
 });
 
+test("Players Play ignores stale readiness failures for deleted playback targets", async () => {
+  let running = false;
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [{
+          id: "current-client",
+          host: "192.168.68.96",
+          port: 9000,
+          address: "/rnbo/inst/23/messages/in/shadowscore"
+        }]
+      }
+    }),
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async prepareBlock() {},
+        async waitForIdle() {},
+        sendStatus() {
+          return [
+            { targetId: "deleted-client", ack: { ok: false, status: "unreachable" } },
+            { targetId: "current-client", ack: { ok: true, status: "prepared" } }
+          ];
+        },
+        sendQueueStatus() {
+          return { inProgress: false, queued: false };
+        }
+      },
+      rnboParamWriter: async () => {},
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          mode: running ? "timer" : "stopped",
+          activeBlockId: "A",
+          macroIndex: 0
+        }),
+        start: () => {
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => {
+          running = false;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "current-client",
+    rnboHost: "192.168.68.96",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/23/messages/in/shadowscore"
+  });
+
+  const played = await requestJson(context, "POST", "/transport/players/play", { mode: "timer" });
+
+  assert.equal(played.transport.players.playing, true);
+  assert.equal(played.transport.arrangement.running, true);
+});
+
 test("transport auto mode selects JACK after the controller starts rolling", async () => {
   let now = 1000;
   let startOptions = null;
@@ -4355,7 +4415,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
-  assert.match(response.body, /20260724-live-stage-witness1/);
+  assert.match(response.body, /20260724-ttid-revision1/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -4393,7 +4453,7 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotState/);
   assert.match(response.body, /displaySavedState/);
-  assert.match(response.body, /20260724-live-stage-witness1/);
+  assert.match(response.body, /20260724-ttid-revision1/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -4438,6 +4498,7 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /\/harmonic\/scales/);
   assert.match(response.body, /\/mesostructure\/\$\{encodeURIComponent\(state\.blockId\)\}\/ttid/);
   assert.match(response.body, /auditionTargets: selected/);
+  assert.match(response.body, /snapshotClient\?\.syncScore\(body\.score\)/);
   assert.match(response.body, /isTtidParam/);
   assert.match(response.body, /encodeScale/);
   assert.match(response.body, /Voltage Shift/);
@@ -4477,7 +4538,7 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /commitGesture/);
   assert.match(response.body, /commitEdit/);
   assert.doesNotMatch(response.body, /draftChanged/);
-  assert.match(response.body, /20260724-live-stage-witness1/);
+  assert.match(response.body, /20260724-ttid-revision1/);
   assert.match(response.body, /dataset\.snapshotValue/);
   assert.match(response.body, /id="rtz-before-play"/);
   assert.match(response.body, /On block change, send RTZ before play/);
@@ -4498,7 +4559,7 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /20260724-live-stage-witness1/,
+    assert.match(response.body, /20260724-ttid-revision1/,
       `${editor} should load the instant-write snapshot client contract`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');

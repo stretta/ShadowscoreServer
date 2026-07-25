@@ -163,6 +163,14 @@ export function createOscSnapshotEditorClient(options) {
     retrySave() {
       return writeQueue?.retry() ?? false;
     },
+    syncScore(nextScore) {
+      if (!nextScore || typeof nextScore !== "object") return false;
+      score = structuredClone(nextScore);
+      assignments = score.oscAssignments ?? {};
+      if (chase) selectPlayingBlock();
+      renderContext();
+      return true;
+    },
     snapshotState,
     close() {
       events?.close?.();
@@ -564,6 +572,7 @@ export function createOscSnapshotEditorClient(options) {
       "snapshot", "osc.clip.added", "osc.clip.captured", "osc.clip.replaced", "osc.clip.removed",
       "osc.blockState.written", "osc.blockState.replaced", "osc.blockState.batchWritten", "osc.blockState.cleared",
       "mesostructure.oscLayer.assigned", "mesostructure.oscLayer.removed",
+      "mesostructure.ttid.updated",
       "structure.playhead.updated", "osc.assignment.replaced", "osc.assignment.removed",
       "osc.assignment.reconciled", "admin.reset", "admin.score.created", "admin.score.initialized", "admin.restore"
     ]) events.addEventListener(eventName, updateScore);

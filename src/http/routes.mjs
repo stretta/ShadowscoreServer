@@ -2251,7 +2251,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   if (runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.prepareBlock === "function") {
     await runtime.rnboAdapter.prepareBlock(score.structureState?.activeBlockId, "transport-start");
   }
-  const rnboReadiness = await awaitRnboPlaybackReady(runtime);
+  const rnboReadiness = await awaitRnboPlaybackReady(runtime, score);
   const playbackUpdate = body.phaseReset === false || typeof runtime.rnboAdapter?.applyBlockUpdate !== "function"
     ? null
     : await runtime.rnboAdapter.applyBlockUpdate(score.structureState?.activeBlockId, {
@@ -2302,12 +2302,21 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   };
 }
 
-async function awaitRnboPlaybackReady(runtime) {
+async function awaitRnboPlaybackReady(runtime, score) {
   if (!runtime.rnboAdapter?.enabled) return null;
   if (typeof runtime.rnboAdapter.waitForIdle === "function") {
     await runtime.rnboAdapter.waitForIdle();
   }
-  const failed = (runtime.rnboAdapter.sendStatus?.() ?? []).filter((status) => status.ack?.ok === false);
+  const assignedTargetKeys = new Set(Object.values(score.assignments ?? {})
+    .flatMap((assignment) => [assignment?.rnboTargetId, assignment?.rnboAddress])
+    .map(optionalString)
+    .filter(Boolean));
+  const statuses = runtime.rnboAdapter.sendStatus?.() ?? [];
+  const relevantStatuses = assignedTargetKeys.size === 0
+    ? statuses
+    : statuses.filter((status) => assignedTargetKeys.has(optionalString(status.targetId))
+      || assignedTargetKeys.has(optionalString(status.address)));
+  const failed = relevantStatuses.filter((status) => status.ack?.ok === false);
   if (failed.length) {
     throw new Error(`RNBO playback is not ready: ${failed.map((status) => `${status.targetId} ${status.ack?.status ?? "failed"}`).join(", ")}`);
   }

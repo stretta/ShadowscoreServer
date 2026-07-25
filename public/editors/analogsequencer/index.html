@@ -102,7 +102,7 @@
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-live="polite"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, oscPlaybackWiperVisible } from "/shared/osc-snapshot-editor.js?v=20260724-live-stage-witness1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, oscPlaybackWiperVisible } from "/shared/osc-snapshot-editor.js?v=20260724-ttid-revision1";
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     let SCALES = Object.freeze({ ionian: [0, 2, 4, 5, 7, 9, 11] });
     const targetsEl = document.querySelector("#targets");
@@ -259,6 +259,7 @@
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || body.ok === false) throw new Error(body.error || "TTID update failed");
+      snapshotClient?.syncScore(body.score);
       ttidValue = mask;
       for (const target of targets) {
         const param = (target.parameters || []).find(isTtidParam);

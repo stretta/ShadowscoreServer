@@ -4433,6 +4433,17 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /Clock Selected On/);
   assert.match(response.body, /inputPort: "rtz"/);
   assert.match(response.body, /setAllClocks/);
+  assert.match(response.body, /Quantizer TTID/);
+  assert.match(response.body, /id="ttid-keys"/);
+  assert.match(response.body, /\/harmonic\/scales/);
+  assert.match(response.body, /\/mesostructure\/\$\{encodeURIComponent\(state\.blockId\)\}\/ttid/);
+  assert.match(response.body, /auditionTargets: selected/);
+  assert.match(response.body, /isTtidParam/);
+  assert.match(response.body, /encodeScale/);
+  assert.match(response.body, /Voltage Shift/);
+  assert.match(response.body, /Middle C = 0 V/);
+  assert.match(response.body, /portamento/);
+  assert.match(response.body, /\$\{formatted\} ms/);
   assert.match(response.body, /param: "Clock"/);
   assert.match(response.body, /renderParameters/);
   assert.match(response.body, /function shouldCurve/);

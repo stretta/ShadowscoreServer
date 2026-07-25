@@ -14,7 +14,7 @@
     .subtitle, .status, .detail, .empty { color: var(--ss-muted); font-size: 12px; font-weight: 750; }
     .subtitle { margin: 4px 0 0; }
     .status { max-width: 48vw; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
-    .toolbar, .snapshot-panel, .targets, .sequencer { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); }
+    .toolbar, .snapshot-panel, .targets, .sequencer, .ttid { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); }
     .toolbar { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 10px; }
     .toolbar-actions { align-items: center; display: flex; flex-wrap: wrap; gap: 8px; }
     .targets { display: flex; gap: 8px; overflow-x: auto; padding: 10px; }
@@ -42,6 +42,17 @@
     .step input:checked { background: var(--ss-accent); border-color: var(--ss-accent); box-shadow: inset 0 0 0 5px var(--ss-surface); }
     .step input:focus-visible { outline: 2px solid var(--ss-accent-secondary); outline-offset: 2px; }
     .missing { opacity: .45; }
+    .ttid { display: grid; gap: 12px; padding: 14px; }
+    .ttid-head, .ttid-preset { align-items: center; display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; }
+    .ttid-head h2 { font-size: 14px; margin: 0; }
+    .ttid-readout { color: var(--ss-accent); font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; font-weight: 850; }
+    .ttid-keys { display: grid; gap: 7px; grid-template-columns: repeat(12, minmax(52px, 1fr)); }
+    .ttid-key { min-width: 0; padding-inline: 6px; }
+    .ttid-key[aria-pressed="true"] { background: var(--ss-accent); border-color: var(--ss-accent); color: var(--ss-bg); }
+    .ttid-preset { justify-content: flex-start; }
+    .ttid-preset label { display: grid; gap: 4px; min-width: 130px; }
+    .ttid-preset label > span { color: var(--ss-muted); font-size: 11px; font-weight: 800; }
+    .ttid-note { color: var(--ss-muted); font-size: 12px; font-weight: 750; margin: 0; }
     .parameters { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); display: grid; gap: 12px; padding: 14px; }
     .parameters h2 { font-size: 14px; margin: 0; }
     .parameter-grid { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
@@ -77,15 +88,30 @@
       </div>
       <div id="stages" class="stages"></div>
     </section>
+    <section class="ttid" aria-labelledby="ttid-label">
+      <div class="ttid-head"><div><h2 id="ttid-label">Quantizer TTID</h2><p class="ttid-note">Edits the current block scale and auditions it on checked AnalogSequencers.</p></div><output id="ttid-readout" class="ttid-readout">4095 / 0xFFF</output></div>
+      <div id="ttid-keys" class="ttid-keys" aria-label="TTID pitch classes"></div>
+      <div class="ttid-preset">
+        <label><span>Root</span><select id="ttid-root" aria-label="TTID root"></select></label>
+        <label><span>Scale</span><select id="ttid-scale" aria-label="TTID scale"></select></label>
+        <button id="ttid-load" class="primary" type="button">Load Scale</button>
+      </div>
+    </section>
     <section class="parameters"><h2>Sequence Parameters</h2><div id="parameters" class="parameter-grid"></div><label class="parameter-toggle"><input id="rtz-before-play" type="checkbox"> On block change, send RTZ before play</label></section>
     <div id="snapshot-mount"></div>
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-live="polite"></div></section>
   </main>
   <script type="module">
     import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, oscPlaybackWiperVisible } from "/shared/osc-snapshot-editor.js?v=20260724-live-stage-witness1";
+    const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
+    let SCALES = Object.freeze({ ionian: [0, 2, 4, 5, 7, 9, 11] });
     const targetsEl = document.querySelector("#targets");
     const stagesEl = document.querySelector("#stages");
     const parametersEl = document.querySelector("#parameters");
+    const ttidKeysEl = document.querySelector("#ttid-keys");
+    const ttidReadoutEl = document.querySelector("#ttid-readout");
+    const ttidRootSelect = document.querySelector("#ttid-root");
+    const ttidScaleSelect = document.querySelector("#ttid-scale");
     const statusEl = document.querySelector("#status");
     const readSourceSelect = document.querySelector("#read-source");
     const getDataButton = document.querySelector("#get-data");
@@ -97,6 +123,7 @@
     let targets = [];
     let readSourceId = "";
     let pitchRange = { min: 24, max: 72 };
+    let ttidValue = 4095;
     let stagePollTimer;
     let stagePollGeneration = 0;
     let snapshotClient;
@@ -109,6 +136,7 @@
     pitchRangeMinSelect.addEventListener("change", () => applyPitchRange("min").catch(reportError));
     pitchRangeMaxSelect.addEventListener("change", () => applyPitchRange("max").catch(reportError));
     mutateButton.addEventListener("click", () => mutateSequence().catch(reportError));
+    document.querySelector("#ttid-load").addEventListener("click", () => setTtid(encodeScale(ttidRootSelect.value, ttidScaleSelect.value)).catch(reportError));
     rtzBeforePlayInput.addEventListener("change", () => snapshotClient?.commitEdit());
     const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
     snapshotClient = createOscSnapshotEditorClient({
@@ -117,12 +145,32 @@
       elements: snapshotElements,
       serializeState: serializeSnapshotState,
       displayState: displaySavedState,
-      onFocusChange: getData,
+      onFocusChange: focusInstance,
+      readOnBlockChange: true,
       liveTargetRoot: targetsEl,
       setStatus: (text) => { statusEl.textContent = text; }
     });
     populatePitchRangeControls();
-    Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
+    populateTtidRoots();
+    initialize().catch(reportError);
+
+    async function initialize() {
+      await loadScales();
+      await refresh();
+      await snapshotClient.init();
+      hydrateBlockTtid();
+    }
+
+    async function loadScales() {
+      const response = await fetch("/harmonic/scales", { cache: "no-store" });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) throw new Error(body.error || "Scale catalog unavailable");
+      SCALES = Object.freeze(body.scales || {});
+      ttidScaleSelect.replaceChildren(...Object.keys(SCALES).sort((a, b) => a.localeCompare(b)).map(name => {
+        const option = document.createElement("option"); option.value = name; option.textContent = name; return option;
+      }));
+      if (Object.hasOwn(SCALES, "ionian")) ttidScaleSelect.value = "ionian";
+    }
 
     async function refresh() {
       statusEl.textContent = "Loading AnalogSequencer targets...";
@@ -133,6 +181,7 @@
       renderTargets();
       renderReadSources();
       renderStages();
+      hydrateBlockTtid();
       renderParameters();
       statusEl.textContent = targets.length ? `${targets.length} client${targets.length === 1 ? "" : "s"} online · data source ${readSourceTarget()?.label || readSourceId}` : "No AnalogSequencer client online";
       startStagePolling();
@@ -165,21 +214,70 @@
 
     function renderParameters() {
       const source = readSourceTarget() || { parameters: [] };
-      const params = (source.parameters || []).filter(param => !/Stage(?:Value|Step)/i.test(param.name));
+      const params = (source.parameters || []).filter(param => !/Stage(?:Value|Step)/i.test(param.name) && !isTtidParam(param));
       parametersEl.replaceChildren(...params.map(createParameterControl));
       if (!params.length) parametersEl.innerHTML = `<span class="empty">No additional parameters reported.</span>`;
+    }
+
+    function populateTtidRoots() {
+      ttidRootSelect.replaceChildren(...ROOTS.map((name, pc) => {
+        const option = document.createElement("option"); option.value = String(pc); option.textContent = name; return option;
+      }));
+    }
+
+    function renderTtid() {
+      const mask = normalizeTtid(ttidValue);
+      ttidReadoutEl.textContent = `${mask} / 0x${mask.toString(16).toUpperCase().padStart(3, "0")}`;
+      ttidKeysEl.replaceChildren(...ROOTS.map((name, pc) => {
+        const button = document.createElement("button");
+        button.className = "ttid-key";
+        button.type = "button";
+        button.textContent = name;
+        button.setAttribute("aria-pressed", String(Boolean(mask & (1 << pc))));
+        button.addEventListener("click", () => setTtid(mask ^ (1 << pc)).catch(reportError));
+        return button;
+      }));
+    }
+
+    function hydrateBlockTtid(scoreOverride) {
+      const state = snapshotClient?.snapshotState();
+      const block = (scoreOverride || state?.score)?.mesostructure?.[state?.blockId];
+      const liveParam = (readSourceTarget()?.parameters || []).find(isTtidParam);
+      ttidValue = normalizeTtid(block?.ttid ?? liveParam?.value ?? 4095);
+      renderTtid();
+    }
+
+    async function setTtid(value) {
+      const state = snapshotClient?.snapshotState();
+      if (!state?.blockId) throw new Error("Choose an EDITING block");
+      const mask = normalizeTtid(value);
+      const selected = selectedTargetIds();
+      const response = await fetch(`/mesostructure/${encodeURIComponent(state.blockId)}/ttid`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ttid: mask, expectedScoreRevision: state.score?.scoreRevision, auditionTargets: selected })
+      });
+      const body = await response.json().catch(() => ({}));
+      if (!response.ok || body.ok === false) throw new Error(body.error || "TTID update failed");
+      ttidValue = mask;
+      for (const target of targets) {
+        const param = (target.parameters || []).find(isTtidParam);
+        if (param && selected.includes(target.id)) param.value = mask;
+      }
+      renderTtid();
+      statusEl.textContent = `Updated ${state.blockId} TTID to ${mask}${selected.length ? ` and auditioned ${selected.length} selected client${selected.length === 1 ? "" : "s"}` : ""}`;
     }
 
     function createParameterControl(param) {
       const card = document.createElement("label"); card.className = "parameter";
       const head = document.createElement("span"); head.className = "parameter-head";
-      const name = document.createElement("span"); name.className = "parameter-name"; name.textContent = isMaxCountParam(param) ? "Max Count" : (param.displayName || param.name);
-      const readout = document.createElement("output"); readout.className = "parameter-value"; readout.textContent = formatParameterValue(param.value);
+      const name = document.createElement("span"); name.className = "parameter-name"; name.textContent = parameterLabel(param);
+      const readout = document.createElement("output"); readout.className = "parameter-value"; readout.textContent = formatParameterValue(param.value, param);
       head.append(name, readout); card.append(head);
       if (Array.isArray(param.values) && param.values.length) {
         const select = document.createElement("select");
-        for (const value of uniqueParameterValues(param.values)) { const option = document.createElement("option"); option.value = value; option.textContent = value; select.append(option); }
-        select.value = String(param.value); select.dataset.param = param.name; select.addEventListener("change", () => { param.value = select.value; readout.textContent = select.value; if (isMaxCountParam(param)) applyMaxCount(maxCountParamValue(param)); sendParam(param.name, isMaxCountParam(param) ? maxCountWireValue(select.value) : select.value).catch(reportError); snapshotClient?.commitEdit(); }); card.append(select);
+        for (const value of uniqueParameterValues(param.values)) { const option = document.createElement("option"); option.value = value; option.textContent = parameterChoiceLabel(param, value); select.append(option); }
+        select.value = String(param.value); select.dataset.param = param.name; select.addEventListener("change", () => { param.value = select.value; readout.textContent = formatParameterValue(select.value, param); if (isMaxCountParam(param)) applyMaxCount(maxCountParamValue(param)); sendParam(param.name, isMaxCountParam(param) ? maxCountWireValue(select.value) : select.value).catch(reportError); snapshotClient?.commitEdit(); }); card.append(select);
       } else if (isToggleParam(param)) {
         const toggleLabel = document.createElement("span"); toggleLabel.className = "parameter-toggle";
         const toggle = document.createElement("input"); toggle.type = "checkbox"; toggle.checked = Boolean(Number(param.value)); toggle.dataset.param = param.name; toggle.setAttribute("aria-label", param.displayName || param.name);
@@ -189,7 +287,7 @@
       } else {
         const min = Number(param.min ?? 0); const max = Number(param.max ?? 1); const curved = shouldCurve(param, min, max);
         const input = document.createElement("input"); input.type = "range"; input.min = curved ? "0" : String(min); input.max = curved ? "1" : String(max); input.step = curved ? "0.001" : String(parameterStep(param)); input.value = String(curved ? valueToSliderPosition(param, param.value, min, max) : (param.value ?? min)); input.dataset.param = param.name; input.dataset.snapshotValue = String(param.value ?? min);
-        input.addEventListener("input", () => { const value = sliderValue(param, input, min, max, curved); param.value = value; input.dataset.snapshotValue = String(value); readout.textContent = formatParameterValue(value); if (isMaxCountParam(param)) applyMaxCount(Math.round(value)); scheduleSend(param.name, value); });
+        input.addEventListener("input", () => { const value = sliderValue(param, input, min, max, curved); param.value = value; input.dataset.snapshotValue = String(value); readout.textContent = formatParameterValue(value, param); if (isMaxCountParam(param)) applyMaxCount(Math.round(value)); scheduleSend(param.name, value); });
         bindRangeCommit(input, () => flushSend(param.name, sliderValue(param, input, min, max, curved))); card.append(input);
       }
       return card;
@@ -379,7 +477,8 @@
     function startStagePolling() { clearTimeout(stagePollTimer); const generation = ++stagePollGeneration; if (!readSourceTarget()) { setPlayingStage(); return; } pollCurrentStage(generation); }
     async function pollCurrentStage(generation) { const targetId = readSourceId; try { const target = targets.find(entry => entry.id === targetId); if (!target) throw new Error("No read source"); const host = oscQueryHost(target); const path = `${target.baseAddress}/messages/out/current_stage`; const response = await fetch(`${location.protocol}//${host}:5678${path}`, { cache: "no-store" }); if (!response.ok) throw new Error(`current_stage ${response.status}`); const body = await response.json(); if (!isCurrentStagePoll(generation, targetId)) return; setPlayingStage(integerValue(Array.isArray(body.VALUE) ? body.VALUE[0] : body.VALUE, 0)); } catch { if (isCurrentStagePoll(generation, targetId)) setPlayingStage(); } finally { if (isCurrentStagePoll(generation, targetId)) stagePollTimer = setTimeout(() => pollCurrentStage(generation), 125); } }
     function isCurrentStagePoll(generation, targetId) { return generation === stagePollGeneration && targetId === readSourceId; }
-    async function getData() { const targetId = readSourceSelect.value; if (!targets.some(target => target.id === targetId)) throw new Error("Choose an instance to get data from"); readSourceId = targetId; getDataButton.disabled = true; statusEl.textContent = `Getting data from ${readSourceTarget()?.label || targetId}...`; try { await hydrateReadSource(); statusEl.textContent = `Got parameter data from ${readSourceTarget()?.label || targetId}`; startStagePolling(); } finally { getDataButton.disabled = targets.length === 0; } }
+    async function focusInstance() { await getData(); hydrateBlockTtid(); }
+    async function getData() { const targetId = readSourceSelect.value; if (!targets.some(target => target.id === targetId)) throw new Error("Choose an instance to get data from"); readSourceId = targetId; getDataButton.disabled = true; statusEl.textContent = `Getting data from ${readSourceTarget()?.label || targetId}...`; try { await hydrateReadSource(); hydrateBlockTtid(); statusEl.textContent = `Got parameter data from ${readSourceTarget()?.label || targetId}`; startStagePolling(); } finally { getDataButton.disabled = targets.length === 0; } }
     async function hydrateReadSource() { const target = readSourceTarget(); if (!target) return; const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" }); if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`); const body = await response.json(); const nodes = body.CONTENTS || {};
       target.parameters = (target.parameters || []).map(param => { const node = nodes[param.name]; if (!node) return param; const range = Array.isArray(node.RANGE) ? node.RANGE : []; const hydrated = { ...param, value: node.VALUE, min: firstDefined(range.map(entry => entry.MIN), param.min), max: firstDefined(range.map(entry => entry.MAX), param.max), values: firstDefined(range.map(entry => entry.VALS), param.values), normalized: node.CONTENTS?.normalized?.VALUE ?? param.normalized }; return normalizeMaxCountParam(hydrated); });
       renderStages(); renderParameters();
@@ -398,14 +497,30 @@
     function normalizeMaxCountTarget(target) { return { ...target, parameters: (target.parameters || []).map(normalizeMaxCountParam) }; }
     function normalizeMaxCountParam(param) { return isMaxCountParam(param) ? { ...param, value: String(clamp(integerValue(param.value, 15) + 1, 1, 16)) } : param; }
     function isMaxCountParam(param) { return /^(?:maxcount|maxcnt)$/i.test(String(param?.name || "")); }
+    function isTtidParam(param) { return String(param?.meta?.editor || "").trim().toLowerCase() === "ttid" || /^(?:scale|ttid)$/i.test(String(param?.name || "")); }
+    function normalizeTtid(value) { return (Number(value) || 0) & 0xFFF; }
+    function encodeScale(root, scaleName) { return (SCALES[scaleName] || []).reduce((mask, pc) => mask | (1 << ((Number(pc) + Number(root)) % 12)), 0) & 0xFFF; }
+    function parameterLabel(param) {
+      if (isMaxCountParam(param)) return "Max Count";
+      if (/^zerovolts$/i.test(String(param?.name || ""))) return "Voltage Shift";
+      return param.displayName || param.name;
+    }
+    function parameterChoiceLabel(param, value) {
+      if (/^zerovolts$/i.test(String(param?.name || ""))) return String(value) === "MiddleC" ? "Middle C = 0 V" : `${value} = 0 V`;
+      return String(value);
+    }
     function uniqueParameterValues(values) { return [...new Set((values || []).map(value => String(value)))]; }
     function isToggleParam(param) { return String(param.name || "").toLowerCase() === "clock" && Number(param.min) === 0 && Number(param.max) === 1; }
     function parameterStep(param) { if (isMaxCountParam(param) || param.meta?.edit_as === "int") return 1; const span = Number(param.max) - Number(param.min); return span <= 1 ? 0.01 : span <= 100 ? 0.1 : 1; }
-    function shouldCurve(param, min, max) { const name = String(param.name || ""); const unit = String(param.unit || param.meta?.unit || "").toLowerCase(); return /(?:attack|decay|release|env.*time)/i.test(name) || (unit === "ms" && Math.abs(max - min) >= 1000); }
+    function shouldCurve(param, min, max) { const name = String(param.name || ""); const unit = String(param.unit || param.meta?.unit || "").toLowerCase(); return /(?:attack|decay|release|env.*time|portamento)/i.test(name) || (unit === "ms" && Math.abs(max - min) >= 1000); }
     function curveExponent(param, min, max) { if (Number(param._curveExponent) > 0) return param._curveExponent; const explicit = Number(param.exponent ?? param.meta?.exponent); if (explicit > 0) return (param._curveExponent = explicit); const normalized = Number(param.normalized); const linear = (Number(param.value) - min) / (max - min); if (linear > .0001 && linear < .9999 && normalized > .0001 && normalized < .9999) { const inferred = Math.log(linear) / Math.log(normalized); if (inferred >= .5 && inferred <= 8) return (param._curveExponent = inferred); } return (param._curveExponent = /release/i.test(String(param.name || "")) ? 5 : 3); }
     function valueToSliderPosition(param, value, min, max) { return Math.pow(clamp((Number(value) - min) / (max - min), 0, 1), 1 / curveExponent(param, min, max)); }
     function sliderValue(param, input, min, max, curved) { if (!curved) return Number(input.value); const value = min + ((max - min) * Math.pow(clamp(Number(input.value), 0, 1), curveExponent(param, min, max))); const step = parameterStep(param); return clamp(min + (Math.round((value - min) / step) * step), min, max); }
-    function formatParameterValue(value) { return typeof value === "number" ? String(Math.round(value * 100) / 100) : String(value ?? ""); }
+    function formatParameterValue(value, param) {
+      if (/^zerovolts$/i.test(String(param?.name || ""))) return parameterChoiceLabel(param, value);
+      const formatted = typeof value === "number" ? String(Math.round(value * 100) / 100) : String(value ?? "");
+      return /^portamento$/i.test(String(param?.name || "")) ? `${formatted} ms` : formatted;
+    }
     function isLoopback(host) { return !host || host === "127.0.0.1" || host === "localhost" || host === "::1"; }
     function midiNote(value) { const note = integerValue(value, 0); if (note < 0 || note > 127) return "—"; return `${["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"][note % 12]}${Math.floor(note / 12) - 1}`; }
     function integerValue(value, fallback) { const number = Number(value); return Number.isFinite(number) ? Math.round(number) : fallback; }

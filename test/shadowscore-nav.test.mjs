@@ -12,6 +12,12 @@ test("grouped navigation has the settled four primary destinations", () => {
     { id: "osc", label: "OSC" },
     { id: "setup", label: "Setup" }
   ]);
+  const setup = shadowScoreNavigation.find(({ id }) => id === "setup");
+  assert.deepEqual(setup.items.map(({ label }) => label), [
+    "Dashboard",
+    "Admin",
+    "Transport"
+  ]);
 });
 
 test("grouped navigation resolves current group and item for every route family", () => {
@@ -40,10 +46,10 @@ test("grouped navigation resolves current group and item for every route family"
     groupLabel: "OSC",
     itemLabel: "OSC Macros"
   });
-  assert.deepEqual(activeNavigationForPath("/admin#routing"), {
+  assert.deepEqual(activeNavigationForPath("/"), {
     groupId: "setup",
     groupLabel: "Setup",
-    itemLabel: "Player And Client Routing"
+    itemLabel: "Dashboard"
   });
   assert.deepEqual(activeNavigationForPath("/admin"), {
     groupId: "setup",
@@ -53,6 +59,6 @@ test("grouped navigation resolves current group and item for every route family"
   assert.deepEqual(activeNavigationForPath("/transport/status"), {
     groupId: "setup",
     groupLabel: "Setup",
-    itemLabel: "Transport Status"
+    itemLabel: "Transport"
   });
 });

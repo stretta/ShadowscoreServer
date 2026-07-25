@@ -81,10 +81,9 @@ top-level `OSC` label for now.
 
 `Setup` contains:
 
-- System Overview, currently called Dashboard
-- player and client routing
+- Dashboard
 - Admin
-- Transport Status and diagnostics
+- Transport diagnostics
 
 The route `/` may remain the dashboard route initially. Navigation labels and
 ownership can change before route compatibility is reconsidered.
@@ -107,7 +106,10 @@ Create one musician-facing `Arrange` surface containing:
   actions; and
 - an Advanced or Diagnostics entry point.
 
-Keep the existing Transport Status capability as a Setup/Diagnostics surface.
+Keep the existing Transport capability as a Setup/Diagnostics surface until its
+remaining Re-sync, clock-source, JACK, timing-contract, and event diagnostics
+have another home. Player and arrangement routing remains available within
+Admin but does not need a separate Setup menu entry.
 This is a user-interface consolidation, not a merger of the underlying
 transport, score-store, playback-snapshot, or diagnostic services.
 
@@ -621,7 +623,7 @@ Layout refinement, 2026-07-24:
 - put Piano Roll, Matrix, and Event List under ShadowScore;
 - expose Arrange directly;
 - put all listed editors/tools under OSC;
-- put System Overview, routing, Admin, and Transport Status under Setup; and
+- put Dashboard, Admin, and Transport under Setup; and
 - update route tests to cover every hosted page.
 
 Acceptance:
@@ -777,7 +779,7 @@ Hands-on continuation, 2026-07-24:
 - every hosted HTML surface has the same menu groups;
 - direct deep links correctly mark their group/current item;
 - menus are keyboard navigable;
-- Transport Status is reachable under Setup;
+- Transport is reachable under Setup;
 - Events disclosure defaults closed;
 - event logging continues while closed; and
 - Event List remains under ShadowScore and is never labeled diagnostic.

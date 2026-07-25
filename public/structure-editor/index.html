@@ -261,6 +261,29 @@
       min-width: 0;
     }
 
+    .performance-controls {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 18px;
+      grid-column: 1 / -1;
+    }
+
+    .performance-group {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .performance-group strong {
+      color: var(--muted);
+      font-size: 0.75rem;
+      letter-spacing: 0.05em;
+      min-width: 92px;
+      text-transform: uppercase;
+    }
+
     .playback-status {
       align-self: center;
       display: grid;
@@ -515,10 +538,18 @@
             <button id="set-active-block" type="button">Cue Section</button>
             <button id="advance-block" type="button">Next Section</button>
             <button id="reset-block" type="button">Return to Start</button>
-            <button class="primary" id="players-play" type="button">Players Play</button>
-            <button id="players-stop" type="button">Players Stop</button>
-            <button class="primary" id="arrangement-run" type="button">Arrangement Run</button>
-            <button id="arrangement-hold" type="button">Arrangement Hold</button>
+            <div class="performance-controls">
+              <div class="performance-group" aria-label="Players">
+                <strong>Players</strong>
+                <button class="primary" id="players-play" type="button">Play</button>
+                <button id="players-stop" type="button">Stop</button>
+              </div>
+              <div class="performance-group" aria-label="Arrangement">
+                <strong>Arrangement</strong>
+                <button class="primary" id="arrangement-run" type="button">Run</button>
+                <button id="arrangement-hold" type="button">Hold</button>
+              </div>
+            </div>
             <div class="tempo-controls" aria-label="Live tempo">
               <label>Live Tempo
                 <input id="live-tempo" type="number" min="20" max="400" step="0.01" value="120">

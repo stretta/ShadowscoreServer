@@ -33,10 +33,9 @@ export const shadowScoreNavigation = Object.freeze([
     id: "setup",
     label: "Setup",
     items: Object.freeze([
-      Object.freeze({ label: "System Overview", href: "/" }),
-      Object.freeze({ label: "Player And Client Routing", href: "/admin#routing" }),
+      Object.freeze({ label: "Dashboard", href: "/" }),
       Object.freeze({ label: "Admin", href: "/admin" }),
-      Object.freeze({ label: "Transport Status", href: "/transport/status" })
+      Object.freeze({ label: "Transport", href: "/transport/status" })
     ])
   })
 ]);

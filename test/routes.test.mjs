@@ -194,6 +194,10 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /Session link/);
   assert.match(response.body, /Download backup/);
   assert.match(response.body, /Saved scores/);
+  assert.match(response.body, /id="saved-score-select"/);
+  assert.match(response.body, /id="load-saved-score"/);
+  assert.match(response.body, /id="remove-saved-score"/);
+  assert.doesNotMatch(response.body, /id="saved-scores"/);
   assert.match(response.body, /\/admin\/scores/);
   assert.match(response.body, /New score/);
   assert.match(response.body, /\/admin\/scores\/new/);
@@ -4122,8 +4126,10 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /Arrangement/);
   assert.match(response.body, /Add to Arrangement/);
   assert.match(response.body, /Cue Section/);
-  assert.match(response.body, /Players Play/);
-  assert.match(response.body, /Arrangement Hold/);
+  assert.match(response.body, /class="performance-group" aria-label="Players"/);
+  assert.match(response.body, /id="players-play" type="button">Play/);
+  assert.match(response.body, /class="performance-group" aria-label="Arrangement"/);
+  assert.match(response.body, /id="arrangement-hold" type="button">Hold/);
   assert.match(response.body, /Follow Block Tempo/);
   assert.match(response.body, /liveTempoDirty: false/);
   assert.match(response.body, /els\.liveTempo\.addEventListener\("input", \(\) => \{\s+state\.liveTempoDirty = true/);

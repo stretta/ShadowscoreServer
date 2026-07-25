@@ -33,14 +33,16 @@ export function adminPage() {
       grid-template-columns: 1fr auto;
       margin-bottom: 12px;
     }
-    .preset-row, .backup-row, .score-save-row, .score-new-row, .voice-tools {
+    .preset-row, .backup-row, .score-save-row, .score-library-row, .score-new-row, .voice-tools {
       display: flex;
       flex-wrap: wrap;
       gap: 8px;
       margin-top: 10px;
     }
     .score-save-row { margin: 0 0 8px; }
-    .score-new-row { margin: 0 0 10px; }
+    .score-library-row { align-items: center; margin: 0 0 8px; }
+    .score-library-row select { flex: 1 1 260px; max-width: 520px; }
+    .score-new-row { margin: 0; }
     .score-save-row input { max-width: 360px; }
     .voice-tools { margin: 0 0 12px; }
     .voice-tools input { max-width: 240px; }
@@ -55,7 +57,7 @@ export function adminPage() {
       font-size: 13px;
       margin-top: 6px;
     }
-    .target-list, .unit-list, .score-list, .oscquery-device-list, .osc-role-list, .osc-resource-list { display: grid; gap: 8px; }
+    .target-list, .unit-list, .oscquery-device-list, .osc-role-list, .osc-resource-list { display: grid; gap: 8px; }
     .oscquery-device-form {
       align-items: end;
       display: grid;
@@ -92,7 +94,7 @@ export function adminPage() {
       font-size: 12px;
       line-height: 1.35;
     }
-    .target, .unit, .score-item, .oscquery-device, .osc-role, .osc-resource {
+    .target, .unit, .oscquery-device, .osc-role, .osc-resource {
       align-items: center;
       background: rgba(38, 51, 65, 0.46);
       border: 1px solid var(--ss-border);
@@ -104,7 +106,7 @@ export function adminPage() {
     }
     .target, .unit, .oscquery-device, .osc-role, .osc-resource { align-items: flex-start; }
     .item-main { display: grid; gap: 4px; min-width: 0; }
-    .score-detail { font-size: 12px; margin-top: 3px; }
+    .score-detail { font-size: 12px; min-height: 18px; }
     .target code, .unit code, .oscquery-device code, .osc-role code, .osc-resource code { color: var(--ss-muted); font-size: 12px; }
     .diagnostic {
       background: rgba(251, 191, 36, 0.1);
@@ -226,12 +228,17 @@ export function adminPage() {
       <div class="score-save-row">
         <input id="saved-score-name" autocomplete="off" aria-label="Saved score name" placeholder="Score name">
         <button class="primary" id="save-score" type="button">Save score</button>
+      </div>
+      <div class="score-library-row">
+        <select id="saved-score-select" aria-label="Saved score"></select>
+        <button class="primary" id="load-saved-score" type="button">Load</button>
+        <button class="danger" id="remove-saved-score" type="button">Remove</button>
         <button id="refresh-scores" type="button">Refresh</button>
       </div>
+      <div class="score-detail" id="saved-score-detail"></div>
       <div class="score-new-row">
         <button class="danger" id="new-score" type="button">New score</button>
       </div>
-      <div class="score-list" id="saved-scores"></div>
     </section>
     <section class="targets" id="routing">
       <h2>Discovered RNBO targets</h2>
@@ -354,7 +361,10 @@ export function adminPage() {
     const restoreFileEl = document.querySelector("#restore-file");
     const newVoiceIdEl = document.querySelector("#new-voice-id");
     const savedScoreNameEl = document.querySelector("#saved-score-name");
-    const savedScoresEl = document.querySelector("#saved-scores");
+    const savedScoreSelectEl = document.querySelector("#saved-score-select");
+    const savedScoreDetailEl = document.querySelector("#saved-score-detail");
+    const loadSavedScoreEl = document.querySelector("#load-saved-score");
+    const removeSavedScoreEl = document.querySelector("#remove-saved-score");
     const inputs = new Map();
     let discoveredTargets = [];
     let hardwareUnits = [];
@@ -369,6 +379,7 @@ export function adminPage() {
     let selectedOscRoleTargetId = "";
     let suggestedOscRoleFields = {};
     let currentScore = null;
+    let savedScores = [];
     let rnboSendQueue = {
       inProgress: false,
       queued: false,
@@ -390,6 +401,13 @@ export function adminPage() {
     document.querySelector("#save-score").addEventListener("click", saveScoreToLibrary);
     document.querySelector("#refresh-scores").addEventListener("click", loadSavedScores);
     document.querySelector("#new-score").addEventListener("click", createNewScore);
+    savedScoreSelectEl.addEventListener("change", renderSelectedSavedScore);
+    loadSavedScoreEl.addEventListener("click", () => {
+      if (savedScoreSelectEl.value) void loadSavedScore(savedScoreSelectEl.value);
+    });
+    removeSavedScoreEl.addEventListener("click", () => {
+      if (savedScoreSelectEl.value) void deleteSavedScore(savedScoreSelectEl.value);
+    });
     oscQueryDeviceFormEl.addEventListener("submit", saveOscQueryDevice);
     cancelOscQueryDeviceEl.addEventListener("click", resetOscQueryDeviceForm);
     oscRoleFormEl.addEventListener("submit", saveOscRole);
@@ -741,41 +759,33 @@ export function adminPage() {
     }
 
     function renderSavedScores(scores) {
-      savedScoresEl.textContent = "";
-      if (scores.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "score-item";
-        empty.textContent = "No saved scores on this Pi.";
-        savedScoresEl.append(empty);
-        return;
-      }
+      const selectedId = savedScoreSelectEl.value;
+      savedScores = scores;
+      savedScoreSelectEl.replaceChildren();
       for (const savedScore of scores) {
-        const row = document.createElement("div");
-        row.className = "score-item";
-        const label = document.createElement("div");
-        const name = document.createElement("strong");
-        name.textContent = savedScore.name;
-        const detail = document.createElement("div");
-        detail.className = "score-detail";
-        detail.textContent = savedScore.id + " · v" + savedScore.version + " · " + formatDate(savedScore.savedAt);
-        label.append(name, detail);
-
-        const actions = document.createElement("div");
-        actions.className = "actions";
-        const load = document.createElement("button");
-        load.type = "button";
-        load.className = "primary";
-        load.textContent = "Load";
-        load.addEventListener("click", () => loadSavedScore(savedScore.id));
-        const remove = document.createElement("button");
-        remove.type = "button";
-        remove.className = "danger";
-        remove.textContent = "Delete";
-        remove.addEventListener("click", () => deleteSavedScore(savedScore.id));
-        actions.append(load, remove);
-        row.append(label, actions);
-        savedScoresEl.append(row);
+        const option = document.createElement("option");
+        option.value = savedScore.id;
+        option.textContent = savedScore.name;
+        savedScoreSelectEl.append(option);
       }
+      if (scores.length === 0) {
+        const option = document.createElement("option");
+        option.textContent = "No saved scores on this Pi";
+        savedScoreSelectEl.append(option);
+      } else if (scores.some((score) => score.id === selectedId)) {
+        savedScoreSelectEl.value = selectedId;
+      }
+      renderSelectedSavedScore();
+    }
+
+    function renderSelectedSavedScore() {
+      const savedScore = savedScores.find((score) => score.id === savedScoreSelectEl.value);
+      const hasSelection = Boolean(savedScore);
+      loadSavedScoreEl.disabled = !hasSelection;
+      removeSavedScoreEl.disabled = !hasSelection;
+      savedScoreDetailEl.textContent = savedScore
+        ? savedScore.id + " · v" + savedScore.version + " · " + formatDate(savedScore.savedAt)
+        : "Save a named copy of the current score to add it here.";
     }
 
     function formatDate(value) {

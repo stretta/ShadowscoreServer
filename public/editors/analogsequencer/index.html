@@ -494,9 +494,9 @@
     function applyMaxCount(maxCount) { for (const stage of stagesEl.querySelectorAll(".stage")) { const unused = Number(stage.dataset.stage) > maxCount; stage.classList.toggle("unused", unused); for (const input of stage.querySelectorAll("input")) input.disabled = unused || stage.classList.contains("missing"); } }
     function maxCountValue(target) { return maxCountParamValue((target.parameters || []).find(isMaxCountParam)); }
     function maxCountParamValue(param) { return clamp(integerValue(param?.value, 16), 1, 16); }
-    function maxCountWireValue(stageCount) { return String(Math.max(1, clamp(integerValue(stageCount, 16), 1, 16) - 1)); }
+    function maxCountWireValue(stageCount) { return String(clamp(integerValue(stageCount, 16), 1, 16)); }
     function normalizeMaxCountTarget(target) { return { ...target, parameters: (target.parameters || []).map(normalizeMaxCountParam) }; }
-    function normalizeMaxCountParam(param) { return isMaxCountParam(param) ? { ...param, value: String(clamp(integerValue(param.value, 15) + 1, 1, 16)) } : param; }
+    function normalizeMaxCountParam(param) { return isMaxCountParam(param) ? { ...param, value: String(clamp(integerValue(param.value, 16), 1, 16)) } : param; }
     function isMaxCountParam(param) { return /^(?:maxcount|maxcnt)$/i.test(String(param?.name || "")); }
     function isTtidParam(param) { return String(param?.meta?.editor || "").trim().toLowerCase() === "ttid" || /^(?:scale|ttid)$/i.test(String(param?.name || "")); }
     function normalizeTtid(value) { return (Number(value) || 0) & 0xFFF; }

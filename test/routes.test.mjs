@@ -4515,6 +4515,8 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /maxCountParamValue/);
   assert.match(response.body, /maxCountWireValue/);
   assert.match(response.body, /normalizeMaxCountParam/);
+  assert.match(response.body, /function maxCountWireValue\(stageCount\) \{ return String\(clamp\(integerValue\(stageCount, 16\), 1, 16\)\); \}/);
+  assert.match(response.body, /function normalizeMaxCountParam\(param\) \{ return isMaxCountParam\(param\) \? \{ \.\.\.param, value: String\(clamp\(integerValue\(param\.value, 16\), 1, 16\)\) \} : param; \}/);
   assert.match(response.body, /uniqueParameterValues/);
   assert.match(response.body, /Max Count/);
   assert.match(response.body, /\.stage\.unused/);

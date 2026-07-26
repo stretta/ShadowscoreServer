@@ -716,6 +716,7 @@
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || body.ok === false) throw new Error(body.error || "TTID update failed");
+      snapshotClient?.syncScore(body.score);
       setStatus(`Updated ${blockId} TTID to ${value}${selected.length ? ` and auditioned ${selected.length} target${selected.length === 1 ? "" : "s"}` : ""}`);
       await hydrateBlockTtid(body.score);
     }
@@ -748,10 +749,6 @@
       if (!block) return;
       for (const param of ttidParams) paramState.set(param.name, normalizeMask(block.ttid));
       renderEditors();
-      const expected = encodeScale(Number(block.scale?.root_note || 0), canonicalScaleName(block.scale?.scale_name));
-      if (expected !== normalizeMask(block.ttid)) {
-        setStatus("Runtime TTID differs from the rendered ShadowScore scale. Use Matrix Edit to synchronize both.");
-      }
     }
 
     function canonicalScaleName(value) {

@@ -437,6 +437,10 @@ test("block TTID edits are non-destructive and scale transforms commit notes, me
   const edited = store.updateBlockTtid("A", 1, { expectedScoreRevision: 0 });
   assert.equal(edited.mesostructure.A.ttid, 1);
   assert.equal(edited.clips["a-player-1"].notes[0].pitch, originalPitch);
+  assert.throws(() => store.replaceMesoBlock("A", {
+    ...edited.mesostructure.A,
+    ttid: 2
+  }), /TTID changes must use the TTID endpoint/);
 
   store.replaceClip("a-player-1", {
     ...edited.clips["a-player-1"],

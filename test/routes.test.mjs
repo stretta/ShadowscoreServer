@@ -669,7 +669,7 @@ test("harmonic routes expose the catalog and keep direct TTID edits separate fro
   });
   assert.equal(direct.score.mesostructure.A.ttid, 1);
   assert.equal(direct.score.clips["a-player-1"].notes[0].pitch, originalPitch);
-  assert.equal(direct.drift.drifted, true);
+  assert.equal(Object.hasOwn(direct, "drift"), false);
 
   const transformed = await requestJson(context, "POST", "/mesostructure/A/scale-transform", {
     expectedScoreRevision: 1,
@@ -4261,6 +4261,8 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /id="block-save-state"/);
   assert.match(response.body, /id="macro-save-state"/);
   assert.match(response.body, /queueStructureAutosave/);
+  assert.match(response.body, /\/mesostructure\/\$\{encodeURIComponent\(nextId\)\}\/ttid/);
+  assert.doesNotMatch(response.body, /Runtime TTID differs/);
   assert.doesNotMatch(response.body, /Save Assignments|Save Song Form/);
   assert.doesNotMatch(response.body, /scoreWithLocalDrafts/);
 });
@@ -4320,6 +4322,8 @@ test("TTID editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotState/);
   assert.match(response.body, /displaySavedState/);
+  assert.match(response.body, /snapshotClient\?\.syncScore\(body\.score\)/);
+  assert.doesNotMatch(response.body, /Runtime TTID differs/);
 });
 
 test("Plate editor route serves the OSC target integration page", async () => {
@@ -4445,6 +4449,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
+  assert.match(response.body, /snapshotClient\?\.syncScore\(body\.score\)/);
   assert.match(response.body, /20260724-ttid-revision1/);
 });
 

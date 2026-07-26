@@ -227,6 +227,9 @@ export function createScoreStore(initialScore, options = {}) {
       if (existing && blockDocument.scale !== undefined && JSON.stringify(block.scale) !== JSON.stringify(existing.scale)) {
         throw new Error(`mesostructural block '${id}' scale changes must use scale-transform`);
       }
+      if (existing && blockDocument.ttid !== undefined && block.ttid !== existing.ttid) {
+        throw new Error(`mesostructural block '${id}' TTID changes must use the TTID endpoint`);
+      }
       assertOscBlockReferences(id, block, score.oscAssignments, score.oscClips);
       score = {
         ...score,

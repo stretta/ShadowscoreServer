@@ -494,18 +494,17 @@
             <label>Written Tempo
               <input id="tempo" type="number" min="20" max="400" step="0.01" value="120">
             </label>
-            <label>Rendered Root (Matrix Edit)
+            <label>Scale Metadata Root
               <select id="scale-root">
               </select>
             </label>
-            <label class="wide">Rendered Scale (Matrix Edit)
+            <label class="wide">Scale Metadata
               <input id="scale-name" spellcheck="false" placeholder="Ionian" required>
             </label>
-            <label>Runtime TTID
+            <label>Block TTID
               <input id="block-ttid" type="number" min="0" max="4095" step="1">
             </label>
           </div>
-          <div id="harmonic-warning" class="empty" hidden>Runtime TTID differs from the rendered ShadowScore scale. Use Matrix Edit to synchronize both.</div>
           <div>
             <table>
               <thead>
@@ -625,7 +624,6 @@
       scaleRoot: document.querySelector("#scale-root"),
       scaleName: document.querySelector("#scale-name"),
       blockTtid: document.querySelector("#block-ttid"),
-      harmonicWarning: document.querySelector("#harmonic-warning"),
       players: document.querySelector("#players"),
       playersEmpty: document.querySelector("#players-empty"),
       revertBlock: document.querySelector("#revert-block"),
@@ -889,7 +887,6 @@
         els.blockId.value = "";
         els.durationValue.value = "8";
         els.tempo.value = "120";
-        els.harmonicWarning.hidden = true;
         els.playersEmpty.hidden = false;
         updateButtons();
         return;
@@ -902,7 +899,6 @@
       els.scaleRoot.value = Number.isFinite(block.scale?.root_note) ? String(block.scale.root_note) : "";
       els.scaleName.value = block.scale?.scale_name ?? "";
       els.blockTtid.value = String(block.ttid ?? 2741);
-      els.harmonicWarning.hidden = Number(block.ttid) === ttidForScale(block.scale);
 
       const voices = state.session?.voices ?? Object.keys(state.score?.voices ?? {}).map((id) => ({ id, label: id }));
       els.playersEmpty.hidden = voices.length > 0;
@@ -1258,6 +1254,7 @@
         setStatus("Block ID is required.");
         return;
       }
+      const desiredTtid = Math.max(0, Math.min(4095, Math.round(numberValue(els.blockTtid.value, 2741))));
       const block = blockFromForm();
       setStatus(`Saving block ${nextId}...`);
       try {
@@ -1268,6 +1265,19 @@
           body: withExpectedStructureRevision(block, draft)
         });
         state.client?.adoptServerScore(score);
+        if (Number(score.mesostructure?.[nextId]?.ttid) !== desiredTtid) {
+          const response = await fetchJson(`${state.serverUrl}/mesostructure/${encodeURIComponent(nextId)}/ttid`, undefined, {
+            method: "PUT",
+            body: {
+              ttid: desiredTtid,
+              expectedScoreRevision: score.scoreRevision ?? score.version,
+              expectedStructureRevision: score.structureRevision,
+              auditionTargets: []
+            }
+          });
+          score = response.score;
+          state.client?.adoptServerScore(score);
+        }
         if (originalId !== nextId && score.mesostructure?.[originalId]) {
           score = await fetchJson(`${state.serverUrl}/macrostructure`, undefined, {
             method: "POST",
@@ -1593,15 +1603,9 @@
         tempo: numberValue(els.tempo.value, 120),
         duration: { [unit]: numberValue(els.durationValue.value, 8) },
         scale,
-        ttid: Math.max(0, Math.min(4095, Math.round(numberValue(els.blockTtid.value, 2741)))),
+        ttid: currentBlock()?.ttid ?? 2741,
         players
       };
-    }
-
-    function ttidForScale(scale = {}) {
-      const root = Number(scale.root_note || 0) % 12;
-      const intervals = Array.isArray(scale.scale_intervals) ? scale.scale_intervals : [];
-      return intervals.reduce((mask, interval) => mask | (1 << ((root + Number(interval)) % 12)), 0);
     }
 
     function markBlockDirty() {

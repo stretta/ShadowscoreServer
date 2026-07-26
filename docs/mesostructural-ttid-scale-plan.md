@@ -5,7 +5,7 @@
 Implementation and cross-repository landing are complete. ShadowscoreServer
 owns the canonical catalog and conversion module, normalized block schema,
 revision-guarded TTID and atomic scale-transform APIs, persisted-score cutover,
-OSC snapshot exclusion, block-owned TTID controls, drift visibility,
+OSC snapshot exclusion, block-owned TTID controls,
 `ignoreScale`, and ordered runtime distribution. The ShadowScore data-format
 reference documents the ownership contract. Matrix Edit now writes block TTID
 non-destructively, folds the visible pitch grid to that mask, and reserves pitch
@@ -28,10 +28,9 @@ clip-based note material and TTID-capable RNBO instances.
 
 Clip scale data remains descriptive metadata about the notes currently stored
 in a clip. TTID is mesostructural runtime state shared by all eligible RNBO
-instances during a block. Matrix Edit is the only editor that can deliberately
-synchronize both domains because its scale operation destructively transforms
-ShadowScore notes. OSC editors can edit runtime TTID without transforming note
-material.
+instances during a block. Any TTID-capable editor can edit block TTID without
+transforming note material. Rooted scale metadata and stored pitches change
+only through separate, explicit transform or quantization workflows.
 
 This plan assumes a clean schema break. Existing score files, OSC snapshots,
 and older editor payloads do not need to remain compatible.
@@ -69,9 +68,9 @@ The ownership rules are:
   `Quantize to TTID`; that action does not infer or write rooted scale metadata.
 - OSC editors write block TTID only.
 - TTID never belongs to an OSC clip or instance snapshot.
-- Direct TTID editing may intentionally diverge from block scale and rendered
-  ShadowScore notes. That divergence is visible but is not repaired
-  automatically.
+- Direct TTID editing may intentionally diverge from rooted scale metadata and
+  stored ShadowScore notes. That difference is valid and does not require a
+  warning or automatic repair.
 - Loading or selecting a block never causes Matrix Edit to transform notes.
 
 ## Phase 1: Canonical Scale and TTID Conversion
@@ -82,7 +81,6 @@ Add one shared ShadowscoreServer scale module that:
 - Converts key plus scale into an absolute pitch-class set.
 - Converts that pitch-class set into the HIN/TTID integer.
 - Validates TTID as a 12-bit integer from `0` through `4095`.
-- Compares block scale with block TTID to detect drift.
 
 Confirm the bit ordering against the existing Max/HIN examples before using the
 converter elsewhere. Add golden vectors for chromatic, modal, pentatonic, and
@@ -212,16 +210,12 @@ Changing TTID may immediately affect TTID-capable runtime clients, but it never
 transforms stored Matrix Edit notes. The server's atomic scale-transform API is
 retained for explicit whole-score conversion workflows outside this control.
 
-## Phase 8: Drift Visibility
+## Phase 8: Independent Scale Metadata
 
-Compare the selected block's TTID with the value derived from its rooted scale.
-When they differ, show a non-blocking warning in relevant editors:
-
-> Runtime TTID differs from the rendered ShadowScore scale. Use Matrix Edit to
-> synchronize both.
-
-Do not automatically repair the mismatch. Direct OSC-editor TTID changes are
-valid and intentionally non-destructive.
+Do not warn when the selected block's TTID differs from the value derived from
+its rooted scale metadata. Block TTID is authoritative runtime state, and direct
+TTID edits are valid and intentionally non-destructive. Rooted scale metadata
+is synchronized only by an explicit scale-transform workflow.
 
 ## Phase 9: Client Scale Exemption
 
@@ -275,8 +269,8 @@ Update:
 - Matrix Edit TTID fold and explicit quantization documentation.
 - Admin and client scale-exemption documentation.
 
-Document the asymmetric authority model and the possibility of intentional
-drift after a TTID change made from an OSC editor.
+Document the asymmetric authority model and the fact that rooted scale metadata
+may intentionally differ after a TTID change made from an editor.
 
 ## Phase 12: Verification and Landing
 

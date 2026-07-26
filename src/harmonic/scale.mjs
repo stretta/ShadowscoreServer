@@ -55,12 +55,6 @@ export function scaleToTtid(scale) {
   return pitchClassesToTtid(scaleToPitchClasses(scale));
 }
 
-export function harmonicDrift(scale, ttid) {
-  const expectedTtid = scaleToTtid(scale);
-  const actualTtid = normalizeTtid(ttid);
-  return { drifted: expectedTtid !== actualTtid, expectedTtid, actualTtid };
-}
-
 export function reinterpretPitch(pitch, sourceScale, targetScale, centerPitch = 60) {
   const sourceMap = buildPitchMap(sourceScale);
   const targetMap = buildPitchMap(targetScale);

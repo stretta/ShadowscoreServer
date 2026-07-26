@@ -5,7 +5,7 @@ import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
 import { configuredRnboTargets, discoverRnboControlTargets, discoverRnboDevices, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
 import { editorManifests } from "../editors/manifest.mjs";
 import { distributeBlockTtid } from "../harmonic/distribution.mjs";
-import { harmonicDrift, scaleCatalog } from "../harmonic/scale.mjs";
+import { scaleCatalog } from "../harmonic/scale.mjs";
 import { activeWrittenTempo } from "../playback/tempo.mjs";
 import { resolveOscAssignments } from "../osc/assignments.mjs";
 import { findOscMacro, listOscMacros, resolveMacroStepAddress, saveOscMacro, validateMacro } from "../osc/macros.mjs";
@@ -1458,7 +1458,6 @@ export async function routeRequest(request, response, store, config, runtime = {
         score,
         blockId,
         ttid: score.mesostructure[blockId].ttid,
-        drift: harmonicDrift(score.mesostructure[blockId].scale, score.mesostructure[blockId].ttid),
         distribution
       });
     } catch (error) {

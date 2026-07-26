@@ -971,6 +971,7 @@
         method: "PUT",
         body: JSON.stringify({ ttid: value, expectedScoreRevision: state.score?.scoreRevision, auditionTargets: selected })
       });
+      snapshotClient?.syncScore(body.score);
       setStatus(`Updated ${state.blockId} TTID to ${formatMask(value)}${selected.length ? ` and auditioned ${selected.length} target${selected.length === 1 ? "" : "s"}` : ""}`);
       hydrateBlockTtid(body.score);
     }

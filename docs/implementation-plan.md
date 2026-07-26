@@ -1,5 +1,11 @@
 # ShadowscoreServer Implementation Plan
 
+> Historical implementation record. The schema example and endpoint list below
+> describe an earlier checkpoint and are intentionally not exhaustive. Use
+> [`../README.md`](../README.md) for the current model and HTTP API, and inspect
+> `src/state/score-store.mjs` and `src/http/routes.mjs` when an exact
+> implementation contract is required.
+
 ## Intent
 
 ShadowscoreServer is the shared score server for an ensemble. It replaces the older "ShadowscoreBridge" idea with a clearer responsibility: the server is the source of truth for ensemble score state, while bridges and adapters connect that state to RNBO, Matrix Edit, or other clients.

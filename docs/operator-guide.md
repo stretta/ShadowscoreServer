@@ -9,7 +9,7 @@ ShadowscoreServer host.
 - Peer units register their local RNBO targets with the host.
 - Players are stable score lanes. Clients are runtime output devices or
   processes, and assignments route a player to a live client target.
-- Structure Editor is the main form and assignment surface.
+- Arrange (`/structure-editor`) is the main form and assignment surface.
 - Event List is the canonical clip editor.
 - Matrix Edit is the live block-context performance workspace.
 - Piano Roll is the explicit-save time, duration, pitch, and velocity editor.
@@ -35,14 +35,15 @@ http://<host>.local:8790/piano-roll
 http://<host>.local:8790/admin
 http://<host>.local:8790/transport/status
 http://<host>.local:8790/editors
+http://<host>.local:8790/editors/element
 http://<host>.local:8790/editors/plate
 http://<host>.local:8790/tools/osc-volume
 http://<host>.local:8790/tools/osc-macros
 ```
 
 The root page is the ShadowScore view index. Use `/structure-editor` for
-Structure Editor directly, or the root index for links to all bundled editing
-views and discovered RNBO graph editors.
+Arrange directly, or the root index for links to all bundled editing views and
+discovered RNBO graph editors.
 
 ## Verify Hardware
 
@@ -100,7 +101,7 @@ matching stable `deviceId`.
 
 ## Prepare The Score
 
-Use Structure Editor for:
+Use Arrange for:
 
 - selecting the active block;
 - editing block durations and written tempos;
@@ -122,7 +123,7 @@ Use Matrix Edit for:
   block.
 
 Matrix Edit is not the canonical place for clip attributes or structure changes.
-Those belong to Event List and Structure Editor respectively.
+Those belong to Event List and Arrange respectively.
 
 Use Piano Roll for:
 
@@ -134,12 +135,16 @@ Use Piano Roll for:
 
 Piano Roll is a first-class clip editor for performance timing. Event List
 remains the exact-review surface for full clip attributes and advanced note
-fields such as probability, deviation, and release velocity. Structure Editor
-continues to own block duration and player-to-clip assignment.
+fields such as probability, deviation, and release velocity. Arrange owns block
+duration and player-to-clip assignment and remains served at
+`/structure-editor`.
 
-Use `/editors`, `/editors/poland`, `/tools/osc-volume`, and `/tools/osc-macros`
-for instrument-control surfaces that route through `/osc/targets`, `/osc/send`,
-`/osc/broadcast`, and `/osc/macros`.
+Use `/editors` and its eight bundled instrument editors, plus
+`/tools/osc-volume` and `/tools/osc-macros`, for instrument-control surfaces.
+Persistent control gestures send to the checked live instances and save their
+complete canonical block state at the gesture's commit boundary. There is no
+separate Write/Reload draft workflow. **Recall Now** remains the explicit
+full-state send.
 
 ## Score Operations
 
@@ -177,24 +182,34 @@ http://<host>.local:8790/transport/status
 Use it to inspect JACK bridge freshness, beat witness state, active block,
 macro playback mode, and remaining beats.
 
-Common control routes:
+Primary performance control routes:
 
 ```text
-POST /macrostructure/playback/start
-POST /macrostructure/playback/stop
-POST /macrostructure/advance
-POST /macrostructure/reset
-POST /macrostructure/phase-reset
-POST /transport/jack/start
-POST /transport/jack/stop
-POST /transport/jack/locate
-POST /transport/jack/tempo
+POST /transport/players/play
+POST /transport/players/stop
+POST /transport/arrangement/run
+POST /transport/arrangement/hold
+POST /transport/return-to-start
+POST /transport/tempo
+POST /transport/tempo/follow-block
+POST /transport/tempo/use-block
 ```
 
-`/macrostructure/playback/start` starts macro playback and writes `Clock: 1` to
-assignment-bound targets. Pass `{ "phaseReset": true }` when a start should also
-write `SetStage: 0`. `/macrostructure/phase-reset` writes `SetStage: 0` without
-starting or stopping playback.
+Players Play/Stop controls assigned client sound and JACK transport.
+Arrangement Run/Hold controls whether form advances without conflating that
+choice with whether players sound. Return to Start resets form position and
+client stage. The older `/transport/play`, `/transport/stop`, and lower-level
+macro/JACK routes remain available for compatibility and diagnostics.
+
+Canonical score edits do not silently change the active RNBO client tables.
+When a changed active block should sound, use **Apply next beat** while running
+or **Update players now** while stopped. Their API routes are:
+
+```text
+GET  /playback/updates
+POST /playback/updates/apply-next-beat
+POST /playback/updates/update-now
+```
 
 ## Quick Recovery
 

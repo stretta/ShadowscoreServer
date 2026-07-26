@@ -192,7 +192,7 @@ if [[ "$ROLE" == "host" ]]; then
   for _ in $(seq 1 20); do
     if curl -fsS --max-time 1 "http://127.0.0.1:8790/healthz" >/dev/null 2>&1 \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/" | grep -q "ShadowScore Views" \
-      && curl -fsS --max-time 1 "http://127.0.0.1:8790/structure-editor" | grep -q "ShadowScore Structure Editor" \
+      && curl -fsS --max-time 1 "http://127.0.0.1:8790/structure-editor" | grep -q "ShadowScore Arrange" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/matrix-edit" | grep -q "ShadowScore Matrix Edit" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/piano-roll" | grep -q "ShadowScore Piano Roll" \
       && curl -fsS --max-time 1 "http://127.0.0.1:8790/event-list" | grep -q "ShadowScore Event List"; then

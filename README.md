@@ -176,17 +176,18 @@ update only the nested diagnostic connection indicator.
 The `/editors` route serves the registered OSC-generator index from
 `public/editors`, and `/editors/manifest` exposes the generator manifest JSON.
 The bundled ListSequencer, ListVelSequencer, AnalogSequencer, Plate, Poland,
-SoftPiano, and TTID editors share the mesostructural OSC state workflow. Their
-focused instance determines the score role, PLAYING and EDITING identify the
-transport and write destinations, and CHASE optionally keeps them together.
+SoftPiano, Element, and TTID editors share the mesostructural OSC state
+workflow. Their focused instance determines the score role, PLAYING and
+EDITING identify the transport and write destinations, and CHASE optionally
+keeps them together.
 Every structural block is shown as Written or Unspecified; unspecified state
 is a no-op during recall, distinct from explicitly written silence or empty
-lists. While playback runs, CHASE disables writing; turning CHASE off permits
-writing to any block other than PLAYING, so upcoming state can be prepared
-without colliding with automatic recall. Checked immediate-send targets remain
-independent from focused-instance state capture. Utility tools for live OSC
-target volume trims and macro building are served at `/tools/osc-volume` and
-`/tools/osc-macros`.
+lists. Persistent control gestures send to the checked live instances and
+atomically save their complete canonical block state at the control's commit
+boundary. CHASE follows PLAYING without writing during hydration; turning it
+off permits editing another block. Recall Now remains an explicit full-state
+send. Utility tools for live OSC target volume trims and macro building are
+served at `/tools/osc-volume` and `/tools/osc-macros`.
 
 By default, the active score persists to `data/score.json`, the previous
 snapshot is kept at `data/score.previous.json`, and named saved scores are
@@ -230,6 +231,8 @@ For the session-day operator flow, see
 ## HTTP API
 
 - `GET /healthz`: service status.
+- `GET /harmonic/scales`: canonical harmonic scale catalog used by the server
+  and hosted editors.
 - `GET /score`: current ensemble score snapshot.
 - `GET /session`: host/session metadata, app URLs, voices, assignments, and local RNBO target config.
 - `GET /hardware/units`: local and registered hardware units with online/offline state.
@@ -238,11 +241,28 @@ For the session-day operator flow, see
 - `POST /hardware/units/:unitId/targets/:targetId/use-observed-host`: replace a peer target's advertised host with the remote address observed by the session host. This is an admin repair path for peers that register with an unreachable address.
 - `GET /rnbo/targets`: local and registered RNBO targets with availability state and latest RNBO score send status when available.
 - `GET /rnbo/devices`: RNBO runner/graph-editor devices, including units that do not currently expose ShadowScore playback targets.
+- `GET /oscquery/devices`: saved manual OSCQuery devices. Add `?refresh=true`
+  to refresh them before returning.
+- `POST /oscquery/devices/probe`: probe an OSCQuery endpoint without saving it.
+- `POST /oscquery/devices`: save a manual OSCQuery device.
+- `PATCH|DELETE /oscquery/devices/:deviceId`: update or remove a saved manual
+  OSCQuery device.
+- `POST /oscquery/devices/:deviceId/refresh`: refresh one saved manual
+  OSCQuery device.
 - `GET /osc/targets`: normalized OSC-capable targets. Optional query filters include `app`, `capability`, and `status`.
 - `GET /osc/assignments`: current logical OSC control-role assignment map. Add `?resolved=1` for current normalized target resolutions and compatible targets without mutating the score.
 - `GET /osc/resources`: classify score roles and discovered OSC instances as mapped, compatible, offline, ambiguous, or unmapped.
 - `POST /osc/onboard`: capture one online target and atomically create or reuse its logical role, OSC clip, and block layer.
 - `POST /osc/onboard/automatic`: run the configured default-off automatic onboarding policy and return onboarded and skipped diagnostics.
+- `PUT /osc/block-state`: atomically upsert the complete canonical OSC state
+  for one block and one or more checked instances. The first write creates the
+  required role, clip, and layer; later writes replace the same independent
+  instance state.
+- `POST /osc/block-state/duplicate`: copy checked instances' written state
+  between blocks, requiring explicit replacement intent when the destination
+  is already Written.
+- `POST /osc/block-state/clear`: clear canonical OSC state by the requested
+  block, role, or broader supported scope.
 - `POST /osc/assignments/reconcile`: refresh unlocked role target IDs and routing diagnostics from normalized live targets by stable device identity plus app/editor capability.
 - `GET /osc/recalls`: bounded recent OSC snapshot recall diagnostics across blocks, including encoded payload bytes and monotonic per-write/dispatch timing.
 - `PUT /osc/assignments/:roleId`: create or replace one logical OSC control-role assignment.
@@ -255,6 +275,12 @@ For the session-day operator flow, see
 - `GET /editors/manifest`: registered instrument-editor manifest.
 - `GET /playback/timing-contracts`: target-specific compiled playback timing contracts for the active block, including selected stage resolution, `ClockInterval`/ticks-per-stage, `MaxSteps`/pattern length, target capacities, compact/full-clear replacement mode, and quantization diagnostics when adaptive fidelity modes are enabled.
 - `GET /playback/snapshot`: monotonically versioned, server-owned playback observation combining the authoritative JACK playhead, macro/block state, cached local and peer RNBO execution witnesses, per-target phase error and readback freshness, timing contracts, score-send preparation metrics, ACK state, and recent RNBO playback lifecycle events. The host polls advertised peer `currentStagePath` OSCQuery endpoints; browsers do not contact peers directly.
+- `GET /playback/updates`: desired, prepared, active, and dirty-target state for
+  the selected or active block.
+- `POST /playback/updates/apply-next-beat`: while running, prepare and activate
+  a changed active block on the next safe beat without resetting phase.
+- `POST /playback/updates/update-now`: while stopped, activate the selected
+  block's current canonical score on its assigned players immediately.
 - RNBO clients must implement separate active and staging tables. The server sets prepare-only flag bit `1`, requires opcode `92` READY, and reports the result as `preparedTransaction` without changing `activeTransaction`. At a boundary it sends `SetStage 0`, then `Clock 1`, and promotes the transaction only after matching opcode `93` ACTIVE readback. Opcode `90` single-bank commit clients are unsupported.
 - Automatic updates reuse an identical active or prepared staged payload by hash and block identity. Manual, target-discovery, and forced full-clear sends always retransmit.
 - During JACK-derived playback, the server prepares the next macro block inside the configured `rnbo.lookAheadBeats` window on staged-capable targets only; legacy clients are not sent future-block payloads.
@@ -338,13 +364,14 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /admin`: lab administration for player assignments, logical OSC control roles, OSCQuery devices, saved scores, and resets.
 - `GET /`: ShadowScore view index with editor and RNBO graph-editor links.
 - `GET /editors`: registered instrument-editor browser.
-- `GET /editors/listsequencer`: bundled ListSequencer OSC editor with block snapshot save, load, routing-policy, and recall controls.
-- `GET /editors/listvelsequencer`: bundled eight-row velocity sequencer OSC editor with the shared snapshot workflow.
-- `GET /editors/analogsequencer`: bundled 16-stage analog sequencer OSC editor with the shared snapshot workflow.
-- `GET /editors/plate`: bundled Plate reverb OSC editor with the shared snapshot workflow.
-- `GET /editors/poland`: bundled Poland OSC editor with the shared snapshot workflow.
-- `GET /editors/softpiano`: bundled SoftPiano OSC editor with the shared snapshot workflow.
-- `GET /editors/ttid`: bundled TTID mask and transpose OSC editor with the shared snapshot workflow.
+- `GET /editors/listsequencer`: bundled ListSequencer OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/listvelsequencer`: bundled eight-row velocity sequencer OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/analogsequencer`: bundled 16-stage analog sequencer OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/element`: bundled Element OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/plate`: bundled Plate reverb OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/poland`: bundled Poland OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/softpiano`: bundled SoftPiano OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/ttid`: bundled TTID mask and transpose OSC editor with canonical instant-write block state and explicit recall.
 - `GET /tools/osc-volume`: OSC target volume trim tool.
 - `GET /tools/osc-macros`: OSC macro builder and validator.
 - `GET /event-list`: canonical clip attribute and note-event editor.

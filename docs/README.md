@@ -24,9 +24,12 @@ Start with the current guides:
   The stopped-transport live baseline is repeatable with
   `tools/measure-osc-snapshot.mjs`.
 - [`osc-block-state-authoring-ui-plan.md`](osc-block-state-authoring-ui-plan.md):
-  proposed initial-authoring workflow for instance cards, Written and
+  current instant-write authoring contract for instance cards, Written and
   Unspecified block states, just-in-time onboarding, independent cross-instance
-  copying, and the prototype questions that must be tested before rollout.
+  copying, clearing, and explicit full-state recall.
+- [`osc-instant-write-model-plan.md`](osc-instant-write-model-plan.md):
+  implementation history and acceptance criteria for the canonical OSC
+  instant-write migration.
 
 Design and implementation notes:
 
@@ -75,7 +78,8 @@ Design and implementation notes:
 - [`shadowbox-hardware-ensemble-plan.md`](shadowbox-hardware-ensemble-plan.md):
   original hardware ensemble architecture and phase tracking.
 - [`editor-revision-draft-framework-plan.md`](editor-revision-draft-framework-plan.md):
-  proposed shared revision/draft framework for editor clients.
+  historical proposed shared revision/draft framework. Current editor behavior
+  is described by the README and the live-score editing plan.
 - [`osc-editor-and-macro-control-plan.md`](osc-editor-and-macro-control-plan.md):
   OSC instrument editor, live target, broadcast volume, and macro-control plan.
 - [`mesostructural-osc-snapshot-plan.md`](mesostructural-osc-snapshot-plan.md):
@@ -84,8 +88,9 @@ Design and implementation notes:
 - [`osc-snapshot-contract.md`](osc-snapshot-contract.md): finalized version 1
   semantic snapshot schema, persistent-control rules, and sequencer Clock
   behavior.
-- [`implementation-plan.md`](implementation-plan.md): implementation milestone
-  history and model notes.
+- [`implementation-plan.md`](implementation-plan.md): historical implementation
+  milestones and an early model/API snapshot; it is not the current endpoint
+  reference.
 
 The plan documents are useful context, but they are not the front-door operator
 manual. Prefer the README, operator guide, and deployment guide when setting up

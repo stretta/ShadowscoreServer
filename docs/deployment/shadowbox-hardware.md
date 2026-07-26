@@ -34,7 +34,7 @@ The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages,
 requires Node.js 18 or newer, uses the lockfile for reproducible production
 dependency installs, clones or updates the repo, writes the role-specific
 generated config, installs the matching systemd unit for the selected install directory, starts the
-service, waits for `/healthz`, the root view index (`/`), Structure Editor
+service, waits for `/healthz`, the root view index (`/`), Arrange
 (`/structure-editor`), Matrix Edit (`/matrix-edit`), Piano Roll (`/piano-roll`),
 and the Event List editor (`/event-list`), then runs the hardware smoke test.
 The smoke test verifies the remaining runtime surfaces listed below.
@@ -149,7 +149,7 @@ The smoke test checks:
 - `/rnbo/targets`
 - `/rnbo/devices`
 - root view index at `/`
-- Structure Editor at `/structure-editor`
+- Arrange at `/structure-editor`
 - Matrix Edit at `/matrix-edit`
 - Piano Roll at `/piano-roll`
 - Event List editor at `/event-list`
@@ -169,7 +169,7 @@ Before students connect:
 - A laptop can open Piano Roll at `http://<host>.local:8790/piano-roll`.
 - A laptop can open the Event List editor at `http://<host>.local:8790/event-list`.
 - A laptop can open the ShadowScore view index at `http://<host>.local:8790/`.
-- A laptop can open Structure Editor at `http://<host>.local:8790/structure-editor`.
+- A laptop can open Arrange at `http://<host>.local:8790/structure-editor`.
 - A laptop can open Admin at `http://<host>.local:8790/admin`.
 - A laptop can open Transport Status at `http://<host>.local:8790/transport/status`.
 - `curl http://127.0.0.1:5678/` returns RNBOOSCQuery JSON on each unit.
@@ -177,7 +177,9 @@ Before students connect:
 - `curl http://<host>.local:8790/rnbo/targets` lists the expected ShadowScoreClient targets.
 - `curl http://<host>.local:8790/hardware/units` shows peer units as `online`.
 - `data/score.json` exists after a score edit and survives service restart.
-- A committed voice edit reaches the assigned RNBO target.
+- A canonical clip edit appears in `/playback/updates`, and **Apply next beat**
+  while running or **Update players now** while stopped activates it on the
+  assigned RNBO target.
 
 ## Logs
 

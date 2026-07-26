@@ -53,7 +53,7 @@ deployed code is actually running.
 ### Host Route Verification
 
 - For `--role host`, verifies live HTTP routes after restart:
-  `/healthz`, `/session`, `/matrix-edit`, and `/event-list`.
+  `/healthz`, `/session`, `/matrix-edit`, `/piano-roll`, and `/event-list`.
 - Allows rollout-specific route checks with repeatable `--verify-route <path>`.
 - Polls route checks briefly so a clean restart has time to bind the port.
 - Keeps hardware smoke as a separate deeper check.
@@ -90,5 +90,6 @@ deployed code is actually running.
 - Live test on `wren`:
   - service reaches `active/running`
   - service snapshot changes or emits an explicit unchanged warning
-  - `/healthz`, `/session`, `/matrix-edit`, and `/event-list` answer
+  - `/healthz`, `/session`, `/matrix-edit`, `/piano-roll`, and `/event-list`
+    answer
   - hardware smoke passes with `config/shadowscore.host.local.json`

@@ -251,16 +251,13 @@
     function renderChoice(param) {
       const wrap = document.createElement("div");
       wrap.className = "control";
-      const label = document.createElement("label");
-      label.className = "control-label";
-      label.textContent = labelFor(param);
       const output = document.createElement("output");
       output.className = "control-readout";
       output.textContent = String(param.value ?? param.values[0]);
       const options = document.createElement("div");
       options.className = "choice-options";
       options.setAttribute("role", "radiogroup");
-      options.setAttribute("aria-label", label.textContent);
+      options.setAttribute("aria-label", labelFor(param));
       for (const value of param.values) {
         const button = document.createElement("button");
         button.className = "choice-option";
@@ -277,7 +274,7 @@
         });
         options.append(button);
       }
-      wrap.replaceChildren(label, options, output);
+      wrap.replaceChildren(options, output);
       return wrap;
     }
 

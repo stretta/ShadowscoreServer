@@ -743,7 +743,7 @@ test("OSC capture creates and assigns one live instance atomically", async () =>
       oscSender: async (write) => sends.push(write),
       oscCaptureDelay: async () => {},
       oscCaptureFetch: async (url) => {
-        if (url.endsWith("/params")) return jsonFetchResponse({ CONTENTS: { Clock: { VALUE: 1 }, GateTime: { VALUE: 0.4 } } });
+        if (url.endsWith("/params")) return jsonFetchResponse(clockParamsBody("On", { GateTime: 0.4 }));
         if (url.endsWith("/StepsAck")) return jsonFetchResponse({ VALUE: [1, 0, 1, 0] });
         return jsonFetchResponse({}, 404);
       },
@@ -779,7 +779,7 @@ test("OSC capture creates and assigns one live instance atomically", async () =>
   assert.equal(context.store.getScore().oscClips["should-not-exist"], undefined);
 
   context.runtime.oscCaptureFetch = async (url) => url.endsWith("/params")
-    ? jsonFetchResponse({ CONTENTS: { Clock: { VALUE: 1 }, GateTime: { VALUE: 0.4 } } })
+    ? jsonFetchResponse(clockParamsBody("On", { GateTime: 0.4 }))
     : jsonFetchResponse({}, 404);
   const incomplete = await request(context, "POST", "/osc/clips/capture", {
     targetId: "heron:listsequencer:main",
@@ -800,7 +800,7 @@ test("OSC onboarding atomically creates and idempotently reuses a role, clip, an
       oscSender: async () => {},
       oscCaptureDelay: async () => {},
       oscCaptureFetch: async (url) => {
-        if (url.endsWith("/params")) return jsonFetchResponse({ CONTENTS: { Clock: { VALUE: 1 }, GateTime: { VALUE: gateTime } } });
+        if (url.endsWith("/params")) return jsonFetchResponse(clockParamsBody("On", { GateTime: gateTime }));
         if (url.endsWith("/StepsAck")) return jsonFetchResponse({ VALUE: [1, 0, 1, 0] });
         return jsonFetchResponse({}, 404);
       },
@@ -929,7 +929,7 @@ test("Block State upsert atomically saves the displayed state to every checked t
     baseAddress: "/rnbo/inst/3",
     instance: "aux",
     parameters: [
-      { name: "Clock", address: "/rnbo/inst/3/params/Clock" },
+      { name: "Clock", address: "/rnbo/inst/3/params/Clock/Clock" },
       { name: "GateTime", address: "/rnbo/inst/3/params/GateTime" }
     ]
   };
@@ -1054,7 +1054,7 @@ test("automatic OSC onboarding endpoint obeys configured stable role templates",
       oscSender: async () => {},
       oscCaptureDelay: async () => {},
       oscCaptureFetch: async (url) => {
-        if (url.endsWith("/params")) return jsonFetchResponse({ CONTENTS: { Clock: { VALUE: 1 }, GateTime: { VALUE: 0.5 } } });
+        if (url.endsWith("/params")) return jsonFetchResponse(clockParamsBody("On", { GateTime: 0.5 }));
         if (url.endsWith("/StepsAck")) return jsonFetchResponse({ VALUE: [1, 1, 0, 0] });
         return jsonFetchResponse({}, 404);
       },
@@ -1081,7 +1081,7 @@ test("hardware registration triggers enabled automatic OSC onboarding", async ()
     config,
     runtime: {
       peerRegistry: createPeerRegistry(config),
-      oscCaptureFetch: async () => jsonFetchResponse({ CONTENTS: { Clock: { VALUE: 0 }, Glide: { VALUE: 12 } } })
+      oscCaptureFetch: async () => jsonFetchResponse(clockParamsBody("Off", { Glide: 12 }, 4))
     }
   });
 
@@ -1097,7 +1097,7 @@ test("hardware registration triggers enabled automatic OSC onboarding", async ()
       baseAddress: "/rnbo/inst/4",
       app: "analogsequencer",
       parameters: [
-        { name: "Clock", address: "/rnbo/inst/4/params/Clock" },
+        { name: "Clock", address: "/rnbo/inst/4/params/Clock/Clock", type: "s", values: ["Off", "On"] },
         { name: "Glide", address: "/rnbo/inst/4/params/Glide" }
       ]
     }]
@@ -1130,7 +1130,7 @@ test("block OSC recall route dry-runs and dispatches ordered semantic writes wit
             deviceId: "heron",
             available: true,
             parameters: [
-              { name: "Clock", address: "/rnbo/inst/42/params/Clock" },
+              { name: "Clock", address: "/rnbo/inst/42/params/Clock/Clock" },
               { name: "GateTime", address: "/rnbo/inst/42/params/GateTime" }
             ],
             inputPorts: [
@@ -1184,7 +1184,7 @@ test("block OSC recall route dry-runs and dispatches ordered semantic writes wit
   assert.deepEqual(sends.map((write) => write.address), [
     "/rnbo/inst/42/params/GateTime",
     "/rnbo/inst/42/messages/in/Steps",
-    "/rnbo/inst/42/params/Clock"
+    "/rnbo/inst/42/params/Clock/Clock"
   ]);
   assert.equal(context.store.getScore().version, versionBeforeRecall);
 
@@ -1230,7 +1230,7 @@ test("active block route changes automatically recall snapshots once and expose 
             available: true,
             parameters: [
               { name: "GateTime", address: "/rnbo/inst/42/params/GateTime" },
-              { name: "Clock", address: "/rnbo/inst/42/params/Clock" }
+              { name: "Clock", address: "/rnbo/inst/42/params/Clock/Clock" }
             ],
             inputPorts: [{ name: "Steps", address: "/rnbo/inst/42/messages/in/Steps" }]
           }];
@@ -1258,7 +1258,7 @@ test("active block route changes automatically recall snapshots once and expose 
   assert.deepEqual(sends.map((write) => write.address), [
     "/rnbo/inst/42/params/GateTime",
     "/rnbo/inst/42/messages/in/Steps",
-    "/rnbo/inst/42/params/Clock"
+    "/rnbo/inst/42/params/Clock/Clock"
   ]);
 
   await requestJson(context, "POST", "/structure/playhead", { activeBlockId: "B", macroIndex: 1 });
@@ -1286,7 +1286,7 @@ test("automatic OSC recall can use cached targets without refreshing discovery o
     hardwareUnitId: "wren",
     deviceId: "wren",
     available: true,
-    parameters: [{ name: "Clock", address: "/rnbo/inst/42/params/Clock" }],
+    parameters: [{ name: "Clock", address: "/rnbo/inst/42/params/Clock/Clock" }],
     inputPorts: [{ name: "rtz", address: "/rnbo/inst/42/messages/in/rtz" }]
   };
   const context = createRouteContext({
@@ -1322,7 +1322,7 @@ test("automatic OSC recall can use cached targets without refreshing discovery o
   assert.equal(result.ok, true);
   assert.deepEqual(sends.map((write) => write.address), [
     "/rnbo/inst/42/messages/in/rtz",
-    "/rnbo/inst/42/params/Clock"
+    "/rnbo/inst/42/params/Clock/Clock"
   ]);
 });
 
@@ -1414,17 +1414,17 @@ test("macro playback routes expose, start, and stop the chain runner", async () 
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Clock",
-      value: 1
+      path: "/rnbo/inst/2/params/Clock/Clock",
+      value: "On"
     }
   ]);
   assert.deepEqual(started.clockWrites, [
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Clock",
+      path: "/rnbo/inst/2/params/Clock/Clock",
       targetId: "source-client",
-      value: 1
+      value: "On"
     }
   ]);
   assert.deepEqual(started.phaseWrites, []);
@@ -1435,16 +1435,16 @@ test("macro playback routes expose, start, and stop the chain runner", async () 
   assert.deepEqual(writes.at(-1), {
     host: "192.168.68.96",
     port: 9000,
-    path: "/rnbo/inst/2/params/Clock",
-    value: 0
+    path: "/rnbo/inst/2/params/Clock/Clock",
+    value: "Off"
   });
   assert.deepEqual(stopped.clockWrites, [
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Clock",
+      path: "/rnbo/inst/2/params/Clock/Clock",
       targetId: "source-client",
-      value: 0
+      value: "Off"
     }
   ]);
 });
@@ -1537,8 +1537,8 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Clock",
-      value: 1
+      path: "/rnbo/inst/2/params/Clock/Clock",
+      value: "On"
     }
   ]);
   assert.equal(started.clockWrites.length, 1);
@@ -1553,14 +1553,15 @@ test("transport facade play and stop wrap macro playback with aggregate status",
   assert.deepEqual(writes.at(-1), {
     host: "192.168.68.96",
     port: 9000,
-    path: "/rnbo/inst/2/params/Clock",
-    value: 0
+    path: "/rnbo/inst/2/params/Clock/Clock",
+    value: "Off"
   });
   assert.deepEqual(jackCalls, [["tempo", 120], ["start"], ["stop"]]);
 });
 
 test("player and arrangement controls remain distinct and idempotent", async () => {
   const writes = [];
+  const oscWrites = [];
   const jackCalls = [];
   let running = false;
   let mode = "stopped";
@@ -1593,6 +1594,31 @@ test("player and arrangement controls remain distinct and idempotent", async () 
         }
       },
       rnboParamWriter: async (write) => writes.push(write),
+      oscSender: async (write) => oscWrites.push(write),
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() {
+          return ["analogsequencer", "listvelsequencer", "listsequencer", "triggerseq", "plate"].map((app, index) => ({
+            id: `rnbo-inst-${index + 10}:${app}`,
+            localId: `rnbo-inst-${index + 10}:${app}`,
+            host: "192.168.68.101",
+            port: 1234,
+            baseAddress: `/rnbo/inst/${index + 10}`,
+            app,
+            instance: "main",
+            hardwareUnitId: "rack",
+            deviceId: "rack",
+            available: true,
+            parameters: [{
+              name: "Clock",
+              address: `/rnbo/inst/${index + 10}/params/Clock/Clock`,
+              type: "s",
+              values: ["Off", "On"]
+            }]
+          }));
+        }
+      },
       macroPlayback: {
         snapshot: () => ({
           running,
@@ -1616,6 +1642,13 @@ test("player and arrangement controls remain distinct and idempotent", async () 
       }
     }
   });
+  for (const app of ["analogsequencer", "listvelsequencer", "listsequencer", "triggerseq", "plate"]) {
+    context.store.replaceOscAssignment(`role-${app}`, {
+      app,
+      deviceId: "rack",
+      oscTargetId: `rack:${app}:main`
+    });
+  }
 
   const blocked = await request(context, "POST", "/transport/arrangement/run", {});
   assert.equal(blocked.status, 409);
@@ -1625,6 +1658,13 @@ test("player and arrangement controls remain distinct and idempotent", async () 
   assert.equal(played.transport.players.playing, true);
   assert.equal(played.transport.arrangement.running, true);
   assert.equal(played.transport.stateText, "Players playing · Arrangement running");
+  assert.equal(played.oscClockWrites.length, 4);
+  assert.deepEqual(oscWrites.map(({ targetId, args }) => [targetId, args]), [
+    ["rack:analogsequencer:main", ["On"]],
+    ["rack:listvelsequencer:main", ["On"]],
+    ["rack:listsequencer:main", ["On"]],
+    ["rack:triggerseq:main", ["On"]]
+  ]);
 
   const writesAfterPlay = writes.length;
   const jackAfterPlay = jackCalls.length;
@@ -1647,6 +1687,13 @@ test("player and arrangement controls remain distinct and idempotent", async () 
   const stopped = await requestJson(context, "POST", "/transport/players/stop", {});
   assert.equal(stopped.transport.players.playing, false);
   assert.equal(stopped.transport.arrangement.running, false);
+  assert.equal(stopped.oscClockWrites.length, 4);
+  assert.deepEqual(oscWrites.slice(-4).map(({ targetId, args }) => [targetId, args]), [
+    ["rack:analogsequencer:main", ["Off"]],
+    ["rack:listvelsequencer:main", ["Off"]],
+    ["rack:listsequencer:main", ["Off"]],
+    ["rack:triggerseq:main", ["Off"]]
+  ]);
   const writesAfterStop = writes.length;
   const jackAfterStop = jackCalls.length;
 
@@ -2668,8 +2715,8 @@ test("macro playback start can include an immediate phase reset", async () => {
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Clock",
-      value: 1
+      path: "/rnbo/inst/2/params/Clock/Clock",
+      value: "On"
     }
   ]);
   assert.deepEqual(started.phaseWrites, [
@@ -2730,17 +2777,17 @@ test("macro playback start can scope clock writes to a selected RNBO target", as
     {
       host: "192.168.68.97",
       port: 9001,
-      path: "/rnbo/inst/3/params/Clock",
-      value: 1
+      path: "/rnbo/inst/3/params/Clock/Clock",
+      value: "On"
     }
   ]);
   assert.deepEqual(started.clockWrites, [
     {
       host: "192.168.68.97",
       port: 9001,
-      path: "/rnbo/inst/3/params/Clock",
+      path: "/rnbo/inst/3/params/Clock/Clock",
       targetId: "other-client",
-      value: 1
+      value: "On"
     }
   ]);
 });
@@ -3716,8 +3763,8 @@ test("RNBO target transport controls route writes playback transport controls", 
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Clock",
-      value: 1
+      path: "/rnbo/inst/2/params/Clock/Clock",
+      value: "On"
     }
   ]);
   assert.equal(context.config.rnbo.transport.MaxSteps, 32);
@@ -3782,7 +3829,7 @@ test("legacy RNBO target params route aliases transport controls", async () => {
 
   assert.equal(result.ok, true);
   assert.deepEqual(writes.map((write) => write.path), [
-    "/rnbo/inst/2/params/Clock"
+    "/rnbo/inst/2/params/Clock/Clock"
   ]);
 });
 
@@ -3856,8 +3903,8 @@ test("RNBO target transport controls route derives MaxSteps for assigned targets
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Clock",
-      value: 1
+      path: "/rnbo/inst/2/params/Clock/Clock",
+      value: "On"
     }
   ]);
   assert.equal(context.config.rnbo.transport.MaxSteps, 64);
@@ -3916,7 +3963,7 @@ test("RNBO target transport controls route derives adaptive ClockInterval for as
   assert.deepEqual(writes.map((write) => [write.path, write.value]), [
     ["/rnbo/inst/2/messages/in/MaxSteps", 960],
     ["/rnbo/inst/2/messages/in/ClockInterval", 2],
-    ["/rnbo/inst/2/params/Clock", 1]
+    ["/rnbo/inst/2/params/Clock/Clock", "On"]
   ]);
   assert.equal(context.config.rnbo.transport.MaxSteps, 960);
   assert.equal(context.config.rnbo.transport.ClockInterval, 2);
@@ -5425,13 +5472,29 @@ function captureControlTarget() {
     deviceId: "heron",
     available: true,
     parameters: [
-      { name: "Clock", address: "/rnbo/inst/2/params/Clock" },
+      { name: "Clock", address: "/rnbo/inst/2/params/Clock/Clock", type: "s", values: ["Off", "On"] },
       { name: "GateTime", address: "/rnbo/inst/2/params/GateTime" }
     ],
     inputPorts: [
       { name: "Steps", address: "/rnbo/inst/2/messages/in/Steps" },
       { name: "rtz", address: "/rnbo/inst/2/messages/in/rtz" }
     ]
+  };
+}
+
+function clockParamsBody(value, params = {}, instanceId = 2) {
+  return {
+    CONTENTS: {
+      Clock: {
+        CONTENTS: {
+          Clock: {
+            FULL_PATH: `/rnbo/inst/${instanceId}/params/Clock/Clock`,
+            VALUE: value
+          }
+        }
+      },
+      ...Object.fromEntries(Object.entries(params).map(([name, entry]) => [name, { VALUE: entry }]))
+    }
   };
 }
 

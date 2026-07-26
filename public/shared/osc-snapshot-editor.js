@@ -1069,9 +1069,10 @@ export function oscRecallSummary(result) {
 
 export function oscClockRecallNotice(snapshot) {
   if (!Object.hasOwn(snapshot?.params ?? {}, "Clock")) return "";
-  return Number(snapshot.params.Clock) === 0
-    ? "Clock Off suspends immediately"
-    : "Clock On arms for the next observed shared beat";
+  const value = String(snapshot.params.Clock).trim().toLowerCase();
+  return value === "on" || value === "1"
+    ? "Clock On arms for the next observed shared beat"
+    : "Clock Off suspends immediately";
 }
 
 export function oscClipCaptureSummary(clip) {

@@ -132,10 +132,10 @@ the current block active while player note generation continues.
 
 Default interaction rules:
 
-- Players Stop sends `Clock: 0`, stops note generation, and holds arrangement
-  movement at the current location.
+- Players Stop sends the `Clock: "Off"` enum, stops note generation, and holds
+  arrangement movement at the current location.
 - Players Play sends the required start, readiness, phase, recall, and
-  `Clock: 1` operations, then respects the selected arrangement mode.
+  `Clock: "On"` operations, then respects the selected arrangement mode.
 - Arrangement Hold never stops player note generation.
 - Arrangement Run resumes form movement from the held block and beat anchor.
 - Return to Start changes location; it is not another Stop operation.
@@ -688,10 +688,12 @@ Hands-on continuation, 2026-07-24:
 - the operator confirmed Return to Start, Players Play with Arrangement Run,
   arrangement-wiper movement, block advance, Arrangement Hold while player
   stages continued, Arrangement Run resume, and Players Stop; and
-- Players Stop currently sends `Clock: 0` only to assigned ShadowScore playback
-  clients. It does not override `Clock` on clock-capable OSC roles such as
-  Analog Sequencer. Treat global OSC-instrument stopping as a documented
-  follow-up decision rather than silently changing block-owned snapshot state;
+- Players Play and Stop send the ShadowScoreClient Clock enum (`On` or `Off`)
+  and override `Clock` on assigned clock-capable OSC sequencer roles:
+  AnalogSequencer, ListVelSequencer, ListSequencer, and TriggerSequencer. The
+  transport override happens after block-state recall so Players Play always
+  leaves assigned sequencers running, while the saved block state remains
+  unchanged;
 - written tempos A=90, B=60, C=144, and D/E/F=120 were confirmed canonical,
   but Follow Block Tempo initially left Link/JACK at 90 across B and C. The
   server had been attempting a JACK transport reposition, which the active

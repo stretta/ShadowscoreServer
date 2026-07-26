@@ -103,6 +103,27 @@ test("AnalogSequencer RTZ-before-play does not fire when the recalled Clock is o
   assert.deepEqual(compiled.writes.map((write) => write.name), ["Clock"]);
 });
 
+test("AnalogSequencer RTZ-before-play understands Clock enum strings", () => {
+  const target = oscTarget({
+    app: "analogsequencer",
+    parameters: [{ ...param("Clock"), type: "s", values: ["Off", "On"] }],
+    inputPorts: [inport("rtz")]
+  });
+  const off = compileOscSnapshot({
+    app: "analogsequencer",
+    params: { Clock: "Off" },
+    recall: { rtzBeforePlay: true }
+  }, target);
+  const on = compileOscSnapshot({
+    app: "analogsequencer",
+    params: { Clock: "On" },
+    recall: { rtzBeforePlay: true }
+  }, target);
+
+  assert.deepEqual(off.writes.map((write) => write.name), ["Clock"]);
+  assert.deepEqual(on.writes.map((write) => write.name), ["rtz", "Clock"]);
+});
+
 test("recall telemetry measures encoded payloads and the dispatch window", async () => {
   const score = scoreWithRoles({
     online: snapshot("listsequencer", { GateTime: 0.4, Clock: 1 }, { Steps: [1, 0, 1, 0] })

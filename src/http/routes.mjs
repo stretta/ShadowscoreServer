@@ -23,6 +23,13 @@ import { createSessionSnapshot } from "../session.mjs";
 import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
 
 const REVISION_CONTROL_FIELDS = ["expectedVersion", "expectedScoreRevision", "expectedStructureRevision"];
+const OSC_SEQUENCER_APPS = new Set([
+  "analogsequencer",
+  "listvelsequencer",
+  "listsequencer",
+  "triggerseq",
+  "triggersequencer"
+]);
 
 export async function routeRequest(request, response, store, config, runtime = {}) {
   setCors(response);
@@ -2242,6 +2249,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
       playbackUpdate: null,
       activations: [],
       clockWrites: [],
+      oscClockWrites: [],
       phaseWrites: []
     };
   }
@@ -2269,7 +2277,10 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const activationSchedule = body.phaseReset === false || playbackUpdate
     ? []
     : runtime.rnboAdapter?.schedulePreparedActivations?.({ targetId, initialStage: 0 }) ?? [];
-  const clockWrites = await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId });
+  const [clockWrites, oscClockWrites] = await Promise.all([
+    writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId }),
+    writeOscSequencerClocks(score, config, runtime, "On")
+  ]);
   const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
   if (requestedArrangementMode === "run") {
     playback.start({
@@ -2297,6 +2308,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     playbackUpdate,
     activations,
     clockWrites,
+    oscClockWrites,
     phaseWrites
   };
 }
@@ -2327,17 +2339,42 @@ async function stopUnifiedTransport(store, config, runtime, body = {}) {
   const performance = performanceTransportFor(runtime);
   if (!performance.playersPlaying) {
     playback.stop();
-    return { idempotent: true, jackStop: null, clockWrites: [] };
+    return { idempotent: true, jackStop: null, clockWrites: [], oscClockWrites: [] };
   }
   const targetId = optionalString(body.targetId);
-  const clockWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { Clock: 0 }, { targetId });
+  const score = store.getScore();
+  const [clockWrites, oscClockWrites] = await Promise.all([
+    writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 0 }, { targetId }),
+    writeOscSequencerClocks(score, config, runtime, "Off")
+  ]);
   playback.stop();
   const jackStop = await maybeStopJack(runtime);
   performance.playersPlaying = false;
   return {
     jackStop,
-    clockWrites
+    clockWrites,
+    oscClockWrites
   };
+}
+
+async function writeOscSequencerClocks(score, config, runtime, value) {
+  const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+  const resolutions = resolveOscAssignments(score.oscAssignments ?? {}, targets);
+  const selected = new Map();
+  for (const [roleId, resolution] of Object.entries(resolutions)) {
+    const assignment = score.oscAssignments?.[roleId] ?? {};
+    const app = optionalString(assignment.app || resolution.target?.app).toLowerCase();
+    const target = resolution.target;
+    if (!OSC_SEQUENCER_APPS.has(app) || !target || !["online", "ignored"].includes(resolution.status)) continue;
+    if (!(target.parameters ?? []).some((parameter) => parameter.name === "Clock")) continue;
+    selected.set(target.id, target);
+  }
+  if (selected.size === 0) return [];
+  const result = await sendOscToResolvedTargets([...selected.values()], runtime, {
+    param: "Clock",
+    args: [value]
+  });
+  return result.results;
 }
 
 async function runArrangement(store, config, runtime, body = {}) {

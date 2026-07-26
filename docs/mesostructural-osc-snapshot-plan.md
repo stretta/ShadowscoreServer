@@ -59,10 +59,11 @@ The next implementation should preserve these decisions:
    recall verification.
 9. Writes are concurrent across instances and ordered within each instance.
 10. Persistent parameters and lists are sent before `Clock`. A saved `Clock`
-   value is compositional state and is sent last.
-11. `Clock: 1` is implemented consistently by sequencer exports as an armed,
-   next-shared-beat start. `Clock: 0` suspends the process according to the
-   shared sequencer contract.
+   enum index is compositional state and is resolved to the live enum string
+   only when sent last.
+11. `Clock: "On"` is implemented consistently by sequencer exports as an
+   armed, next-shared-beat start. `Clock: "Off"` suspends the process according
+   to the shared sequencer contract.
 12. `RTZ`, probes, panic actions, stage readbacks, and other momentary commands
    are not snapshot state.
 13. `Ignore Shadowscore recall` is runtime routing policy. It suppresses

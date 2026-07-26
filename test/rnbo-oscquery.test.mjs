@@ -790,8 +790,8 @@ test("plans scoped RNBO transport control writes", () => {
     {
       host: "192.168.68.96",
       port: 9000,
-      path: "/rnbo/inst/2/params/Clock",
-      value: 1
+      path: "/rnbo/inst/2/params/Clock/Clock",
+      value: "On"
     },
     {
       host: "192.168.68.96",
@@ -824,6 +824,24 @@ test("plans scoped RNBO transport control writes", () => {
       value: 0
     }
   ]);
+});
+
+test("normalizes ShadowScoreClient Clock enum transport values", () => {
+  const target = {
+    id: "rnbo-inst-2:shadowscore",
+    host: "192.168.68.96",
+    port: 9000,
+    address: "/rnbo/inst/2/messages/in/shadowscore"
+  };
+
+  assert.deepEqual(rnboTransportControlWrites(target, { Clock: "Off" }), [{
+    host: "192.168.68.96",
+    port: 9000,
+    path: "/rnbo/inst/2/params/Clock/Clock",
+    value: "Off"
+  }]);
+  assert.deepEqual(rnboTransportControlWrites(target, { Clock: 1 })[0].value, "On");
+  assert.throws(() => rnboTransportControlWrites(target, { Clock: 2 }), /Clock must be/);
 });
 
 test("rejects unsupported RNBO transport writes", () => {

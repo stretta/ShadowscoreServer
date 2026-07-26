@@ -127,14 +127,17 @@ the actual advertised OSC address.
 
 Supported sequencer exports use these semantics:
 
-- `Clock: 1` arms the sequencer and starts it on the next observed shared beat.
-- `Clock: 0` suspends the sequencer immediately and preserves its authored
+- the score stores the enum option index (`0` or `1`), while OSC dispatch
+  resolves that index through the target's advertised enum choices;
+- live `Clock: "On"` arms the sequencer and starts it on the next observed
+  shared beat;
+- live `Clock: "Off"` suspends the sequencer immediately and preserves its authored
   state for later re-entry.
 - `Clock` is compositional snapshot state, is never inferred from a zero-step
   pattern, and is always sent after the rest of the snapshot.
 - `RTZ` remains a momentary performance command and is not snapshot state.
 
-Because `Clock: 0` is immediate, lookahead recall must not send it before the
+Because `Clock: "Off"` is immediate, lookahead recall must not send it before the
 block boundary. Initial recall sends the ordered burst at block entry and
 records encoded size plus high-resolution dispatch duration. Live dense-burst
 measurement on wren selected a future staging/commit contract for exact

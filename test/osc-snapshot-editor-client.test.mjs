@@ -100,6 +100,8 @@ test("shared OSC editor snapshot comparison is semantic and order-independent", 
 test("shared OSC editor recall notice follows the saved Clock contract", () => {
   assert.equal(oscClockRecallNotice({ params: { Clock: 0 } }), "Clock Off suspends immediately");
   assert.equal(oscClockRecallNotice({ params: { Clock: 1 } }), "Clock On arms for the next observed shared beat");
+  assert.equal(oscClockRecallNotice({ params: { Clock: "Off" } }), "Clock Off suspends immediately");
+  assert.equal(oscClockRecallNotice({ params: { Clock: "On" } }), "Clock On arms for the next observed shared beat");
   assert.equal(oscClockRecallNotice({ params: { Tempo: 120 } }), "");
 });
 

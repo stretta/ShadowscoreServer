@@ -76,7 +76,9 @@ function compileRecallOptions(snapshot, target, writesByGroup, missingControls, 
 
 function clockStartsPlayback(params = {}) {
   const entry = Object.entries(params).find(([name]) => name.toLowerCase() === "clock");
-  return entry ? Number(entry[1]) !== 0 : false;
+  if (!entry) return false;
+  const value = String(entry[1]).trim().toLowerCase();
+  return value === "on" || value === "1";
 }
 
 export function compileOscBlockRecall(score, blockId, targets, options = {}) {

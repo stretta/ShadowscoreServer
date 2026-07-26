@@ -85,8 +85,8 @@ ACK/readback mechanism only after commit.
 
 Direct `Clock` behavior remains compatible with the existing contract:
 
-- a direct `Clock: 0` is an immediate manual suspension;
-- a direct `Clock: 1` arms the next shared beat;
+- a direct `Clock: "Off"` is an immediate manual suspension;
+- a direct `Clock: "On"` arms the next shared beat;
 - a staged `clockMode` is applied only on the transaction's commit beat.
 
 ## Export-Specific Pending State
@@ -102,8 +102,9 @@ PrimaryRotation, SecondaryRotation, Velocity, and Duration lists.
 ListVelSequencer stages the eight pitch-map params, ClockRate, and all eight row
 lists. The RNBO source should rename the current `4ow` inport to `4row`; the
 server retains its compatibility alias for older exports. ListSequencer and
-ListVelSequencer should also export the clock param directly as `Clock`; the
-server retains its `Clock_1_` compatibility alias.
+ListVelSequencer should also export the enum clock param as the nested
+`Clock/Clock`; the server retains its `Clock_1_` compatibility alias for saved
+target identity.
 
 ## Max Project And Export Workflow
 
@@ -135,4 +136,3 @@ outport on wren.
 5. Repeat with different payload sizes and a staged clock-off block.
 6. Drop one transaction packet and confirm count validation rejects the commit
    without changing active state; resend the complete transaction and commit.
-

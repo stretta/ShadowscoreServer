@@ -99,13 +99,27 @@ export function rnboTransportControlWrites(target, controls) {
     return {
       host,
       port,
-      path: `/rnbo/inst/${instanceId}/${controlRoot}/${controlName}`,
-      value: finiteNumber(value, name)
+      path: controlName === "Clock"
+        ? `/rnbo/inst/${instanceId}/params/Clock/Clock`
+        : `/rnbo/inst/${instanceId}/${controlRoot}/${controlName}`,
+      value: controlName === "Clock" ? clockEnumValue(value) : finiteNumber(value, name)
     };
   });
 }
 
 export const rnboTransportParamWrites = rnboTransportControlWrites;
+
+function clockEnumValue(value) {
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "off" || normalized === "0") return "Off";
+    if (normalized === "on" || normalized === "1") return "On";
+  }
+  const number = Number(value);
+  if (number === 0) return "Off";
+  if (number === 1) return "On";
+  throw new Error("Clock must be Off, On, 0, or 1");
+}
 
 export function configuredRnboTargets(config) {
   const rnbo = config.rnbo ?? {};

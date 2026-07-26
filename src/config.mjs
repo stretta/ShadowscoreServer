@@ -95,6 +95,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/editors/softpiano"]
       },
+      elementEditor: {
+        root: "public/editors/element",
+        index: "index.html",
+        routes: ["/editors/element"]
+      },
       listSequencerEditor: {
         root: "public/editors/listsequencer",
         index: "index.html",
@@ -158,6 +163,14 @@ export const defaultConfig = Object.freeze({
       route: "/editors/softpiano",
       targetFilter: {
         app: "softpiano"
+      }
+    },
+    {
+      id: "element",
+      label: "Element",
+      route: "/editors/element",
+      targetFilter: {
+        app: "element"
       }
     },
     {

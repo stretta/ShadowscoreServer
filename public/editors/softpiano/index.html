@@ -50,12 +50,11 @@
   <script type="module">
     import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-ttid-revision1";
     const SOFTPIANO_GROUPS = [
-      { title: "Output", controls: ["Volume"] },
-      { title: "MIDI", controls: ["TransposeSoftPiano"] },
-      { title: "Tone", controls: ["HPFFreq", "LowPass", "FilterVel", "FilterKeyTracking", "Spread"] },
+      { title: "Output", controls: ["OutputVolume", "HPFFreq"] },
+      { title: "Tone", controls: ["LowPass", "FilterVel", "FilterKeyTracking", "Spread"] },
       { title: "Amp Env", controls: ["Attack", "Decay", "Sustain", "Release"] }
     ];
-    const LABELS = { Volume: "Volume", TransposeSoftPiano: "Transpose", HPFFreq: "High Pass", LowPass: "Low Pass", FilterVel: "Filter Velocity", FilterKeyTracking: "Key Tracking" };
+    const LABELS = { OutputVolume: "Volume", HPFFreq: "High Pass", LowPass: "Low Pass", FilterVel: "Filter Velocity", FilterKeyTracking: "Key Tracking" };
     const targetsEl = document.querySelector("#targets");
     const panelsEl = document.querySelector("#panels");
     const statusEl = document.querySelector("#status");
@@ -124,14 +123,15 @@
       try {
         const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" });
         if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`);
-        const nodes = (await response.json()).CONTENTS || {}; let populated = 0;
-        for (const param of target.parameters || []) { const node = nodes[param.name]; if (!node || node.VALUE === undefined || !params.has(param.name)) continue; params.get(param.name).value = scalarValue(node.VALUE); populated += 1; }
+        const nodes = parameterNodesByAddress(await response.json()); let populated = 0;
+        for (const param of target.parameters || []) { const node = nodes.get(param.address); if (!node || node.VALUE === undefined || !params.has(param.name)) continue; params.get(param.name).value = scalarValue(node.VALUE); populated += 1; }
         renderPanels(); setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
       } finally { getDataButton.disabled = targets.length === 0; }
     }
 
     function oscQueryHost(target) { return !target.host || ["127.0.0.1", "localhost", "::1"].includes(target.host) ? location.hostname : target.host; }
     function scalarValue(value) { return Array.isArray(value) ? value[0] : value; }
+    function parameterNodesByAddress(root) { const nodes = new Map(); const visit = (node) => { if (!node || typeof node !== "object") return; if (node.FULL_PATH && node.VALUE !== undefined) nodes.set(node.FULL_PATH, node); for (const child of Object.values(node.CONTENTS || {})) visit(child); }; visit(root); return nodes; }
 
     function renderPanels() {
       const known = new Set(SOFTPIANO_GROUPS.flatMap((group) => group.controls));

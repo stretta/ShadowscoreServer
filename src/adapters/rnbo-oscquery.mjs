@@ -244,7 +244,19 @@ function controlTargetForInstance(instanceId, node, name, config) {
 
 function extractRnboParams(instanceNode) {
   const contents = instanceNode?.CONTENTS?.params?.CONTENTS ?? instanceNode?.CONTENTS?.parameters?.CONTENTS ?? {};
-  return Object.entries(contents).map(([name, node]) => normalizeRnboParam(name, node)).filter(Boolean).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999));
+  return collectRnboParams(contents).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999));
+}
+
+function collectRnboParams(contents, parameters = []) {
+  for (const [name, node] of Object.entries(contents ?? {})) {
+    const parameter = normalizeRnboParam(name, node);
+    if (parameter) {
+      parameters.push(parameter);
+      continue;
+    }
+    collectRnboParams(node?.CONTENTS, parameters);
+  }
+  return parameters;
 }
 
 function extractRnboInputPorts(instanceId, instanceNode) {
@@ -257,7 +269,7 @@ function extractRnboInputPorts(instanceId, instanceNode) {
 
 function normalizeRnboParam(name, node) {
   const address = normalizeAddress(node?.FULL_PATH);
-  if (!address || address.includes("/normalized") || address.includes("/meta") || address.includes("/index")) {
+  if (!address || node?.TYPE === undefined || address.includes("/normalized") || address.includes("/meta") || address.includes("/index")) {
     return undefined;
   }
   const range = Array.isArray(node.RANGE) ? node.RANGE : [];

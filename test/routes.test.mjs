@@ -4025,7 +4025,7 @@ test("editor manifest route lists registered instrument editors", async () => {
   const context = createRouteContext();
   const response = await requestJson(context, "GET", "/editors/manifest");
 
-  assert.equal(response.editors.length, 7);
+  assert.equal(response.editors.length, 8);
   assert.deepEqual(response.editors, [
     {
       id: "poland",
@@ -4057,6 +4057,14 @@ test("editor manifest route lists registered instrument editors", async () => {
       route: "/editors/softpiano",
       targetFilter: {
         app: "softpiano"
+      }
+    },
+    {
+      id: "element",
+      label: "Element",
+      route: "/editors/element",
+      targetFilter: {
+        app: "element"
       }
     },
     {
@@ -4349,8 +4357,8 @@ test("SoftPiano editor route serves the compact OSC control panel", async () => 
   assert.match(response.body, /SoftPiano Editor/);
   assert.match(response.body, /\/osc\/targets\?app=softpiano/);
   assert.match(response.body, /SOFTPIANO_GROUPS/);
-  assert.match(response.body, /TransposeSoftPiano/);
-  assert.match(response.body, /title: "Output", controls: \["Volume"\]/);
+  assert.doesNotMatch(response.body, /TransposeSoftPiano/);
+  assert.match(response.body, /title: "Output", controls: \["OutputVolume", "HPFFreq"\]/);
   assert.match(response.body, /FilterKeyTracking/);
   assert.match(response.body, /HPFFreq: "High Pass"/);
   assert.match(response.body, /Amp Env/);
@@ -4362,6 +4370,28 @@ test("SoftPiano editor route serves the compact OSC control panel", async () => 
   assert.match(response.body, /Instance focus/);
   assert.match(response.body, /async function getData/);
   assert.match(response.body, /OSCQuery parameter read failed/);
+  assert.match(response.body, /mountOscSnapshotPanel/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
+});
+
+test("Element editor route serves the current nested OSC control panel", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/element");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /Element Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=element/);
+  assert.match(response.body, /ELEMENT_GROUPS/);
+  assert.match(response.body, /OutputVolume/);
+  assert.match(response.body, /LFOShape/);
+  assert.match(response.body, /SawLevel/);
+  assert.match(response.body, /FilterMode/);
+  assert.match(response.body, /FilterEnvAttack/);
+  assert.match(response.body, /VCAEnvRelease/);
+  assert.match(response.body, /parameterNodesByAddress/);
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotState/);
@@ -4556,6 +4586,7 @@ test("OSC editors place controls above Block State and live destinations below i
     ["plate", 'id="controls"'],
     ["poland", 'id="controls"'],
     ["softpiano", 'id="panels"'],
+    ["element", 'id="panels"'],
     ["ttid", 'id="editors"']
   ];
   for (const [editor, controlsMarker] of editors) {
@@ -4578,7 +4609,7 @@ test("OSC editors place controls above Block State and live destinations below i
 
 test("instant-write OSC editors expose their intended completion boundaries", async () => {
   const context = createRouteContext();
-  for (const editor of ["analogsequencer", "softpiano", "plate", "poland"]) {
+  for (const editor of ["analogsequencer", "softpiano", "element", "plate", "poland"]) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.match(response.body, /bindRangeCommit/);
     assert.match(response.body, /pointerdown/);
@@ -4731,6 +4762,7 @@ test("shared grouped navigation defines and reaches every hosted user-facing pag
     "/editors/analogsequencer",
     "/editors/listsequencer",
     "/editors/listvelsequencer",
+    "/editors/element",
     "/editors/poland",
     "/editors/plate",
     "/editors/softpiano",

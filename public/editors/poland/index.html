@@ -139,6 +139,7 @@
       --group-accent: #d94645;
     }
 
+    .control-group[data-group="output"],
     .control-group[data-group="oscillator-b"],
     .control-group[data-group="filter"],
     .control-group[data-group="midi"] {
@@ -309,11 +310,11 @@
   <script type="module">
     import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-ttid-revision1";
     const POLAND_GROUPS = [
-      { title: "MIDI", key: "midi", controls: ["TransposePoland"] },
-      { title: "OSC A", key: "oscillator-a", controls: ["VolA", "PitchBiasCoarseA", "PitchBiasFineA", "WavetableA", "WaveBiasA", "WaveModVelA", "WaveModVelRandA", "WaveEnvModDistanceA", "WaveEnvModTimeA"] },
-      { title: "OSC B", key: "oscillator-b", controls: ["VolB", "PitchBiasCoarseB", "PitchBiasFineB", "WavetableB", "WaveBiasB", "WaveModVelB", "WaveModVelRandB", "WaveEnvModDistanceB", "WaveEnvModTimeB"] },
+      { title: "Output", key: "output", controls: ["OutputVolume", "HPFFreq"] },
+      { title: "OSC A", key: "oscillator-a", controls: ["VolA", "PitchBiasCoarseA", "PitchBiasFineA", "WavetableA", "WaveBiasA", "WaveModVelA", "WaveEnvModDistanceA", "WaveEnvModTimeA"] },
+      { title: "OSC B", key: "oscillator-b", controls: ["VolB", "PitchBiasCoarseB", "PitchBiasFineB", "WavetableB", "WaveBiasB", "WaveModVelB", "WaveEnvModDistanceB", "WaveEnvModTimeB"] },
       { title: "Motion", key: "motion", controls: ["VibRate", "VibAmt", "Portamento", "Spread"] },
-      { title: "Filter", key: "filter", controls: ["HPFFreq", "FilterBias", "FilterResonance", "FilterVelocity", "FilterKeyTracking", "FilterEnvAmt", "FilterLFORate", "FilterLFOAmt"] },
+      { title: "Filter", key: "filter", controls: ["FilterBias", "FilterResonance", "FilterVelocity", "FilterKeyTracking", "FilterEnvAmt"] },
       { title: "Filter Env", key: "filter-env", controls: ["FilterAttack", "FilterDecay", "FilterSustain", "FilterRelease"] },
       { title: "VCA Env", key: "vca-env", controls: ["VCAAttack", "VCADecay", "VCASustain", "VCARelease", "VCAVelocity"] }
     ];
@@ -331,20 +332,17 @@
       WaveEnvModTimeB: "Env Time",
       WaveModVelA: "Velocity",
       WaveModVelB: "Velocity",
-      WaveModVelRandA: "Vel Rand",
-      WaveModVelRandB: "Vel Rand",
       WaveBiasA: "Bias",
       WaveBiasB: "Bias",
       WavetableA: "Wave",
       WavetableB: "Wave",
+      OutputVolume: "Volume",
       HPFFreq: "High Pass",
       Portamento: "Glide",
       FilterResonance: "Res",
       FilterVelocity: "Velocity",
       FilterKeyTracking: "Key Track",
       FilterEnvAmt: "Env",
-      FilterLFORate: "LFO Rate",
-      FilterLFOAmt: "LFO Amt",
       FilterAttack: "Attack",
       FilterDecay: "Decay",
       FilterSustain: "Sustain",
@@ -353,8 +351,7 @@
       VCADecay: "Decay",
       VCASustain: "Sustain",
       VCARelease: "Release",
-      VCAVelocity: "Velocity",
-      TransposePoland: "Transpose"
+      VCAVelocity: "Velocity"
     }));
 
     const targetsEl = document.querySelector("#targets");
@@ -442,10 +439,10 @@
       try {
         const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" });
         if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`);
-        const nodes = (await response.json()).CONTENTS || {};
+        const nodes = parameterNodesByAddress(await response.json());
         let populated = 0;
         for (const param of target.parameters || []) {
-          const node = nodes[param.name];
+          const node = nodes.get(param.address);
           if (!node || node.VALUE === undefined || !paramState.has(param.name)) continue;
           paramState.get(param.name).value = scalarValue(node.VALUE);
           populated += 1;
@@ -463,6 +460,17 @@
 
     function scalarValue(value) {
       return Array.isArray(value) ? value[0] : value;
+    }
+
+    function parameterNodesByAddress(root) {
+      const nodes = new Map();
+      const visit = (node) => {
+        if (!node || typeof node !== "object") return;
+        if (node.FULL_PATH && node.VALUE !== undefined) nodes.set(node.FULL_PATH, node);
+        for (const child of Object.values(node.CONTENTS || {})) visit(child);
+      };
+      visit(root);
+      return nodes;
     }
 
     function renderControls() {

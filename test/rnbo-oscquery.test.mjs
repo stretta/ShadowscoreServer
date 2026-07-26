@@ -217,6 +217,77 @@ test("extracts Poland OSC control targets from RNBOOSCQuery params", () => {
   });
 });
 
+test("extracts nested polyphonic instrument parameters with their live OSC paths", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 1234,
+      oscQuery: {
+        enabled: true,
+        url: "http://127.0.0.1:5678/"
+      }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.jack = {
+    CONTENTS: {
+      info: {
+        CONTENTS: {
+          ports: {
+            CONTENTS: {
+              properties: {
+                CONTENTS: {
+                  "Poland-31:out1": {
+                    VALUE: "{\"rnbo-instance-id\":31,\"source\":true,\"type\":\"audio\"}"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  };
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["31"] = {
+    CONTENTS: {
+      params: {
+        CONTENTS: {
+          HPFFreq: rnboParam("/rnbo/inst/31/params/HPFFreq", 0, 0, 137, 0),
+          OutputVolume: rnboParam("/rnbo/inst/31/params/OutputVolume", -6, -70, 0, 1),
+          Poland: {
+            FULL_PATH: "/rnbo/inst/31/params/Poland",
+            CONTENTS: {
+              VolA: rnboParam("/rnbo/inst/31/params/Poland/VolA", -12, -70, 0, 2),
+              FilterKeyTracking: {
+                FULL_PATH: "/rnbo/inst/31/params/Poland/FilterKeyTracking",
+                TYPE: "s",
+                VALUE: "on",
+                RANGE: [{ VALS: ["off", "on"] }],
+                CONTENTS: {
+                  index: { VALUE: 3 },
+                  normalized: { VALUE: 1 }
+                }
+              }
+            }
+          }
+        }
+      },
+      messages: { CONTENTS: { in: { CONTENTS: {} } } }
+    }
+  };
+
+  const target = extractRnboControlTargets(tree, config).find((entry) => entry.instanceId === "31");
+
+  assert.equal(target.app, "poland");
+  assert.deepEqual(target.parameters.map(({ name, address }) => [name, address]), [
+    ["HPFFreq", "/rnbo/inst/31/params/HPFFreq"],
+    ["OutputVolume", "/rnbo/inst/31/params/OutputVolume"],
+    ["VolA", "/rnbo/inst/31/params/Poland/VolA"],
+    ["FilterKeyTracking", "/rnbo/inst/31/params/Poland/FilterKeyTracking"]
+  ]);
+  assert.deepEqual(target.parameters[3].values, ["off", "on"]);
+});
+
 test("extracts Plate OSC control targets from RNBOOSCQuery instance names", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

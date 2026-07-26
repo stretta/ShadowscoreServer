@@ -1,0 +1,360 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Element Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <script type="module" src="/shared/shadowscore-nav.js"></script>
+  <style>
+    body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, rgba(167,139,250,.09), transparent 220px), var(--ss-bg); }
+    main { display: grid; grid-template-rows: auto 1fr auto auto; min-height: 100vh; }
+    header, .actions, .target-card { align-items: center; display: flex; }
+    header { gap: 16px; justify-content: space-between; min-height: 56px; padding: 10px 18px; }
+    h1 { font-size: 18px; margin: 0; }
+    .subtitle, .status, .target-detail, output { color: var(--ss-muted); font-size: 12px; font-weight: 700; }
+    .subtitle { margin: 4px 0 0; }
+    .actions { gap: 10px; }
+    .status { max-width: 420px; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+    .targets { display: flex; gap: 8px; min-height: 58px; overflow-x: auto; padding: 8px 18px 10px; }
+    .target-card { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); cursor: pointer; flex: 0 0 210px; gap: 9px; padding: 10px; }
+    .target-copy { min-width: 0; }
+    .target-name, .target-detail { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .target-name { color: var(--ss-text); font-weight: 800; }
+    #panels { align-items: stretch; display: flex; flex-wrap: wrap; gap: 9px; min-height: 0; overflow: auto; padding: 14px 18px 20px; }
+    .panel { --group-accent: #a78bfa; background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); box-shadow: inset 0 1px 0 rgba(255,255,255,.06); display: flex; flex: 0 0 auto; flex-direction: column; gap: 6px; padding: 28px 7px 8px; position: relative; }
+    .panel::before { background: var(--group-accent); border-radius: calc(var(--ss-radius-ui) - 1px) calc(var(--ss-radius-ui) - 1px) 0 0; content: ""; height: 22px; inset: 0 0 auto; position: absolute; }
+    .panel[data-group="output"], .panel[data-group="filter"] { --group-accent: #0284a8; }
+    .panel[data-group="lfo"] { --group-accent: #6d63c4; }
+    .panel[data-group="oscillator"] { --group-accent: #d94645; }
+    .panel[data-group="filter-env"] { --group-accent: #d97706; }
+    .panel[data-group="vca-env"] { --group-accent: #0f9f8e; }
+    .panel h2 { align-items: center; color: #fff; display: flex; font-size: 11px; font-weight: 800; height: 22px; inset: 0 0 auto; justify-content: center; letter-spacing: .08em; line-height: 1; margin: 0; position: absolute; text-align: center; text-shadow: 0 1px 0 rgba(0,0,0,.22); text-transform: uppercase; z-index: 1; }
+    .controls { align-items: flex-end; display: flex; gap: 5px; justify-content: center; min-height: 158px; min-width: max-content; }
+    .control { align-items: center; display: flex; flex-direction: column; gap: 4px; min-width: 48px; }
+    .control-label { color: var(--ss-text); font-size: 10px; font-weight: 800; line-height: 1.1; max-width: 58px; min-height: 22px; overflow-wrap: anywhere; text-align: center; text-transform: uppercase; }
+    .control-readout { color: var(--ss-muted); font-size: 11px; font-variant-numeric: tabular-nums; min-height: 14px; text-align: center; }
+    .vertical-slider { accent-color: var(--group-accent); appearance: auto; direction: rtl; height: 114px; margin: 0; width: 20px; writing-mode: vertical-lr; }
+    .choice-options { align-content: center; display: grid; gap: 4px; min-height: 114px; width: 54px; }
+    .choice-option { align-items: center; background: var(--ss-surface); border: 1px solid var(--ss-border-strong); border-radius: var(--ss-radius-control); color: var(--ss-text); display: flex; font-size: 11px; font-weight: 800; height: 24px; justify-content: center; padding: 0 5px; }
+    .choice-option[data-active="true"] { background: color-mix(in srgb, var(--group-accent) 28%, var(--ss-surface)); border-color: var(--group-accent); }
+    output { font-variant-numeric: tabular-nums; }
+    .empty { color: var(--ss-muted); padding: 28px 4px; }
+    @media (max-width: 700px) { header { align-items: flex-start; flex-direction: column; } .actions { align-items: flex-start; flex-wrap: wrap; } .status { max-width: none; text-align: left; white-space: normal; } #panels { padding-inline: 12px; } }
+  </style>
+</head>
+<body>
+  <nav class="ss-route-tabs" aria-label="ShadowScore navigation" data-shadow-nav>
+    <a href="/piano-roll">ShadowScore</a><a href="/structure-editor">Arrange</a>
+    <a href="/editors" aria-current="page">OSC</a><a href="/">Setup</a>
+  </nav>
+  <main>
+    <header>
+      <div><h1>Element Editor</h1><p class="subtitle">Oscillator, filter, LFO, and envelope controls</p></div>
+      <div class="actions">
+        <label for="read-source">Instance focus</label>
+        <select id="read-source" aria-label="Instance focus"></select>
+        <button id="get-data" type="button">Read Instance</button>
+        <button id="refresh" type="button">Refresh</button>
+        <span id="status" class="status" role="status"></span>
+      </div>
+    </header>
+    <div id="panels"></div>
+    <div id="snapshot-mount"></div>
+    <section class="ss-osc-live-target-panel">
+      <div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div>
+      <div id="targets" class="targets" aria-label="Element targets"></div>
+    </section>
+  </main>
+  <script type="module">
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-ttid-revision1";
+
+    const ELEMENT_GROUPS = [
+      { title: "Output", key: "output", controls: ["OutputVolume", "HPFFreq"] },
+      { title: "LFO", key: "lfo", controls: ["LFOShape", "LFORate", "PitchLFOAmt", "PWLFOAmt", "FilterLFOAmt"] },
+      { title: "Oscillator", key: "oscillator", controls: ["SawLevel", "PulseLevel", "PW", "SubLevel", "NoiseLevel", "Drift", "Spread"] },
+      { title: "Filter", key: "filter", controls: ["FilterMode", "FilterOffset", "Resonance", "FilterEnvAmt"] },
+      { title: "Filter Env", key: "filter-env", controls: ["FilterEnvAttack", "FilterEnvDecay", "FilterEnvSustain", "FilterEnvRelease"] },
+      { title: "VCA Env", key: "vca-env", controls: ["VCAEnvAttack", "VCAEnvDecay", "VCAEnvSustain", "VCAEnvRelease"] }
+    ];
+    const LABELS = {
+      OutputVolume: "Volume", HPFFreq: "High Pass", LFOShape: "Shape", LFORate: "Rate",
+      PitchLFOAmt: "Vibrato", PWLFOAmt: "PWM", FilterLFOAmt: "Filter",
+      SawLevel: "Saw", PulseLevel: "Pulse", PW: "Pulse Width", SubLevel: "Sub",
+      NoiseLevel: "Noise", FilterMode: "Mode", FilterOffset: "Cutoff",
+      Resonance: "Resonance", FilterEnvAmt: "Envelope"
+    };
+
+    const targetsEl = document.querySelector("#targets");
+    const panelsEl = document.querySelector("#panels");
+    const statusEl = document.querySelector("#status");
+    const refreshButton = document.querySelector("#refresh");
+    const readSourceSelect = document.querySelector("#read-source");
+    const getDataButton = document.querySelector("#get-data");
+    let targets = [];
+    let params = new Map();
+    const pending = new Map();
+    let snapshotClient;
+
+    refreshButton.addEventListener("click", () => refresh().catch(reportError));
+    getDataButton.addEventListener("click", () => getData().catch(reportError));
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
+    snapshotClient = createOscSnapshotEditorClient({ app: "element", roleLabel: "Element", elements: snapshotElements, serializeState: serializeSnapshotState, displayState: displaySavedState, onFocusChange: getData, liveTargetRoot: targetsEl, setStatus });
+    Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
+
+    async function refresh() {
+      refreshButton.disabled = true;
+      try {
+        const response = await fetch("/osc/targets?app=element&status=online", { cache: "no-store" });
+        const body = await response.json();
+        if (!response.ok || body.ok === false) throw new Error(body.error || `Request failed: ${response.status}`);
+        targets = body.targets || [];
+        params = mergeParams(targets);
+        renderTargets();
+        renderReadSources();
+        renderPanels();
+        setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online Element targets");
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+
+    function mergeParams(nextTargets) {
+      const next = new Map();
+      for (const target of nextTargets) for (const param of target.parameters || []) if (!next.has(param.name)) next.set(param.name, { ...param });
+      for (const [name, old] of params) if (next.has(name)) next.get(name).value = old.value;
+      return next;
+    }
+
+    function renderTargets() {
+      const selected = new Set([...targetsEl.querySelectorAll("[data-target]:checked")].map((input) => input.dataset.target));
+      const focusedId = readSourceSelect.value || targets[0]?.id || "";
+      const preserveSelection = targets.some((target) => selected.has(target.id));
+      targetsEl.replaceChildren(...targets.map((target) => {
+        const card = document.createElement("label");
+        card.className = "target-card";
+        card.innerHTML = `<input type="checkbox" data-target="${escapeHtml(target.id)}"><span class="target-copy"><span class="target-name">${escapeHtml(target.label || target.id)}</span><span class="target-detail">${escapeHtml(target.unitId || target.baseAddress || "")}</span></span>`;
+        card.querySelector("input").checked = preserveSelection ? selected.has(target.id) : target.id === focusedId;
+        return card;
+      }));
+    }
+
+    function renderReadSources() {
+      const previous = readSourceSelect.value;
+      readSourceSelect.replaceChildren(...targets.map((target) => {
+        const option = document.createElement("option");
+        option.value = target.id;
+        option.textContent = target.label || target.id;
+        return option;
+      }));
+      readSourceSelect.value = targets.some((target) => target.id === previous) ? previous : (targets[0]?.id || "");
+      readSourceSelect.disabled = targets.length === 0;
+      getDataButton.disabled = targets.length === 0;
+    }
+
+    async function getData() {
+      const target = targets.find((entry) => entry.id === readSourceSelect.value);
+      if (!target) return setStatus("Choose an instance to get data from");
+      getDataButton.disabled = true;
+      setStatus(`Getting data from ${target.label || target.id}...`);
+      try {
+        const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`);
+        const nodes = parameterNodesByAddress(await response.json());
+        let populated = 0;
+        for (const param of target.parameters || []) {
+          const node = nodes.get(param.address);
+          if (!node || node.VALUE === undefined || !params.has(param.name)) continue;
+          params.get(param.name).value = scalarValue(node.VALUE);
+          populated += 1;
+        }
+        renderPanels();
+        setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
+      } finally {
+        getDataButton.disabled = targets.length === 0;
+      }
+    }
+
+    function parameterNodesByAddress(root) {
+      const nodes = new Map();
+      const visit = (node) => {
+        if (!node || typeof node !== "object") return;
+        if (node.FULL_PATH && node.VALUE !== undefined) nodes.set(node.FULL_PATH, node);
+        for (const child of Object.values(node.CONTENTS || {})) visit(child);
+      };
+      visit(root);
+      return nodes;
+    }
+
+    function renderPanels() {
+      const known = new Set(ELEMENT_GROUPS.flatMap((group) => group.controls));
+      const groups = ELEMENT_GROUPS.map((group) => ({ ...group, params: group.controls.map((name) => params.get(name)).filter(Boolean) }));
+      const other = [...params.values()].filter((param) => !known.has(param.name)).sort(byIndex);
+      if (other.length) groups.push({ title: "Other", params: other });
+      const nodes = groups.filter((group) => group.params.length).map(renderGroup);
+      panelsEl.replaceChildren(...nodes);
+      if (!nodes.length) {
+        const empty = document.createElement("div");
+        empty.className = "empty";
+        empty.textContent = targets.length ? "No Element parameters reported." : "No online Element targets.";
+        panelsEl.append(empty);
+      }
+    }
+
+    function renderGroup(group) {
+      const section = document.createElement("section");
+      section.className = "panel";
+      section.dataset.group = group.key || "other";
+      const title = document.createElement("h2");
+      title.textContent = group.title;
+      const controls = document.createElement("div");
+      controls.className = "controls";
+      controls.replaceChildren(...group.params.map(renderControl));
+      section.replaceChildren(title, controls);
+      return section;
+    }
+
+    function renderControl(param) {
+      if (Array.isArray(param.values) && param.values.length) return renderChoice(param);
+      const min = finite(param.min, 0);
+      const max = finite(param.max, 1);
+      const value = clamp(finite(param.value, min), min, max);
+      const curved = shouldCurve(param, min, max);
+      const wrap = document.createElement("div");
+      wrap.className = "control";
+      const label = document.createElement("label");
+      label.className = "control-label";
+      label.htmlFor = `param-${cssSafe(param.name)}`;
+      label.textContent = labelFor(param);
+      const output = document.createElement("output");
+      output.className = "control-readout";
+      output.textContent = format(value, param.unit);
+      const input = document.createElement("input");
+      input.className = "vertical-slider";
+      input.id = label.htmlFor;
+      input.type = "range";
+      input.min = curved ? 0 : min;
+      input.max = curved ? 1 : max;
+      input.step = curved ? .001 : stepFor(param, min, max);
+      input.value = curved ? valueToSliderPosition(param, value, min, max) : value;
+      input.addEventListener("input", () => {
+        const next = sliderValue(param, input, min, max, curved);
+        param.value = next;
+        output.textContent = format(next, param.unit);
+        scheduleSend(param.name, next);
+      });
+      bindRangeCommit(input, () => flushSend(param.name, sliderValue(param, input, min, max, curved)));
+      wrap.replaceChildren(label, input, output);
+      return wrap;
+    }
+
+    function renderChoice(param) {
+      const wrap = document.createElement("div");
+      wrap.className = "control";
+      const label = document.createElement("label");
+      label.className = "control-label";
+      label.textContent = labelFor(param);
+      const output = document.createElement("output");
+      output.className = "control-readout";
+      output.textContent = String(param.value ?? param.values[0]);
+      const options = document.createElement("div");
+      options.className = "choice-options";
+      options.setAttribute("role", "radiogroup");
+      options.setAttribute("aria-label", label.textContent);
+      for (const value of param.values) {
+        const button = document.createElement("button");
+        button.className = "choice-option";
+        button.type = "button";
+        button.textContent = splitCamel(value);
+        button.dataset.value = String(value);
+        button.dataset.active = String(String(value) === String(param.value));
+        button.addEventListener("click", () => {
+          param.value = value;
+          output.textContent = String(value);
+          for (const option of options.querySelectorAll(".choice-option")) option.dataset.active = String(option === button);
+          sendParam(param.name, value).catch(reportError);
+          snapshotClient?.commitEdit();
+        });
+        options.append(button);
+      }
+      wrap.replaceChildren(label, options, output);
+      return wrap;
+    }
+
+    function scheduleSend(name, value) {
+      if (pending.has(name)) clearTimeout(pending.get(name));
+      pending.set(name, setTimeout(() => {
+        pending.delete(name);
+        sendParam(name, value).catch(reportError);
+      }, 90));
+    }
+
+    function flushSend(name, value) {
+      if (pending.has(name)) clearTimeout(pending.get(name));
+      pending.delete(name);
+      sendParam(name, value).catch(reportError);
+    }
+
+    async function sendParam(param, value) {
+      const selected = [...document.querySelectorAll("[data-target]:checked")].map((input) => input.dataset.target).filter(Boolean);
+      if (!selected.length) return setStatus("No targets selected");
+      if (params.has(param)) params.get(param).value = value;
+      const response = await fetch("/osc/send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targets: selected, param, args: [value] })
+      });
+      const body = await response.json().catch(() => ({}));
+      const sent = (body.results || []).filter((result) => result.ok).length;
+      setStatus(response.ok && body.ok !== false ? `Sent ${labelFor({ name: param })} to ${sent}/${selected.length}` : `Failed ${labelFor({ name: param })} (${sent}/${selected.length})`);
+    }
+
+    function bindRangeCommit(input, flushLive) {
+      let gesture = null;
+      input.addEventListener("pointerdown", () => { gesture = snapshotClient?.beginGesture() ?? null; });
+      input.addEventListener("pointerup", () => {
+        const completed = gesture;
+        if (completed) snapshotClient?.commitGesture(completed);
+        queueMicrotask(() => { if (gesture === completed) gesture = null; });
+      });
+      input.addEventListener("pointercancel", () => {
+        if (gesture) snapshotClient?.cancelGesture(gesture);
+        gesture = null;
+      });
+      input.addEventListener("change", () => {
+        flushLive();
+        if (gesture) snapshotClient?.commitGesture(gesture);
+        else snapshotClient?.commitEdit();
+        gesture = null;
+      });
+    }
+
+    function serializeSnapshotState() {
+      return createOscEditorSnapshot({ app: "element", paramEntries: Array.from(params, ([name, param]) => ({ name, value: param.value, values: param.values })) });
+    }
+
+    function displaySavedState(snapshot) {
+      for (const [name, value] of Object.entries(snapshot.params ?? {})) if (params.has(name)) params.get(name).value = oscEditorParamValue(params.get(name), value);
+      renderPanels();
+    }
+
+    function oscQueryHost(target) { return !target.host || ["127.0.0.1", "localhost", "::1"].includes(target.host) ? location.hostname : target.host; }
+    function scalarValue(value) { return Array.isArray(value) ? value[0] : value; }
+    function byIndex(a, b) { return (a.index ?? 9999) - (b.index ?? 9999); }
+    function labelFor(param) { return LABELS[param.name] || param.meta?.label || splitCamel(param.displayName || param.name); }
+    function stepFor(param, min, max) { const step = finite(param.meta?.edit_step, NaN); if (step > 0) return step; const range = Math.abs(max - min); return range > 64 ? 1 : range > 8 ? .1 : .01; }
+    function shouldCurve(param, min, max) { const name = String(param.name || ""); const unit = String(param.unit || param.meta?.unit || "").toLowerCase(); return /(?:attack|decay|release|env.*time)/i.test(name) || (unit === "ms" && Math.abs(max - min) >= 1000); }
+    function curveExponent(param) { return /release/i.test(String(param.name || "")) ? 5 : 3; }
+    function valueToSliderPosition(param, value, min, max) { return Math.pow(clamp((finite(value, min) - min) / (max - min), 0, 1), 1 / curveExponent(param)); }
+    function sliderValue(param, input, min, max, curved) { if (!curved) return Number(input.value); const value = min + ((max - min) * Math.pow(clamp(Number(input.value), 0, 1), curveExponent(param))); const step = stepFor(param, min, max); return clamp(min + (Math.round((value - min) / step) * step), min, max); }
+    function format(value, unit) { const number = Number(value); const text = Number.isInteger(number) ? String(number) : number.toFixed(Math.abs(number) >= 10 ? 1 : 2).replace(/\.?0+$/, ""); return `${text}${unit ? ` ${unit}` : ""}`; }
+    function finite(value, fallback) { const number = Number(value); return Number.isFinite(number) ? number : fallback; }
+    function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+    function splitCamel(value) { return String(value || "").replace(/([a-z0-9])([A-Z])/g, "$1 $2"); }
+    function cssSafe(value) { return String(value).replace(/[^a-zA-Z0-9_-]/g, "-"); }
+    function setStatus(message) { statusEl.textContent = message; }
+    function reportError(error) { refreshButton.disabled = false; setStatus(error.message || "Element editor failed"); }
+    function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+  </script>
+</body>
+</html>

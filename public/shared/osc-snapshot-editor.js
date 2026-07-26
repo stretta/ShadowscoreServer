@@ -1,5 +1,47 @@
 const MOMENTARY_INPUT_PORTS = new Set(["get", "panic", "probe", "reset", "rtz", "setstage"]);
 
+export async function readOscQueryParameterValues(target, options = {}) {
+  if (!target?.baseAddress) throw new Error("OSCQuery parameter read requires a target base address");
+  const fetchImpl = options.fetchImpl ?? globalThis.fetch;
+  if (typeof fetchImpl !== "function") throw new Error("OSCQuery parameter read requires fetch");
+  const protocol = options.protocol ?? globalThis.location?.protocol ?? "http:";
+  const locationHostname = options.hostname ?? globalThis.location?.hostname ?? "";
+  const host = isLoopbackHost(target.host) && locationHostname ? locationHostname : target.host;
+  const baseUrl = String(target.oscQueryUrl || `${protocol}//${host}:5678`).replace(/\/$/, "");
+  const paramsPath = `${target.baseAddress}/params`;
+  const response = await fetchImpl(`${baseUrl}/${paramsPath.replace(/^\//, "")}`, { cache: "no-store" });
+  if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`);
+  const body = await response.json();
+  const nodesByAddress = new Map();
+  indexOscQueryParameterNodes(body?.CONTENTS, paramsPath, nodesByAddress);
+  return new Map((target.parameters ?? []).flatMap((param) => {
+    const node = nodesByAddress.get(normalizeOscAddress(param.address));
+    const value = scalarOscQueryValue(node?.VALUE);
+    return value === undefined ? [] : [[param.name, value]];
+  }));
+}
+
+function indexOscQueryParameterNodes(contents, parentPath, result) {
+  for (const [name, node] of Object.entries(contents ?? {})) {
+    const address = normalizeOscAddress(node?.FULL_PATH || `${parentPath}/${name}`);
+    if (node?.VALUE !== undefined) result.set(address, node);
+    indexOscQueryParameterNodes(node?.CONTENTS, address, result);
+  }
+}
+
+function normalizeOscAddress(value) {
+  const address = String(value ?? "").replace(/\/+/g, "/");
+  return address && !address.startsWith("/") ? `/${address}` : address;
+}
+
+function scalarOscQueryValue(value) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function isLoopbackHost(host) {
+  return !host || host === "127.0.0.1" || host === "localhost" || host === "::1";
+}
+
 export function mountOscSnapshotPanel(parent, options = {}) {
   if (!parent) throw new Error("OSC snapshot panel requires a parent element");
   const section = document.createElement("section");
@@ -1028,8 +1070,8 @@ export function oscRecallSummary(result) {
 export function oscClockRecallNotice(snapshot) {
   if (!Object.hasOwn(snapshot?.params ?? {}, "Clock")) return "";
   return Number(snapshot.params.Clock) === 0
-    ? "Clock 0 suspends immediately"
-    : "Clock 1 arms for the next observed shared beat";
+    ? "Clock Off suspends immediately"
+    : "Clock On arms for the next observed shared beat";
 }
 
 export function oscClipCaptureSummary(clip) {

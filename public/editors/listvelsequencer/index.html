@@ -89,7 +89,7 @@
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-ttid-revision1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, readOscQueryParameterValues } from "/shared/osc-snapshot-editor.js?v=20260726-unified-clock1";
 
     const ROW_COUNT = 8;
     const GET_REQUEST = [-999];
@@ -413,15 +413,12 @@
       const target = targets.find((entry) => entry.id === readSourceSelect.value);
       if (!target) throw new Error("Choose an instance to get data from");
       setStatus(`Getting parameters and OSC rows from ${target.label || target.id}...`);
-      const paramsResponse = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" });
-        if (!paramsResponse.ok) throw new Error(`OSCQuery parameter read failed (${paramsResponse.status})`);
-        const nodes = (await paramsResponse.json()).CONTENTS || {};
+        const values = await readOscQueryParameterValues(target);
         let populatedParams = 0;
         target.parameters = (target.parameters || []).map((param) => {
-          const node = nodes[param.name];
-          if (!node || node.VALUE === undefined) return param;
+          if (!values.has(param.name)) return param;
           populatedParams += 1;
-          const value = scalarValue(node.VALUE);
+          const value = values.get(param.name);
           parameterState.set(param.name, value);
           return { ...param, value };
         });

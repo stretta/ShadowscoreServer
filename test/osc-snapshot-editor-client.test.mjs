@@ -11,6 +11,7 @@ import {
   oscEditorParamValue,
   oscPlaybackWiperVisible,
   oscRecallSummary,
+  readOscQueryParameterValues,
   resolveFocusedOscRole,
   selectExclusiveOscTarget,
   sameOscSnapshot
@@ -97,9 +98,52 @@ test("shared OSC editor snapshot comparison is semantic and order-independent", 
 });
 
 test("shared OSC editor recall notice follows the saved Clock contract", () => {
-  assert.equal(oscClockRecallNotice({ params: { Clock: 0 } }), "Clock 0 suspends immediately");
-  assert.equal(oscClockRecallNotice({ params: { Clock: 1 } }), "Clock 1 arms for the next observed shared beat");
+  assert.equal(oscClockRecallNotice({ params: { Clock: 0 } }), "Clock Off suspends immediately");
+  assert.equal(oscClockRecallNotice({ params: { Clock: 1 } }), "Clock On arms for the next observed shared beat");
   assert.equal(oscClockRecallNotice({ params: { Tempo: 120 } }), "");
+});
+
+test("shared OSC editor reads unified nested Clock parameters by reported address", async () => {
+  const target = {
+    host: "127.0.0.1",
+    baseAddress: "/rnbo/inst/3",
+    parameters: [
+      { name: "Clock", address: "/rnbo/inst/3/params/Clock/Clock" },
+      { name: "Swing", address: "/rnbo/inst/3/params/Clock/Swing" },
+      { name: "ClockInterval", address: "/rnbo/inst/3/params/Clock/ClockInterval" },
+      { name: "SwingAmt", address: "/rnbo/inst/3/params/Clock/SwingAmt" }
+    ]
+  };
+  const values = await readOscQueryParameterValues(target, {
+    protocol: "http:",
+    hostname: "wren.local",
+    fetchImpl: async (url) => {
+      assert.equal(url, "http://wren.local:5678/rnbo/inst/3/params");
+      return {
+        ok: true,
+        async json() {
+          return {
+            CONTENTS: {
+              Clock: {
+                CONTENTS: {
+                  Clock: { FULL_PATH: "/rnbo/inst/3/params/Clock/Clock", VALUE: "On" },
+                  Swing: { FULL_PATH: "/rnbo/inst/3/params/Clock/Swing", VALUE: "Off" },
+                  ClockInterval: { FULL_PATH: "/rnbo/inst/3/params/Clock/ClockInterval", VALUE: 240 },
+                  SwingAmt: { FULL_PATH: "/rnbo/inst/3/params/Clock/SwingAmt", VALUE: 0.625 }
+                }
+              }
+            }
+          };
+        }
+      };
+    }
+  });
+  assert.deepEqual(Object.fromEntries(values), {
+    Clock: "On",
+    Swing: "Off",
+    ClockInterval: 240,
+    SwingAmt: 0.625
+  });
 });
 
 test("focused live instances resolve their score role without exposing role selection", () => {

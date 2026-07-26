@@ -84,6 +84,38 @@ test("capture supports parameter-only AnalogSequencer and ListVel row ACK naming
   assert.equal(sends[0].address, "/rnbo/inst/7/messages/in/4ow");
 });
 
+test("capture follows unified nested Clock addresses and stores enum indexes", async () => {
+  const captured = await captureOscTarget({
+    ...target(),
+    parameters: [
+      { name: "Clock", address: "/rnbo/inst/2/params/Clock/Clock", type: "s", values: ["Off", "On"] },
+      { name: "Swing", address: "/rnbo/inst/2/params/Clock/Swing", type: "s", values: ["Off", "On"] },
+      { name: "ClockInterval", address: "/rnbo/inst/2/params/Clock/ClockInterval" },
+      { name: "SwingAmt", address: "/rnbo/inst/2/params/Clock/SwingAmt" }
+    ],
+    inputPorts: []
+  }, {
+    fetchImpl: async () => response({
+      CONTENTS: {
+        Clock: {
+          CONTENTS: {
+            Clock: { FULL_PATH: "/rnbo/inst/2/params/Clock/Clock", VALUE: "On" },
+            Swing: { FULL_PATH: "/rnbo/inst/2/params/Clock/Swing", VALUE: "Off" },
+            ClockInterval: { FULL_PATH: "/rnbo/inst/2/params/Clock/ClockInterval", VALUE: 240 },
+            SwingAmt: { FULL_PATH: "/rnbo/inst/2/params/Clock/SwingAmt", VALUE: 0.75 }
+          }
+        }
+      }
+    })
+  });
+  assert.deepEqual(captured.clip.params, {
+    Clock: 1,
+    Swing: 0,
+    ClockInterval: 240,
+    SwingAmt: 0.75
+  });
+});
+
 function target() {
   return {
     id: "heron:listsequencer:main",

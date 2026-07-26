@@ -42,19 +42,27 @@ export async function captureOscTarget(target, options = {}) {
 
 async function captureParameters(target, fetchImpl, diagnostics, options) {
   const body = await fetchJson(oscQueryUrl(target, `${target.baseAddress}/params`), fetchImpl, options.timeoutMs);
-  const nodes = body?.CONTENTS ?? {};
+  const nodesByAddress = new Map();
+  indexParameterNodes(body?.CONTENTS, `${target.baseAddress}/params`, nodesByAddress);
   const params = {};
   for (const param of target.parameters ?? []) {
     const disposition = snapshotControlDisposition({ kind: "param", name: param.name, meta: param.meta });
     if (disposition.state === "excluded") continue;
-    const liveName = addressTail(param.address) || param.name;
-    const node = nodes[param.name] ?? nodes[liveName];
+    const node = nodesByAddress.get(normalizeAddress(param.address));
     const value = scalar(node?.VALUE ?? param.value);
     const normalized = normalizeParamValue(param, value);
     if (normalized.ok) params[param.name] = normalized.value;
     else diagnostics.push({ severity: "error", kind: "param", name: param.name, reason: normalized.reason });
   }
   return params;
+}
+
+function indexParameterNodes(contents, parentPath, result) {
+  for (const [name, node] of Object.entries(contents ?? {})) {
+    const address = normalizeAddress(node?.FULL_PATH || `${parentPath}/${name}`);
+    if (node?.VALUE !== undefined) result.set(address, node);
+    indexParameterNodes(node?.CONTENTS, address, result);
+  }
 }
 
 async function captureInputPorts(target, fetchImpl, diagnostics, options) {
@@ -123,6 +131,11 @@ function numericList(value) {
 
 function addressTail(address) {
   return decodeURIComponent(String(address || "").split("/").filter(Boolean).at(-1) || "");
+}
+
+function normalizeAddress(value) {
+  const address = String(value ?? "").replace(/\/+/g, "/");
+  return address && !address.startsWith("/") ? `/${address}` : address;
 }
 
 function delay(ms) {

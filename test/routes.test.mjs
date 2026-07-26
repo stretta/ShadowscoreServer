@@ -4443,14 +4443,14 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /messages\/out\/\$\{encodeURIComponent\(inputPortName\)\}Ack/);
   assert.match(response.body, /formatAckValue/);
   assert.match(response.body, /hydrateParameters/);
-  assert.match(response.body, /OSCQuery parameter read failed/);
+  assert.match(response.body, /readOscQueryParameterValues/);
   assert.match(response.body, /id="snapshot-mount"/);
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.doesNotMatch(response.body, /Write snapshot to|Save Snapshot/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
   assert.match(response.body, /snapshotClient\?\.syncScore\(body\.score\)/);
-  assert.match(response.body, /20260724-ttid-revision1/);
+  assert.match(response.body, /20260726-unified-clock1/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -4483,12 +4483,12 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /refresh\(\{ hydrate: true \}\)/);
   assert.match(response.body, /if \(hydrate && targets\.length\) await getData\(\)/);
   assert.match(response.body, /readOnBlockChange: true/);
-  assert.match(response.body, /OSCQuery parameter read failed/);
+  assert.match(response.body, /readOscQueryParameterValues/);
   assert.match(response.body, /mountOscSnapshotPanel/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotState/);
   assert.match(response.body, /displaySavedState/);
-  assert.match(response.body, /20260724-ttid-revision1/);
+  assert.match(response.body, /20260726-unified-clock1/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -4528,6 +4528,8 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /Clock Selected On/);
   assert.match(response.body, /inputPort: "rtz"/);
   assert.match(response.body, /setAllClocks/);
+  assert.match(response.body, /setAllClocks\("Off"\)/);
+  assert.match(response.body, /setAllClocks\("On"\)/);
   assert.match(response.body, /Quantizer TTID/);
   assert.match(response.body, /id="ttid-keys"/);
   assert.match(response.body, /\/harmonic\/scales/);
@@ -4560,7 +4562,7 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /selectedTargetIds/);
   assert.match(response.body, /readSourceId/);
   assert.match(response.body, /hydrateReadSource/);
-  assert.match(response.body, /\/params/);
+  assert.match(response.body, /readOscQueryParameterValues/);
   assert.match(response.body, /isToggleParam/);
   assert.match(response.body, /parameter-toggle/);
   assert.match(response.body, /id="snapshot-mount"/);
@@ -4575,7 +4577,7 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /commitGesture/);
   assert.match(response.body, /commitEdit/);
   assert.doesNotMatch(response.body, /draftChanged/);
-  assert.match(response.body, /20260724-ttid-revision1/);
+  assert.match(response.body, /20260726-unified-clock1/);
   assert.match(response.body, /dataset\.snapshotValue/);
   assert.match(response.body, /id="rtz-before-play"/);
   assert.match(response.body, /On block change, send RTZ before play/);
@@ -4597,7 +4599,7 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /20260724-ttid-revision1/,
+    assert.match(response.body, /202607(?:24-ttid-revision1|26-unified-clock1)/,
       `${editor} should load the instant-write snapshot client contract`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');

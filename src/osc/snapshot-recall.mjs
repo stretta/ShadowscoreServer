@@ -22,7 +22,8 @@ export function compileOscSnapshot(snapshot, target, context = {}) {
       kind: "param",
       name,
       args: [value],
-      liveControl: (target.parameters ?? []).find((entry) => entry.name === name),
+      liveControl: (target.parameters ?? []).find((entry) => (entry.key ?? entry.name) === name)
+        ?? (target.parameters ?? []).find((entry) => entry.name === name),
       writesByGroup,
       missingControls,
       excludedControls,

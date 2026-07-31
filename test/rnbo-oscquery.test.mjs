@@ -205,6 +205,7 @@ test("extracts Poland OSC control targets from RNBOOSCQuery params", () => {
   assert.equal(targets[0].parameters.length, 4);
   assert.deepEqual(targets[0].parameters[0], {
     name: "VolA",
+    path: "VolA",
     address: "/rnbo/inst/2/params/VolA",
     type: "f",
     value: 0.5,
@@ -286,6 +287,59 @@ test("extracts nested polyphonic instrument parameters with their live OSC paths
     ["FilterKeyTracking", "/rnbo/inst/31/params/Poland/FilterKeyTracking"]
   ]);
   assert.deepEqual(target.parameters[3].values, ["off", "on"]);
+});
+
+test("assigns unique nested keys when an instrument repeats parameter leaf names", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 1234,
+      oscQuery: { enabled: true, url: "http://127.0.0.1:5678/" }
+    }
+  });
+  const tree = createOscQueryTree();
+  tree.CONTENTS.rnbo.CONTENTS.jack = {
+    CONTENTS: { info: { CONTENTS: { ports: { CONTENTS: { properties: { CONTENTS: {
+      "Subtractive-I-9:out1": { VALUE: "{\"rnbo-instance-id\":9,\"source\":true,\"type\":\"audio\"}" }
+    } } } } } } }
+  };
+  tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["9"] = {
+    CONTENTS: {
+      params: {
+        CONTENTS: {
+          "Subtractive-I": {
+            CONTENTS: {
+              VibratoRate: rnboParam("/rnbo/inst/9/params/Subtractive-I/VibratoRate", 5, 0, 10, 1),
+              OscA: { CONTENTS: {
+                Wave: rnboParam("/rnbo/inst/9/params/Subtractive-I/OscA/Wave", 0, 0, 4, 2)
+              } },
+              OscB: { CONTENTS: {
+                Wave: rnboParam("/rnbo/inst/9/params/Subtractive-I/OscB/Wave", 1, 0, 4, 3)
+              } },
+              FilterEnv: { CONTENTS: {
+                Attack: rnboParam("/rnbo/inst/9/params/Subtractive-I/FilterEnv/Attack", 2, 0, 5000, 4)
+              } },
+              AmpEnv: { CONTENTS: {
+                Attack: rnboParam("/rnbo/inst/9/params/Subtractive-I/AmpEnv/Attack", 5, 0, 5000, 5)
+              } }
+            }
+          }
+        }
+      },
+      messages: { CONTENTS: { in: { CONTENTS: {} } } }
+    }
+  };
+
+  const target = extractRnboControlTargets(tree, config).find((entry) => entry.instanceId === "9");
+
+  assert.equal(target.app, "subtractive-i");
+  assert.deepEqual(target.parameters.map(({ name, path, key }) => [name, path, key]), [
+    ["VibratoRate", "Subtractive-I/VibratoRate", undefined],
+    ["Wave", "Subtractive-I/OscA/Wave", "OscA/Wave"],
+    ["Wave", "Subtractive-I/OscB/Wave", "OscB/Wave"],
+    ["Attack", "Subtractive-I/FilterEnv/Attack", "FilterEnv/Attack"],
+    ["Attack", "Subtractive-I/AmpEnv/Attack", "AmpEnv/Attack"]
+  ]);
 });
 
 test("extracts Plate OSC control targets from RNBOOSCQuery instance names", () => {

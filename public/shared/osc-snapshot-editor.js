@@ -17,7 +17,7 @@ export async function readOscQueryParameterValues(target, options = {}) {
   return new Map((target.parameters ?? []).flatMap((param) => {
     const node = nodesByAddress.get(normalizeOscAddress(param.address));
     const value = scalarOscQueryValue(node?.VALUE);
-    return value === undefined ? [] : [[param.name, value]];
+    return value === undefined ? [] : [[param.key ?? param.name, value]];
   }));
 }
 

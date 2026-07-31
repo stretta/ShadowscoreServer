@@ -258,17 +258,19 @@ function controlTargetForInstance(instanceId, node, name, config) {
 
 function extractRnboParams(instanceNode) {
   const contents = instanceNode?.CONTENTS?.params?.CONTENTS ?? instanceNode?.CONTENTS?.parameters?.CONTENTS ?? {};
-  return collectRnboParams(contents).sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999));
+  return assignNestedParameterKeys(collectRnboParams(contents))
+    .sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999));
 }
 
-function collectRnboParams(contents, parameters = []) {
+function collectRnboParams(contents, parameters = [], path = []) {
   for (const [name, node] of Object.entries(contents ?? {})) {
-    const parameter = normalizeRnboParam(name, node);
+    const parameterPath = [...path, name];
+    const parameter = normalizeRnboParam(name, node, parameterPath);
     if (parameter) {
       parameters.push(parameter);
       continue;
     }
-    collectRnboParams(node?.CONTENTS, parameters);
+    collectRnboParams(node?.CONTENTS, parameters, parameterPath);
   }
   return parameters;
 }
@@ -281,7 +283,7 @@ function extractRnboInputPorts(instanceId, instanceNode) {
     .sort((a, b) => (a.index ?? 9999) - (b.index ?? 9999) || a.name.localeCompare(b.name));
 }
 
-function normalizeRnboParam(name, node) {
+function normalizeRnboParam(name, node, path = [name]) {
   const address = normalizeAddress(node?.FULL_PATH);
   if (!address || node?.TYPE === undefined || address.includes("/normalized") || address.includes("/meta") || address.includes("/index")) {
     return undefined;
@@ -290,6 +292,7 @@ function normalizeRnboParam(name, node) {
   const meta = parseMetadata(node.CONTENTS);
   return withoutUndefined({
     name,
+    path: path.join("/"),
     address,
     type: node.TYPE,
     value: node.VALUE,
@@ -303,6 +306,27 @@ function normalizeRnboParam(name, node) {
     normalized: optionalFiniteNumber(node.CONTENTS?.normalized?.VALUE),
     meta
   });
+}
+
+function assignNestedParameterKeys(parameters) {
+  const counts = parameters.reduce((result, parameter) => {
+    result.set(parameter.name, (result.get(parameter.name) ?? 0) + 1);
+    return result;
+  }, new Map());
+  return parameters.map((parameter) => counts.get(parameter.name) > 1
+    ? { ...parameter, key: shortestUniquePathSuffix(parameter, parameters.filter((candidate) => candidate.name === parameter.name)) }
+    : parameter);
+}
+
+function shortestUniquePathSuffix(parameter, sameNameParameters) {
+  const parts = parameter.path.split("/");
+  for (let length = 2; length <= parts.length; length += 1) {
+    const suffix = parts.slice(-length).join("/");
+    if (sameNameParameters.filter((candidate) => candidate.path.endsWith(`/${suffix}`) || candidate.path === suffix).length === 1) {
+      return suffix;
+    }
+  }
+  return parameter.path;
 }
 
 function normalizeRnboInputPort(instanceId, name, node) {

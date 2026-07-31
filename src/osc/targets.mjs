@@ -62,6 +62,8 @@ function normalizeParameters(parameters) {
   }
   return parameters.map((parameter) => ({
     name: semanticParameterName(parameter.name),
+    ...(stringField(parameter.key) ? { key: stringField(parameter.key) } : {}),
+    ...(stringField(parameter.path) ? { path: stringField(parameter.path) } : {}),
     address: normalizeAddress(parameter.address),
     type: stringField(parameter.type) || undefined,
     value: parameter.value,
@@ -71,6 +73,7 @@ function normalizeParameters(parameters) {
     unit: stringField(parameter.unit) || undefined,
     displayName: stringField(parameter.displayName) || semanticParameterName(parameter.name),
     index: parameter.index,
+    ...(parameter.steps !== undefined ? { steps: parameter.steps } : {}),
     normalized: parameter.normalized,
     meta: parameter.meta
   })).filter((parameter) => parameter.name && parameter.address);

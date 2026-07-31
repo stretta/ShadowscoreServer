@@ -1773,7 +1773,8 @@ async function sendOscToResolvedTargets(targets, runtime, body) {
 }
 
 function parameterAddressForTarget(target, name) {
-  const parameter = (target.parameters ?? []).find((entry) => entry.name === name);
+  const parameter = (target.parameters ?? []).find((entry) => (entry.key ?? entry.name) === name)
+    ?? (target.parameters ?? []).find((entry) => entry.name === name);
   if (!parameter?.address) {
     throw new Error(`OSC target '${target.id ?? ""}' does not expose parameter '${name}'`);
   }

@@ -4072,7 +4072,7 @@ test("editor manifest route lists registered instrument editors", async () => {
   const context = createRouteContext();
   const response = await requestJson(context, "GET", "/editors/manifest");
 
-  assert.equal(response.editors.length, 8);
+  assert.equal(response.editors.length, 9);
   assert.deepEqual(response.editors, [
     {
       id: "poland",
@@ -4112,6 +4112,14 @@ test("editor manifest route lists registered instrument editors", async () => {
       route: "/editors/element",
       targetFilter: {
         app: "element"
+      }
+    },
+    {
+      id: "subtractive-i",
+      label: "Subtractive-I",
+      route: "/editors/subtractive-i",
+      targetFilter: {
+        app: "subtractive-i"
       }
     },
     {
@@ -4449,6 +4457,32 @@ test("Element editor route serves the current nested OSC control panel", async (
   assert.match(response.body, /displaySavedState/);
 });
 
+test("Subtractive-I editor route follows the live nested oscillator and envelope structure", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/subtractive-i");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /Subtractive-I Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=subtractive-i/);
+  assert.match(response.body, /SUBTRACTIVE_GROUPS/);
+  assert.match(response.body, /prefix: "OscA\/"/);
+  assert.match(response.body, /prefix: "OscB\/"/);
+  assert.match(response.body, /prefix: "OscC\/"/);
+  assert.match(response.body, /prefix: "FilterEnv\/"/);
+  assert.match(response.body, /prefix: "AmpEnv\/"/);
+  assert.match(response.body, /title: "Mixer"/);
+  assert.match(response.body, /\["OscA\/Level", "OscB\/Level", "OscC\/Level", "Noise", "RingMod"\]/);
+  assert.match(response.body, /"OscA\/Level": "OSC A"/);
+  assert.match(response.body, /parameterKey/);
+  assert.match(response.body, /targetParam\.address/);
+  assert.match(response.body, /parameterNodesByAddress/);
+  assert.match(response.body, /mountOscSnapshotPanel/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
+});
+
 test("ListSequencer editor route serves the OSC target integration page", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/editors/listsequencer");
@@ -4641,12 +4675,13 @@ test("OSC editors place controls above Block State and live destinations below i
     ["poland", 'id="controls"'],
     ["softpiano", 'id="panels"'],
     ["element", 'id="panels"'],
+    ["subtractive-i", 'id="panels"'],
     ["ttid", 'id="editors"']
   ];
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /202607(?:24-ttid-revision1|26-unified-clock1)/,
+    assert.match(response.body, /202607(?:24-ttid-revision1|26-unified-clock1|27-nested-keys1)/,
       `${editor} should load the instant-write snapshot client contract`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');
@@ -4663,7 +4698,7 @@ test("OSC editors place controls above Block State and live destinations below i
 
 test("instant-write OSC editors expose their intended completion boundaries", async () => {
   const context = createRouteContext();
-  for (const editor of ["analogsequencer", "softpiano", "element", "plate", "poland"]) {
+  for (const editor of ["analogsequencer", "softpiano", "element", "subtractive-i", "plate", "poland"]) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.match(response.body, /bindRangeCommit/);
     assert.match(response.body, /pointerdown/);
@@ -4817,6 +4852,7 @@ test("shared grouped navigation defines and reaches every hosted user-facing pag
     "/editors/listsequencer",
     "/editors/listvelsequencer",
     "/editors/element",
+    "/editors/subtractive-i",
     "/editors/poland",
     "/editors/plate",
     "/editors/softpiano",
@@ -4994,10 +5030,13 @@ test("OSC target route exposes registered Poland control targets", async () => {
       instance: "main",
       parameters: [{
         name: "VolA",
+        key: "OscA/VolA",
+        path: "Poland/OscA/VolA",
         address: "/rnbo/inst/10/params/VolA",
         value: 0.5,
         min: 0,
-        max: 1
+        max: 1,
+        steps: 101
       }]
     }]
   }, { remoteAddress: "192.168.68.101" });
@@ -5009,6 +5048,9 @@ test("OSC target route exposes registered Poland control targets", async () => {
   assert.equal(response.targets[0].id, "heron:poland:main");
   assert.equal(response.targets[0].status, "online");
   assert.equal(response.targets[0].parameters[0].address, "/rnbo/inst/10/params/VolA");
+  assert.equal(response.targets[0].parameters[0].key, "OscA/VolA");
+  assert.equal(response.targets[0].parameters[0].path, "Poland/OscA/VolA");
+  assert.equal(response.targets[0].parameters[0].steps, 101);
 });
 
 test("OSC target route exposes registered TTID control targets", async () => {

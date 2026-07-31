@@ -57,6 +57,24 @@ test("snapshot compiler translates numeric enum indexes to live OSCQuery string 
   }]);
 });
 
+test("snapshot compiler resolves repeated leaf names through unique nested keys", () => {
+  const compiled = compileOscSnapshot({
+    app: "subtractive-i",
+    params: { "FilterEnv/Attack": 2, "AmpEnv/Attack": 5 }
+  }, oscTarget({
+    app: "subtractive-i",
+    parameters: [
+      { ...param("Attack"), key: "FilterEnv/Attack", address: "/rnbo/inst/9/params/Subtractive-I/FilterEnv/Attack" },
+      { ...param("Attack"), key: "AmpEnv/Attack", address: "/rnbo/inst/9/params/Subtractive-I/AmpEnv/Attack" }
+    ]
+  }));
+
+  assert.deepEqual(compiled.writes.map((write) => [write.name, write.address, write.args]), [
+    ["FilterEnv/Attack", "/rnbo/inst/9/params/Subtractive-I/FilterEnv/Attack", [2]],
+    ["AmpEnv/Attack", "/rnbo/inst/9/params/Subtractive-I/AmpEnv/Attack", [5]]
+  ]);
+});
+
 test("AnalogSequencer MaxCnt maps a saved 16-stage count to terminal counter value 15", () => {
   const compiled = compileOscSnapshot({
     app: "analogsequencer",

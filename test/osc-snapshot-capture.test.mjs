@@ -116,6 +116,27 @@ test("capture follows unified nested Clock addresses and stores enum indexes", a
   });
 });
 
+test("capture preserves unique nested parameter keys for repeated leaf names", async () => {
+  const captured = await captureOscTarget({
+    ...target(),
+    app: "subtractive-i",
+    parameters: [
+      { name: "Attack", key: "FilterEnv/Attack", address: "/rnbo/inst/9/params/Subtractive-I/FilterEnv/Attack" },
+      { name: "Attack", key: "AmpEnv/Attack", address: "/rnbo/inst/9/params/Subtractive-I/AmpEnv/Attack" }
+    ],
+    inputPorts: []
+  }, {
+    fetchImpl: async () => response({ CONTENTS: {
+      "Subtractive-I": { CONTENTS: {
+        FilterEnv: { CONTENTS: { Attack: { FULL_PATH: "/rnbo/inst/9/params/Subtractive-I/FilterEnv/Attack", VALUE: 2 } } },
+        AmpEnv: { CONTENTS: { Attack: { FULL_PATH: "/rnbo/inst/9/params/Subtractive-I/AmpEnv/Attack", VALUE: 5 } } }
+      } }
+    } })
+  });
+
+  assert.deepEqual(captured.clip.params, { "FilterEnv/Attack": 2, "AmpEnv/Attack": 5 });
+});
+
 function target() {
   return {
     id: "heron:listsequencer:main",

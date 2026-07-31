@@ -46,13 +46,14 @@ async function captureParameters(target, fetchImpl, diagnostics, options) {
   indexParameterNodes(body?.CONTENTS, `${target.baseAddress}/params`, nodesByAddress);
   const params = {};
   for (const param of target.parameters ?? []) {
-    const disposition = snapshotControlDisposition({ kind: "param", name: param.name, meta: param.meta });
+    const controlName = param.key ?? param.name;
+    const disposition = snapshotControlDisposition({ kind: "param", name: controlName, meta: param.meta });
     if (disposition.state === "excluded") continue;
     const node = nodesByAddress.get(normalizeAddress(param.address));
     const value = scalar(node?.VALUE ?? param.value);
     const normalized = normalizeParamValue(param, value);
-    if (normalized.ok) params[param.name] = normalized.value;
-    else diagnostics.push({ severity: "error", kind: "param", name: param.name, reason: normalized.reason });
+    if (normalized.ok) params[controlName] = normalized.value;
+    else diagnostics.push({ severity: "error", kind: "param", name: controlName, reason: normalized.reason });
   }
   return params;
 }

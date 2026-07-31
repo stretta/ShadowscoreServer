@@ -225,7 +225,9 @@ This is the core path for all-local volume and other shared gestures.
 ```http
 GET /osc/macros
 POST /osc/macros
+POST /osc/macros/run
 POST /osc/macros/:macroId/run
+POST /osc/block-state/capture
 ```
 
 Macro shape:
@@ -249,8 +251,26 @@ Macro shape:
 }
 ```
 
-The first implementation can execute steps immediately in order. Later versions
-can add delays, dry-run validation, per-step conditions, and group expansion.
+Fixed-target steps remain supported. Semantic steps can instead store a live
+selector and resolve every matching target at execution time:
+
+```json
+{
+  "where": {
+    "capability": "ttid-edit",
+    "status": "online",
+    "parameter": "ScalarTranspose"
+  },
+  "param": "ScalarTranspose",
+  "args": [3]
+}
+```
+
+`POST /osc/macros/run` executes or dry-runs an inline macro without saving the
+macro definition. This is the control path for gestural utilities such as
+ensemble transpose. Execution is live and non-persistent. The separate
+`POST /osc/block-state/capture` action captures complete state from explicitly
+selected live targets into role-specific snapshots for one EDITING block.
 
 ## Editor Hosting Model
 
@@ -302,7 +322,7 @@ This keeps authoring and runtime roles separate:
 
 Status as of the current implementation pass:
 
-- Phase 1 through Phase 6 are implemented in ShadowscoreServer.
+- Phase 1 through Phase 7 are implemented in ShadowscoreServer.
 - The implemented routes and hosted pages have been deployed to `wren.local`.
 - Live verification used the three online Poland instances on `wren`, `heron`,
   and `raven`.
@@ -436,6 +456,23 @@ Implemented notes:
 - Added `/editors` as a hosted editor index.
 - Registered Poland as the first manifest entry.
 - Updated the dashboard to link to `/editors`.
+
+### Phase 7: Semantic Ensemble Transpose - Complete
+
+- Extend macro steps with dynamic `where` selectors while preserving existing
+  fixed-target macros.
+- Resolve current online targets by capability and exact standardized
+  parameter name at dry-run or execution time.
+- Add absolute live controls for `ChromaticTranspose` and `ScalarTranspose` to
+  `/tools/osc-macros`.
+- Validate each target's published parameter range before sending and report
+  expanded target results individually.
+- Keep live execution non-persistent: it changes running RNBO instances without
+  changing TTID or score-owned OSC snapshots.
+- Add an explicit block selector and capture action. Capture reads each
+  compatible instance's complete live state and atomically writes its
+  role-specific snapshot only to the selected EDITING block.
+- Browser MIDI input and HTTPS deployment are intentionally deferred.
 - Fixed static route precedence so `/editors/poland` remains more specific
   than `/editors`.
 
@@ -449,6 +486,8 @@ Automated tests:
 - `/osc/send` request validation
 - per-target send result reporting
 - macro validation and run ordering
+- semantic macro target expansion and per-target range validation
+- atomic multi-target capture into one EDITING block
 
 Live verification:
 

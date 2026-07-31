@@ -14,7 +14,7 @@
 
     main {
       display: grid;
-      grid-template-rows: auto 1fr;
+      grid-template-rows: auto auto 1fr;
       min-height: 100vh;
     }
 
@@ -56,6 +56,59 @@
       grid-template-columns: minmax(240px, 0.8fr) minmax(360px, 1.2fr);
       min-height: 0;
       padding: 14px 18px 20px;
+    }
+
+    .transpose-panel {
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
+      display: grid;
+      gap: 12px;
+      margin: 0 18px;
+      padding: 14px;
+    }
+
+    .transpose-heading {
+      align-items: baseline;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 14px;
+      justify-content: space-between;
+    }
+
+    .transpose-heading h2 {
+      font-size: 17px;
+      margin: 0;
+    }
+
+    .transpose-controls {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(2, minmax(260px, 1fr));
+    }
+
+    .transpose-control {
+      align-items: end;
+      background: var(--ss-surface);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(110px, 1fr) auto;
+      padding: 10px;
+    }
+
+    .transpose-control input {
+      font-size: 20px;
+      font-variant-numeric: tabular-nums;
+      text-align: center;
+    }
+
+    .capture-row {
+      align-items: end;
+      display: grid;
+      gap: 8px;
+      grid-template-columns: minmax(220px, 1fr) auto;
     }
 
     .panel {
@@ -186,7 +239,9 @@
 
       .workspace,
       .fields,
-      .step-builder {
+      .step-builder,
+      .transpose-controls,
+      .capture-row {
         grid-template-columns: 1fr;
       }
     }
@@ -207,6 +262,33 @@
         <span id="status" class="status" role="status"></span>
       </div>
     </header>
+    <section class="transpose-panel" aria-labelledby="transpose-heading">
+      <div class="transpose-heading">
+        <h2 id="transpose-heading">Ensemble Transpose</h2>
+        <span id="transpose-targets" class="meta">Discovering compatible instances…</span>
+      </div>
+      <div class="transpose-controls">
+        <div class="transpose-control">
+          <label><span>Chromatic Transpose</span><input id="chromatic-value" type="number" step="1" value="0"></label>
+          <div class="actions">
+            <button type="button" data-transpose-dry="ChromaticTranspose">Dry Run</button>
+            <button type="button" class="primary" data-transpose-run="ChromaticTranspose">Apply Live</button>
+          </div>
+        </div>
+        <div class="transpose-control">
+          <label><span>Scalar Transpose</span><input id="scalar-value" type="number" step="1" value="0"></label>
+          <div class="actions">
+            <button type="button" data-transpose-dry="ScalarTranspose">Dry Run</button>
+            <button type="button" class="primary" data-transpose-run="ScalarTranspose">Apply Live</button>
+          </div>
+        </div>
+      </div>
+      <div class="capture-row">
+        <label><span>EDITING Block</span><select id="capture-block"></select></label>
+        <button id="capture-transpose" type="button">Capture Compatible Instances to EDITING Block</button>
+      </div>
+      <div class="meta">Apply Live changes running instances only. Capture explicitly saves each compatible instance’s complete live state to its role-specific snapshot in the selected block.</div>
+    </section>
     <section class="workspace">
       <aside class="panel">
         <div id="macros" class="macro-list"></div>
@@ -245,13 +327,21 @@
     const stepParamEl = document.querySelector("#step-param");
     const stepValueEl = document.querySelector("#step-value");
     const refreshButton = document.querySelector("#refresh");
+    const captureBlockEl = document.querySelector("#capture-block");
+    const captureButton = document.querySelector("#capture-transpose");
+    const transposeTargetsEl = document.querySelector("#transpose-targets");
     let macros = [];
     let targets = [];
+    let score = null;
 
     setMacro({
-      id: "poland-vola-zero",
-      label: "Poland VolA Zero",
-      steps: [{ target: "wren:poland:main", param: "VolA", args: [0] }]
+      id: "transpose-scalar",
+      label: "Scalar Transpose",
+      steps: [{
+        where: { capability: "ttid-edit", status: "online", parameter: "ScalarTranspose" },
+        param: "ScalarTranspose",
+        args: [0]
+      }]
     });
 
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
@@ -265,20 +355,32 @@
     });
     macroIdEl.addEventListener("input", syncHeaderToJson);
     macroLabelEl.addEventListener("input", syncHeaderToJson);
+    for (const button of document.querySelectorAll("[data-transpose-dry]")) {
+      button.addEventListener("click", () => runTranspose(button.dataset.transposeDry, true).catch(reportError));
+    }
+    for (const button of document.querySelectorAll("[data-transpose-run]")) {
+      button.addEventListener("click", () => runTranspose(button.dataset.transposeRun, false).catch(reportError));
+    }
+    captureButton.addEventListener("click", () => captureTransposeState().catch(reportError));
 
     async function refresh() {
       refreshButton.disabled = true;
       setStatus("Refreshing");
-      const [macroResponse, targetResponse] = await Promise.all([
+      const [macroResponse, targetResponse, scoreResponse] = await Promise.all([
         fetch("/osc/macros"),
-        fetch("/osc/targets?status=online")
+        fetch("/osc/targets?status=online"),
+        fetch("/score", { cache: "no-store" })
       ]);
       const macroBody = await macroResponse.json();
       const targetBody = await targetResponse.json();
+      const scoreBody = await scoreResponse.json();
       macros = macroBody.macros || [];
       targets = targetBody.targets || [];
+      score = scoreBody;
       renderMacros();
       renderTargets();
+      renderTransposeTargets();
+      renderBlocks();
       setStatus(`${macros.length} macro${macros.length === 1 ? "" : "s"}, ${targets.length} target${targets.length === 1 ? "" : "s"}`);
       refreshButton.disabled = false;
     }
@@ -320,6 +422,97 @@
         return option;
       });
       stepTargetEl.replaceChildren(...options);
+    }
+
+    function renderTransposeTargets() {
+      const scalar = compatibleTransposeTargets("ScalarTranspose");
+      const chromatic = compatibleTransposeTargets("ChromaticTranspose");
+      transposeTargetsEl.textContent = `${chromatic.length} chromatic · ${scalar.length} scalar compatible instance${Math.max(chromatic.length, scalar.length) === 1 ? "" : "s"}`;
+      captureButton.disabled = compatibleTransposeTargets().length === 0;
+    }
+
+    function renderBlocks() {
+      const previous = captureBlockEl.value;
+      const options = Object.entries(score?.mesostructure || {}).map(([blockId, block]) => {
+        const option = document.createElement("option");
+        option.value = blockId;
+        option.textContent = block.name ? `${blockId} · ${block.name}` : blockId;
+        return option;
+      });
+      captureBlockEl.replaceChildren(...options);
+      const activeBlockId = score?.structureState?.activeBlockId;
+      captureBlockEl.value = options.some((option) => option.value === previous)
+        ? previous
+        : options.some((option) => option.value === activeBlockId) ? activeBlockId : options[0]?.value || "";
+      captureButton.disabled = !captureBlockEl.value || compatibleTransposeTargets().length === 0;
+    }
+
+    function compatibleTransposeTargets(parameter) {
+      return targets.filter((target) => (target.capabilities || []).includes("ttid-edit")
+        && (target.parameters || []).some((entry) => parameter
+          ? entry.name === parameter
+          : entry.name === "ScalarTranspose" || entry.name === "ChromaticTranspose"));
+    }
+
+    function transposeInput(parameter) {
+      return document.querySelector(parameter === "ScalarTranspose" ? "#scalar-value" : "#chromatic-value");
+    }
+
+    function transposeMacro(parameter) {
+      return {
+        id: parameter === "ScalarTranspose" ? "transpose-scalar" : "transpose-chromatic",
+        label: parameter === "ScalarTranspose" ? "Scalar Transpose" : "Chromatic Transpose",
+        steps: [{
+          where: { capability: "ttid-edit", status: "online", parameter },
+          param: parameter,
+          args: [Number(transposeInput(parameter).value)]
+        }]
+      };
+    }
+
+    async function runTranspose(parameter, dryRun) {
+      const macro = transposeMacro(parameter);
+      if (!Number.isFinite(macro.steps[0].args[0])) throw new Error(`${macro.label} must be numeric`);
+      setStatus(dryRun ? `Dry run ${macro.label}` : `Applying ${macro.label} live`);
+      const response = await fetch("/osc/macros/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ macro, dryRun })
+      });
+      const body = await response.json().catch(() => ({}));
+      renderValidation(body.validation || []);
+      if (!response.ok || body.ok === false) throw new Error(body.error || `Validation failed for ${macro.label}`);
+      const count = dryRun ? body.validation.length : (body.results || []).filter((result) => result.ok).length;
+      setStatus(dryRun ? `${macro.label}: ${count} compatible instance${count === 1 ? "" : "s"}` : `${macro.label} applied live to ${count} instance${count === 1 ? "" : "s"}; score unchanged`);
+    }
+
+    async function captureTransposeState() {
+      const blockId = captureBlockEl.value;
+      const selected = compatibleTransposeTargets();
+      if (!blockId) throw new Error("Choose an EDITING block");
+      if (!selected.length) throw new Error("No compatible transpose instances are online");
+      const label = `${selected.length} compatible instance${selected.length === 1 ? "" : "s"} into block ${blockId}`;
+      if (!confirm(`Capture complete live state from ${label}? Existing Written snapshots for these roles will be replaced.`)) return;
+      captureButton.disabled = true;
+      setStatus(`Capturing ${label}`);
+      try {
+        const response = await fetch("/osc/block-state/capture", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            blockId,
+            targets: selected.map((target) => target.id),
+            expectedStructureRevision: score?.structureRevision
+          })
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || body.ok === false) throw new Error(body.error || "Capture failed");
+        score = body.score;
+        renderBlocks();
+        setStatus(`Captured ${body.capturedCount} instance${body.capturedCount === 1 ? "" : "s"} into block ${blockId}`);
+      } finally {
+        captureButton.disabled = compatibleTransposeTargets().length === 0;
+      }
     }
 
     async function saveCurrent() {
@@ -401,9 +594,10 @@
       const rows = validation.map((step) => {
         const row = document.createElement("div");
         row.className = "validation-row";
+        const target = step.target || (step.selector ? `selector ${JSON.stringify(step.selector)}` : "no target");
         row.innerHTML = `
           <span class="badge ${step.ok ? "ok" : "fail"}">${step.ok ? "OK" : "Fail"}</span>
-          <span class="meta">${escapeHtml(step.target)} ${escapeHtml(step.param || step.address || "")} ${escapeHtml(step.error || step.address || "")}</span>
+          <span class="meta">${escapeHtml(target)} ${escapeHtml(step.param || step.address || "")} ${escapeHtml(step.error || step.address || "")}</span>
         `;
         return row;
       });

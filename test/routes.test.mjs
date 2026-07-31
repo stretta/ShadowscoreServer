@@ -4752,6 +4752,12 @@ test("OSC macro tool route serves builder and validation controls", async () => 
   assert.match(response.body, /id="step-param"/);
   assert.match(response.body, /Dry Run/);
   assert.match(response.body, /validation-row/);
+  assert.match(response.body, /Ensemble Transpose/);
+  assert.match(response.body, /ChromaticTranspose/);
+  assert.match(response.body, /ScalarTranspose/);
+  assert.match(response.body, /\/osc\/macros\/run/);
+  assert.match(response.body, /\/osc\/block-state\/capture/);
+  assert.match(response.body, /Capture Compatible Instances to EDITING Block/);
   assert.match(response.body, /data-shadow-nav/);
   assert.match(response.body, /<a href="\/editors" aria-current="page">OSC<\/a>/);
 });
@@ -5425,6 +5431,128 @@ test("OSC macro routes resolve named parameters per target", async () => {
   assert.equal(run.ok, true);
   assert.equal(run.results[0].address, "/rnbo/inst/9/params/VolA");
   assert.deepEqual(sends[0].args, [-6]);
+});
+
+test("OSC macro routes expand semantic transpose selectors across compatible apps", async () => {
+  const sends = [];
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  registry.register({
+    id: "heron",
+    advertisedName: "Heron",
+    oscTargets: [
+      {
+        id: "rnbo-inst-4:quantizer",
+        label: "Quantizer",
+        host: "192.168.68.101",
+        port: 1234,
+        baseAddress: "/rnbo/inst/4",
+        app: "quantizer",
+        instance: "main",
+        parameters: [
+          { name: "TTID", address: "/rnbo/inst/4/params/TTID", meta: { editor: "ttid" } },
+          { name: "ScalarTranspose", address: "/rnbo/inst/4/params/ScalarTranspose", min: -12, max: 12 }
+        ]
+      },
+      {
+        id: "rnbo-inst-5:analogsequencer",
+        label: "Analog Sequencer",
+        host: "192.168.68.101",
+        port: 1234,
+        baseAddress: "/rnbo/inst/5",
+        app: "analogsequencer",
+        instance: "main",
+        parameters: [
+          { name: "Scale", address: "/rnbo/inst/5/params/Scale", meta: { editor: "ttid" } },
+          { name: "ScalarTranspose", address: "/rnbo/inst/5/params/ScalarTranspose", min: -7, max: 7 }
+        ]
+      }
+    ]
+  }, { remoteAddress: "192.168.68.101" });
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: registry,
+      oscSender: async (send) => sends.push(send)
+    }
+  });
+  const macro = {
+    id: "transpose-scalar",
+    label: "Scalar Transpose",
+    steps: [{
+      where: { capability: "ttid-edit", status: "online", parameter: "ScalarTranspose" },
+      param: "ScalarTranspose",
+      args: [3]
+    }]
+  };
+
+  const dryRun = await requestJson(context, "POST", "/osc/macros/run", { macro, dryRun: true });
+  assert.equal(dryRun.ok, true);
+  assert.deepEqual(dryRun.validation.map((entry) => entry.target), [
+    "heron:quantizer:main",
+    "heron:analogsequencer:main"
+  ]);
+  assert.equal(sends.length, 0);
+
+  const run = await requestJson(context, "POST", "/osc/macros/run", { macro });
+  assert.equal(run.ok, true);
+  assert.equal(run.results.length, 2);
+  assert.deepEqual(sends.map((send) => send.args), [[3], [3]]);
+
+  const invalid = await request(context, "POST", "/osc/macros/run", {
+    macro: { ...macro, steps: [{ ...macro.steps[0], args: [9] }] }
+  });
+  assert.equal(invalid.status, 409);
+  assert.match(invalid.body, /above 'ScalarTranspose' maximum 7/);
+  assert.equal(sends.length, 2);
+});
+
+test("OSC Block State capture persists complete live target state to one editing block", async () => {
+  const registry = createPeerRegistry(defaultConfig, { now: () => 1782580000000 });
+  registry.register({
+    id: "heron",
+    advertisedName: "Heron",
+    oscTargets: [{
+      id: "rnbo-inst-4:quantizer",
+      label: "Quantizer",
+      host: "192.168.68.101",
+      port: 1234,
+      baseAddress: "/rnbo/inst/4",
+      app: "quantizer",
+      instance: "main",
+      parameters: [
+        { name: "TTID", address: "/rnbo/inst/4/params/TTID", meta: { editor: "ttid" } },
+        { name: "ScalarTranspose", address: "/rnbo/inst/4/params/ScalarTranspose", min: -12, max: 12 },
+        { name: "ChromaticTranspose", address: "/rnbo/inst/4/params/ChromaticTranspose", min: -24, max: 24 }
+      ]
+    }]
+  }, { remoteAddress: "192.168.68.101" });
+  const context = createRouteContext({
+    runtime: {
+      peerRegistry: registry,
+      oscCaptureFetch: async () => jsonFetchResponse({
+        CONTENTS: {
+          TTID: { FULL_PATH: "/rnbo/inst/4/params/TTID", VALUE: 2741 },
+          ScalarTranspose: { FULL_PATH: "/rnbo/inst/4/params/ScalarTranspose", VALUE: 3 },
+          ChromaticTranspose: { FULL_PATH: "/rnbo/inst/4/params/ChromaticTranspose", VALUE: -2 }
+        }
+      })
+    }
+  });
+  const initial = await requestJson(context, "GET", "/score");
+  const blockId = initial.structureState.activeBlockId;
+  const captured = await requestJson(context, "POST", "/osc/block-state/capture", {
+    blockId,
+    targets: ["heron:quantizer:main"],
+    expectedStructureRevision: initial.structureRevision
+  });
+
+  assert.equal(captured.capturedCount, 1);
+  assert.equal(captured.captures[0].targetId, "heron:quantizer:main");
+  assert.deepEqual(captured.captures[0].clip.params, {
+    ScalarTranspose: 3,
+    ChromaticTranspose: -2
+  });
+  assert.equal(captured.captures[0].clip.params.TTID, undefined);
+  assert.equal(captured.score.mesostructure[blockId].oscLayers[captured.captures[0].roleId].clipId, captured.captures[0].clipId);
 });
 
 function manualDevice(document) {

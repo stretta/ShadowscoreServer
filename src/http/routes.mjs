@@ -8,7 +8,7 @@ import { distributeBlockTtid } from "../harmonic/distribution.mjs";
 import { scaleCatalog } from "../harmonic/scale.mjs";
 import { activeWrittenTempo } from "../playback/tempo.mjs";
 import { resolveOscAssignments } from "../osc/assignments.mjs";
-import { findOscMacro, listOscMacros, resolveMacroStepAddress, saveOscMacro, validateMacro } from "../osc/macros.mjs";
+import { findOscMacro, listOscMacros, normalizeMacro, saveOscMacro, validateMacro } from "../osc/macros.mjs";
 import { sendOscMessage } from "../osc/send.mjs";
 import { captureOscTarget } from "../osc/snapshot-capture.mjs";
 import { createOscSnapshotRecallService } from "../osc/snapshot-recall.mjs";
@@ -238,6 +238,87 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/osc/block-state/capture") {
+    try {
+      const body = await readJson(request);
+      const blockId = requiredString(body.blockId, "blockId");
+      const requestedTargetIds = Array.isArray(body.targets)
+        ? Array.from(new Set(body.targets.map((targetId) => requiredString(targetId, "targets[]"))))
+        : [];
+      if (!requestedTargetIds.length) throw new Error("targets must include at least one checked instance");
+      const currentScore = store.getScore();
+      if (!currentScore.mesostructure?.[blockId]) throw new Error(`unknown mesostructural block '${blockId}'`);
+      const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+      const selectedTargets = requestedTargetIds.map((requestedTargetId) => {
+        const target = targets.find((entry) => entry.id === requestedTargetId || entry.rnboTargetId === requestedTargetId);
+        if (!target) throw new Error(`unknown OSC target '${requestedTargetId}'`);
+        if (target.status !== "online" || !target.sendable) throw new Error(`OSC target '${target.id}' is not online and sendable`);
+        return target;
+      });
+      const capturedTargets = await Promise.all(selectedTargets.map(async (target) => ({
+        target,
+        captured: await captureOscTarget(target, {
+          allowIncomplete: Boolean(body.allowIncomplete),
+          fetchImpl: runtime.oscCaptureFetch ?? globalThis.fetch,
+          sender: runtime.oscSender,
+          delay: runtime.oscCaptureDelay,
+          now: runtime.now
+        })
+      })));
+      let planningScore = currentScore;
+      const plans = [];
+      for (const { target, captured } of capturedTargets) {
+        const role = blockStateRoleForTarget(planningScore, target, targets);
+        const existingLayer = planningScore.mesostructure[blockId].oscLayers?.[role.roleId];
+        const baseClipId = `${blockId}-${role.roleId}`.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+        const clipId = existingLayer?.clipId || uniqueOscClipId(planningScore, baseClipId);
+        const label = role.assignment.label || target.label || role.roleId;
+        const clip = { ...captured.clip, name: optionalString(body.name) || `${blockId} · ${label}` };
+        plans.push({
+          targetId: target.id,
+          roleId: role.roleId,
+          assignment: role.assignment,
+          clipId,
+          clip,
+          replace: Boolean(existingLayer?.clipId),
+          complete: captured.complete,
+          diagnostics: captured.diagnostics
+        });
+        planningScore = {
+          ...planningScore,
+          oscAssignments: { ...(planningScore.oscAssignments ?? {}), [role.roleId]: role.assignment },
+          oscClips: { ...(planningScore.oscClips ?? {}), [clipId]: clip },
+          mesostructure: {
+            ...planningScore.mesostructure,
+            [blockId]: {
+              ...planningScore.mesostructure[blockId],
+              oscLayers: {
+                ...(planningScore.mesostructure[blockId].oscLayers ?? {}),
+                [role.roleId]: { clipId }
+              }
+            }
+          }
+        };
+      }
+      const result = store.writeOscBlockStates(plans, blockId, revisionOptions(body));
+      writeJson(response, 200, {
+        ok: true,
+        blockId,
+        capturedCount: plans.length,
+        captures: result.writes.map((write, index) => ({
+          ...write,
+          targetId: plans[index].targetId,
+          complete: plans[index].complete,
+          diagnostics: plans[index].diagnostics
+        })),
+        score: result.score
+      });
+    } catch (error) {
+      writeError(response, error, new Set(["OSC_ROLE_ASSIGNMENT_REQUIRED", "stale_structure_revision"]).has(error?.code) ? 409 : 400);
+    }
+    return;
+  }
+
   if (request.method === "PUT" && url.pathname === "/osc/block-state") {
     try {
       const body = await readJson(request);
@@ -461,6 +542,18 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/osc/macros/run") {
+    try {
+      const body = await readJson(request);
+      const macro = normalizeMacro(body.macro ?? body);
+      const result = await runOscMacro(macro, config, runtime, { dryRun: body.dryRun === true });
+      writeJson(response, result.ok ? 200 : 409, result);
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   const oscMacroRunMatch = url.pathname.match(/^\/osc\/macros\/([^/]+)\/run$/);
   if (request.method === "POST" && oscMacroRunMatch) {
     try {
@@ -470,20 +563,8 @@ export async function routeRequest(request, response, store, config, runtime = {
       if (!macro) {
         throw new Error(`unknown OSC macro '${macroId}'`);
       }
-      const targets = buildOscTargets(await readAllOscTargets(config, runtime));
-      const targetsById = new Map(targets.map((target) => [target.id, target]));
-      const validation = validateMacro(macro, targetsById);
-      const valid = validation.every((step) => step.ok);
-      if (body.dryRun === true || !valid) {
-        writeJson(response, valid ? 200 : 409, { ok: valid, dryRun: true, macro, validation });
-      } else {
-        writeJson(response, 200, {
-          ok: true,
-          macro,
-          validation,
-          results: await sendOscSteps(macro.steps, targetsById, runtime)
-        });
-      }
+      const result = await runOscMacro(macro, config, runtime, { dryRun: body.dryRun === true });
+      writeJson(response, result.ok ? 200 : 409, result);
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
     }
@@ -1789,12 +1870,24 @@ function inputPortAddressForTarget(target, name) {
   return inputPort.address;
 }
 
-async function sendOscSteps(steps, targetsById, runtime) {
+async function runOscMacro(macro, config, runtime, options = {}) {
+  const targets = buildOscTargets(await readAllOscTargets(config, runtime));
+  const targetsById = new Map(targets.map((target) => [target.id, target]));
+  const validation = validateMacro(macro, targetsById);
+  const valid = validation.every((step) => step.ok);
+  if (options.dryRun || !valid) {
+    return { ok: valid, dryRun: true, macro, validation };
+  }
+  const results = await sendOscSteps(validation, targetsById, runtime);
+  return { ok: results.every((result) => result.ok), dryRun: false, macro, validation, results };
+}
+
+async function sendOscSteps(validation, targetsById, runtime) {
   const results = [];
-  for (const step of steps) {
+  for (const step of validation) {
     const target = targetsById.get(step.target);
     try {
-      results.push(await sendOscMessage(target, resolveMacroStepAddress(step, target), step.args, {
+      results.push(await sendOscMessage(target, step.address, step.args, {
         sender: runtime.oscSender
       }));
     } catch (error) {

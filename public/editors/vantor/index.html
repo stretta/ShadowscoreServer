@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Subtractive-I Editor</title>
+  <title>Vantor OSC Editor</title>
   <link rel="stylesheet" href="/shared/shadowscore-style.css">
   <script type="module" src="/shared/shadowscore-nav.js"></script>
   <style>
@@ -55,7 +55,7 @@
   </nav>
   <main>
     <header>
-      <div><h1>Subtractive-I Editor</h1><p class="subtitle">Three oscillators, performance modulation, filter, and envelope controls</p></div>
+      <div><h1>Vantor Editor</h1><p class="subtitle">Three oscillators, performance modulation, filter, and envelope controls</p></div>
       <div class="actions">
         <label for="read-source">Instance focus</label>
         <select id="read-source" aria-label="Instance focus"></select>
@@ -68,13 +68,13 @@
     <div id="snapshot-mount"></div>
     <section class="ss-osc-live-target-panel">
       <div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div>
-      <div id="targets" class="targets" aria-label="Subtractive-I targets"></div>
+      <div id="targets" class="targets" aria-label="Vantor targets"></div>
     </section>
   </main>
   <script type="module">
     import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260727-nested-keys1";
 
-    const SUBTRACTIVE_GROUPS = [
+    const VANTOR_GROUPS = [
       { title: "Global", key: "global", controls: ["Volume", "MIDI_Channel", "Transpose", "BendRangeLow", "BendRangeHi", "AftertouchSlideUpTime", "AftertouchSlideDownTime"] },
       { title: "Mixer", key: "mixer", controls: ["OscA/Level", "OscB/Level", "OscC/Level", "Noise", "RingMod"] },
       { title: "Performance", key: "performance", controls: ["VibratoRate", "VibratoAmtMin", "VibratoAmtMax", "Portamento", "StereoSpread"] },
@@ -117,13 +117,13 @@
     refreshButton.addEventListener("click", () => refresh().catch(reportError));
     getDataButton.addEventListener("click", () => getData().catch(reportError));
     const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
-    snapshotClient = createOscSnapshotEditorClient({ app: "subtractive-i", roleLabel: "Subtractive-I", elements: snapshotElements, serializeState: serializeSnapshotState, displayState: displaySavedState, onFocusChange: getData, liveTargetRoot: targetsEl, setStatus });
+    snapshotClient = createOscSnapshotEditorClient({ app: "vantor", roleLabel: "Vantor", elements: snapshotElements, serializeState: serializeSnapshotState, displayState: displaySavedState, onFocusChange: getData, liveTargetRoot: targetsEl, setStatus });
     Promise.all([refresh(), snapshotClient.init()]).catch(reportError);
 
     async function refresh() {
       refreshButton.disabled = true;
       try {
-        const response = await fetch("/osc/targets?app=subtractive-i&status=online", { cache: "no-store" });
+        const response = await fetch("/osc/targets?app=vantor&status=online", { cache: "no-store" });
         const body = await response.json();
         if (!response.ok || body.ok === false) throw new Error(body.error || `Request failed: ${response.status}`);
         targets = body.targets || [];
@@ -131,7 +131,7 @@
         renderTargets();
         renderReadSources();
         renderPanels();
-        setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online Subtractive-I targets");
+        setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online Vantor targets");
       } finally {
         refreshButton.disabled = false;
       }
@@ -210,7 +210,7 @@
 
     function renderPanels() {
       const assigned = new Set();
-      const groups = SUBTRACTIVE_GROUPS.map((group) => {
+      const groups = VANTOR_GROUPS.map((group) => {
         const members = group.controls
           ? group.controls.map((key) => params.get(key)).filter((param) => param && !assigned.has(parameterKey(param)))
           : [...params.values()].filter((param) => !assigned.has(parameterKey(param)) && parameterKey(param).startsWith(group.prefix));
@@ -224,7 +224,7 @@
       if (!nodes.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = targets.length ? "No Subtractive-I parameters reported." : "No online Subtractive-I targets.";
+        empty.textContent = targets.length ? "No Vantor parameters reported." : "No online Vantor targets.";
         panelsEl.append(empty);
       }
     }
@@ -390,7 +390,7 @@
     }
 
     function serializeSnapshotState() {
-      return createOscEditorSnapshot({ app: "subtractive-i", paramEntries: Array.from(params, ([name, param]) => ({ name, value: param.value, values: param.values })) });
+      return createOscEditorSnapshot({ app: "vantor", paramEntries: Array.from(params, ([name, param]) => ({ name, value: param.value, values: param.values })) });
     }
 
     function displaySavedState(snapshot) {
@@ -414,7 +414,7 @@
     function splitCamel(value) { return String(value || "").replace(/([a-z0-9])([A-Z])/g, "$1 $2"); }
     function cssSafe(value) { return String(value).replace(/[^a-zA-Z0-9_-]/g, "-"); }
     function setStatus(message) { statusEl.textContent = message; }
-    function reportError(error) { refreshButton.disabled = false; setStatus(error.message || "Subtractive-I editor failed"); }
+    function reportError(error) { refreshButton.disabled = false; setStatus(error.message || "Vantor editor failed"); }
     function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
   </script>
 </body>

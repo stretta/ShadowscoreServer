@@ -4115,11 +4115,11 @@ test("editor manifest route lists registered instrument editors", async () => {
       }
     },
     {
-      id: "subtractive-i",
-      label: "Subtractive-I",
-      route: "/editors/subtractive-i",
+      id: "vantor",
+      label: "Vantor",
+      route: "/editors/vantor",
       targetFilter: {
-        app: "subtractive-i"
+        app: "vantor"
       }
     },
     {
@@ -4465,15 +4465,15 @@ test("Element editor route serves the current nested OSC control panel", async (
   assert.match(response.body, /displaySavedState/);
 });
 
-test("Subtractive-I editor route follows the live nested oscillator and envelope structure", async () => {
+test("Vantor editor route follows the live nested oscillator and envelope structure", async () => {
   const context = createRouteContext();
-  const response = await request(context, "GET", "/editors/subtractive-i");
+  const response = await request(context, "GET", "/editors/vantor");
 
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
-  assert.match(response.body, /Subtractive-I Editor/);
-  assert.match(response.body, /\/osc\/targets\?app=subtractive-i/);
-  assert.match(response.body, /SUBTRACTIVE_GROUPS/);
+  assert.match(response.body, /Vantor Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=vantor/);
+  assert.match(response.body, /VANTOR_GROUPS/);
   assert.match(response.body, /prefix: "OscA\/"/);
   assert.match(response.body, /prefix: "OscB\/"/);
   assert.match(response.body, /prefix: "OscC\/"/);
@@ -4704,7 +4704,7 @@ test("OSC editors place controls above Block State and live destinations below i
     ["poland", 'id="controls"'],
     ["softpiano", 'id="panels"'],
     ["element", 'id="panels"'],
-    ["subtractive-i", 'id="panels"'],
+    ["vantor", 'id="panels"'],
     ["ttid", 'id="editors"']
   ];
   for (const [editor, controlsMarker] of editors) {
@@ -4727,7 +4727,7 @@ test("OSC editors place controls above Block State and live destinations below i
 
 test("instant-write OSC editors expose their intended completion boundaries", async () => {
   const context = createRouteContext();
-  for (const editor of ["analogsequencer", "softpiano", "element", "subtractive-i", "plate", "poland"]) {
+  for (const editor of ["analogsequencer", "softpiano", "element", "vantor", "plate", "poland"]) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.match(response.body, /bindRangeCommit/);
     assert.match(response.body, /pointerdown/);
@@ -4887,7 +4887,7 @@ test("shared grouped navigation defines and reaches every hosted user-facing pag
     "/editors/listsequencer",
     "/editors/listvelsequencer",
     "/editors/element",
-    "/editors/subtractive-i",
+    "/editors/vantor",
     "/editors/poland",
     "/editors/plate",
     "/editors/softpiano",

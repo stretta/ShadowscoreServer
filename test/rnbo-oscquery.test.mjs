@@ -289,7 +289,7 @@ test("extracts nested polyphonic instrument parameters with their live OSC paths
   assert.deepEqual(target.parameters[3].values, ["off", "on"]);
 });
 
-test("assigns unique nested keys when an instrument repeats parameter leaf names", () => {
+test("classifies Vantor while preserving unique keys for its legacy nested parameter namespace", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
       host: "127.0.0.1",
@@ -300,7 +300,7 @@ test("assigns unique nested keys when an instrument repeats parameter leaf names
   const tree = createOscQueryTree();
   tree.CONTENTS.rnbo.CONTENTS.jack = {
     CONTENTS: { info: { CONTENTS: { ports: { CONTENTS: { properties: { CONTENTS: {
-      "Subtractive-I-9:out1": { VALUE: "{\"rnbo-instance-id\":9,\"source\":true,\"type\":\"audio\"}" }
+      "Vantor-9:out1": { VALUE: "{\"rnbo-instance-id\":9,\"source\":true,\"type\":\"audio\"}" }
     } } } } } } }
   };
   tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["9"] = {
@@ -332,7 +332,7 @@ test("assigns unique nested keys when an instrument repeats parameter leaf names
 
   const target = extractRnboControlTargets(tree, config).find((entry) => entry.instanceId === "9");
 
-  assert.equal(target.app, "subtractive-i");
+  assert.equal(target.app, "vantor");
   assert.deepEqual(target.parameters.map(({ name, path, key }) => [name, path, key]), [
     ["VibratoRate", "Subtractive-I/VibratoRate", undefined],
     ["Wave", "Subtractive-I/OscA/Wave", "OscA/Wave"],

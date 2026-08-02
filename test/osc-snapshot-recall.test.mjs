@@ -59,10 +59,10 @@ test("snapshot compiler translates numeric enum indexes to live OSCQuery string 
 
 test("snapshot compiler resolves repeated leaf names through unique nested keys", () => {
   const compiled = compileOscSnapshot({
-    app: "subtractive-i",
+    app: "vantor",
     params: { "FilterEnv/Attack": 2, "AmpEnv/Attack": 5 }
   }, oscTarget({
-    app: "subtractive-i",
+    app: "vantor",
     parameters: [
       { ...param("Attack"), key: "FilterEnv/Attack", address: "/rnbo/inst/9/params/Subtractive-I/FilterEnv/Attack" },
       { ...param("Attack"), key: "AmpEnv/Attack", address: "/rnbo/inst/9/params/Subtractive-I/AmpEnv/Attack" }

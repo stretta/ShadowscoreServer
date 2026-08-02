@@ -119,7 +119,7 @@ test("capture follows unified nested Clock addresses and stores enum indexes", a
 test("capture preserves unique nested parameter keys for repeated leaf names", async () => {
   const captured = await captureOscTarget({
     ...target(),
-    app: "subtractive-i",
+    app: "vantor",
     parameters: [
       { name: "Attack", key: "FilterEnv/Attack", address: "/rnbo/inst/9/params/Subtractive-I/FilterEnv/Attack" },
       { name: "Attack", key: "AmpEnv/Attack", address: "/rnbo/inst/9/params/Subtractive-I/AmpEnv/Attack" }

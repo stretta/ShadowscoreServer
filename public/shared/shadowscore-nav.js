@@ -23,7 +23,7 @@ export const shadowScoreNavigation = Object.freeze([
       Object.freeze({ label: "List Sequencer", href: "/editors/listsequencer" }),
       Object.freeze({ label: "List Velocity Sequencer", href: "/editors/listvelsequencer" }),
       Object.freeze({ label: "Element", href: "/editors/element" }),
-      Object.freeze({ label: "Subtractive-I", href: "/editors/subtractive-i" }),
+      Object.freeze({ label: "Vantor", href: "/editors/vantor" }),
       Object.freeze({ label: "Poland", href: "/editors/poland" }),
       Object.freeze({ label: "Plate", href: "/editors/plate" }),
       Object.freeze({ label: "Soft Piano", href: "/editors/softpiano" }),

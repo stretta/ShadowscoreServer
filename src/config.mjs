@@ -100,10 +100,10 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/editors/element"]
       },
-      subtractiveIEditor: {
-        root: "public/editors/subtractive-i",
+      vantorEditor: {
+        root: "public/editors/vantor",
         index: "index.html",
-        routes: ["/editors/subtractive-i"]
+        routes: ["/editors/vantor"]
       },
       listSequencerEditor: {
         root: "public/editors/listsequencer",
@@ -184,11 +184,11 @@ export const defaultConfig = Object.freeze({
       }
     },
     {
-      id: "subtractive-i",
-      label: "Subtractive-I",
-      route: "/editors/subtractive-i",
+      id: "vantor",
+      label: "Vantor",
+      route: "/editors/vantor",
       targetFilter: {
-        app: "subtractive-i"
+        app: "vantor"
       }
     },
     {

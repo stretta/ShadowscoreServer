@@ -87,6 +87,26 @@ test("AnalogSequencer MaxCnt maps a saved 16-stage count to terminal counter val
   assert.deepEqual(compiled.writes.map((write) => [write.name, write.args]), [["MaxCnt", ["15"]]]);
 });
 
+test("TriggerSequencer recalls MaxCnt with AnalogSequencer terminal-counter semantics", () => {
+  const compiled = compileOscSnapshot({
+    app: "triggersequencer",
+    params: { MaxCnt: 15, Steps: 32769, TriggerDuration: 24 }
+  }, oscTarget({
+    app: "triggersequencer",
+    parameters: [
+      { ...param("MaxCnt"), type: "s", values: Array.from({ length: 16 }, (_, index) => String(index + 1)) },
+      { ...param("Steps"), min: 0, max: 65535 },
+      { ...param("TriggerDuration"), min: 2, max: 1000 }
+    ]
+  }));
+
+  assert.deepEqual(compiled.writes.map((write) => [write.name, write.args]), [
+    ["MaxCnt", ["15"]],
+    ["Steps", [32769]],
+    ["TriggerDuration", [24]]
+  ]);
+});
+
 test("AnalogSequencer recall can send RTZ immediately before Clock starts playback", () => {
   const compiled = compileOscSnapshot({
     app: "analogsequencer",

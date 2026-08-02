@@ -41,6 +41,11 @@ test("grouped navigation resolves current group and item for every route family"
     groupLabel: "OSC",
     itemLabel: "Analog Sequencer"
   });
+  assert.deepEqual(activeNavigationForPath("/editors/triggersequencer"), {
+    groupId: "osc",
+    groupLabel: "OSC",
+    itemLabel: "Trigger Sequencer"
+  });
   assert.deepEqual(activeNavigationForPath("/tools/osc-macros"), {
     groupId: "osc",
     groupLabel: "OSC",

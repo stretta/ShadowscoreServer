@@ -120,6 +120,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/editors/analogsequencer"]
       },
+      triggerSequencerEditor: {
+        root: "public/editors/triggersequencer",
+        index: "index.html",
+        routes: ["/editors/triggersequencer"]
+      },
       shared: {
         root: "public/shared",
         index: "index.html",
@@ -208,6 +213,14 @@ export const defaultConfig = Object.freeze({
       route: "/editors/analogsequencer",
       targetFilter: {
         app: "analogsequencer"
+      }
+    },
+    {
+      id: "triggersequencer",
+      label: "TriggerSequencer",
+      route: "/editors/triggersequencer",
+      targetFilter: {
+        app: "triggersequencer"
       }
     }
   ],

@@ -4072,7 +4072,7 @@ test("editor manifest route lists registered instrument editors", async () => {
   const context = createRouteContext();
   const response = await requestJson(context, "GET", "/editors/manifest");
 
-  assert.equal(response.editors.length, 9);
+  assert.equal(response.editors.length, 10);
   assert.deepEqual(response.editors, [
     {
       id: "poland",
@@ -4144,6 +4144,14 @@ test("editor manifest route lists registered instrument editors", async () => {
       route: "/editors/analogsequencer",
       targetFilter: {
         app: "analogsequencer"
+      }
+    },
+    {
+      id: "triggersequencer",
+      label: "TriggerSequencer",
+      route: "/editors/triggersequencer",
+      targetFilter: {
+        app: "triggersequencer"
       }
     }
   ]);
@@ -4665,10 +4673,31 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /recall: \{ rtzBeforePlay: rtzBeforePlayInput\.checked \}/);
 });
 
+test("TriggerSequencer editor route serves the 16-bit block-recall surface", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/triggersequencer");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /TriggerSequencer Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=triggersequencer/);
+  assert.match(response.body, /Steps is stored and recalled as one unsigned 16-bit integer/);
+  assert.match(response.body, /repeat\(16/);
+  assert.match(response.body, /1 << index/);
+  assert.match(response.body, /messages\/out\/current_stage/);
+  assert.match(response.body, /TriggerDuration/);
+  assert.match(response.body, /canonicalParamName/);
+  assert.match(response.body, /return isMaxCount\(param\) \? "MaxCnt"/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
+});
+
 test("OSC editors place controls above Block State and live destinations below it", async () => {
   const context = createRouteContext();
   const editors = [
     ["analogsequencer", 'id="stages"'],
+    ["triggersequencer", 'id="steps"'],
     ["listsequencer", 'id="inports"'],
     ["listvelsequencer", 'id="parameters"'],
     ["plate", 'id="controls"'],

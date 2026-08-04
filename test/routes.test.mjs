@@ -3616,6 +3616,7 @@ test("hardware units expire offline without removing voice assignments", async (
   });
   await requestJson(context, "POST", "/hardware/register", {
     id: "shadowbox-b",
+    rnboDevices: [{ id: "runner", host: "shadowbox-b.local", graphEditorUrl: "http://shadowbox-b.local:3000" }],
     targets: [{ id: "b-source", host: "192.168.68.71", port: 9000, address: "/rnbo/inst/2/messages/in/shadowscore" }]
   });
 
@@ -3623,11 +3624,18 @@ test("hardware units expire offline without removing voice assignments", async (
   const session = await requestJson(context, "GET", "/session");
   const peer = session.hardwareUnits.find((unit) => unit.id === "shadowbox-b");
   const target = session.rnbo.targets.find((entry) => entry.id === "shadowbox-b:b-source");
+  const device = session.rnbo.devices.find((entry) => entry.id === "shadowbox-b:runner");
 
   assert.equal(peer.status, "offline");
   assert.equal(peer.available, false);
   assert.equal(target.available, false);
+  assert.equal(device.available, false);
+  assert.equal(device.unitStatus, "offline");
   assert.equal(session.assignments["player-1"].rnboTargetId, "shadowbox-b:b-source");
+
+  const devices = await requestJson(context, "GET", "/rnbo/devices");
+  assert.equal(devices.devices[0].available, false);
+  assert.equal(devices.devices[0].unitStatus, "offline");
 });
 
 test("hardware heartbeat refreshes a registered unit", async () => {
@@ -4066,6 +4074,8 @@ test("root route serves view index", async () => {
   assert.match(response.body, /\/transport\/status/);
   assert.match(response.body, /\/rnbo\/devices/);
   assert.match(response.body, /:3000/);
+  assert.match(response.body, /Online Hardware Units/);
+  assert.match(response.body, /device\.available === false \|\| device\.unitStatus === "offline"/);
 });
 
 test("editor manifest route lists registered instrument editors", async () => {

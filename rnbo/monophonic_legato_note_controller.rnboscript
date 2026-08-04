@@ -1,0 +1,232 @@
+// Monophonic/legato MIDI note controller for RNBO Codebox.
+//
+// Inlets
+//   in1: raw MIDI byte stream
+//   in2: selection/stealing mode
+//          0 = highest held note
+//          1 = lowest held note
+//          2 = oldest held note (FIFO)
+//          3 = newest held note (LIFO)
+//          4 = no stealing while the voice is occupied
+//
+// Outlets
+//   out1: raw MIDI byte stream
+//   listout2: [voice, mute], for the poly~ mute inlet
+//   out3: target voice, for a "set target" message
+//
+// Use this before an RNBO subpatcher configured with @voicecontrol user.
+
+const NOTE_BUFFER_SIZE = 128;
+const VOICE = 1;
+
+const MODE_HIGH = 0;
+const MODE_LOW = 1;
+const MODE_FIFO = 2;
+const MODE_LIFO = 3;
+const MODE_NO_STEAL = 4;
+
+const MIDI_NOTE_OFF = 0x80;
+const MIDI_NOTE_ON = 0x90;
+
+// noteBuffer fields:
+//   0 = held (1 while the physical key is down)
+//   1 = assigned voice (1 active, 0 waiting)
+//   2 = MIDI pitch
+//   3 = velocity
+//   4 = note-on time
+//   5 = MIDI channel
+//
+// A separate held flag is used instead of pitch == 0 as an empty marker so
+// that MIDI note 0 works correctly.
+@state noteBuffer = new FixedNumberArray(NOTE_BUFFER_SIZE, 6);
+@state parser = new midiparse();
+@state mode = MODE_HIGH;
+
+function findNote(pitch, channel) {
+    for (let i = 0; i < NOTE_BUFFER_SIZE; i++) {
+        if (
+            noteBuffer[i][0] == 1
+            && noteBuffer[i][2] == pitch
+            && noteBuffer[i][5] == channel
+        ) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+function findFreeSlot() {
+    for (let i = 0; i < NOTE_BUFFER_SIZE; i++) {
+        if (noteBuffer[i][0] == 0) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+function findActiveNote() {
+    for (let i = 0; i < NOTE_BUFFER_SIZE; i++) {
+        if (noteBuffer[i][0] == 1 && noteBuffer[i][1] == VOICE) {
+            return i;
+        }
+    }
+
+    return -1;
+}
+
+function isBetterCandidate(candidate, selected) {
+    if (mode == MODE_HIGH) {
+        return noteBuffer[candidate][2] > noteBuffer[selected][2];
+    }
+
+    if (mode == MODE_LOW) {
+        return noteBuffer[candidate][2] < noteBuffer[selected][2];
+    }
+
+    if (mode == MODE_LIFO) {
+        return noteBuffer[candidate][4] > noteBuffer[selected][4];
+    }
+
+    // FIFO is also the deterministic fallback for no-steal mode after the
+    // currently sounding note has been released.
+    return noteBuffer[candidate][4] < noteBuffer[selected][4];
+}
+
+function findNextWaitingNote() {
+    let selected = -1;
+
+    for (let i = 0; i < NOTE_BUFFER_SIZE; i++) {
+        if (noteBuffer[i][0] == 1 && noteBuffer[i][1] == 0) {
+            if (selected < 0 || isBetterCandidate(i, selected)) {
+                selected = i;
+            }
+        }
+    }
+
+    return selected;
+}
+
+function sendNoteOn(bufferIndex) {
+    let pitch = noteBuffer[bufferIndex][2];
+    let velocity = noteBuffer[bufferIndex][3];
+    let channel = noteBuffer[bufferIndex][5];
+
+    noteBuffer[bufferIndex][1] = VOICE;
+
+    // Explicitly unmute the voice before sending it MIDI.
+    listout2 = [VOICE, 0];
+    out3 = VOICE;
+    out1 = MIDI_NOTE_ON | channel;
+    out1 = pitch;
+    out1 = velocity;
+}
+
+function sendNoteOff(bufferIndex, releaseVelocity) {
+    let pitch = noteBuffer[bufferIndex][2];
+    let channel = noteBuffer[bufferIndex][5];
+
+    out3 = VOICE;
+    out1 = MIDI_NOTE_OFF | channel;
+    out1 = pitch;
+    out1 = releaseVelocity;
+
+    noteBuffer[bufferIndex][1] = 0;
+}
+
+function addHeldNote(pitch, velocity, channel) {
+    let existing = findNote(pitch, channel);
+
+    if (existing >= 0) {
+        noteBuffer[existing][3] = velocity;
+        return;
+    }
+
+    let slot = findFreeSlot();
+    if (slot < 0) {
+        return;
+    }
+
+    noteBuffer[slot][0] = 1;
+    noteBuffer[slot][1] = 0;
+    noteBuffer[slot][2] = pitch;
+    noteBuffer[slot][3] = velocity;
+    noteBuffer[slot][4] = currenttime();
+    noteBuffer[slot][5] = channel;
+
+    let active = findActiveNote();
+    if (active >= 0) {
+        if (mode == MODE_NO_STEAL) {
+            return;
+        }
+
+        sendNoteOff(active, 64);
+    }
+
+    sendNoteOn(slot);
+}
+
+function removeHeldNote(pitch, releaseVelocity, channel) {
+    let slot = findNote(pitch, channel);
+    if (slot < 0) {
+        return;
+    }
+
+    let wasActive = noteBuffer[slot][1] == VOICE;
+    if (wasActive) {
+        sendNoteOff(slot, releaseVelocity);
+    }
+
+    noteBuffer[slot][0] = 0;
+    noteBuffer[slot][1] = 0;
+    noteBuffer[slot][2] = 0;
+    noteBuffer[slot][3] = 0;
+    noteBuffer[slot][4] = 0;
+    noteBuffer[slot][5] = 0;
+
+    // Releasing a waiting/stolen note must not disturb the active voice.
+    if (!wasActive) {
+        return;
+    }
+
+    let next = findNextWaitingNote();
+    if (next >= 0) {
+        sendNoteOn(next);
+    }
+}
+
+let midiState = parser.next(in1);
+let messageType = midiState[0];
+mode = in2;
+
+let status = midiState[midiState.length - 3];
+let byte1 = midiState[midiState.length - 2];
+let byte2 = midiState[midiState.length - 1];
+
+switch (messageType) {
+    case -1:
+        // The MIDI parser has not completed a message yet.
+        break;
+
+    case 0:
+    {
+        let pitch = midiState[1];
+        let velocity = midiState[2];
+        let channel = midiState[3];
+
+        if (velocity != 0) {
+            addHeldNote(pitch, velocity, channel);
+        } else {
+            removeHeldNote(pitch, velocity, channel);
+        }
+        break;
+    }
+
+    default:
+        // Route non-note MIDI to every voice.
+        out3 = 0;
+        out1 = status;
+        out1 = byte1;
+        out1 = byte2;
+}

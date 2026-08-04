@@ -168,7 +168,7 @@
         <div class="metric-detail" id="playback-state"></div>
       </div>
       <div class="metric">
-        <div class="metric-label">Hardware Units</div>
+        <div class="metric-label">Online Hardware Units</div>
         <div class="metric-value" id="hardware-count">-</div>
         <div class="metric-detail" id="hardware-detail"></div>
       </div>
@@ -267,8 +267,12 @@
       fields["active-block"].textContent = playback?.activeBlockId || "-";
       fields["playback-state"].textContent = playback ? (playback.running ? "playing" : "stopped") : "playback unavailable";
       const units = hardware?.hardwareUnits ?? [];
-      fields["hardware-count"].textContent = String(units.length);
-      fields["hardware-detail"].textContent = units.length ? units.map((unit) => unit.advertisedName || unit.id).join(", ") : "none registered";
+      const onlineUnits = units.filter((unit) => unit.available !== false && unit.status !== "offline");
+      const offlineUnitCount = units.length - onlineUnits.length;
+      fields["hardware-count"].textContent = String(onlineUnits.length);
+      fields["hardware-detail"].textContent = onlineUnits.length
+        ? onlineUnits.map((unit) => unit.advertisedName || unit.id).join(", ") + (offlineUnitCount ? ` · ${offlineUnitCount} offline` : "")
+        : (offlineUnitCount ? `${offlineUnitCount} offline` : "none registered");
       const rnboTargets = targets?.targets ?? [];
       fields["target-count"].textContent = String(rnboTargets.length);
       fields["target-detail"].textContent = rnboTargets.length ? `${rnboTargets.filter((target) => target.available !== false).length} online` : "none discovered";
@@ -285,11 +289,9 @@
         const devices = Array.isArray(payload.devices) ? payload.devices : [];
         const links = graphEditorLinks(devices);
         renderGraphEditors(links);
-        fields["target-detail"].textContent = `${links.length} graph editor${links.length === 1 ? "" : "s"} discovered`;
       } catch (error) {
         rnboLinksElement.className = "";
         rnboLinksElement.innerHTML = `<div class="error">Could not load /rnbo/devices: ${escapeHtml(error.message)}</div>`;
-        fields["target-detail"].textContent = "graph editor discovery unavailable";
       }
     }
 
@@ -304,6 +306,9 @@
     function graphEditorLinks(devices) {
       const links = new Map();
       for (const device of devices) {
+        if (device.available === false || device.unitStatus === "offline") {
+          continue;
+        }
         addGraphEditorLink(links, device);
       }
       return Array.from(links.values()).sort((a, b) => a.label.localeCompare(b.label));

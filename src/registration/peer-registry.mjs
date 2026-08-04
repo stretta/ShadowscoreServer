@@ -60,7 +60,13 @@ export function createPeerRegistry(config, options = {}) {
       );
     },
     rnboDevices() {
-      return this.snapshot().flatMap((unit) => unit.rnboDevices ?? []);
+      return this.snapshot().flatMap((unit) =>
+        (unit.rnboDevices ?? []).map((device) => ({
+          ...device,
+          available: unit.available && device.available !== false,
+          unitStatus: unit.status
+        }))
+      );
     },
     useObservedHost(unitId, targetId) {
       const id = stringField(unitId);

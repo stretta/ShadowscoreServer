@@ -34,12 +34,13 @@
     .rows { display: grid; gap: 10px; }
     .row-card { display: grid; gap: 10px; padding: 12px; }
     .row-head { align-items: center; display: flex; gap: 10px; justify-content: space-between; }
-    .row-grid { align-items: end; display: grid; gap: 10px; grid-template-columns: 112px minmax(260px, 1fr) auto auto; }
+    .row-grid { align-items: end; display: grid; gap: 10px; grid-template-columns: 112px minmax(260px, 1fr) auto auto auto; }
     .field { display: grid; gap: 5px; }
     .field label { color: var(--ss-muted); font-size: 11px; font-weight: 850; letter-spacing: .02em; text-transform: uppercase; }
     .field input { box-sizing: border-box; min-height: 36px; width: 100%; }
     .velocity-list { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .map-input { font-variant-numeric: tabular-nums; text-align: right; }
+    .row-mute[aria-pressed="true"] { background: var(--ss-danger, #b43b3b); border-color: var(--ss-danger, #b43b3b); color: #fff; }
     .empty { border: 1px dashed var(--ss-border-strong); border-radius: var(--ss-radius-ui); padding: 12px; }
     @media (max-width: 760px) {
       .top, .toolbar, .row-head, .read-source { align-items: flex-start; flex-direction: column; }
@@ -152,13 +153,16 @@
         const number = index + 1;
         const portsByTarget = new Map();
         const mapsByTarget = new Map();
+        const mutesByTarget = new Map();
         for (const target of nextTargets) {
           const inputPort = (target.inputPorts || []).find((entry) => rowNumber(entry.name) === number);
           const mapParam = (target.parameters || []).find((entry) => mapNumber(entry.name) === number);
+          const muteParam = (target.parameters || []).find((entry) => muteNumber(entry.name) === number);
           if (inputPort) portsByTarget.set(target.id, inputPort);
           if (mapParam) mapsByTarget.set(target.id, mapParam);
+          if (muteParam) mutesByTarget.set(target.id, muteParam);
         }
-        return { number, portsByTarget, mapsByTarget };
+        return { number, portsByTarget, mapsByTarget, mutesByTarget };
       });
     }
 
@@ -172,11 +176,16 @@
       return match ? Number(match[1]) : 0;
     }
 
+    function muteNumber(name) {
+      const match = String(name || "").toLowerCase().match(/^(?:([1-8])mute|mute([1-8]))$/);
+      return match ? Number(match[1] || match[2]) : 0;
+    }
+
     function collectGlobalParams(nextTargets) {
       const byName = new Map();
       for (const target of nextTargets) {
         for (const param of target.parameters || []) {
-          if (mapNumber(param.name)) continue;
+          if (mapNumber(param.name) || muteNumber(param.name)) continue;
           if (!byName.has(param.name)) byName.set(param.name, { name: param.name, paramsByTarget: new Map() });
           byName.get(param.name).paramsByTarget.set(target.id, param);
         }
@@ -340,6 +349,9 @@
       const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
       const mapParam = row.mapsByTarget.get(source?.id) || Array.from(row.mapsByTarget.values())[0];
       const mapValue = mapParam && parameterState.has(mapParam.name) ? parameterState.get(mapParam.name) : mapParam?.value;
+      const muteParam = row.mutesByTarget.get(source?.id) || Array.from(row.mutesByTarget.values())[0];
+      const muteValue = muteParam && parameterState.has(muteParam.name) ? parameterState.get(muteParam.name) : muteParam?.value;
+      const muted = muteIsOn(muteValue, muteParam);
       card.innerHTML = `
         <div class="row-head">
           <div>
@@ -359,10 +371,12 @@
           </div>
           <button type="button" data-get-row="${row.number}">Get Row</button>
           <button class="primary" type="button" data-send-row="${row.number}">Send Row</button>
+          <button class="row-mute" type="button" aria-pressed="${muted}" data-row-mute="${row.number}"${muteParam ? "" : " disabled"}>${muteParam ? (muted ? "Muted" : "Mute") : "Mute unavailable"}</button>
         </div>
       `;
       card.querySelector("[data-get-row]").addEventListener("click", () => getRow(row).catch(reportError));
       card.querySelector("[data-send-row]").addEventListener("click", () => sendRow(row).catch(reportError));
+      card.querySelector("[data-row-mute]").addEventListener("click", () => sendRowMute(row).catch(reportError));
       const mapInput = card.querySelector("[data-row-map]");
       mapInput.addEventListener("input", () => {
         const name = mapParam?.name;
@@ -478,6 +492,29 @@
       if (sent !== selected.length) throw new Error(`${row.number}map failed on ${selected.length - sent} target${selected.length - sent === 1 ? "" : "s"}`);
     }
 
+    async function sendRowMute(row) {
+      const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
+      const sourceParam = row.mutesByTarget.get(source?.id) || Array.from(row.mutesByTarget.values())[0];
+      if (!sourceParam) throw new Error(`Row ${row.number} mute is unavailable`);
+      const current = parameterState.has(sourceParam.name) ? parameterState.get(sourceParam.name) : sourceParam.value;
+      const value = muteIsOn(current, sourceParam) ? muteOffValue(sourceParam) : muteOnValue(sourceParam);
+      const selected = selectedTargetIds().filter((id) => row.mutesByTarget.has(id));
+      if (!selected.length) throw new Error(`No checked target exposes row ${row.number} mute`);
+      for (const targetId of selected) {
+        const param = row.mutesByTarget.get(targetId);
+        setParameterValue(param.name, value);
+      }
+      snapshotClient?.commitEdit();
+      renderRows();
+      const results = await Promise.allSettled(selected.map((targetId) => {
+        const param = row.mutesByTarget.get(targetId);
+        return postOsc({ targets: [targetId], param: param.name, args: [value] });
+      }));
+      const sent = results.filter((result) => result.status === "fulfilled").length;
+      setStatus(`${muteIsOn(value, sourceParam) ? "Muted" : "Unmuted"} row ${row.number} on ${sent}/${selected.length}`);
+      if (sent !== selected.length) throw new Error(`Row ${row.number} mute failed on ${selected.length - sent} target${selected.length - sent === 1 ? "" : "s"}`);
+    }
+
     function serializeSnapshotState() {
       const source = targets.find((target) => target.id === readSourceSelect.value) || targets[0];
       const byParamName = new Map((source?.parameters || []).map((param) => [param.name, param]));
@@ -580,6 +617,16 @@
     }
     function isToggleParam(param) {
       return Number(param?.min) === 0 && Number(param?.max) === 1;
+    }
+    function muteIsOn(value, param) {
+      const on = muteOnValue(param);
+      return String(value).toLowerCase() === String(on).toLowerCase() || (typeof value === "number" && value === 1);
+    }
+    function muteOnValue(param) {
+      return (param?.values || []).find((value) => String(value).toLowerCase() === "on") ?? 1;
+    }
+    function muteOffValue(param) {
+      return (param?.values || []).find((value) => String(value).toLowerCase() === "off") ?? 0;
     }
     function reported(value, fallback) { return Number.isFinite(Number(value)) ? Number(value) : fallback; }
     function isLoopback(host) { return ["", "127.0.0.1", "localhost", "::1"].includes(String(host || "").toLowerCase()); }

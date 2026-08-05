@@ -4569,6 +4569,14 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /inputPort: inputPort\.name/);
   assert.match(response.body, /param: mapParam\.name/);
   assert.match(response.body, /sendPitchMap/);
+  assert.match(response.body, /data-row-mute/);
+  assert.match(response.body, /function muteNumber/);
+  assert.match(response.body, /async function sendRowMute/);
+  assert.match(response.body, /param: param\.name, args: \[value\]/);
+  assert.match(response.body, /muteIsOn\(current, sourceParam\) \? muteOffValue\(sourceParam\) : muteOnValue\(sourceParam\)/);
+  assert.match(response.body, /String\(value\)\.toLowerCase\(\) === "on"/);
+  assert.match(response.body, /String\(value\)\.toLowerCase\(\) === "off"/);
+  assert.match(response.body, /mapNumber\(param\.name\) \|\| muteNumber\(param\.name\)/);
   assert.doesNotMatch(response.body, /schedulePitchMap|flushPitchMap/);
   assert.match(response.body, /parseVelocityList/);
   assert.match(response.body, /collectGlobalParams/);

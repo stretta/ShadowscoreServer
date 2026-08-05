@@ -4082,7 +4082,7 @@ test("editor manifest route lists registered instrument editors", async () => {
   const context = createRouteContext();
   const response = await requestJson(context, "GET", "/editors/manifest");
 
-  assert.equal(response.editors.length, 10);
+  assert.equal(response.editors.length, 11);
   assert.deepEqual(response.editors, [
     {
       id: "poland",
@@ -4130,6 +4130,14 @@ test("editor manifest route lists registered instrument editors", async () => {
       route: "/editors/vantor",
       targetFilter: {
         app: "vantor"
+      }
+    },
+    {
+      id: "drumbox",
+      label: "Drumbox",
+      route: "/editors/drumbox",
+      targetFilter: {
+        app: "drumbox"
       }
     },
     {
@@ -4501,6 +4509,29 @@ test("Vantor editor route follows the live nested oscillator and envelope struct
   assert.match(response.body, /displaySavedState/);
 });
 
+test("Drumbox editor route follows the live nested drum voice structure", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/drumbox");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /Drumbox Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=drumbox/);
+  assert.match(response.body, /DRUMBOX_GROUPS/);
+  assert.match(response.body, /prefix: "SynthDrum1\/"/);
+  assert.match(response.body, /prefix: "SynthDrum2\/"/);
+  assert.match(response.body, /prefix: `Sample\$\{number\}\/`/);
+  assert.match(response.body, /"AmpModEnvHoldTime"/);
+  assert.match(response.body, /prefix: "RnboPlateReverb\/"/);
+  assert.match(response.body, /parameterPath\(param\)\.startsWith\(group\.prefix\)/);
+  assert.match(response.body, /return param\?\.meta\?\.label \|\| LABELS\[param\?\.name\]/);
+  assert.match(response.body, /\.controls \{[^}]*min-width: 0; width: 100%;/);
+  assert.match(response.body, /\.control \{[^}]*flex: 1 1 0;[^}]*min-width: 0;/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
+});
+
 test("ListSequencer editor route serves the OSC target integration page", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/editors/listsequencer");
@@ -4723,6 +4754,7 @@ test("OSC editors place controls above Block State and live destinations below i
     ["softpiano", 'id="panels"'],
     ["element", 'id="panels"'],
     ["vantor", 'id="panels"'],
+    ["drumbox", 'id="panels"'],
     ["ttid", 'id="editors"']
   ];
   for (const [editor, controlsMarker] of editors) {
@@ -4745,7 +4777,7 @@ test("OSC editors place controls above Block State and live destinations below i
 
 test("instant-write OSC editors expose their intended completion boundaries", async () => {
   const context = createRouteContext();
-  for (const editor of ["analogsequencer", "softpiano", "element", "vantor", "plate", "poland"]) {
+  for (const editor of ["analogsequencer", "softpiano", "element", "vantor", "drumbox", "plate", "poland"]) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.match(response.body, /bindRangeCommit/);
     assert.match(response.body, /pointerdown/);
@@ -4906,6 +4938,7 @@ test("shared grouped navigation defines and reaches every hosted user-facing pag
     "/editors/listvelsequencer",
     "/editors/element",
     "/editors/vantor",
+    "/editors/drumbox",
     "/editors/poland",
     "/editors/plate",
     "/editors/softpiano",

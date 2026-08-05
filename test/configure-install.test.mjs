@@ -24,6 +24,7 @@ test("installer config registry stays aligned with default applications and edit
   assert.deepEqual(config.static.apps.pianoRoll.routes, ["/piano-roll"]);
   assert.deepEqual(config.static.apps.analogSequencerEditor.routes, ["/editors/analogsequencer"]);
   assert.deepEqual(config.static.apps.triggerSequencerEditor.routes, ["/editors/triggersequencer"]);
+  assert.deepEqual(config.static.apps.drumboxEditor.routes, ["/editors/drumbox"]);
   assert.deepEqual(config.static.apps.listVelSequencerEditor.routes, ["/editors/listvelsequencer"]);
   assert.deepEqual(config.static.apps.softPianoEditor.routes, ["/editors/softpiano"]);
 });
@@ -54,6 +55,7 @@ test("installer updates preserve local settings and custom registry entries", ()
   assert.equal(config.editors.some((editor) => editor.id === "custom"), true);
   assert.equal(config.editors.some((editor) => editor.id === "analogsequencer"), true);
   assert.equal(config.editors.some((editor) => editor.id === "triggersequencer"), true);
+  assert.equal(config.editors.some((editor) => editor.id === "drumbox"), true);
   assert.equal(config.editors.some((editor) => editor.id === "listvelsequencer"), true);
   assert.equal(config.editors.some((editor) => editor.id === "softpiano"), true);
 });

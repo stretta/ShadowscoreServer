@@ -105,6 +105,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/editors/vantor"]
       },
+      drumboxEditor: {
+        root: "public/editors/drumbox",
+        index: "index.html",
+        routes: ["/editors/drumbox"]
+      },
       listSequencerEditor: {
         root: "public/editors/listsequencer",
         index: "index.html",
@@ -189,6 +194,14 @@ export const defaultConfig = Object.freeze({
       route: "/editors/vantor",
       targetFilter: {
         app: "vantor"
+      }
+    },
+    {
+      id: "drumbox",
+      label: "Drumbox",
+      route: "/editors/drumbox",
+      targetFilter: {
+        app: "drumbox"
       }
     },
     {

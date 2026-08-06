@@ -4541,6 +4541,7 @@ test("Drumbox editor route follows the live nested drum voice structure", async 
   assert.match(response.body, /return param\?\.meta\?\.label \|\| LABELS\[param\?\.name\]/);
   assert.match(response.body, /\.controls \{[^}]*min-width: 0; width: 100%;/);
   assert.match(response.body, /\.control \{[^}]*flex: 1 1 0;[^}]*min-width: 0;/);
+  assert.match(response.body, /\.control-readout \{[^}]*height: 14px;[^}]*white-space: nowrap;/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotState/);
   assert.match(response.body, /displaySavedState/);

@@ -70,8 +70,14 @@ TTID is always excluded and cannot be opted back into an OSC clip. Any live
 parameter whose `meta.editor` is `ttid` is block-owned harmonic state even when
 the export calls it `Scale`, `PitchSet`, or another name. Capture and recall use
 the live metadata classification; imported snapshots containing semantic
-`Scale` or `ttid` parameters are rejected. Root, transpose, mode, `Clock`, and
-other non-TTID controls remain ordinary device snapshot state.
+`Scale` or `ttid` parameters are rejected.
+
+`Swing` and `SwingAmt` are also always excluded. They are required block-owned
+sequencer state, stored once as `mesostructure.*.swing` and
+`mesostructure.*.swingAmt`. Imported OSC clips containing either semantic
+parameter are rejected; there is no legacy snapshot migration. Root,
+transpose, mode, `Clock`, and other controls remain ordinary device snapshot
+state.
 
 `meta.snapshot: false` or `meta.snapshot_state: false` always excludes a
 control. `meta.snapshot_order: "late"` places an otherwise persistent control
@@ -90,7 +96,9 @@ For each resolved role, the compiler produces:
 4. `Clock`, when saved.
 
 At playback start and mesostructural block entry, the server sends the block's
-shared TTID before compiling this device-specific sequence. Roles or targets
+shared TTID and shared Swing values before compiling this device-specific
+sequence. `SwingAmt` is sent before `Swing`, so enabling Swing observes the
+block's amount immediately. Roles or targets
 with `ignoreScale` skip only the TTID send; `ignoreRecall` remains the separate
 whole-snapshot policy.
 

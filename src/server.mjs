@@ -3,7 +3,7 @@ import http from "node:http";
 import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
-import { applyLiveTempo, distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "./http/routes.mjs";
+import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { createTempoPolicy } from "./playback/tempo-policy.mjs";
 import { createRnboStageCollector } from "./playback/rnbo-stage-collector.mjs";
@@ -68,7 +68,10 @@ const macroPlayback = createMacroPlayback(store, config, {
 runtime.macroPlayback = macroPlayback;
 const oscSnapshotAutoRecall = createOscSnapshotAutoRecall(store, {
   recall: async ({ blockId }) => {
-    await distributeTtidForBlock(store.getScore(), config, runtime, blockId, { preferCachedTargets: true });
+    await Promise.all([
+      distributeTtidForBlock(store.getScore(), config, runtime, blockId, { preferCachedTargets: true }),
+      distributeSwingForBlock(store.getScore(), config, runtime, blockId, { preferCachedTargets: true })
+    ]);
     return recallOscSnapshotsForBlock(store, config, runtime, blockId, { preferCachedTargets: true });
   },
   onError: (error, request) => console.error(`[osc-snapshot] automatic recall failed for ${request.blockId}: ${error.message}`)

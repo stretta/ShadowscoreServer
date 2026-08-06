@@ -110,9 +110,7 @@ test("capture follows unified nested Clock addresses and stores enum indexes", a
   });
   assert.deepEqual(captured.clip.params, {
     Clock: 1,
-    Swing: 0,
-    ClockInterval: 240,
-    SwingAmt: 0.75
+    ClockInterval: 240
   });
 });
 

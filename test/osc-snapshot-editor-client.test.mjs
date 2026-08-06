@@ -88,6 +88,18 @@ test("shared OSC editor snapshot core stores string enums as numeric option inde
   assert.equal(oscEditorParamValue({ ...param, values: ["1", "2", "14", "14", "15"] }, 3), "15");
 });
 
+test("shared OSC editor snapshot core omits block-owned Swing controls", () => {
+  const snapshot = createOscEditorSnapshot({
+    app: "analogsequencer",
+    paramEntries: [
+      { name: "Clock", value: "On", values: ["Off", "On"] },
+      { name: "Swing", value: "On", values: ["Off", "On"] },
+      { name: "SwingAmt", value: 0.625 }
+    ]
+  });
+  assert.deepEqual(snapshot.params, { Clock: 1 });
+});
+
 test("shared OSC editor snapshot comparison is semantic and order-independent", () => {
   assert.equal(sameOscSnapshot(
     { app: "plate", params: { Clock: 0, Decay: 0.5 }, inputPorts: {} },

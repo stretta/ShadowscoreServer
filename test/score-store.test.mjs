@@ -29,6 +29,8 @@ test("initial score creates configured voices", () => {
     assert.deepEqual(block.duration, { bars: 4 });
     assert.equal(block.scale.scale_name, "Ionian");
     assert.equal(block.ttid, 2741);
+    assert.equal(block.swing, 0);
+    assert.equal(block.swingAmt, 0.5);
     assert.deepEqual(block.oscLayers, {});
     assert.equal(Object.keys(block.players).length, 6);
     for (const assignment of Object.values(block.players)) {
@@ -465,6 +467,20 @@ test("block TTID edits are non-destructive and scale transforms commit notes, me
     ...result.score.mesostructure.A,
     scale: { root_note: 0, scale_name: "Chromatic", scale_intervals: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11] }
   }), /must use scale-transform/);
+});
+
+test("block Swing edits are revision-aware block state and cannot use generic block replacement", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const events = [];
+  store.events.on("change", (event) => events.push(event));
+  const edited = store.updateBlockSwing("A", { swing: "On", swingAmt: 0.625 }, { expectedScoreRevision: 0 });
+  assert.equal(edited.mesostructure.A.swing, 1);
+  assert.equal(edited.mesostructure.A.swingAmt, 0.625);
+  assert.equal(events.at(-1).type, "mesostructure.swing.updated");
+  assert.throws(() => store.replaceMesoBlock("A", {
+    ...edited.mesostructure.A,
+    swingAmt: 0.75
+  }), /Swing changes must use the Swing endpoint/);
 });
 
 test("mesostructural block duplication preserves shared clip assignments inside the copy", () => {

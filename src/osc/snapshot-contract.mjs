@@ -73,6 +73,9 @@ export function snapshotControlDisposition({ kind, name, meta = {} } = {}) {
   if (controlKind === "param" && isTtidMetadata(meta)) {
     return { state: "excluded", reason: "mesostructural-ttid" };
   }
+  if (controlKind === "param" && isBlockSwingName(semanticName)) {
+    return { state: "excluded", reason: "mesostructural-swing" };
+  }
   if (controlKind === "inputPort" && isMomentaryInputPort(semanticName, meta)) {
     return { state: "excluded", reason: "momentary-control" };
   }
@@ -94,6 +97,9 @@ function normalizeParams(document) {
     if (isReservedTtidName(semanticName)) {
       throw new Error(`OSC snapshots cannot own mesostructural TTID parameter '${semanticName}'`);
     }
+    if (isBlockSwingName(semanticName)) {
+      throw new Error(`OSC snapshots cannot own mesostructural Swing parameter '${semanticName}'`);
+    }
     if (!Number.isFinite(value)) {
       throw new Error(`OSC snapshot parameter '${semanticName}' must be numeric`);
     }
@@ -110,6 +116,11 @@ function isTtidMetadata(meta) {
 function isReservedTtidName(name) {
   const normalized = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "");
   return normalized === "ttid" || normalized === "scale";
+}
+
+function isBlockSwingName(name) {
+  const normalized = String(name).split("/").at(-1).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return normalized === "swing" || normalized === "swingamt";
 }
 
 function normalizeInputPorts(document) {

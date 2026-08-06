@@ -682,6 +682,20 @@ test("harmonic routes expose the catalog and keep direct TTID edits separate fro
   assert.equal(transformed.score.structureRevision, 1);
 });
 
+test("block Swing route stores one shared groove and does not create per-instance OSC state", async () => {
+  const context = createRouteContext();
+  const result = await requestJson(context, "PUT", "/mesostructure/A/swing", {
+    expectedScoreRevision: 0,
+    swing: "On",
+    swingAmt: 0.625,
+    auditionTargets: []
+  });
+  assert.equal(result.score.mesostructure.A.swing, 1);
+  assert.equal(result.score.mesostructure.A.swingAmt, 0.625);
+  assert.deepEqual(result.score.oscClips, {});
+  assert.equal(result.distribution.attemptedCount, 0);
+});
+
 test("OSC clip and block layer routes create, reuse, replace, and safely delete state", async () => {
   const context = createRouteContext();
   await requestJson(context, "PUT", "/osc/assignments/list-a", { app: "listsequencer", deviceId: "finch" });
@@ -4580,7 +4594,7 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /createOscEditorSnapshot/);
   assert.match(response.body, /snapshotClient\?\.syncScore\(body\.score\)/);
-  assert.match(response.body, /20260726-unified-clock1/);
+  assert.match(response.body, /20260806-block-swing1/);
 });
 
 test("ListVelSequencer editor route serves row-level get and multi-target send controls", async () => {
@@ -4626,7 +4640,7 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotState/);
   assert.match(response.body, /displaySavedState/);
-  assert.match(response.body, /20260726-unified-clock1/);
+  assert.match(response.body, /20260806-block-swing1/);
 });
 
 test("AnalogSequencer editor route serves the 16-stage OSC control surface", async () => {
@@ -4715,7 +4729,7 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /commitGesture/);
   assert.match(response.body, /commitEdit/);
   assert.doesNotMatch(response.body, /draftChanged/);
-  assert.match(response.body, /20260726-unified-clock1/);
+  assert.match(response.body, /20260806-block-swing1/);
   assert.match(response.body, /dataset\.snapshotValue/);
   assert.match(response.body, /id="rtz-before-play"/);
   assert.match(response.body, /On block change, send RTZ before play/);
@@ -4760,7 +4774,7 @@ test("OSC editors place controls above Block State and live destinations below i
   for (const [editor, controlsMarker] of editors) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.equal(response.status, 200);
-    assert.match(response.body, /202607(?:24-ttid-revision1|26-unified-clock1|27-nested-keys1)/,
+    assert.match(response.body, /2026(?:0724-ttid-revision1|0727-nested-keys1|0806-block-swing1)/,
       `${editor} should load the instant-write snapshot client contract`);
     const controlsIndex = response.body.indexOf(controlsMarker);
     const blockStateIndex = response.body.indexOf('id="snapshot-mount"');

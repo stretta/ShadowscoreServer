@@ -90,7 +90,7 @@
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, readOscQueryParameterValues } from "/shared/osc-snapshot-editor.js?v=20260726-unified-clock1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, readOscQueryParameterValues } from "/shared/osc-snapshot-editor.js?v=20260806-block-swing1";
 
     const ROW_COUNT = 8;
     const GET_REQUEST = [-999];
@@ -122,6 +122,7 @@
       elements: snapshotElements,
       serializeState: serializeSnapshotState,
       displayState: displaySavedState,
+      onBlockChange: hydrateBlockSwing,
       onFocusChange: getData,
       readOnBlockChange: true,
       liveTargetRoot: targetsEl,
@@ -331,6 +332,7 @@
 
     async function sendGlobalParam(entry, value) {
       setParameterValue(entry.name, value);
+      if (isBlockSwingParam(entry.name)) return updateBlockSwing(entry.name, value);
       snapshotClient?.commitEdit();
       const selected = selectedTargetIds().filter((id) => entry.paramsByTarget.has(id));
       if (!selected.length) throw new Error(`No checked target exposes ${entry.name}`);
@@ -342,6 +344,30 @@
       setStatus(`Sent ${entry.name} ${value} to ${sent}/${selected.length}`);
       if (sent !== selected.length) throw new Error(`${entry.name} failed on ${selected.length - sent} target${selected.length - sent === 1 ? "" : "s"}`);
     }
+
+    async function updateBlockSwing(name, value) {
+      const state = snapshotClient?.snapshotState();
+      const block = state?.score?.mesostructure?.[state.blockId];
+      if (!block) throw new Error("Choose an EDITING block");
+      const normalized = normalizeSwingName(name);
+      const result = await snapshotClient.updateBlockSwing({ swing: normalized === "swing" ? value : block.swing, swingAmt: normalized === "swingamt" ? value : block.swingAmt });
+      hydrateBlockSwing(result.score.mesostructure[result.blockId]);
+      setStatus(`Updated ${result.blockId} Swing for ${result.distribution.succeededCount}/${result.distribution.attemptedCount} sequencers`);
+    }
+
+    function hydrateBlockSwing(block) {
+      if (!block) return;
+      for (const entry of globalParams) {
+        const name = normalizeSwingName(entry.name);
+        const param = Array.from(entry.paramsByTarget.values())[0];
+        if (name === "swing") setParameterValue(entry.name, Array.isArray(param?.values) ? (Number(block.swing) ? "On" : "Off") : block.swing);
+        if (name === "swingamt") setParameterValue(entry.name, block.swingAmt);
+      }
+      renderGlobalParams();
+    }
+
+    function isBlockSwingParam(name) { return ["swing", "swingamt"].includes(normalizeSwingName(name)); }
+    function normalizeSwingName(value) { return String(value || "").split("/").at(-1).toLowerCase().replace(/[^a-z0-9]+/g, ""); }
 
     function renderRow(row) {
       const card = document.createElement("article");

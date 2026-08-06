@@ -446,6 +446,8 @@ function normalizePersistedMesostructure(mesostructure) {
       duration: isPlainObject(block?.duration) ? structuredClone(block.duration) : {},
       scale: isPlainObject(block?.scale) ? structuredClone(block.scale) : {},
       ...(block?.ttid === undefined ? {} : { ttid: block.ttid }),
+      swing: block?.swing,
+      swingAmt: block?.swingAmt,
       players: isPlainObject(block?.players) ? structuredClone(block.players) : {},
       oscLayers: Object.fromEntries(Object.entries(block?.oscLayers ?? {}).map(([roleId, layer]) => [
         roleId,

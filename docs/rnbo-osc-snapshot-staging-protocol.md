@@ -91,10 +91,11 @@ Direct `Clock` behavior remains compatible with the existing contract:
 
 ## Export-Specific Pending State
 
-AnalogSequencer stages all persistent params: the 16 stage values, 16 stage
-enable flags, GateTime, Swing, Mode, MaxCnt, SwingAmt, ClockRate, and any other
-editor-visible persistent param. RTZ and current-stage readback remain outside
-the protocol.
+AnalogSequencer stages its instance-owned persistent params: the 16 stage
+values, 16 stage enable flags, GateTime, Mode, MaxCnt, ClockRate, and any other
+editor-visible instance param. `Swing` and `SwingAmt` are block-owned and never
+enter this per-instance staging protocol. RTZ and current-stage readback remain
+outside the protocol.
 
 ListSequencer stages Root, Scale, transpose params, ClockRate, and the Steps,
 PrimaryRotation, SecondaryRotation, Velocity, and Duration lists.

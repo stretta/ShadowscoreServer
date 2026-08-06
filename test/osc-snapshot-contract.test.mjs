@@ -124,3 +124,16 @@ test("TTID metadata is mesostructural and cannot be imported as OSC clip state",
   assert.throws(() => normalizeOscSnapshot({ app: "listsequencer", params: { Scale: 2741 }, inputPorts: {} }), /cannot own mesostructural TTID/);
   assert.throws(() => normalizeOscSnapshot({ app: "quantizer", params: { ttid: 2741 }, inputPorts: {} }), /cannot own mesostructural TTID/);
 });
+
+test("Swing and SwingAmt are mesostructural and cannot be imported as OSC clip state", () => {
+  for (const name of ["Swing", "SwingAmt"]) {
+    assert.deepEqual(snapshotControlDisposition({ kind: "param", name }), {
+      state: "excluded",
+      reason: "mesostructural-swing"
+    });
+    assert.throws(
+      () => normalizeOscSnapshot({ app: "analogsequencer", params: { [name]: 0 }, inputPorts: {} }),
+      /cannot own mesostructural Swing/
+    );
+  }
+});

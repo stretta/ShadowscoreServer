@@ -49,6 +49,8 @@ The target mesostructural shape is:
         "scale_name": "Ionian"
       },
       "ttid": 2741,
+      "swing": 0,
+      "swingAmt": 0.5,
       "players": {},
       "oscLayers": {}
     }
@@ -61,6 +63,8 @@ The ownership rules are:
 - `clip.context.scale` describes the notes currently stored in that clip.
 - `mesostructure.*.scale` describes rooted and named harmonic context.
 - `mesostructure.*.ttid` is the rootless runtime pitch-class set.
+- `mesostructure.*.swing` and `mesostructure.*.swingAmt` are shared sequencer
+  groove state and never belong to an OSC clip or instance snapshot.
 - Matrix Edit writes block TTID directly and uses it as a non-destructive pitch
   fold. Notes excluded by the fold remain stored and reappear when included
   again.

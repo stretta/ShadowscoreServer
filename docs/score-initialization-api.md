@@ -9,7 +9,7 @@ The request owns structural intent only:
 - `clips`: reusable note clips with notes, loop duration, playback type,
   context, and behavior;
 - `blocks`: mesostructural ids, written tempos, durations, required rooted scale context,
-  required 12-bit `ttid`, and player-to-clip assignments;
+  required 12-bit `ttid`, shared `swing` / `swingAmt`, and player-to-clip assignments;
 - `macrostructure`: ordered block occurrences;
 - `oscRoles`: stable logical ids, app capabilities, labels, and recall policy.
 
@@ -22,13 +22,16 @@ The canonical block harmonic shape is:
     "scale_intervals": [0, 2, 4, 5, 7, 9, 11],
     "scale_name": "Ionian"
   },
-  "ttid": 2741
+  "ttid": 2741,
+  "swing": 0,
+  "swingAmt": 0.5
 }
 ```
 
 Initialization normalizes omitted new-score harmonic values to this C Ionian
-default and omitted written tempo to 120 BPM. Every stored block contains all
-three fields. OSC roles may independently set `ignoreRecall` and `ignoreScale`.
+default, omitted written tempo to 120 BPM, and omitted Swing to Off with an
+amount of `0.5`. Every stored block contains these fields. OSC roles may
+independently set `ignoreRecall` and `ignoreScale`.
 
 Legacy requests that still provide `macrostructure.tempo` use it only to fill
 missing block tempos. The normalized score removes that legacy field.

@@ -1,4 +1,5 @@
 import { DEFAULT_SCALE, normalizeScale, normalizeTtid, scaleToTtid } from "../harmonic/scale.mjs";
+import { DEFAULT_SWING, DEFAULT_SWING_AMT, normalizeSwing, normalizeSwingAmt } from "../sequencer/swing.mjs";
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 
@@ -135,6 +136,8 @@ function normalizeBlock(document, index, fallbackTempo = 120) {
     duration: structuredClone(document.duration ?? { bars: 1 }),
     scale: normalizeScale(document.scale ?? DEFAULT_SCALE),
     ttid: document.ttid === undefined ? scaleToTtid(document.scale ?? DEFAULT_SCALE) : normalizeTtid(document.ttid),
+    swing: normalizeSwing(document.swing ?? DEFAULT_SWING),
+    swingAmt: normalizeSwingAmt(document.swingAmt ?? DEFAULT_SWING_AMT),
     players
   };
 }

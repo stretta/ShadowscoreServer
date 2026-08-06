@@ -115,6 +115,13 @@ export function createCollaborationHub(store, config = {}) {
             { ...revisionOptions(payload), sourceClientId: client.id }
           ));
           break;
+        case "mesostructure.swing.update":
+          ack(client, requestId, store.updateBlockSwing(
+            requireString(payload.blockId, "blockId"),
+            { swing: payload.swing, swingAmt: payload.swingAmt },
+            { ...revisionOptions(payload), sourceClientId: client.id }
+          ));
+          break;
         case "mesostructure.scale.transform":
           ack(client, requestId, store.transformBlockScale(
             requireString(payload.blockId, "blockId"),

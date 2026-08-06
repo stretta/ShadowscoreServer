@@ -20,6 +20,7 @@ import { buildPlaybackSnapshot, nextPlaybackSnapshotGeneration } from "../playba
 import { createTempoPolicy } from "../playback/tempo-policy.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
+import { distributeBlockSwing } from "../sequencer/distribution.mjs";
 import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
 
 const REVISION_CONTROL_FIELDS = ["expectedVersion", "expectedScoreRevision", "expectedStructureRevision"];
@@ -1554,6 +1555,34 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  const mesoSwingMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/swing$/);
+  if (mesoSwingMatch && (request.method === "PUT" || request.method === "POST")) {
+    try {
+      const blockId = decodeURIComponent(mesoSwingMatch[1]);
+      const body = await readJson(request);
+      const score = request.method === "PUT"
+        ? store.updateBlockSwing(blockId, body, revisionOptions(body))
+        : store.getScore();
+      const active = score.structureState?.activeBlockId === blockId;
+      const distribution = await distributeSwingForBlock(score, config, runtime, blockId, {
+        targetIds: request.method === "POST" || active
+          ? undefined
+          : Array.isArray(body.auditionTargets) ? body.auditionTargets : []
+      });
+      writeJson(response, distribution.ok ? 200 : 502, {
+        ok: distribution.ok,
+        score,
+        blockId,
+        swing: score.mesostructure[blockId].swing,
+        swingAmt: score.mesostructure[blockId].swingAmt,
+        distribution
+      });
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
   const mesoScaleTransformMatch = url.pathname.match(/^\/mesostructure\/([^/]+)\/scale-transform$/);
   if (request.method === "POST" && mesoScaleTransformMatch) {
     try {
@@ -1797,6 +1826,15 @@ export async function recallOscSnapshotsForBlock(store, config, runtime, blockId
 
 export async function distributeTtidForBlock(score, config, runtime, blockId, options = {}) {
   return distributeBlockTtid(score, blockId, buildOscTargets(await readAllOscTargets(config, runtime, {
+    preferCached: Boolean(options.preferCachedTargets)
+  })), {
+    targetIds: options.targetIds,
+    sender: runtime.oscSender
+  });
+}
+
+export async function distributeSwingForBlock(score, config, runtime, blockId, options = {}) {
+  return distributeBlockSwing(score, blockId, buildOscTargets(await readAllOscTargets(config, runtime, {
     preferCached: Boolean(options.preferCachedTargets)
   })), {
     targetIds: options.targetIds,
@@ -2339,6 +2377,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
       jackTempo: null,
       tempoWrites: [],
       ttidDistribution: null,
+      swingDistribution: null,
       snapshotRecall: null,
       playbackUpdate: null,
       activations: [],
@@ -2363,7 +2402,10 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const tempoApplication = await applyLiveTempo(store, config, runtime, tempo);
   const jackTempo = tempoApplication.jack;
   const jackStart = await maybeStartJack(runtime);
-  const ttidDistribution = await distributeTtidForBlock(score, config, runtime, score.structureState?.activeBlockId);
+  const [ttidDistribution, swingDistribution] = await Promise.all([
+    distributeTtidForBlock(score, config, runtime, score.structureState?.activeBlockId),
+    distributeSwingForBlock(score, config, runtime, score.structureState?.activeBlockId)
+  ]);
   const snapshotRecall = await recallOscSnapshotsForBlock(store, config, runtime, score.structureState?.activeBlockId);
   const phaseWrites = body.phaseReset === false
     ? []
@@ -2398,6 +2440,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     jackTempo,
     tempoWrites: tempoApplication.rnboWrites,
     ttidDistribution,
+    swingDistribution,
     snapshotRecall,
     playbackUpdate,
     activations,

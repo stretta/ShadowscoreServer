@@ -504,6 +504,12 @@
             <label>Block TTID
               <input id="block-ttid" type="number" min="0" max="4095" step="1">
             </label>
+            <label>Block Swing
+              <select id="block-swing"><option value="0">Off</option><option value="1">On</option></select>
+            </label>
+            <label>Block Swing Amount
+              <input id="block-swing-amt" type="number" min="0" max="1" step="0.001">
+            </label>
           </div>
           <div>
             <table>
@@ -624,6 +630,8 @@
       scaleRoot: document.querySelector("#scale-root"),
       scaleName: document.querySelector("#scale-name"),
       blockTtid: document.querySelector("#block-ttid"),
+      blockSwing: document.querySelector("#block-swing"),
+      blockSwingAmt: document.querySelector("#block-swing-amt"),
       players: document.querySelector("#players"),
       playersEmpty: document.querySelector("#players-empty"),
       revertBlock: document.querySelector("#revert-block"),
@@ -702,7 +710,7 @@
       els.liveTempo.addEventListener("change", () => void setLiveTempo());
       els.followBlockTempo.addEventListener("change", () => void setFollowBlockTempo());
       els.useBlockTempo.addEventListener("click", () => void useBlockTempo());
-      [els.blockId, els.durationUnit, els.durationValue, els.tempo, els.scaleRoot, els.scaleName, els.blockTtid].forEach((el) => {
+      [els.blockId, els.durationUnit, els.durationValue, els.tempo, els.scaleRoot, els.scaleName, els.blockTtid, els.blockSwing, els.blockSwingAmt].forEach((el) => {
         el.addEventListener("input", () => {
           markBlockDirty();
         });
@@ -877,7 +885,7 @@
     function renderBlockEditor() {
       const block = currentBlock();
       const enabled = Boolean(block);
-      [els.blockId, els.durationUnit, els.durationValue, els.tempo, els.scaleRoot, els.scaleName, els.blockTtid].forEach((el) => {
+      [els.blockId, els.durationUnit, els.durationValue, els.tempo, els.scaleRoot, els.scaleName, els.blockTtid, els.blockSwing, els.blockSwingAmt].forEach((el) => {
         el.disabled = !enabled;
       });
       els.scaleRoot.disabled = true;
@@ -899,6 +907,8 @@
       els.scaleRoot.value = Number.isFinite(block.scale?.root_note) ? String(block.scale.root_note) : "";
       els.scaleName.value = block.scale?.scale_name ?? "";
       els.blockTtid.value = String(block.ttid ?? 2741);
+      els.blockSwing.value = String(block.swing ?? 0);
+      els.blockSwingAmt.value = String(block.swingAmt ?? 0.5);
 
       const voices = state.session?.voices ?? Object.keys(state.score?.voices ?? {}).map((id) => ({ id, label: id }));
       els.playersEmpty.hidden = voices.length > 0;
@@ -1167,6 +1177,8 @@
             tempo: 120,
             scale: { root_note: 0, scale_name: "Ionian", scale_intervals: [0, 2, 4, 5, 7, 9, 11] },
             ttid: 2741,
+            swing: 0,
+            swingAmt: 0.5,
             players: {}
           }
         }
@@ -1255,6 +1267,8 @@
         return;
       }
       const desiredTtid = Math.max(0, Math.min(4095, Math.round(numberValue(els.blockTtid.value, 2741))));
+      const desiredSwing = els.blockSwing.value === "1" ? 1 : 0;
+      const desiredSwingAmt = Math.max(0, Math.min(1, numberValue(els.blockSwingAmt.value, 0.5)));
       const block = blockFromForm();
       setStatus(`Saving block ${nextId}...`);
       try {
@@ -1270,6 +1284,21 @@
             method: "PUT",
             body: {
               ttid: desiredTtid,
+              expectedScoreRevision: score.scoreRevision ?? score.version,
+              expectedStructureRevision: score.structureRevision,
+              auditionTargets: []
+            }
+          });
+          score = response.score;
+          state.client?.adoptServerScore(score);
+        }
+        if (Number(score.mesostructure?.[nextId]?.swing) !== desiredSwing
+          || Number(score.mesostructure?.[nextId]?.swingAmt) !== desiredSwingAmt) {
+          const response = await fetchJson(`${state.serverUrl}/mesostructure/${encodeURIComponent(nextId)}/swing`, undefined, {
+            method: "PUT",
+            body: {
+              swing: desiredSwing,
+              swingAmt: desiredSwingAmt,
               expectedScoreRevision: score.scoreRevision ?? score.version,
               expectedStructureRevision: score.structureRevision,
               auditionTargets: []
@@ -1604,6 +1633,8 @@
         duration: { [unit]: numberValue(els.durationValue.value, 8) },
         scale,
         ttid: currentBlock()?.ttid ?? 2741,
+        swing: currentBlock()?.swing ?? 0,
+        swingAmt: currentBlock()?.swingAmt ?? 0.5,
         players
       };
     }

@@ -385,7 +385,7 @@
     <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
   </main>
   <script type="module">
-    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, readOscQueryParameterValues } from "/shared/osc-snapshot-editor.js?v=20260726-unified-clock1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, readOscQueryParameterValues } from "/shared/osc-snapshot-editor.js?v=20260806-block-swing1";
     const ROOTS = ["C", "C#", "D", "Eb", "E", "F", "F#", "G", "Ab", "A", "Bb", "B"];
     const WHITE_PCS = new Set([0, 2, 4, 5, 7, 9, 11]);
     let SCALES = Object.freeze({ ionian: [0, 2, 4, 5, 7, 9, 11] });
@@ -432,6 +432,7 @@
       elements: snapshotElements,
       serializeState: serializeSnapshotState,
       displayState: displaySavedState,
+      onBlockChange: hydrateBlockSwing,
       onFocusChange: populateFields,
       readOnBlockChange: true,
       liveTargetRoot: targetsEl,
@@ -978,6 +979,7 @@
     }
 
     async function sendParam(param, value, { commit = true } = {}) {
+      if (isBlockSwingParam(param)) return updateBlockSwing(param, value);
       if (commit) snapshotClient?.commitEdit();
       const selected = selectedTargetsFor(param.targetIds);
       if (!selected.length) {
@@ -988,6 +990,32 @@
       const sent = (body.results || []).filter((result) => result.ok).length;
       setStatus(`Sent ${paramLabel(param.name, param.displayName)} ${value} to ${sent}/${selected.length}`);
     }
+
+    async function updateBlockSwing(param, value) {
+      const state = snapshotClient?.snapshotState();
+      const block = state?.score?.mesostructure?.[state.blockId];
+      if (!block) throw new Error("Choose an EDITING block");
+      const name = normalizeSwingName(param.name);
+      const result = await snapshotClient.updateBlockSwing({
+        swing: name === "swing" ? value : block.swing,
+        swingAmt: name === "swingamt" ? value : block.swingAmt
+      });
+      hydrateBlockSwing(result.score.mesostructure[result.blockId]);
+      setStatus(`Updated ${result.blockId} Swing for ${result.distribution.succeededCount}/${result.distribution.attemptedCount} sequencers`);
+    }
+
+    function hydrateBlockSwing(block) {
+      if (!block) return;
+      for (const param of genericParams) {
+        const name = normalizeSwingName(param.name);
+        if (name === "swing") param.value = Array.isArray(param.values) ? (Number(block.swing) ? "On" : "Off") : block.swing;
+        if (name === "swingamt") param.value = block.swingAmt;
+      }
+      renderInports();
+    }
+
+    function isBlockSwingParam(param) { return ["swing", "swingamt"].includes(normalizeSwingName(param?.name)); }
+    function normalizeSwingName(value) { return String(value || "").split("/").at(-1).toLowerCase().replace(/[^a-z0-9]+/g, ""); }
 
     async function postOsc(payload) {
       const response = await fetch("/osc/send", {

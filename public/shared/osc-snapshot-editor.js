@@ -213,6 +213,23 @@ export function createOscSnapshotEditorClient(options) {
       renderContext();
       return true;
     },
+    async updateBlockSwing(document = {}) {
+      const blockId = elements.blockSelect?.value || "";
+      if (!blockId) throw new Error("Choose an EDITING block before changing Swing");
+      const result = await fetchJson(`/mesostructure/${encodeURIComponent(blockId)}/swing`, {
+        method: "PUT",
+        body: JSON.stringify({
+          swing: document.swing,
+          swingAmt: document.swingAmt,
+          expectedScoreRevision: score?.scoreRevision,
+          auditionTargets: selectedLiveTargetIds(options.liveTargetRoot)
+        })
+      });
+      score = structuredClone(result.score);
+      assignments = score.oscAssignments ?? {};
+      renderContext();
+      return result;
+    },
     snapshotState,
     close() {
       events?.close?.();
@@ -308,6 +325,8 @@ export function createOscSnapshotEditorClient(options) {
     renderInstances();
     renderSlots();
     renderStatus();
+    const blockId = elements.blockSelect?.value || "";
+    options.onBlockChange?.(structuredClone(score?.mesostructure?.[blockId] ?? null), blockId);
   }
 
   function renderStatus() {
@@ -615,6 +634,7 @@ export function createOscSnapshotEditorClient(options) {
       "osc.blockState.written", "osc.blockState.replaced", "osc.blockState.batchWritten", "osc.blockState.cleared",
       "mesostructure.oscLayer.assigned", "mesostructure.oscLayer.removed",
       "mesostructure.ttid.updated",
+      "mesostructure.swing.updated",
       "structure.playhead.updated", "osc.assignment.replaced", "osc.assignment.removed",
       "osc.assignment.reconciled", "admin.reset", "admin.score.created", "admin.score.initialized", "admin.restore"
     ]) events.addEventListener(eventName, updateScore);
@@ -1022,7 +1042,7 @@ export function createOscEditorSnapshot({ app, paramEntries = [], inputPortEntri
     schemaVersion: 1,
     app: normalizedApp,
     params: Object.fromEntries(paramEntries
-      .filter(({ name, meta }) => String(meta?.editor ?? "").trim().toLowerCase() !== "ttid" && !["scale", "ttid"].includes(String(name ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "")))
+      .filter(({ name, meta }) => String(meta?.editor ?? "").trim().toLowerCase() !== "ttid" && !["scale", "ttid", "swing", "swingamt"].includes(String(name ?? "").split("/").at(-1).toLowerCase().replace(/[^a-z0-9]+/g, "")))
       .map(({ name, value, values }) => {
       const semanticName = controlName(name, "parameter");
       return [semanticName, oscSnapshotParamValue({ name: semanticName, value, values })];

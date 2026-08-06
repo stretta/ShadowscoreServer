@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { DEFAULT_SCALE, normalizeScale, normalizeTtid, reinterpretPitch, scaleToTtid } from "../harmonic/scale.mjs";
 import { reconcileOscAssignments as reconcileOscRoleAssignments } from "../osc/assignments.mjs";
 import { normalizeOscClip } from "../osc/snapshot-contract.mjs";
+import { DEFAULT_SWING, DEFAULT_SWING_AMT, normalizeSwing, normalizeSwingAmt } from "../sequencer/swing.mjs";
 import { createScoreInitializationPlan } from "./score-initialization.mjs";
 import { reconcilePlayerStructure } from "./player-structure.mjs";
 
@@ -154,6 +155,22 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "mesostructure.ttid.updated", score, { blockId: id, ttid }, options);
       return structuredClone(score);
     },
+    updateBlockSwing(blockId, document, options = {}) {
+      const id = normalizeBlockId(blockId);
+      const block = score.mesostructure[id];
+      if (!block) throw new Error(`unknown mesostructural block '${id}'`);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const swing = normalizeSwing(document?.swing);
+      const swingAmt = normalizeSwingAmt(document?.swingAmt);
+      score = {
+        ...score,
+        ...nextRevisionFields(score),
+        mesostructure: { ...score.mesostructure, [id]: { ...block, swing, swingAmt } }
+      };
+      emitChange(events, "mesostructure.swing.updated", score, { blockId: id, swing, swingAmt }, options);
+      return structuredClone(score);
+    },
     transformBlockScale(blockId, scaleDocument, options = {}) {
       const id = normalizeBlockId(blockId);
       const block = score.mesostructure[id];
@@ -222,13 +239,19 @@ export function createScoreStore(initialScore, options = {}) {
         ...blockDocument,
         tempo: blockDocument.tempo ?? existing?.tempo,
         scale: blockDocument.scale ?? existing?.scale ?? DEFAULT_SCALE,
-        ttid: blockDocument.ttid ?? existing?.ttid
+        ttid: blockDocument.ttid ?? existing?.ttid,
+        swing: blockDocument.swing ?? existing?.swing,
+        swingAmt: blockDocument.swingAmt ?? existing?.swingAmt
       });
       if (existing && blockDocument.scale !== undefined && JSON.stringify(block.scale) !== JSON.stringify(existing.scale)) {
         throw new Error(`mesostructural block '${id}' scale changes must use scale-transform`);
       }
       if (existing && blockDocument.ttid !== undefined && block.ttid !== existing.ttid) {
         throw new Error(`mesostructural block '${id}' TTID changes must use the TTID endpoint`);
+      }
+      if (existing && (blockDocument.swing !== undefined || blockDocument.swingAmt !== undefined)
+        && (block.swing !== existing.swing || block.swingAmt !== existing.swingAmt)) {
+        throw new Error(`mesostructural block '${id}' Swing changes must use the Swing endpoint`);
       }
       assertOscBlockReferences(id, block, score.oscAssignments, score.oscClips);
       score = {
@@ -1207,6 +1230,8 @@ function createDefaultMesostructure(voiceIds = []) {
         duration: { bars: 4 },
         scale: structuredClone(DEFAULT_SCALE),
         ttid: scaleToTtid(DEFAULT_SCALE),
+        swing: DEFAULT_SWING,
+        swingAmt: DEFAULT_SWING_AMT,
         oscLayers: {},
         players: Object.fromEntries(
           voiceIds.map((voiceId) => [voiceId, { clipId: defaultClipId(blockId, voiceId) }])
@@ -1558,6 +1583,8 @@ function normalizeMesoBlock(blockDocument, fallbackTempo = 120) {
     duration: structuredClone(blockDocument.duration),
     scale,
     ttid: blockDocument.ttid === undefined ? scaleToTtid(scale) : normalizeTtid(blockDocument.ttid),
+    swing: normalizeSwing(blockDocument.swing ?? DEFAULT_SWING),
+    swingAmt: normalizeSwingAmt(blockDocument.swingAmt ?? DEFAULT_SWING_AMT),
     oscLayers: normalizeOscLayers(blockDocument.oscLayers ?? {}),
     players: normalizeMesoBlockPlayers(blockDocument.players ?? {})
   };

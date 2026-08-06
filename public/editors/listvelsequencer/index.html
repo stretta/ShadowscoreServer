@@ -34,12 +34,14 @@
     .rows { display: grid; gap: 10px; }
     .row-card { display: grid; gap: 10px; padding: 12px; }
     .row-head { align-items: center; display: flex; gap: 10px; justify-content: space-between; }
-    .row-grid { align-items: end; display: grid; gap: 10px; grid-template-columns: 112px minmax(260px, 1fr) auto auto auto; }
+    .row-grid { align-items: end; display: grid; gap: 10px; grid-template-columns: 112px minmax(260px, 1fr) auto auto auto auto; }
     .field { display: grid; gap: 5px; }
     .field label { color: var(--ss-muted); font-size: 11px; font-weight: 850; letter-spacing: .02em; text-transform: uppercase; }
     .field input { box-sizing: border-box; min-height: 36px; width: 100%; }
     .velocity-list { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
     .map-input { font-variant-numeric: tabular-nums; text-align: right; }
+    .rotation-controls { align-items: center; display: flex; gap: 6px; }
+    .rotate-button { min-width: 36px; padding-inline: 9px; }
     .row-mute[aria-pressed="true"] { background: var(--ss-danger, #b43b3b); border-color: var(--ss-danger, #b43b3b); color: #fff; }
     .empty { border: 1px dashed var(--ss-border-strong); border-radius: var(--ss-radius-ui); padding: 12px; }
     @media (max-width: 760px) {
@@ -395,6 +397,10 @@
             <label for="row-${row.number}-values">Velocity sequence</label>
             <input id="row-${row.number}-values" class="velocity-list" type="text" inputmode="numeric" autocomplete="off" spellcheck="false" placeholder="127 96 0 72" value="${escapeHtml(rowValueState.get(row.number) || "")}" data-row-values="${row.number}">
           </div>
+          <div class="rotation-controls" aria-label="Row ${row.number} rotation controls">
+            <button class="rotate-button" type="button" data-rotate-row="left" aria-label="Rotate row ${row.number} left" title="Rotate left">&larr;</button>
+            <button class="rotate-button" type="button" data-rotate-row="right" aria-label="Rotate row ${row.number} right" title="Rotate right">&rarr;</button>
+          </div>
           <button type="button" data-get-row="${row.number}">Get Row</button>
           <button class="primary" type="button" data-send-row="${row.number}">Send Row</button>
           <button class="row-mute" type="button" aria-pressed="${muted}" data-row-mute="${row.number}"${muteParam ? "" : " disabled"}>${muteParam ? (muted ? "Muted" : "Mute") : "Mute unavailable"}</button>
@@ -403,6 +409,9 @@
       card.querySelector("[data-get-row]").addEventListener("click", () => getRow(row).catch(reportError));
       card.querySelector("[data-send-row]").addEventListener("click", () => sendRow(row).catch(reportError));
       card.querySelector("[data-row-mute]").addEventListener("click", () => sendRowMute(row).catch(reportError));
+      for (const button of card.querySelectorAll("[data-rotate-row]")) {
+        button.addEventListener("click", () => rotateRow(row, button.dataset.rotateRow).catch(reportError));
+      }
       const mapInput = card.querySelector("[data-row-map]");
       mapInput.addEventListener("input", () => {
         const name = mapParam?.name;
@@ -502,6 +511,15 @@
       if (sent !== selected.length) throw new Error(`Row ${row.number} failed on ${selected.length - sent} target${selected.length - sent === 1 ? "" : "s"}`);
     }
 
+    async function rotateRow(row, direction) {
+      const input = rowsEl.querySelector(`[data-row-values="${row.number}"]`);
+      const values = parseVelocityList(input.value);
+      const rotated = rotateList(values, direction);
+      input.value = rotated.join(" ");
+      rowValueState.set(row.number, input.value);
+      await sendRow(row);
+    }
+
     async function sendPitchMap(row, rawValue) {
       const pitch = parsePitchMap(rawValue);
       const sourceParam = Array.from(row.mapsByTarget.values())[0];
@@ -584,6 +602,13 @@
         throw new Error("Velocity rows accept integers from 0 through 127");
       }
       return values;
+    }
+
+    function rotateList(values, direction) {
+      if (values.length < 2) return [...values];
+      return direction === "right"
+        ? [values.at(-1), ...values.slice(0, -1)]
+        : [...values.slice(1), values[0]];
     }
 
     function parsePitchMap(value) {

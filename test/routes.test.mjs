@@ -4587,6 +4587,15 @@ test("ListSequencer editor route serves the OSC target integration page", async 
   assert.match(response.body, /args: \[-999\]/);
   assert.match(response.body, /messages\/out\/\$\{encodeURIComponent\(inputPortName\)\}Ack/);
   assert.match(response.body, /formatAckValue/);
+  assert.match(response.body, /data-rotate="left"/);
+  assert.match(response.body, /data-rotate="right"/);
+  assert.match(response.body, /async function rotateInputPort/);
+  assert.match(response.body, /function rotateList/);
+  assert.match(response.body, /inputPortState = new Map/);
+  assert.match(response.body, /inputPortState\.set\(input\.dataset\.inport, input\.value\)/);
+  assert.match(response.body, /inputPortState\.set\(inputPort\.name, input\.value\)/);
+  assert.match(response.body, /\[values\.at\(-1\), \.\.\.values\.slice\(0, -1\)\]/);
+  assert.match(response.body, /\[\.\.\.values\.slice\(1\), values\[0\]\]/);
   assert.match(response.body, /hydrateParameters/);
   assert.match(response.body, /readOscQueryParameterValues/);
   assert.match(response.body, /id="snapshot-mount"/);
@@ -4625,6 +4634,12 @@ test("ListVelSequencer editor route serves row-level get and multi-target send c
   assert.match(response.body, /mapNumber\(param\.name\) \|\| muteNumber\(param\.name\)/);
   assert.doesNotMatch(response.body, /schedulePitchMap|flushPitchMap/);
   assert.match(response.body, /parseVelocityList/);
+  assert.match(response.body, /data-rotate-row="left"/);
+  assert.match(response.body, /data-rotate-row="right"/);
+  assert.match(response.body, /async function rotateRow/);
+  assert.match(response.body, /function rotateList/);
+  assert.match(response.body, /\[values\.at\(-1\), \.\.\.values\.slice\(0, -1\)\]/);
+  assert.match(response.body, /\[\.\.\.values\.slice\(1\), values\[0\]\]/);
   assert.match(response.body, /collectGlobalParams/);
   assert.match(response.body, /renderGlobalParams/);
   assert.match(response.body, /param\.values/);

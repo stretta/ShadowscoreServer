@@ -201,6 +201,17 @@
       width: 100%;
     }
 
+    .list-actions {
+      align-items: center;
+      display: flex;
+      gap: 6px;
+    }
+
+    .rotate-button {
+      min-width: 36px;
+      padding-inline: 9px;
+    }
+
     .number-object {
       background: var(--ss-surface);
       border: 1px solid var(--ss-border-strong);
@@ -421,6 +432,7 @@
     let ttidParams = [];
     let ttidState = new Map();
     let scaleState = new Map();
+    let inputPortState = new Map();
     let snapshotClient;
 
     refreshButton.addEventListener("click", () => refresh({ hydrate: true }).catch(reportError));
@@ -517,12 +529,9 @@
       rootParams = collectNamedParams(targets, new Set(["root"]));
       ttidParams = collectTtidParams(targets);
       genericParams = collectGenericParams(targets);
+      inputPortState = new Map(Object.entries(snapshot.inputPorts ?? {}).map(([name, values]) => [name, values.join(" ")]));
       renderInports();
       renderTtid();
-      for (const [name, values] of Object.entries(snapshot.inputPorts ?? {})) {
-        const input = inportsEl.querySelector(`[data-inport="${cssSelectorValue(name)}"]`);
-        if (input) input.value = values.join(" ");
-      }
     }
 
     function collectInputPorts(nextTargets) {
@@ -625,6 +634,9 @@
     }
 
     function renderInports() {
+      for (const input of inportsEl.querySelectorAll("[data-inport]")) {
+        inputPortState.set(input.dataset.inport, input.value);
+      }
       const rows = [
         ...inputPorts.map((inputPort) => isMomentaryInputPort(inputPort) ? renderActionInputPort(inputPort) : renderInputPort(inputPort)),
         ...transposeParams.map(renderTransposeParam),
@@ -643,12 +655,19 @@
           <div class="control-name">${escapeHtml(labelFor(inputPort))}</div>
           <div class="control-detail">${escapeHtml(inputPort.name)} · ${inputPort.targetIds.length}</div>
         </div>
-        <input id="${inputId}" type="text" autocomplete="off" spellcheck="false" data-inport="${escapeHtml(inputPort.name)}">
-        <button type="button">Send</button>
+        <input id="${inputId}" type="text" autocomplete="off" spellcheck="false" value="${escapeHtml(inputPortState.get(inputPort.name) || "")}" data-inport="${escapeHtml(inputPort.name)}">
+        <div class="list-actions" aria-label="${escapeHtml(labelFor(inputPort))} rotation and send controls">
+          <button class="rotate-button" type="button" data-rotate="left" aria-label="Rotate ${escapeHtml(labelFor(inputPort))} left" title="Rotate left">&larr;</button>
+          <button class="rotate-button" type="button" data-rotate="right" aria-label="Rotate ${escapeHtml(labelFor(inputPort))} right" title="Rotate right">&rarr;</button>
+          <button type="button" data-send>Send</button>
+        </div>
       `;
       const input = row.querySelector("input");
-      const button = row.querySelector("button");
-      button.addEventListener("click", () => sendAddress(inputPort, parseArgs(input.value)));
+      row.querySelector("[data-send]").addEventListener("click", () => sendAddress(inputPort, parseArgs(input.value)));
+      for (const button of row.querySelectorAll("[data-rotate]")) {
+        button.addEventListener("click", () => rotateInputPort(inputPort, input, button.dataset.rotate).catch(reportError));
+      }
+      input.addEventListener("input", () => inputPortState.set(inputPort.name, input.value));
       input.addEventListener("keydown", (event) => {
         if (event.key === "Enter") {
           event.preventDefault();
@@ -656,6 +675,15 @@
         }
       });
       return row;
+    }
+
+    async function rotateInputPort(inputPort, input, direction) {
+      const values = parseArgs(input.value);
+      if (!values.length) throw new Error(`Enter at least one ${labelFor(inputPort)} value to rotate`);
+      const rotated = rotateList(values, direction);
+      input.value = rotated.join(" ");
+      inputPortState.set(inputPort.name, input.value);
+      await sendAddress(inputPort, rotated);
     }
 
     function renderActionInputPort(inputPort) {
@@ -903,6 +931,7 @@
         const input = inportsEl.querySelector(`[data-inport="${cssSelectorValue(fields[index].name)}"]`);
         if (!input) continue;
         input.value = formatAckValue(reads[index].value);
+        inputPortState.set(fields[index].name, input.value);
         populated += 1;
       }
       const failed = fields.length - populated;
@@ -1050,6 +1079,13 @@
         const number = Number(part);
         return Number.isFinite(number) && part !== "" ? number : part;
       });
+    }
+
+    function rotateList(values, direction) {
+      if (values.length < 2) return [...values];
+      return direction === "right"
+        ? [values.at(-1), ...values.slice(0, -1)]
+        : [...values.slice(1), values[0]];
     }
 
     function isLoopback(host) {

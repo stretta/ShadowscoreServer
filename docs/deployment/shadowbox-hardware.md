@@ -65,6 +65,9 @@ server code.
 For a peer unit, copy `config/shadowbox.hardware-peer.json` instead and set:
 
 - `registration.sessionHostUrl` to the selected host URL.
+- `server.advertisedName` and `server.hostIdentity` to this peer unit.
+- `rnbo.oscQuery.oscHost` to the peer's LAN name, for example `pt6.local`, if
+  the local RNBO OSC target is otherwise configured as `127.0.0.1`.
 
 ## Coordinator discovery and selection
 
@@ -88,9 +91,6 @@ discovery state with:
 ```sh
 curl http://127.0.0.1:8790/coordinator
 ```
-- `server.advertisedName` and `server.hostIdentity` to this peer unit.
-- `rnbo.oscQuery.oscHost` to the peer's LAN name, for example `pt6.local`, if
-  the local RNBO OSC target is otherwise configured as `127.0.0.1`.
 
 ## Systemd Services
 

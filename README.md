@@ -9,7 +9,8 @@ The server owns reusable clips, the mesostructural blocks that assign those clip
 - Shared `context`: ensemble-wide scale, root, grid, clip, and seed defaults.
 - `clips`: reusable ShadowScore note documents. Clip-owned metadata includes duration, time signature, playback type, and behavior flags.
 - `mesostructure`: section-sized blocks with durations, required rooted scale
-  context, required block-owned TTID, and per-player clip assignments.
+  context, required block-owned TTID, shared sequencer Swing/SwingAmt, optional
+  written tempo, and per-player clip assignments.
 - `macrostructure`: the ordered chain of mesostructural block occurrences.
 - `structureState`: the active block and macro-chain index used for editing and playback.
 - Per-voice `notes`: legacy ShadowScore note documents retained for compatibility and migration.
@@ -135,6 +136,8 @@ The root `/` route serves a ShadowScore view index with links to the bundled
 editor pages and live RNBO graph editors discovered through `/rnbo/devices`.
 RNBO devices are separate from ShadowScore playback targets: a unit can appear
 as a graph-editor link before a ShadowScoreClient instance is loaded there.
+The dashboard's hardware count and graph-editor links include online units
+only; the hardware and RNBO device APIs retain offline records for diagnostics.
 
 The `/matrix-edit` route serves static Matrix Edit assets from `public/matrix-edit`.
 The bundled Matrix Edit build loads `/session`, `/score`, and `/structure`,
@@ -154,8 +157,9 @@ Event List because assignments belong to mesostructural blocks.
 
 The `/structure-editor` route serves the Arrange workspace from
 `public/structure-editor`. It edits score-owned mesostructural block parameters,
-per-player clip assignments, block-owned written tempos, and the ordered
-arrangement without changing the Matrix Edit or Event List surfaces. The
+per-player clip assignments, block-owned written tempos and sequencer swing,
+and the ordered arrangement without changing the Matrix Edit or Event List
+surfaces. The
 arrangement strip supports drag reorder and Alt+Left/Right keyboard reorder.
 Its visible left/right occurrence controls provide the same operation on touch
 screens, and block selection remains visually separate from playback position.
@@ -184,9 +188,10 @@ update only the nested diagnostic connection indicator.
 
 The `/editors` route serves the registered OSC-generator index from
 `public/editors`, and `/editors/manifest` exposes the generator manifest JSON.
-The bundled ListSequencer, ListVelSequencer, AnalogSequencer, Plate, Poland,
-SoftPiano, Element, and TTID editors share the mesostructural OSC state
-workflow. Their focused instance determines the score role, PLAYING and
+The bundled ListSequencer, ListVelSequencer, AnalogSequencer,
+TriggerSequencer, Drumbox, Vantor, Plate, Poland, SoftPiano, Element, and TTID
+editors share the mesostructural OSC state workflow. Their focused instance
+determines the score role, PLAYING and
 EDITING identify the transport and write destinations, and CHASE optionally
 keeps them together.
 Every structural block is shown as Written or Unspecified; unspecified state
@@ -195,8 +200,12 @@ lists. Persistent control gestures send to the checked live instances and
 atomically save their complete canonical block state at the control's commit
 boundary. CHASE follows PLAYING without writing during hydration; turning it
 off permits editing another block. Recall Now remains an explicit full-state
-send. Utility tools for live OSC target volume trims and macro building are
-served at `/tools/osc-volume` and `/tools/osc-macros`.
+send. Sequencer Swing and SwingAmt are shared block state rather than
+instance-owned snapshot parameters. ListSequencer list fields and each
+ListVelSequencer row provide non-destructive rotate-left/right controls;
+ListVelSequencer also exposes each export row's mute parameter when available.
+Utility tools for live OSC target volume trims and macro building are served at
+`/tools/osc-volume` and `/tools/osc-macros`.
 
 By default, the active score persists to `data/score.json`, the previous
 snapshot is kept at `data/score.previous.json`, and named saved scores are
@@ -240,6 +249,13 @@ For the session-day operator flow, see
 ## HTTP API
 
 - `GET /healthz`: service status.
+- `GET /coordinator`: persisted coordinator selection plus current Bonjour
+  discovery state. Add `?refresh=true` to wait for a fresh discovery pass.
+- `POST /coordinator/select`: select this unit or a discovered remote
+  Shadowscore server as coordinator without changing static config or
+  restarting the service.
+- `POST /coordinator/claim`: make this unit the coordinator and ask each
+  online discovered Shadowscore server to join it.
 - `GET /harmonic/scales`: canonical harmonic scale catalog used by the server
   and hosted editors.
 - `GET /score`: current ensemble score snapshot.
@@ -303,8 +319,8 @@ For the session-day operator flow, see
 - `POST /transport/tempo`: set runtime live tempo immediately with `{ "bpm": 108 }` without rewriting the active block.
 - `POST /transport/tempo/follow-block`: enable or disable written-tempo recall at the next block boundary with `{ "follow": true }`. Enabling it does not jump tempo mid-block.
 - `POST /transport/tempo/use-block`: explicitly recall the active block's written tempo now.
-- `POST /transport/players/play`: start assigned players while preserving the requested Arrangement Run/Hold mode. Waits for queued RNBO score preparation and rejects explicit ACK failures; reasserts runtime live tempo to the configured authority; starts JACK; writes `SetStage 0` to assigned clients by default; then sends `Clock 1` so each client starts on its next synchronized beat. Playhead-only updates do not retransmit an already committed active block.
-- `POST /transport/players/stop`: silence assigned players and stop JACK while preserving the current arrangement location and requested Run/Hold mode.
+- `POST /transport/players/play`: start assigned players while preserving the requested Arrangement Run/Hold mode. Waits for queued RNBO score preparation and rejects explicit ACK failures; distributes the active block's TTID and Swing; reasserts runtime live tempo to the configured authority; starts JACK; writes `SetStage 0` to assigned clients by default; then sends `Clock 1` to assigned clients and `Clock: On` to resolved OSC sequencers so they start on the synchronized beat. Playhead-only updates do not retransmit an already committed active block.
+- `POST /transport/players/stop`: silence assigned players, send `Clock: Off` to resolved OSC sequencers, and stop JACK while preserving the current arrangement location and requested Run/Hold mode.
 - `POST /transport/arrangement/run`: start or resume arrangement movement while Players are playing. Returns `409` if Players are stopped.
 - `POST /transport/arrangement/hold`: hold arrangement movement on the current block without stopping JACK or assigned players.
 - `POST /transport/play`: compatibility facade for Players Play plus Arrangement Run.
@@ -333,6 +349,11 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /mesostructure/:blockId/duplicate`: duplicate one mesostructural block, using `blockId` or `id` in the request body for the new block ID.
 - `PUT /mesostructure/:blockId/ttid`: non-destructively update block TTID with the normal revision guard; active-block edits distribute immediately to eligible online targets.
 - `POST /mesostructure/:blockId/ttid`: manually resend the stored block TTID without changing the score.
+- `PUT /mesostructure/:blockId/swing`: update the block-owned `swing` and
+  `swingAmt` pair with the normal revision guard; active-block edits distribute
+  immediately to eligible online sequencers.
+- `POST /mesostructure/:blockId/swing`: manually resend the stored block Swing
+  pair without changing the score.
 - `POST /mesostructure/:blockId/scale-transform`: atomically reinterpret scale-following clip and legacy voice pitches, update clip scale metadata, and synchronize the block scale and TTID.
 - `DELETE /mesostructure/:blockId`: remove one mesostructural block and delete its appearances from the macro chain.
 - `GET /osc/clips`: list reusable, composition-owned OSC clips.
@@ -351,8 +372,8 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /macrostructure/advance`: advance the active block to the next macro chain entry.
 - `POST /macrostructure/reset`: reset the active block to the beginning of the macro chain.
 - `POST /macrostructure/phase-reset`: write `SetStage: 0` to assignment-bound RNBO targets, optionally scoped with `{ "targetId": "..." }`.
-- `POST /macrostructure/playback/start`: start playback from the current active block and send `Clock: 1` to available RNBO targets. The default/`auto` mode chooses beat-derived playback when JACK or RNBO client readback is usable, otherwise it falls back to the internal timer. Diagnostic callers can still pass `{ "mode": "jack" }` or `{ "mode": "timer" }` explicitly.
-- `POST /macrostructure/playback/stop`: stop macro playback and send `Clock: 0` to available RNBO targets.
+- `POST /macrostructure/playback/start`: start playback from the current active block, distribute its TTID and Swing, send `Clock: 1` to assigned playback clients, and send `Clock: On` to resolved OSC sequencers. The default/`auto` mode chooses beat-derived playback when JACK or RNBO client readback is usable, otherwise it falls back to the internal timer. Diagnostic callers can still pass `{ "mode": "jack" }` or `{ "mode": "timer" }` explicitly.
+- `POST /macrostructure/playback/stop`: stop macro playback, send `Clock: 0` to assigned playback clients, and send `Clock: Off` to resolved OSC sequencers.
 - `POST /voices`: add a voice with `{ "voiceId": "...", "assignment": { ... } }`.
 - `DELETE /voices/:voiceId`: remove a voice and its assignment.
 - `POST /voices/:voiceId/assignment`: assign a voice to a player, device, or client.
@@ -376,6 +397,12 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /editors/listsequencer`: bundled ListSequencer OSC editor with canonical instant-write block state and explicit recall.
 - `GET /editors/listvelsequencer`: bundled eight-row velocity sequencer OSC editor with canonical instant-write block state and explicit recall.
 - `GET /editors/analogsequencer`: bundled 16-stage analog sequencer OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/triggersequencer`: bundled 16-step bitmask trigger sequencer
+  OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/drumbox`: bundled synth-drum, sample-voice, and plate-reverb
+  OSC editor with one focused read source and checked live write destinations.
+- `GET /editors/vantor`: bundled three-oscillator Vantor OSC editor with one
+  focused read source and checked live write destinations.
 - `GET /editors/element`: bundled Element OSC editor with canonical instant-write block state and explicit recall.
 - `GET /editors/plate`: bundled Plate reverb OSC editor with canonical instant-write block state and explicit recall.
 - `GET /editors/poland`: bundled Poland OSC editor with canonical instant-write block state and explicit recall.
@@ -403,6 +430,8 @@ Client command messages are JSON objects:
 - `mesostructure.block.replace`: add or replace one mesostructural block with `blockId` and `block`.
 - `mesostructure.block.remove`: remove one mesostructural block with `blockId`.
 - `mesostructure.ttid.update`: update block-owned TTID without changing notes.
+- `mesostructure.swing.update`: update block-owned `swing` and `swingAmt`
+  without creating instance-owned OSC snapshot parameters.
 - `mesostructure.scale.transform`: atomically transform notes and synchronize block scale plus TTID.
 - `osc.clip.add`, `osc.clip.replace`, `osc.clip.remove`: manage reusable OSC clips.
 - `mesostructure.oscLayer.assign`, `mesostructure.oscLayer.remove`: manage block role-to-clip layers.
@@ -446,6 +475,15 @@ npm run export:shadowscore
 That builds `@matrixedit/rnbo-matrix-editor` with the `/matrix-edit/` base path
 and syncs the generated artifact into this server repo.
 
+The [`rnbo/monophonic_legato_note_controller.rnboscript`](rnbo/monophonic_legato_note_controller.rnboscript)
+file is an RNBO Codebox helper for highest-, lowest-, oldest-, newest-, or
+no-steal monophonic note selection before a subpatcher configured with
+`@voicecontrol user`. It is source material rather than a server-loaded runtime
+component.
+Stealing currently emits note-off followed by note-on, so any true-legato
+envelope behavior must be implemented and verified in the receiving RNBO
+patch.
+
 ## Hardware Deployment
 
 Hardware deployment material lives in
@@ -467,6 +505,3 @@ agent units, `--sync-only` for a file-only update, `--force-restart` for the
 kill/reset/start recovery path, `--verify-route <path>` for rollout-specific
 host checks, or `--dry-run` to preview the rsync. If the Pi does not allow
 passwordless sudo, set `SHADOWSCORE_SUDO_PASSWORD` for that deploy.
-- **Piano Roll** owns duration, onset, pitch, and note-specific velocity edits
-  for an assigned clip. It keeps per-clip drafts until explicit Save and shows
-  projected loop aliases and the live playback position.

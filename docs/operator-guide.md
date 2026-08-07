@@ -36,6 +36,9 @@ http://<host>.local:8790/admin
 http://<host>.local:8790/transport/status
 http://<host>.local:8790/editors
 http://<host>.local:8790/editors/element
+http://<host>.local:8790/editors/vantor
+http://<host>.local:8790/editors/drumbox
+http://<host>.local:8790/editors/triggersequencer
 http://<host>.local:8790/editors/plate
 http://<host>.local:8790/tools/osc-volume
 http://<host>.local:8790/tools/osc-macros
@@ -45,12 +48,19 @@ The root page is the ShadowScore view index. Use `/structure-editor` for
 Arrange directly, or the root index for links to all bundled editing views and
 discovered RNBO graph editors.
 
+The root page also shows the discovered ensemble tree. On the intended session
+authority, choose **Make this tree coordinator** to claim all online discovered
+Shadowscore units. On an individual unit, choose **Join** beside the intended
+authority to move only that unit. The choice persists without a restart. An
+offline unit is not rewritten; join it after it returns.
+
 ## Verify Hardware
 
 Check the session and target maps:
 
 ```sh
 curl http://<host>.local:8790/session
+curl http://<host>.local:8790/coordinator
 curl http://<host>.local:8790/hardware/units
 curl http://<host>.local:8790/rnbo/devices
 curl http://<host>.local:8790/rnbo/targets
@@ -60,6 +70,8 @@ curl http://<host>.local:8790/playback/timing-contracts
 
 The useful reading is:
 
+- `/coordinator` shows this unit's persisted authority selection and the
+  Shadowscore-capable units discovered through RNBOOSCQuery Bonjour services.
 - `/hardware/units` shows which peer boxes are online.
 - `/rnbo/devices` shows RNBO graph editors, including boxes that do not yet
   have a ShadowScoreClient instance loaded.
@@ -104,7 +116,7 @@ matching stable `deviceId`.
 Use Arrange for:
 
 - selecting the active block;
-- editing block durations and written tempos;
+- editing block durations, written tempos, and shared sequencer Swing/SwingAmt;
 - assigning clips to players;
 - setting the ordered macrostructure block occurrences.
 
@@ -139,12 +151,16 @@ fields such as probability, deviation, and release velocity. Arrange owns block
 duration and player-to-clip assignment and remains served at
 `/structure-editor`.
 
-Use `/editors` and its eight bundled instrument editors, plus
+Use `/editors` and its eleven bundled instrument editors, plus
 `/tools/osc-volume` and `/tools/osc-macros`, for instrument-control surfaces.
 Persistent control gestures send to the checked live instances and save their
 complete canonical block state at the gesture's commit boundary. There is no
 separate Write/Reload draft workflow. **Recall Now** remains the explicit
-full-state send.
+full-state send. Swing and SwingAmt belong to the selected block and distribute
+across compatible sequencers; they are not saved independently in each OSC
+clip. ListSequencer list controls and ListVelSequencer rows can be rotated in
+the browser, and ListVelSequencer row mute buttons write the export's available
+mute parameters.
 
 ## Score Operations
 
@@ -195,7 +211,9 @@ POST /transport/tempo/follow-block
 POST /transport/tempo/use-block
 ```
 
-Players Play/Stop controls assigned client sound and JACK transport.
+Players Play/Stop controls assigned client sound, resolved OSC sequencer
+clocks, and JACK transport. Starting also distributes the active block's shared
+TTID and Swing state.
 Arrangement Run/Hold controls whether form advances without conflating that
 choice with whether players sound. Return to Start resets form position and
 client stage. The older `/transport/play`, `/transport/stop`, and lower-level

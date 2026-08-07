@@ -458,8 +458,9 @@ instances, and reassigning either role changes only the runtime destination.
 
 ### Phase E: Replace Editor Snapshot UX
 
-Status: streamlined locally across all seven bundled OSC editors after live rig
-testing exposed capture ambiguity. The shared panel now presents PLAYING and
+Status at this phase's checkpoint: streamlined locally across the original
+seven bundled OSC editors after live rig testing exposed capture ambiguity.
+The shared panel now presents PLAYING and
 EDITING blocks, optional chase, focused-instance routing, and one Written or
 Unspecified slot per structural block. A first write creates the focused
 instance's clip/layer and a later write replaces it; missing layers remain
@@ -758,15 +759,15 @@ node tools/measure-osc-snapshot.mjs \
 
 ### Phase 8: Remaining Editors And Hardening
 
-Status: implemented for every bundled OSC editor family. ListSequencer,
-ListVelSequencer, AnalogSequencer, Plate, Poland, SoftPiano, and TTID now use the
-same browser snapshot client and panel while retaining their instrument-specific
-draft models and live read/write controls. Loading saved state mutates only the
-form draft; saving remains offline-capable at the score API; explicit and
-automatic recalls route through logical assignments. Persistent controls honor
-the shared metadata/exclusion and late-order contract, and recall results expose
-payload-size and dispatch-duration telemetry. A snapshot checksum ACK remains a
-conditional follow-up only if live measurements demonstrate loss.
+Status: implemented for every currently registered OSC editor family.
+ListSequencer, ListVelSequencer, AnalogSequencer, TriggerSequencer, Drumbox,
+Vantor, Plate, Poland, SoftPiano, Element, and TTID use the shared browser
+snapshot client and block panel while retaining their instrument-specific live
+controls. Persistent gestures use the canonical instant-write model; explicit
+and automatic recalls route through logical assignments. Persistent controls
+honor the shared metadata/exclusion and late-order contract, and recall results
+expose payload-size and dispatch-duration telemetry. A snapshot checksum ACK
+remains a conditional follow-up only if live measurements demonstrate loss.
 
 - Roll the snapshot section into AnalogSequencer, Plate, Poland, SoftPiano,
   TTID, and other supported editors.

@@ -18,6 +18,10 @@ export const defaultConfig = Object.freeze({
     heartbeatIntervalMs: 10000,
     heartbeatTtlMs: 30000
   },
+  coordinator: {
+    statePath: "data/coordinator.json",
+    probeTimeoutMs: 1500
+  },
   transport: {
     tempoAuthority: "link",
     link: {

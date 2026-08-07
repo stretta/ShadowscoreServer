@@ -3,6 +3,7 @@ import http from "node:http";
 import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
+import { createCoordinatorManager } from "./coordinator/coordinator-manager.mjs";
 import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { createTempoPolicy } from "./playback/tempo-policy.mjs";
@@ -23,10 +24,12 @@ const store = createScoreStore(initialScore, { defaultScore });
 const persistence = createScorePersistence(store, config);
 const peerRegistry = createPeerRegistry(config);
 const manualOscQueryDevices = createManualOscQueryDeviceRegistry(config);
+const coordinator = await createCoordinatorManager(config);
 const oscSnapshotRecall = createOscSnapshotRecallService();
 let tempoPolicy;
 const rnbo = createRnboOscAdapter(config, {
   peerRegistry,
+  coordinator,
   getTempo: () => tempoPolicy?.snapshot().live
 });
 const jackTransport = createJackTransportState(config);
@@ -38,6 +41,7 @@ const runtime = {
   jackTransport,
   jackController,
   peerRegistry,
+  coordinator,
   manualOscQueryDevices,
   oscSnapshotRecall,
   rnboAdapter: rnbo,
@@ -113,6 +117,7 @@ async function shutdown() {
   macroPlayback.close();
   rnbo.close();
   rnboStageCollector.close();
+  coordinator.close();
   server.close();
   server.closeAllConnections?.();
   try {

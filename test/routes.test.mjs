@@ -28,6 +28,41 @@ test("assignment routes expose, replace, and clear voice assignments", async () 
   assert.equal(cleared.assignments["player-1"].assignee, "");
 });
 
+test("coordinator routes expose discovery and change the local selection", async () => {
+  const calls = [];
+  const snapshot = {
+    local: { id: "elm", name: "Elm", url: "http://elm.local:8790" },
+    selection: { mode: "local", coordinatorId: "elm", coordinatorUrl: "http://elm.local:8790" },
+    registration: { active: false, lastRegistrationAt: "", lastError: "" },
+    candidates: [{ id: "birch", name: "birch", shadowscoreUrl: "http://birch.local:8790", shadowscoreAvailable: true }]
+  };
+  const context = createRouteContext({
+    runtime: {
+      coordinator: {
+        async snapshot(options) { calls.push(["snapshot", options]); return snapshot; },
+        async select(body) { calls.push(["select", body]); return { ...snapshot, selection: body }; },
+        async claim() { calls.push(["claim"]); return { ...snapshot, claimed: true, results: [] }; }
+      }
+    }
+  });
+
+  const current = await requestJson(context, "GET", "/coordinator?refresh=true");
+  assert.equal(current.local.id, "elm");
+  const selected = await requestJson(context, "POST", "/coordinator/select", {
+    mode: "remote",
+    coordinatorId: "birch",
+    coordinatorUrl: "http://birch.local:8790"
+  });
+  assert.equal(selected.selection.coordinatorId, "birch");
+  const claimed = await requestJson(context, "POST", "/coordinator/claim", {});
+  assert.equal(claimed.claimed, true);
+  assert.deepEqual(calls, [
+    ["snapshot", { refresh: true }],
+    ["select", { mode: "remote", coordinatorId: "birch", coordinatorUrl: "http://birch.local:8790" }],
+    ["claim"]
+  ]);
+});
+
 test("assignment route rejects duplicate RNBO targets", async () => {
   const context = createRouteContext();
 
@@ -4090,6 +4125,10 @@ test("root route serves view index", async () => {
   assert.match(response.body, /:3000/);
   assert.match(response.body, /Online Hardware Units/);
   assert.match(response.body, /device\.available === false \|\| device\.unitStatus === "offline"/);
+  assert.match(response.body, /Ensemble Coordinator/);
+  assert.match(response.body, /\/coordinator\/claim/);
+  assert.match(response.body, /\/coordinator\/select/);
+  assert.match(response.body, /discovered via Bonjour/);
 });
 
 test("editor manifest route lists registered instrument editors", async () => {

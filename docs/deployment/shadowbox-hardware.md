@@ -65,6 +65,29 @@ server code.
 For a peer unit, copy `config/shadowbox.hardware-peer.json` instead and set:
 
 - `registration.sessionHostUrl` to the selected host URL.
+
+## Coordinator discovery and selection
+
+Current installations can select the session coordinator from the root
+dashboard instead of editing `registration.sessionHostUrl`. Shadowscore uses
+Bonjour `_oscjson._tcp` advertisements from RNBOOSCQuery as genuine LAN
+discovery, probes each discovered unit on port `8790`, and labels units that do
+not yet run Shadowscore separately.
+
+On the intended authority, open `http://<unit>.local:8790/`, then use **Make
+this tree coordinator**. That choice is saved in `data/coordinator.json`, and
+the authority asks each online, discovered Shadowscore unit to join it. A unit
+can be moved later by opening its dashboard and choosing another discovered
+unit, or by claiming the ensemble from the new authority. No process restart
+or config edit is required.
+
+This workflow does not rewrite an offline unit. When it returns, join the
+coordinator from that unit's dashboard. Verify the current selection and
+discovery state with:
+
+```sh
+curl http://127.0.0.1:8790/coordinator
+```
 - `server.advertisedName` and `server.hostIdentity` to this peer unit.
 - `rnbo.oscQuery.oscHost` to the peer's LAN name, for example `pt6.local`, if
   the local RNBO OSC target is otherwise configured as `127.0.0.1`.

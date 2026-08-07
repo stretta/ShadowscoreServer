@@ -45,7 +45,7 @@ export function migratePersistedScore(score, options = {}) {
   for (const clip of Object.values(migrated.oscClips ?? {})) {
     if (!isPlainObject(clip?.params)) continue;
     clip.params = Object.fromEntries(
-      Object.entries(clip.params).filter(([name]) => !isReservedTtidName(name))
+      Object.entries(clip.params).filter(([name]) => !isReservedTtidName(name) && !isReservedSwingName(name))
     );
   }
   return migrated;
@@ -545,6 +545,11 @@ function cleanToken(value) {
 function isReservedTtidName(name) {
   const normalized = String(name).toLowerCase().replace(/[^a-z0-9]+/g, "");
   return normalized === "ttid" || normalized === "scale";
+}
+
+function isReservedSwingName(name) {
+  const normalized = String(name).split("/").at(-1).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  return normalized === "swing" || normalized === "swingamt";
 }
 
 function stringField(value) {

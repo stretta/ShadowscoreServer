@@ -60,6 +60,29 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "GET" && url.pathname === "/coordinator") {
+    writeJson(response, 200, await requireCoordinator(runtime).snapshot({ refresh: url.searchParams.get("refresh") === "true" }));
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/coordinator/select") {
+    try {
+      writeJson(response, 200, { ok: true, ...(await requireCoordinator(runtime).select(await readJson(request))) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/coordinator/claim") {
+    try {
+      writeJson(response, 200, { ok: true, ...(await requireCoordinator(runtime).claim()) });
+    } catch (error) {
+      writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
   if (request.method === "GET" && url.pathname === "/harmonic/scales") {
     writeJson(response, 200, { ok: true, scales: scaleCatalog() });
     return;
@@ -1757,6 +1780,13 @@ function requireManualOscQueryDevices(runtime) {
     throw new Error("manual OSCQuery device registry is not available");
   }
   return runtime.manualOscQueryDevices;
+}
+
+function requireCoordinator(runtime) {
+  if (!runtime.coordinator) {
+    throw new Error("coordinator manager is not available");
+  }
+  return runtime.coordinator;
 }
 
 async function readRnboDevices(config) {

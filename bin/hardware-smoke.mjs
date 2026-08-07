@@ -20,7 +20,7 @@ export async function runHardwareSmoke(config, options = {}) {
 
   const checks = [];
   if (peerRole) {
-    for (const name of ["healthz", "session", "rnbo targets", "rnbo devices", "view index", "structure editor", "matrix edit", "piano roll", "event list", "JACK transport", "http port"]) {
+    for (const name of ["healthz", "session", "rnbo targets", "rnbo devices", "coordinator", "view index", "structure editor", "matrix edit", "piano roll", "event list", "JACK transport", "http port"]) {
       checks.push(skipCheck(name, "peer role"));
     }
   } else {
@@ -28,6 +28,8 @@ export async function runHardwareSmoke(config, options = {}) {
     checks.push(await checkHttpJson("session", `${baseUrl}/session`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.voices) && payload.voices.length > 0));
     checks.push(await checkHttpJson("rnbo targets", `${baseUrl}/rnbo/targets`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.targets)));
     checks.push(await checkHttpJson("rnbo devices", `${baseUrl}/rnbo/devices`, fetchImpl, timeoutMs, (payload) => Array.isArray(payload.devices)));
+    checks.push(await checkHttpJson("coordinator", `${baseUrl}/coordinator`, fetchImpl, timeoutMs, (payload) =>
+      payload.local && payload.selection && Array.isArray(payload.candidates)));
     checks.push(await checkHttpText("view index", `${baseUrl}/`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Views")));
     checks.push(await checkHttpText("arrange editor", `${baseUrl}/structure-editor`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Arrange")));
     checks.push(await checkHttpText("matrix edit", `${baseUrl}/matrix-edit`, fetchImpl, timeoutMs, (body) => body.includes("ShadowScore Matrix Edit")));

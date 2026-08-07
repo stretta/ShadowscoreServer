@@ -74,6 +74,15 @@ Hardware registration and manual OSCQuery device save/update/refresh events run
 the enabled policy. Ambiguous, unavailable, invalid, and failed captures are
 reported without creating partial score resources.
 
+The root dashboard also discovers RNBOOSCQuery units through Bonjour and shows
+them under **Ensemble Coordinator**. Choose **Join** to make this unit register
+with another Shadowscore server without editing its config or restarting it.
+Choose **Make this tree coordinator** to make the current unit authoritative
+and move every discovered unit that is already running a compatible
+Shadowscore server to it. The selection persists in `data/coordinator.json`.
+Offline units are intentionally not changed; select the coordinator from their
+dashboard after they return.
+
 For a Shadowbox host with a machine-local config, create a local copy first:
 
 ```sh

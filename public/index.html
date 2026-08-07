@@ -131,6 +131,29 @@
       border-color: var(--ss-warn);
     }
 
+    .coordinator-panel {
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
+      padding: 14px;
+    }
+
+    .coordinator-toolbar,
+    .coordinator-card-actions {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .coordinator-toolbar { justify-content: space-between; }
+    .coordinator-summary { color: var(--ss-text); font-weight: 750; }
+    .coordinator-detail { color: var(--ss-muted); font-size: 12px; margin-top: 4px; overflow-wrap: anywhere; }
+    .coordinator-grid { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); margin-top: 12px; }
+    .coordinator-card { background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); padding: 11px; }
+    .coordinator-card.current { border-color: var(--ss-accent-secondary); }
+    button.compact { min-height: 30px; padding: 5px 9px; }
+
     @media (max-width: 680px) {
       main {
         width: min(100vw - 24px, 1120px);
@@ -176,6 +199,21 @@
         <div class="metric-label">RNBO Targets</div>
         <div class="metric-value" id="target-count">-</div>
         <div class="metric-detail" id="target-detail"></div>
+      </div>
+    </section>
+
+    <section aria-labelledby="coordinator-heading">
+      <h2 id="coordinator-heading">Ensemble Coordinator</h2>
+      <div class="coordinator-panel">
+        <div class="coordinator-toolbar">
+          <div>
+            <div class="coordinator-summary" id="coordinator-summary">Discovering trees...</div>
+            <div class="coordinator-detail" id="coordinator-detail"></div>
+          </div>
+          <button class="compact" id="refresh-coordinators" type="button">Refresh</button>
+        </div>
+        <div class="coordinator-detail" id="coordinator-status" role="status" aria-live="polite"></div>
+        <div class="coordinator-grid" id="coordinator-candidates"></div>
       </div>
     </section>
 
@@ -248,11 +286,16 @@
     const fields = Object.fromEntries(Array.from(document.querySelectorAll("[id]")).map((element) => [element.id, element]));
     const statusElement = fields.status;
     const rnboLinksElement = document.querySelector("#rnbo-links");
+    const coordinatorCandidatesElement = fields["coordinator-candidates"];
+    let coordinatorSnapshot;
 
     refreshDashboard();
     refreshGraphEditors();
+    refreshCoordinators(true);
     setInterval(refreshDashboard, 5000);
     setInterval(refreshGraphEditors, 10000);
+    setInterval(refreshCoordinators, 10000);
+    fields["refresh-coordinators"].addEventListener("click", () => refreshCoordinators(true));
 
     async function refreshDashboard() {
       const results = await Promise.allSettled([
@@ -301,6 +344,101 @@
         throw new Error(`${response.status} ${response.statusText}`);
       }
       return response.json();
+    }
+
+    async function postJson(url, body = {}) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body)
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || `${response.status} ${response.statusText}`);
+      return payload;
+    }
+
+    async function refreshCoordinators(force = false) {
+      try {
+        coordinatorSnapshot = await fetchJson(`/coordinator${force ? "?refresh=true" : ""}`);
+        renderCoordinators(coordinatorSnapshot);
+      } catch (error) {
+        fields["coordinator-status"].textContent = `Coordinator discovery unavailable: ${error.message}`;
+      }
+    }
+
+    function renderCoordinators(snapshot) {
+      const selection = snapshot.selection || {};
+      const local = snapshot.local || {};
+      const candidates = Array.isArray(snapshot.candidates) ? snapshot.candidates : [];
+      const coordinatorName = selection.coordinatorId || "none";
+      fields["coordinator-summary"].textContent = selection.mode === "local"
+        ? `${local.name || local.id} coordinates this ensemble`
+        : `${local.name || local.id} joins ${coordinatorName}`;
+      fields["coordinator-detail"].textContent = selection.coordinatorUrl || "No coordinator URL";
+      fields["coordinator-status"].textContent = snapshot.registration?.lastError
+        ? `Registration failed: ${snapshot.registration.lastError}`
+        : (snapshot.registration?.lastRegistrationAt ? `Registered ${formatTime(snapshot.registration.lastRegistrationAt)}` : `${candidates.length} tree${candidates.length === 1 ? "" : "s"} discovered via Bonjour`);
+      coordinatorCandidatesElement.textContent = "";
+      const discovered = new Map(candidates.map((candidate) => [candidate.id, candidate]));
+      if (local.id && !discovered.has(local.id)) {
+        discovered.set(local.id, { id: local.id, name: local.name, shadowscoreUrl: local.url, shadowscoreAvailable: true });
+      }
+      for (const candidate of Array.from(discovered.values()).sort((left, right) => left.name.localeCompare(right.name))) {
+        const card = document.createElement("div");
+        const current = candidate.id === selection.coordinatorId;
+        card.className = `coordinator-card${current ? " current" : ""}`;
+        const title = document.createElement("div");
+        title.className = "card-title";
+        title.textContent = candidate.name || candidate.id;
+        const detail = document.createElement("div");
+        detail.className = "coordinator-detail";
+        detail.textContent = `${candidate.shadowscoreAvailable ? "ShadowScore ready" : "RNBO only"} · ${candidate.shadowscoreUrl || candidate.host || ""}`;
+        const actions = document.createElement("div");
+        actions.className = "coordinator-card-actions";
+        actions.style.marginTop = "9px";
+        if (current) {
+          const badge = document.createElement("span");
+          badge.className = "coordinator-detail";
+          badge.textContent = "Current coordinator";
+          actions.append(badge);
+        } else if (candidate.shadowscoreAvailable) {
+          const button = document.createElement("button");
+          button.className = "compact";
+          button.type = "button";
+          button.textContent = candidate.id === local.id ? "Make this tree coordinator" : `Join ${candidate.name || candidate.id}`;
+          button.addEventListener("click", () => chooseCoordinator(candidate));
+          actions.append(button);
+        }
+        card.append(title, detail, actions);
+        coordinatorCandidatesElement.append(card);
+      }
+    }
+
+    async function chooseCoordinator(candidate) {
+      const local = coordinatorSnapshot?.local || {};
+      const movingFleet = candidate.id === local.id;
+      const question = movingFleet
+        ? `Make ${local.name || local.id} the coordinator and move every discovered tree to it?`
+        : `Join the coordinator on ${candidate.name || candidate.id}?`;
+      if (!window.confirm(question)) return;
+      fields["coordinator-status"].textContent = movingFleet ? "Moving ensemble..." : "Changing coordinator...";
+      try {
+        coordinatorSnapshot = movingFleet
+          ? await postJson("/coordinator/claim")
+          : await postJson("/coordinator/select", { mode: "remote", coordinatorId: candidate.id, coordinatorUrl: candidate.shadowscoreUrl });
+        renderCoordinators(coordinatorSnapshot);
+        if (movingFleet && coordinatorSnapshot.results?.some((result) => !result.ok)) {
+          const failures = coordinatorSnapshot.results.filter((result) => !result.ok).map((result) => result.id).join(", ");
+          fields["coordinator-status"].textContent = `Coordinator changed; could not reach ${failures}`;
+        }
+      } catch (error) {
+        fields["coordinator-status"].textContent = `Coordinator change failed: ${error.message}`;
+      }
+    }
+
+    function formatTime(value) {
+      const date = new Date(value);
+      return Number.isNaN(date.getTime()) ? "" : date.toLocaleTimeString();
     }
 
     function graphEditorLinks(devices) {

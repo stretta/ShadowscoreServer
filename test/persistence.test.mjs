@@ -161,6 +161,27 @@ test("persisted OSC clips migrate legacy TTID parameters out of snapshot ownersh
   assert.deepEqual(persisted.oscClips.legacy.params, { Clock: 1, Scale: 2741, "T-T-I-D": 4095 });
 });
 
+test("persisted OSC clips migrate legacy Swing parameters out of snapshot ownership", () => {
+  const persisted = scoreWithVersion(1);
+  persisted.oscClips = {
+    legacy: {
+      app: "analogsequencer",
+      params: {
+        Clock: 1,
+        Swing: "On",
+        SwingAmt: 0.625,
+        "/rnbo/inst/2/params/Clock/Swing": "Off"
+      },
+      inputPorts: {}
+    }
+  };
+
+  const migrated = migratePersistedScore(persisted);
+
+  assert.deepEqual(migrated.oscClips.legacy.params, { Clock: 1 });
+  assert.equal(persisted.oscClips.legacy.params.Swing, "On");
+});
+
 test("persisted macrostructure tempo migrates into missing block tempos", () => {
   const persisted = createInitialScore(defaultConfig);
   persisted.macrostructure.tempo = 96;

@@ -11,6 +11,7 @@ test("hardware smoke passes required host checks and skips host-only registratio
       "http://127.0.0.1:8790/session": { voices: [{ id: "player-1" }] },
       "http://127.0.0.1:8790/rnbo/targets": { targets: [] },
       "http://127.0.0.1:8790/rnbo/devices": { devices: [] },
+      "http://127.0.0.1:8790/coordinator": coordinatorPayload(),
       "http://127.0.0.1:8790/": "ShadowScore Views",
       "http://127.0.0.1:8790/structure-editor": "ShadowScore Arrange",
       "http://127.0.0.1:8790/matrix-edit": "ShadowScore Matrix Edit",
@@ -40,6 +41,7 @@ test("hardware smoke requires fresh JACK transport when enabled", async () => {
       "http://127.0.0.1:8790/session": { voices: [{ id: "player-1" }] },
       "http://127.0.0.1:8790/rnbo/targets": { targets: [] },
       "http://127.0.0.1:8790/rnbo/devices": { devices: [] },
+      "http://127.0.0.1:8790/coordinator": coordinatorPayload(),
       "http://127.0.0.1:8790/": "ShadowScore Views",
       "http://127.0.0.1:8790/structure-editor": "ShadowScore Arrange",
       "http://127.0.0.1:8790/matrix-edit": "ShadowScore Matrix Edit",
@@ -75,6 +77,7 @@ test("hardware smoke fails stale JACK transport when enabled", async () => {
       "http://127.0.0.1:8790/session": { voices: [{ id: "player-1" }] },
       "http://127.0.0.1:8790/rnbo/targets": { targets: [] },
       "http://127.0.0.1:8790/rnbo/devices": { devices: [] },
+      "http://127.0.0.1:8790/coordinator": coordinatorPayload(),
       "http://127.0.0.1:8790/": "ShadowScore Views",
       "http://127.0.0.1:8790/structure-editor": "ShadowScore Arrange",
       "http://127.0.0.1:8790/matrix-edit": "ShadowScore Matrix Edit",
@@ -145,6 +148,7 @@ test("peer hardware smoke skips host-only web checks", async () => {
 
   assert.equal(result.ok, true);
   assert.equal(result.checks.find((check) => check.name === "healthz").status, "skip");
+  assert.equal(result.checks.find((check) => check.name === "coordinator").status, "skip");
   assert.equal(result.checks.find((check) => check.name === "http port").status, "skip");
   assert.equal(result.checks.find((check) => check.name === "RNBOOSCQuery").status, "pass");
   assert.equal(result.checks.find((check) => check.name === "peer registration").status, "pass");
@@ -186,6 +190,14 @@ function createFetch(payloads) {
         return String(payload);
       }
     };
+  };
+}
+
+function coordinatorPayload() {
+  return {
+    local: { id: "wren", name: "wren", url: "http://wren.local:8790" },
+    selection: { mode: "local", coordinatorId: "wren", coordinatorUrl: "http://wren.local:8790" },
+    candidates: []
   };
 }
 

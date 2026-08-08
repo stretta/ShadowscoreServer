@@ -5018,6 +5018,16 @@ test("shared ShadowScore stylesheet is served as a static asset", async () => {
   assert.match(response.body, /ss-route-tabs/);
 });
 
+test("shared bipolar range renderer is served as a static asset", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/shared/bipolar-range.js");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/javascript/);
+  assert.match(response.body, /min >= 0 \|\| max <= 0/);
+  assert.match(response.body, /--ss-range-fill-start/);
+});
+
 test("shared grouped navigation defines and reaches every hosted user-facing page", async () => {
   const context = createRouteContext();
   const asset = await request(context, "GET", "/shared/shadowscore-nav.js");

@@ -1,3 +1,5 @@
+import "./bipolar-range.js";
+
 export const shadowScoreNavigation = Object.freeze([
   Object.freeze({
     id: "shadowscore",

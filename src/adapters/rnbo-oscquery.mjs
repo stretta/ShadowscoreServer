@@ -300,6 +300,7 @@ function normalizeRnboParam(name, node, path = [name]) {
     min: firstFinite(range.map((entry) => entry.MIN)),
     max: firstFinite(range.map((entry) => entry.MAX)),
     values: firstArray(range.map((entry) => entry.VALS)),
+    steps: optionalFiniteNumber(node.STEPS ?? node.CONTENTS?.steps?.VALUE ?? meta?.steps),
     unit: stringField(meta?.unit ?? meta?.units ?? node.CONTENTS?.unit?.VALUE) || undefined,
     displayName: stringField(meta?.display_name ?? node.CONTENTS?.display_name?.VALUE) || name,
     index: optionalFiniteNumber(node.CONTENTS?.index?.VALUE),

@@ -266,7 +266,8 @@ test("extracts nested polyphonic instrument parameters with their live OSC paths
                 RANGE: [{ VALS: ["off", "on"] }],
                 CONTENTS: {
                   index: { VALUE: 3 },
-                  normalized: { VALUE: 1 }
+                  normalized: { VALUE: 1 },
+                  meta: { VALUE: "{\"steps\":2}" }
                 }
               }
             }
@@ -287,6 +288,7 @@ test("extracts nested polyphonic instrument parameters with their live OSC paths
     ["FilterKeyTracking", "/rnbo/inst/31/params/Poland/FilterKeyTracking"]
   ]);
   assert.deepEqual(target.parameters[3].values, ["off", "on"]);
+  assert.equal(target.parameters[3].steps, 2);
 });
 
 test("classifies Vantor while preserving unique keys for its legacy nested parameter namespace", () => {

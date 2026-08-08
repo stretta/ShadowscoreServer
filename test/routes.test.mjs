@@ -4582,6 +4582,8 @@ test("Drumbox editor route follows the live nested drum voice structure", async 
   assert.match(response.body, /prefix: "SynthDrum1\/"/);
   assert.match(response.body, /prefix: "SynthDrum2\/"/);
   assert.match(response.body, /prefix: `Sample\$\{number\}\/`/);
+  assert.match(response.body, /const SAMPLE_CONTROLS = \["PlayMode", "Note", "Sample", "Transpose", "Attack", "Hold", "Release", "Level", "Pan", "AuxSend"\]/);
+  assert.match(response.body, /"AuxSend"/);
   assert.match(response.body, /"AmpModEnvHoldTime"/);
   assert.match(response.body, /prefix: "RnboPlateReverb\/"/);
   assert.match(response.body, /parameterPath\(param\)\.startsWith\(group\.prefix\)/);
@@ -4589,6 +4591,15 @@ test("Drumbox editor route follows the live nested drum voice structure", async 
   assert.match(response.body, /\.controls \{[^}]*min-width: 0; width: 100%;/);
   assert.match(response.body, /\.control \{[^}]*flex: 1 1 0;[^}]*min-width: 0;/);
   assert.match(response.body, /\.control-readout \{[^}]*height: 14px;[^}]*white-space: nowrap;/);
+  assert.match(response.body, /\.panel\[data-group\^="sample-"\] \.control-label \{[^}]*font-size: 9px;[^}]*white-space: nowrap;/);
+  assert.match(response.body, /Array\.isArray\(param\.values\) && param\.values\.length/);
+  assert.match(response.body, /function renderChoice\(param\)/);
+  assert.match(response.body, /function renderSwitch\(param\)/);
+  assert.match(response.body, /input\.setAttribute\("role", "switch"\)/);
+  assert.match(response.body, /return "SHOT"/);
+  assert.match(response.body, /newestTarget\(\)\?\.id/);
+  assert.match(response.body, /syncParamsToReadSource\(\{ preserve: false \}\)/);
+  assert.match(response.body, /refresh\(\)\.then\(\(\) => snapshotClient\.init\(\)\)/);
   assert.match(response.body, /createOscSnapshotEditorClient/);
   assert.match(response.body, /serializeSnapshotState/);
   assert.match(response.body, /displaySavedState/);

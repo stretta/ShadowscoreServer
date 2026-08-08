@@ -1,0 +1,323 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SingleHalfKrell Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <script type="module" src="/shared/shadowscore-nav.js"></script>
+  <style>
+    body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, rgba(251,146,60,.09), transparent 240px), var(--ss-bg); }
+    main { margin: 0 auto; padding: 18px 0 48px; width: min(1060px, calc(100vw - 32px)); }
+    header, .actions, .target-card, .control-head, .ttid-head, .ttid-presets { align-items: center; display: flex; }
+    header { gap: 16px; justify-content: space-between; }
+    h1 { font-size: 18px; margin: 0; }
+    .subtitle, .status, .target-detail, output, .ttid-note { color: var(--ss-muted); font-size: 12px; font-weight: 700; }
+    .subtitle { margin: 4px 0 0; }
+    .actions { flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+    .status { max-width: 420px; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+    .targets { display: flex; gap: 8px; margin: 18px 0 12px; overflow-x: auto; }
+    .target-card { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); cursor: pointer; flex: 0 0 210px; gap: 9px; padding: 10px; }
+    .target-copy { min-width: 0; }
+    .target-name, .target-detail { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .target-name { color: var(--ss-text); font-weight: 800; }
+    #panels { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: 14px; }
+    .panel { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); min-width: 0; padding: 14px; }
+    .panel h2 { color: var(--ss-accent-secondary); font-size: 11px; letter-spacing: .09em; margin: 0 0 12px; text-transform: uppercase; }
+    .controls { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); min-width: 0; }
+    .control { background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); min-width: 0; padding: 10px; }
+    .control-head { gap: 8px; justify-content: space-between; margin-bottom: 9px; }
+    .control label { color: var(--ss-text); font-size: 12px; font-weight: 800; }
+    .control input, .control select { accent-color: #fb923c; margin: 0; width: 100%; }
+    output { font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .ttid-control { grid-column: 1 / -1; }
+    .ttid-head { justify-content: space-between; margin-bottom: 10px; }
+    .ttid-head strong { color: var(--ss-text); font-size: 12px; }
+    .ttid-keys { display: grid; gap: 6px; grid-template-columns: repeat(12, minmax(34px, 1fr)); }
+    .ttid-key { min-width: 0; padding: 7px 3px; }
+    .ttid-key[aria-pressed="true"] { background: #fb923c; border-color: #fb923c; color: var(--ss-bg); }
+    .ttid-presets { flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .ttid-presets label { display: grid; flex: 1 1 130px; gap: 4px; }
+    .ttid-presets label > span { color: var(--ss-muted); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+    .empty { color: var(--ss-muted); padding: 28px 4px; }
+    @media (max-width: 760px) { #panels { grid-template-columns: 1fr; } header { align-items: flex-start; flex-direction: column; } .actions { justify-content: flex-start; } .status { max-width: none; text-align: left; white-space: normal; } .ttid-keys { grid-template-columns: repeat(6, 1fr); } }
+  </style>
+</head>
+<body>
+  <nav class="ss-route-tabs" aria-label="ShadowScore navigation" data-shadow-nav>
+    <a href="/piano-roll">ShadowScore</a><a href="/structure-editor">Arrange</a>
+    <a href="/editors" aria-current="page">OSC</a><a href="/">Setup</a>
+  </nav>
+  <main>
+    <header>
+      <div><h1>SingleHalfKrell Editor</h1><p class="subtitle">Envelope, pitch, FM, and quantizer controls</p></div>
+      <div class="actions"><label for="read-source">Instance focus</label><select id="read-source" aria-label="Instance focus"></select><button id="get-data" type="button">Read Instance</button><button id="refresh" type="button">Refresh</button><span id="status" class="status" role="status"></span></div>
+    </header>
+    <div id="panels"></div>
+    <div id="snapshot-mount"></div>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-label="SingleHalfKrell targets"></div></section>
+  </main>
+  <script type="module">
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue } from "/shared/osc-snapshot-editor.js?v=20260724-ttid-revision1";
+
+    const SINGLE_HALF_KRELL_GROUPS = [
+      { title: "Envelope", controls: ["MaxRandomTimeDomain", "Attack", "Release"] },
+      { title: "Pitch", controls: ["PitchBias", "PitchModAmtRandom", "PitchModAmtAD"] },
+      { title: "FM", controls: ["ModulationIndex", "ModulationRatioRange", "ModulationRatioRangeFine"] },
+      { title: "Quantizer", controls: ["Quantizer_1_/ScalarTranspose", "Quantizer_1_.2/ChromaticTranspose", "Quantizer_1_.1/Portamento", "Quantizer_1_.3/Scale"] }
+    ];
+    const LABELS = {
+      MaxRandomTimeDomain: "Maximum Random Time",
+      PitchBias: "Pitch Bias",
+      PitchModAmtRandom: "Random Pitch Amount",
+      PitchModAmtAD: "Envelope Pitch Amount",
+      ModulationIndex: "Modulation Index",
+      ModulationRatioRange: "Ratio Range",
+      ModulationRatioRangeFine: "Fine Ratio Range",
+      ScalarTranspose: "Scalar Transpose",
+      ChromaticTranspose: "Chromatic Transpose"
+    };
+    const ROOTS = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
+    const targetsEl = document.querySelector("#targets");
+    const panelsEl = document.querySelector("#panels");
+    const statusEl = document.querySelector("#status");
+    const refreshButton = document.querySelector("#refresh");
+    const readSourceSelect = document.querySelector("#read-source");
+    const getDataButton = document.querySelector("#get-data");
+    let targets = [];
+    let params = new Map();
+    let scales = {};
+    const ttidPreset = { root: 0, scale: "ionian" };
+    const pending = new Map();
+    let snapshotClient;
+
+    refreshButton.addEventListener("click", () => refresh().catch(reportError));
+    getDataButton.addEventListener("click", () => getData().catch(reportError));
+    const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
+    snapshotClient = createOscSnapshotEditorClient({ app: "singlehalfkrell", roleLabel: "SingleHalfKrell", elements: snapshotElements, serializeState: serializeSnapshotState, displayState: displaySavedState, onFocusChange: getData, liveTargetRoot: targetsEl, setStatus });
+    Promise.all([loadScales(), snapshotClient.init()]).then(refresh).catch(reportError);
+
+    async function loadScales() {
+      const response = await fetch("/harmonic/scales", { cache: "no-store" });
+      const body = await response.json();
+      if (!response.ok || body.ok === false) throw new Error(body.error || "Scale catalog unavailable");
+      scales = body.scales || {};
+      if (!Object.hasOwn(scales, ttidPreset.scale)) ttidPreset.scale = Object.keys(scales)[0] || "";
+    }
+
+    async function refresh() {
+      refreshButton.disabled = true;
+      try {
+        const response = await fetch("/osc/targets?app=singlehalfkrell&status=online", { cache: "no-store" });
+        const body = await response.json();
+        if (!response.ok || body.ok === false) throw new Error(body.error || `Request failed: ${response.status}`);
+        targets = body.targets || [];
+        params = mergeParams(targets);
+        renderTargets();
+        renderReadSources();
+        renderPanels();
+        setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online SingleHalfKrell targets");
+      } finally { refreshButton.disabled = false; }
+    }
+
+    function mergeParams(nextTargets) {
+      const next = new Map();
+      for (const target of nextTargets) for (const param of target.parameters || []) {
+        const key = parameterKey(param);
+        if (!next.has(key)) next.set(key, { ...param, key });
+      }
+      for (const [key, old] of params) if (next.has(key)) next.get(key).value = old.value;
+      return next;
+    }
+
+    function renderTargets() {
+      const selected = new Set([...targetsEl.querySelectorAll("[data-target]:checked")].map((input) => input.dataset.target));
+      const focusedId = readSourceSelect.value || targets[0]?.id || "";
+      const preserveSelection = targets.some((target) => selected.has(target.id));
+      targetsEl.replaceChildren(...targets.map((target) => {
+        const card = document.createElement("label");
+        card.className = "target-card";
+        card.innerHTML = `<input type="checkbox" data-target="${escapeHtml(target.id)}"><span class="target-copy"><span class="target-name">${escapeHtml(target.label || target.id)}</span><span class="target-detail">${escapeHtml(target.unitId || target.baseAddress || "")}</span></span>`;
+        card.querySelector("input").checked = preserveSelection ? selected.has(target.id) : target.id === focusedId;
+        return card;
+      }));
+    }
+
+    function renderReadSources() {
+      const previous = readSourceSelect.value;
+      readSourceSelect.replaceChildren(...targets.map((target) => {
+        const option = document.createElement("option"); option.value = target.id; option.textContent = target.label || target.id; return option;
+      }));
+      readSourceSelect.value = targets.some((target) => target.id === previous) ? previous : (targets[0]?.id || "");
+      readSourceSelect.disabled = targets.length === 0;
+      getDataButton.disabled = targets.length === 0;
+    }
+
+    async function getData() {
+      const target = targets.find((entry) => entry.id === readSourceSelect.value);
+      if (!target) return setStatus("Choose an instance to get data from");
+      getDataButton.disabled = true;
+      setStatus(`Getting data from ${target.label || target.id}...`);
+      try {
+        const response = await fetch(`${location.protocol}//${oscQueryHost(target)}:5678${target.baseAddress}/params`, { cache: "no-store" });
+        if (!response.ok) throw new Error(`OSCQuery parameter read failed (${response.status})`);
+        const nodes = parameterNodesByAddress(await response.json());
+        let populated = 0;
+        for (const targetParam of target.parameters || []) {
+          const key = parameterKey(targetParam);
+          const node = nodes.get(targetParam.address);
+          if (!node || node.VALUE === undefined || !params.has(key)) continue;
+          params.get(key).value = scalarValue(node.VALUE);
+          populated += 1;
+        }
+        renderPanels();
+        setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
+      } finally { getDataButton.disabled = targets.length === 0; }
+    }
+
+    function parameterNodesByAddress(root) {
+      const nodes = new Map();
+      const visit = (node) => {
+        if (!node || typeof node !== "object") return;
+        if (node.FULL_PATH && node.VALUE !== undefined) nodes.set(node.FULL_PATH, node);
+        for (const child of Object.values(node.CONTENTS || {})) visit(child);
+      };
+      visit(root);
+      return nodes;
+    }
+
+    function renderPanels() {
+      const assigned = new Set();
+      const groups = SINGLE_HALF_KRELL_GROUPS.map((group) => {
+        const members = group.controls.map((key) => params.get(key)).filter(Boolean);
+        members.forEach((param) => assigned.add(parameterKey(param)));
+        return { ...group, params: members };
+      });
+      const other = [...params.values()].filter((param) => !assigned.has(parameterKey(param))).sort(byIndex);
+      if (other.length) groups.push({ title: "Other", params: other });
+      const nodes = groups.filter((group) => group.params.length).map(renderGroup);
+      panelsEl.replaceChildren(...nodes);
+      if (!nodes.length) {
+        const empty = document.createElement("div"); empty.className = "empty"; empty.textContent = targets.length ? "No SingleHalfKrell parameters reported." : "No online SingleHalfKrell targets."; panelsEl.append(empty);
+      }
+    }
+
+    function renderGroup(group) {
+      const section = document.createElement("section"); section.className = "panel";
+      const title = document.createElement("h2"); title.textContent = group.title;
+      const controls = document.createElement("div"); controls.className = "controls";
+      controls.replaceChildren(...group.params.map(renderControl));
+      section.replaceChildren(title, controls);
+      return section;
+    }
+
+    function renderControl(param) {
+      if (isTtidParam(param)) return renderTtidControl(param);
+      if (Array.isArray(param.values) && param.values.length) return renderChoice(param);
+      const min = finite(param.min, 0), max = finite(param.max, 1), value = clamp(finite(param.value, min), min, max);
+      const curved = shouldCurve(param, min, max), key = parameterKey(param);
+      const wrap = document.createElement("div"); wrap.className = "control";
+      const head = document.createElement("div"); head.className = "control-head";
+      const label = document.createElement("label"); label.htmlFor = `param-${cssSafe(key)}`; label.textContent = labelFor(param);
+      const output = document.createElement("output"); output.textContent = format(value, param.unit);
+      const input = document.createElement("input"); input.id = label.htmlFor; input.type = "range"; input.min = curved ? 0 : min; input.max = curved ? 1 : max; input.step = curved ? .001 : stepFor(param, min, max); input.value = curved ? valueToSliderPosition(param, value, min, max) : value;
+      input.addEventListener("input", () => { const next = sliderValue(param, input, min, max, curved); param.value = next; output.textContent = format(next, param.unit); scheduleSend(key, next); });
+      bindRangeCommit(input, () => flushSend(key, sliderValue(param, input, min, max, curved)));
+      head.replaceChildren(label, output); wrap.replaceChildren(head, input); return wrap;
+    }
+
+    function renderTtidControl(param) {
+      const mask = normalizeTtid(param.value);
+      const wrap = document.createElement("div"); wrap.className = "control ttid-control";
+      const head = document.createElement("div"); head.className = "ttid-head";
+      const label = document.createElement("strong"); label.textContent = "TTID Scale";
+      const output = document.createElement("output"); output.textContent = `${mask} / 0x${mask.toString(16).toUpperCase().padStart(3, "0")}`;
+      head.replaceChildren(label, output);
+      const keys = document.createElement("div"); keys.className = "ttid-keys"; keys.id = "ttid-keys";
+      keys.replaceChildren(...ROOTS.map((name, pitchClass) => {
+        const button = document.createElement("button"); button.className = "ttid-key"; button.type = "button"; button.textContent = name; button.setAttribute("aria-pressed", String(Boolean(mask & (1 << pitchClass))));
+        button.addEventListener("click", () => setTtid(param, mask ^ (1 << pitchClass)).catch(reportError));
+        return button;
+      }));
+      const presets = document.createElement("div"); presets.className = "ttid-presets";
+      const rootLabel = document.createElement("label"); rootLabel.innerHTML = "<span>Root</span>";
+      const rootSelect = document.createElement("select"); rootSelect.setAttribute("aria-label", "Scale root");
+      rootSelect.replaceChildren(...ROOTS.map((name, value) => { const option = document.createElement("option"); option.value = String(value); option.textContent = name; return option; })); rootSelect.value = String(ttidPreset.root); rootSelect.addEventListener("change", () => { ttidPreset.root = Number(rootSelect.value); }); rootLabel.append(rootSelect);
+      const scaleLabel = document.createElement("label"); scaleLabel.innerHTML = "<span>Scale</span>";
+      const scaleSelect = document.createElement("select"); scaleSelect.setAttribute("aria-label", "Scale pattern");
+      scaleSelect.replaceChildren(...Object.keys(scales).sort((a, b) => a.localeCompare(b)).map((name) => { const option = document.createElement("option"); option.value = name; option.textContent = titleCase(name); return option; })); scaleSelect.value = ttidPreset.scale; scaleSelect.addEventListener("change", () => { ttidPreset.scale = scaleSelect.value; }); scaleLabel.append(scaleSelect);
+      const load = document.createElement("button"); load.className = "primary"; load.type = "button"; load.textContent = "Load Scale"; load.addEventListener("click", () => setTtid(param, encodeScale(ttidPreset.root, ttidPreset.scale)).catch(reportError));
+      presets.replaceChildren(rootLabel, scaleLabel, load);
+      const note = document.createElement("p"); note.className = "ttid-note"; note.textContent = "Toggle pitch classes directly or load a named scale.";
+      wrap.replaceChildren(head, keys, presets, note);
+      return wrap;
+    }
+
+    function renderChoice(param) {
+      const key = parameterKey(param), wrap = document.createElement("div"); wrap.className = "control";
+      const head = document.createElement("div"); head.className = "control-head";
+      const label = document.createElement("label"); label.htmlFor = `param-${cssSafe(key)}`; label.textContent = labelFor(param);
+      const output = document.createElement("output"); output.textContent = String(param.value ?? param.values[0]);
+      const select = document.createElement("select"); select.id = label.htmlFor;
+      for (const value of param.values) { const option = document.createElement("option"); option.value = String(value); option.textContent = splitCamel(value); option.selected = String(value) === String(param.value); select.append(option); }
+      select.addEventListener("change", () => { param.value = select.value; output.textContent = select.value; sendParam(key, select.value).catch(reportError); snapshotClient?.commitEdit(); });
+      head.replaceChildren(label, output); wrap.replaceChildren(head, select); return wrap;
+    }
+
+    async function setTtid(param, value) {
+      const mask = normalizeTtid(value); param.value = mask; await sendParam(parameterKey(param), mask); snapshotClient?.commitEdit(); renderPanels();
+    }
+    function scheduleSend(key, value) { if (pending.has(key)) clearTimeout(pending.get(key)); pending.set(key, setTimeout(() => { pending.delete(key); sendParam(key, value).catch(reportError); }, 90)); }
+    function flushSend(key, value) { if (pending.has(key)) clearTimeout(pending.get(key)); pending.delete(key); sendParam(key, value).catch(reportError); }
+
+    async function sendParam(key, value) {
+      const selected = [...document.querySelectorAll("[data-target]:checked")].map((input) => input.dataset.target).filter(Boolean);
+      if (!selected.length) return setStatus("No targets selected");
+      if (params.has(key)) params.get(key).value = value;
+      const sends = selected.map(async (targetId) => {
+        const target = targets.find((entry) => entry.id === targetId);
+        const targetParam = target?.parameters?.find((entry) => parameterKey(entry) === key);
+        if (!targetParam?.address) return false;
+        const response = await fetch("/osc/send", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ targets: [targetId], address: targetParam.address, args: [value] }) });
+        const body = await response.json().catch(() => ({}));
+        return response.ok && body.ok !== false;
+      });
+      const results = await Promise.all(sends), sent = results.filter(Boolean).length;
+      setStatus(sent === selected.length ? `Sent ${labelFor(params.get(key))} to ${sent}/${selected.length}` : `Failed ${labelFor(params.get(key))} (${sent}/${selected.length})`);
+    }
+
+    function bindRangeCommit(input, flushLive) {
+      let gesture = null;
+      input.addEventListener("pointerdown", () => { gesture = snapshotClient?.beginGesture() ?? null; });
+      input.addEventListener("pointerup", () => { const completed = gesture; if (completed) snapshotClient?.commitGesture(completed); queueMicrotask(() => { if (gesture === completed) gesture = null; }); });
+      input.addEventListener("pointercancel", () => { if (gesture) snapshotClient?.cancelGesture(gesture); gesture = null; });
+      input.addEventListener("change", () => { flushLive(); if (gesture) snapshotClient?.commitGesture(gesture); else snapshotClient?.commitEdit(); gesture = null; });
+    }
+
+    function serializeSnapshotState() { return createOscEditorSnapshot({ app: "singlehalfkrell", paramEntries: Array.from(params, ([name, param]) => ({ name, value: param.value, values: param.values })) }); }
+    function displaySavedState(snapshot) { for (const [name, value] of Object.entries(snapshot.params ?? {})) if (params.has(name)) params.get(name).value = oscEditorParamValue(params.get(name), value); renderPanels(); }
+    function parameterKey(param) { return param?.path || param?.key || param?.name || ""; }
+    function isTtidParam(param) { return String(param?.meta?.editor || "").trim().toLowerCase() === "ttid" || /(?:^|\/)Scale$/i.test(parameterKey(param)); }
+    function encodeScale(root, scaleName) { return (scales[scaleName] || []).reduce((mask, pitchClass) => mask | (1 << ((Number(pitchClass) + Number(root)) % 12)), 0) & 0xFFF; }
+    function normalizeTtid(value) { return Math.max(0, Math.min(0xFFF, Math.round(finite(value, 0xFFF)))); }
+    function oscQueryHost(target) { return !target.host || ["127.0.0.1", "localhost", "::1"].includes(target.host) ? location.hostname : target.host; }
+    function scalarValue(value) { return Array.isArray(value) ? value[0] : value; }
+    function byIndex(a, b) { return (a.index ?? 9999) - (b.index ?? 9999); }
+    function labelFor(param) { return LABELS[param?.name] || param?.meta?.label || splitCamel(param?.displayName || param?.name || "Parameter"); }
+    function stepFor(param, min, max) { const step = finite(param.meta?.edit_step, NaN); if (step > 0) return step; const range = Math.abs(max - min); return range > 64 ? 1 : range > 8 ? .1 : .01; }
+    function shouldCurve(param, min, max) { const name = String(param?.name || ""); const unit = String(param?.unit || param?.meta?.unit || "").toLowerCase(); return /(?:attack|release|randomtime|portamento)/i.test(name) || (unit === "ms" && Math.abs(max - min) >= 1000); }
+    function curveExponent(param) { return /release/i.test(String(param?.name || "")) ? 5 : 3; }
+    function valueToSliderPosition(param, value, min, max) { return Math.pow(clamp((finite(value, min) - min) / (max - min), 0, 1), 1 / curveExponent(param)); }
+    function sliderValue(param, input, min, max, curved) { if (!curved) return Number(input.value); const value = min + ((max - min) * Math.pow(clamp(Number(input.value), 0, 1), curveExponent(param))); const step = stepFor(param, min, max); return clamp(min + (Math.round((value - min) / step) * step), min, max); }
+    function format(value, unit) { const number = Number(value); const text = Number.isInteger(number) ? String(number) : number.toFixed(Math.abs(number) >= 10 ? 1 : 2).replace(/\.?0+$/, ""); return `${text}${unit ? ` ${unit}` : ""}`; }
+    function finite(value, fallback) { const number = Number(value); return Number.isFinite(number) ? number : fallback; }
+    function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+    function splitCamel(value) { return String(value || "").replace(/([a-z0-9])([A-Z])/g, "$1 $2"); }
+    function titleCase(value) { return splitCamel(String(value || "").replace(/[-_]+/g, " ")).replace(/\b\w/g, (char) => char.toUpperCase()); }
+    function cssSafe(value) { return String(value).replace(/[^a-zA-Z0-9_-]/g, "-"); }
+    function setStatus(message) { statusEl.textContent = message; }
+    function reportError(error) { refreshButton.disabled = false; setStatus(error.message || "SingleHalfKrell editor failed"); }
+    function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+  </script>
+</body>
+</html>

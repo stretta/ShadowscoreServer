@@ -4135,7 +4135,7 @@ test("editor manifest route lists registered instrument editors", async () => {
   const context = createRouteContext();
   const response = await requestJson(context, "GET", "/editors/manifest");
 
-  assert.equal(response.editors.length, 11);
+  assert.equal(response.editors.length, 12);
   assert.deepEqual(response.editors, [
     {
       id: "poland",
@@ -4223,6 +4223,14 @@ test("editor manifest route lists registered instrument editors", async () => {
       route: "/editors/triggersequencer",
       targetFilter: {
         app: "triggersequencer"
+      }
+    },
+    {
+      id: "singlehalfkrell",
+      label: "SingleHalfKrell",
+      route: "/editors/singlehalfkrell",
+      targetFilter: {
+        app: "singlehalfkrell"
       }
     }
   ]);
@@ -4811,6 +4819,28 @@ test("TriggerSequencer editor route serves the 16-bit block-recall surface", asy
   assert.match(response.body, /displaySavedState/);
 });
 
+test("SingleHalfKrell editor route follows the live synthesis and quantizer contract", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/singlehalfkrell");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /SingleHalfKrell Editor/);
+  assert.match(response.body, /\/osc\/targets\?app=singlehalfkrell/);
+  assert.match(response.body, /SINGLE_HALF_KRELL_GROUPS/);
+  assert.match(response.body, /MaxRandomTimeDomain/);
+  assert.match(response.body, /PitchModAmtRandom/);
+  assert.match(response.body, /ModulationRatioRangeFine/);
+  assert.match(response.body, /Quantizer_1_\.3\/Scale/);
+  assert.match(response.body, /keys\.id = "ttid-keys"/);
+  assert.match(response.body, /\/harmonic\/scales/);
+  assert.match(response.body, /encodeScale/);
+  assert.match(response.body, /parameterNodesByAddress/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /displaySavedState/);
+});
+
 test("OSC editors place controls above Block State and live destinations below it", async () => {
   const context = createRouteContext();
   const editors = [
@@ -4824,6 +4854,7 @@ test("OSC editors place controls above Block State and live destinations below i
     ["element", 'id="panels"'],
     ["vantor", 'id="panels"'],
     ["drumbox", 'id="panels"'],
+    ["singlehalfkrell", 'id="panels"'],
     ["ttid", 'id="editors"']
   ];
   for (const [editor, controlsMarker] of editors) {
@@ -4846,7 +4877,7 @@ test("OSC editors place controls above Block State and live destinations below i
 
 test("instant-write OSC editors expose their intended completion boundaries", async () => {
   const context = createRouteContext();
-  for (const editor of ["analogsequencer", "softpiano", "element", "vantor", "drumbox", "plate", "poland"]) {
+  for (const editor of ["analogsequencer", "softpiano", "element", "vantor", "drumbox", "singlehalfkrell", "plate", "poland"]) {
     const response = await request(context, "GET", `/editors/${editor}`);
     assert.match(response.body, /bindRangeCommit/);
     assert.match(response.body, /pointerdown/);
@@ -5011,6 +5042,7 @@ test("shared grouped navigation defines and reaches every hosted user-facing pag
     "/editors/poland",
     "/editors/plate",
     "/editors/softpiano",
+    "/editors/singlehalfkrell",
     "/editors/ttid",
     "/tools/osc-volume",
     "/tools/osc-macros",

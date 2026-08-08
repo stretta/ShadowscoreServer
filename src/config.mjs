@@ -134,6 +134,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/editors/triggersequencer"]
       },
+      singleHalfKrellEditor: {
+        root: "public/editors/singlehalfkrell",
+        index: "index.html",
+        routes: ["/editors/singlehalfkrell"]
+      },
       shared: {
         root: "public/shared",
         index: "index.html",
@@ -238,6 +243,14 @@ export const defaultConfig = Object.freeze({
       route: "/editors/triggersequencer",
       targetFilter: {
         app: "triggersequencer"
+      }
+    },
+    {
+      id: "singlehalfkrell",
+      label: "SingleHalfKrell",
+      route: "/editors/singlehalfkrell",
+      targetFilter: {
+        app: "singlehalfkrell"
       }
     }
   ],

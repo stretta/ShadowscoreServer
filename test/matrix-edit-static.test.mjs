@@ -104,6 +104,9 @@ test("Matrix Edit static app includes ShadowScore client wiring", async () => {
   assert.match(css, /ttid-selector/);
   assert.match(css, /ttid-pitch-class/);
   assert.match(css, /grid-template-rows:auto auto auto minmax\(320px,1fr\) auto/);
+  assert.match(css, /\.matrix-shell\{[^}]*min-height:320px/);
+  assert.match(css, /canvas\{[^}]*display:block[^}]*height:100%[^}]*min-height:0/);
+  assert.doesNotMatch(css, /canvas\{[^}]*min-height:320px/);
   assert.match(css, /\.edit-tools\{[^}]*display:flex[^}]*flex-wrap:nowrap[^}]*margin-left:auto/);
 });
 

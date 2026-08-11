@@ -28,9 +28,11 @@
     .detail { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; overflow-wrap: anywhere; }
     .global-panel { display: grid; gap: 10px; padding: 12px; }
     .parameters { display: grid; gap: 8px; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
-    .param-card { align-items: end; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); display: grid; gap: 8px; grid-template-columns: minmax(130px, 1fr) auto; padding: 10px; }
+    .param-card { align-items: end; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); display: grid; gap: 8px; grid-template-columns: minmax(0, 1fr) auto; min-width: 0; padding: 10px; }
+    .param-card > div:first-child, .param-control { min-width: 0; }
     .param-control { align-items: center; display: flex; gap: 8px; justify-content: flex-end; }
-    .param-control input[type="number"], .param-control input[type="text"], .param-control select { min-height: 34px; min-width: 90px; }
+    .param-control input[type="number"] { min-height: 34px; min-width: 0; width: 72px; }
+    .param-control input[type="text"], .param-control select { min-height: 34px; min-width: 90px; }
     .rows { display: grid; gap: 10px; }
     .row-card { display: grid; gap: 10px; padding: 12px; }
     .row-head { align-items: center; display: flex; gap: 10px; justify-content: space-between; }

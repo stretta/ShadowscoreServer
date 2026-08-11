@@ -167,10 +167,10 @@ export const defaultConfig = Object.freeze({
     },
     {
       id: "ttid",
-      label: "TTID",
+      label: "Block Attributes",
       route: "/editors/ttid",
       targetFilter: {
-        app: "ttid"
+        capability: "block-attributes-edit"
       }
     },
     {

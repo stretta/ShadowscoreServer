@@ -134,7 +134,7 @@
     }
 
     function renderParameters() {
-      const params = (readSourceTarget()?.parameters || []).filter(param => param.name !== "Steps");
+      const params = (readSourceTarget()?.parameters || []).filter(param => param.name !== "Steps" && !isBlockSwingParam(param.name));
       parametersEl.replaceChildren(...params.map(createParameterControl));
       if (!params.length) parametersEl.innerHTML = `<span class="empty">No additional parameters reported.</span>`;
     }

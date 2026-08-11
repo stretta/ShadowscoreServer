@@ -237,6 +237,9 @@ function controlTargetForInstance(instanceId, node, name, config) {
   if (parameters.some(isTtidParameter) && !oscCapabilities.includes("ttid-edit")) {
     oscCapabilities.push("ttid-edit");
   }
+  if ((oscCapabilities.includes("ttid-edit") || supportsSwingParameters(app, parameters)) && !oscCapabilities.includes("block-attributes-edit")) {
+    oscCapabilities.push("block-attributes-edit");
+  }
   return withoutUndefined({
     id: `rnbo-inst-${instance}:${app}`,
     name: `${titleCase(app)} ${instance}`,
@@ -436,6 +439,12 @@ function controlCapabilities(app, parameters, inputPorts) {
 
 function isTtidParameter(param) {
   return stringField(param?.meta?.editor).toLowerCase() === "ttid";
+}
+
+function supportsSwingParameters(app, parameters) {
+  if (!["analogsequencer", "listsequencer", "listvelsequencer", "triggerseq", "triggersequencer"].includes(app)) return false;
+  const names = new Set(parameters.map((param) => stringField(param?.key ?? param?.name).split("/").at(-1).toLowerCase().replace(/[^a-z0-9]+/g, "")));
+  return names.has("swing") && names.has("swingamt");
 }
 
 function hasAtLeastParameters(parameterNames, candidates, threshold) {

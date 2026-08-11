@@ -578,6 +578,8 @@
       const specializedNames = new Set([
         ...TRANSPOSE_NAMES,
         "root",
+        "swing",
+        "swingamt",
         ...collectTtidParams(nextTargets).map((param) => normalizedName(param.name))
       ]);
       const byName = new Map();

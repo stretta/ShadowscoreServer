@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>TTID Editor</title>
+  <title>Block Attributes Editor</title>
   <link rel="stylesheet" href="/shared/shadowscore-style.css">
   <script type="module" src="/shared/shadowscore-nav.js"></script>
   <style>
@@ -225,10 +225,50 @@
     }
 
     .scale-row,
+    .block-attribute-row,
     .transpose-row,
     .roots {
       display: grid;
       gap: 8px;
+    }
+
+    .block-attributes {
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-ui);
+      display: grid;
+      gap: 12px;
+      padding: 14px;
+    }
+
+    .block-attribute-row {
+      align-items: end;
+      grid-template-columns: minmax(150px, 0.55fr) minmax(210px, 1fr) auto;
+    }
+
+    .block-attribute-control {
+      display: grid;
+      gap: 6px;
+    }
+
+    .block-attribute-control input {
+      min-height: 34px;
+      padding: 6px 8px;
+    }
+
+    .block-attribute-note {
+      margin: 0;
+    }
+
+    .support-warning {
+      background: color-mix(in srgb, var(--ss-accent-secondary) 13%, var(--ss-surface));
+      border: 1px solid var(--ss-accent-secondary);
+      border-radius: var(--ss-radius-control);
+      color: var(--ss-text);
+      font-size: 12px;
+      font-weight: 800;
+      margin: 10px 10px 0;
+      padding: 9px 10px;
     }
 
     .scale-row {
@@ -306,6 +346,10 @@
       .scale-row {
         grid-template-columns: 1fr;
       }
+
+      .block-attribute-row {
+        grid-template-columns: 1fr;
+      }
     }
   </style>
 </head>
@@ -313,10 +357,10 @@
   <header class="ss-top-strip">
     <div class="top">
       <div>
-        <h1>TTID Editor</h1>
-        <p class="subtitle">12-tone integer dictionary masks from RNBO metadata</p>
+        <h1>Block Attributes Editor</h1>
+        <p class="subtitle">One destination set for block-owned TTID, Swing, and Swing Amount</p>
       </div>
-      <div id="status" class="status" role="status">Loading TTID targets...</div>
+      <div id="status" class="status" role="status">Loading block-attribute destinations...</div>
     </div>
   </header>
   <nav class="ss-route-tabs" aria-label="ShadowScore navigation" data-shadow-nav>
@@ -326,6 +370,23 @@
     <a href="/">Setup</a>
   </nav>
   <main>
+    <section class="block-attributes" aria-labelledby="block-attributes-heading">
+      <div>
+        <h2 id="block-attributes-heading">Block Attributes</h2>
+        <p class="subtitle block-attribute-note">These values belong to the selected block. Each change goes only to checked destinations that publish support for that attribute.</p>
+      </div>
+      <div class="block-attribute-row">
+        <label class="block-attribute-control" for="block-swing">
+          <span class="meta">Swing</span>
+          <select id="block-swing"><option value="0">Off</option><option value="1">On</option></select>
+        </label>
+        <label class="block-attribute-control" for="block-swing-amt">
+          <span class="meta">Swing Amount</span>
+          <input id="block-swing-amt" type="number" min="0" max="1" step="0.001" value="0.5">
+        </label>
+        <button id="broadcast-swing" class="primary" type="button">Send Swing To Selected</button>
+      </div>
+    </section>
     <section class="toolbar" aria-label="TTID controls">
       <div class="select-wrap">
         <label for="param-select">Parameter</label>
@@ -341,7 +402,7 @@
     </section>
     <section id="editors" class="editor-grid" aria-live="polite"></section>
     <div id="snapshot-mount"></div>
-    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Checked instances receive live control changes and the saved Block State.</span></div><div id="targets" class="targets" aria-label="OSC targets"></div></section>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Block Attribute Destinations</h2><span>Checked instances receive the attributes they support.</span></div><p id="support-warning" class="support-warning" role="status" hidden>Not all selected destinations support all the data.</p><div id="targets" class="targets" aria-label="Block attribute destinations"></div></section>
   </main>
   <script type="module">
     import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel } from "/shared/osc-snapshot-editor.js?v=20260724-ttid-revision1";
@@ -358,6 +419,10 @@
     const paramSelect = document.querySelector("#param-select");
     const readSourceSelect = document.querySelector("#read-source");
     const getStateButton = document.querySelector("#get-state");
+    const blockSwingSelect = document.querySelector("#block-swing");
+    const blockSwingAmtInput = document.querySelector("#block-swing-amt");
+    const broadcastSwingButton = document.querySelector("#broadcast-swing");
+    const supportWarning = document.querySelector("#support-warning");
     let targets = [];
     let ttidParams = [];
     let paramState = new Map();
@@ -370,14 +435,16 @@
     selectAllButton.addEventListener("click", selectAllTargets);
     paramSelect.addEventListener("change", renderEditors);
     getStateButton.addEventListener("click", () => getState().catch(reportError));
+    broadcastSwingButton.addEventListener("click", () => broadcastSwing().catch(reportError));
 
     snapshotClient = createOscSnapshotEditorClient({
       app: "ttid",
-      roleLabel: "TTID",
+      roleLabel: "Block Attributes",
       elements: snapshotElements,
       serializeState: serializeSnapshotState,
       displayState: displaySavedState,
       onFocusChange: getState,
+      onBlockChange: hydrateBlockAttributes,
       readOnBlockChange: true,
       liveTargetRoot: targetsEl,
       setStatus
@@ -394,7 +461,7 @@
 
     async function refresh() {
       refreshButton.disabled = true;
-      const response = await fetch("/osc/targets?capability=ttid-edit&status=online", { cache: "no-store" });
+      const response = await fetch("/osc/targets?capability=block-attributes-edit&status=online", { cache: "no-store" });
       const body = await response.json();
       if (!response.ok || body.ok === false) {
         throw new Error(body.error || `Request failed: ${response.status}`);
@@ -406,7 +473,8 @@
       renderReadSourceSelect();
       renderParamSelect();
       renderEditors();
-      setStatus(targets.length ? `${targets.length} target${targets.length === 1 ? "" : "s"} online` : "No online TTID targets");
+      renderSupportWarning();
+      setStatus(targets.length ? `${targets.length} block-attribute destination${targets.length === 1 ? "" : "s"} online` : "No online block-attribute destinations");
       refreshButton.disabled = false;
     }
 
@@ -433,7 +501,7 @@
 
     function renderTargets() {
       const selected = new Set(Array.from(targetsEl.querySelectorAll("[data-target]:checked"), input => input.dataset.target));
-      const focusedId = readSourceSelect.value || targets[0]?.id || "";
+      const focusedId = readSourceSelect.value || ttidTargets()[0]?.id || targets[0]?.id || "";
       const preserveSelection = targets.some(target => selected.has(target.id));
       const cards = targets.map((target) => {
         const label = document.createElement("label");
@@ -441,27 +509,30 @@
         label.innerHTML = `
           <input type="checkbox" data-target="${escapeHtml(target.id)}">
           <span class="target-name">${escapeHtml(target.label || target.id)}</span>
-          <span class="target-detail">${escapeHtml(target.unitId || "")} ${escapeHtml(target.baseAddress || "")}</span>
+          <span class="target-detail">${escapeHtml(attributeSupportText(target))} · ${escapeHtml(target.unitId || "")} ${escapeHtml(target.baseAddress || "")}</span>
         `;
-        label.querySelector("input").checked = preserveSelection ? selected.has(target.id) : target.id === focusedId;
+        const input = label.querySelector("input");
+        input.checked = preserveSelection ? selected.has(target.id) : target.id === focusedId;
+        input.addEventListener("change", renderSupportWarning);
         return label;
       });
       targetsEl.replaceChildren(...cards);
-      if (!cards.length) targetsEl.innerHTML = `<div class="empty-state">No online TTID targets.</div>`;
+      if (!cards.length) targetsEl.innerHTML = `<div class="empty-state">No online block-attribute destinations.</div>`;
     }
 
     function renderReadSourceSelect() {
       const selected = readSourceSelect.value;
-      const options = targets.map((target) => {
+      const sources = ttidTargets();
+      const options = sources.map((target) => {
         const option = document.createElement("option");
         option.value = target.id;
         option.textContent = `${target.label || target.id} · ${target.baseAddress || target.id}`;
         return option;
       });
       readSourceSelect.replaceChildren(...options);
-      readSourceSelect.value = targets.some((target) => target.id === selected) ? selected : (targets[0]?.id || "");
-      readSourceSelect.disabled = targets.length === 0;
-      getStateButton.disabled = targets.length === 0;
+      readSourceSelect.value = sources.some((target) => target.id === selected) ? selected : (sources[0]?.id || "");
+      readSourceSelect.disabled = sources.length === 0;
+      getStateButton.disabled = sources.length === 0;
     }
 
     function renderParamSelect() {
@@ -487,7 +558,7 @@
       if (!nodes.length) {
         const empty = document.createElement("div");
         empty.className = "empty-state";
-        empty.textContent = targets.length ? "No parameters with editor: ttid metadata were reported." : "No online TTID targets.";
+        empty.textContent = ttidTargets().length ? "No parameters with editor: ttid metadata were reported." : "No selected destination publishes TTID support.";
         editorsEl.append(empty);
       }
     }
@@ -685,7 +756,7 @@
         await hydrateBlockTtid();
         setStatus(`Got ${populated} parameter${populated === 1 ? "" : "s"} from ${target.label || target.id}`);
       } finally {
-        getStateButton.disabled = targets.length === 0;
+        getStateButton.disabled = ttidTargets().length === 0;
       }
     }
 
@@ -712,13 +783,43 @@
       const response = await fetch(`/mesostructure/${encodeURIComponent(blockId)}/ttid`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ttid: value, expectedScoreRevision: state.score?.scoreRevision, auditionTargets: selected })
+        body: JSON.stringify({ ttid: value, expectedScoreRevision: state.score?.scoreRevision, destinationTargets: selected })
       });
       const body = await response.json().catch(() => ({}));
       if (!response.ok || body.ok === false) throw new Error(body.error || "TTID update failed");
       snapshotClient?.syncScore(body.score);
-      setStatus(`Updated ${blockId} TTID to ${value}${selected.length ? ` and auditioned ${selected.length} target${selected.length === 1 ? "" : "s"}` : ""}`);
+      setStatus(`TTID ${body.distribution?.succeededCount ?? 0}/${body.distribution?.attemptedCount ?? 0} destinations · saved on ${blockId}`);
       await hydrateBlockTtid(body.score);
+    }
+
+    async function broadcastSwing() {
+      const state = snapshotClient?.snapshotState();
+      const blockId = state?.blockId;
+      if (!blockId) throw new Error("Choose an EDITING block");
+      const swingAmt = Number(blockSwingAmtInput.value);
+      if (!Number.isFinite(swingAmt) || swingAmt < 0 || swingAmt > 1) throw new Error("Swing Amount must be from 0 through 1");
+      const selected = selectedSwingTargets();
+      broadcastSwingButton.disabled = true;
+      setStatus(`Sending ${blockId} Swing...`);
+      try {
+        const response = await fetch(`/mesostructure/${encodeURIComponent(blockId)}/swing`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            swing: Number(blockSwingSelect.value),
+            swingAmt,
+            expectedScoreRevision: state.score?.scoreRevision,
+            destinationTargets: selected
+          })
+        });
+        const body = await response.json().catch(() => ({}));
+        if (!response.ok || body.ok === false) throw new Error(body.error || "Swing broadcast failed");
+        snapshotClient?.syncScore(body.score);
+        hydrateBlockAttributes(body.score?.mesostructure?.[blockId]);
+        setStatus(`Swing ${body.distribution?.succeededCount ?? 0}/${body.distribution?.attemptedCount ?? 0} destinations · saved on ${blockId}`);
+      } finally {
+        broadcastSwingButton.disabled = false;
+      }
     }
 
     function serializeSnapshotState() {
@@ -751,6 +852,12 @@
       renderEditors();
     }
 
+    function hydrateBlockAttributes(block) {
+      if (!block) return;
+      blockSwingSelect.value = Number(block.swing) ? "1" : "0";
+      blockSwingAmtInput.value = String(block.swingAmt ?? 0.5);
+    }
+
     function canonicalScaleName(value) {
       const name = String(value || "ionian").trim().toLowerCase().replace(/\s+/g, "-");
       return Object.hasOwn(SCALES, name) ? name : "ionian";
@@ -769,7 +876,7 @@
 
     async function sendParamToTargets(param, value, allowedTargetIds) {
       const allowed = new Set(allowedTargetIds || []);
-      const selected = Array.from(document.querySelectorAll("[data-target]:checked"))
+      const selected = Array.from(targetsEl.querySelectorAll("[data-target]:checked"))
         .map((input) => input.dataset.target)
         .filter((id) => id && allowed.has(id));
       if (selected.length === 0) {
@@ -794,15 +901,53 @@
     function selectedTargetsForParam(paramName) {
       const param = ttidParams.find((entry) => entry.name === paramName);
       const allowed = new Set(param?.targetIds || []);
-      return Array.from(document.querySelectorAll("[data-target]:checked"))
+      return Array.from(targetsEl.querySelectorAll("[data-target]:checked"))
         .map((input) => input.dataset.target)
         .filter((id) => id && allowed.has(id));
     }
 
+    function selectedSwingTargets() {
+      const allowed = new Set(targets.filter(supportsSwing).map((target) => target.id));
+      return selectedTargetIds().filter((id) => allowed.has(id));
+    }
+
+    function selectedTargetIds() {
+      return Array.from(targetsEl.querySelectorAll("[data-target]:checked"), (input) => input.dataset.target).filter(Boolean);
+    }
+
+    function ttidTargets() {
+      return targets.filter(supportsTtid);
+    }
+
+    function supportsTtid(target) {
+      return (target.capabilities || []).includes("ttid-edit") || (target.parameters || []).some((param) => String(param.meta?.editor || "").trim().toLowerCase() === "ttid");
+    }
+
+    function supportsSwing(target) {
+      const app = String(target.app || "").trim().toLowerCase();
+      if (!["analogsequencer", "listsequencer", "listvelsequencer", "triggerseq", "triggersequencer"].includes(app)) return false;
+      const names = new Set((target.parameters || []).map((param) => normalizeAttributeName(param.key ?? param.name)));
+      return names.has("swing") && names.has("swingamt");
+    }
+
+    function normalizeAttributeName(value) {
+      return String(value || "").split("/").at(-1).toLowerCase().replace(/[^a-z0-9]+/g, "");
+    }
+
+    function attributeSupportText(target) {
+      return [supportsTtid(target) ? "TTID" : "", supportsSwing(target) ? "Swing" : ""].filter(Boolean).join(" + ");
+    }
+
+    function renderSupportWarning() {
+      const selected = targets.filter((target) => selectedTargetIds().includes(target.id));
+      supportWarning.hidden = selected.length === 0 || selected.every((target) => supportsTtid(target) && supportsSwing(target));
+    }
+
     function selectAllTargets() {
-      for (const input of document.querySelectorAll("[data-target]")) {
+      for (const input of targetsEl.querySelectorAll("[data-target]")) {
         input.checked = true;
       }
+      renderSupportWarning();
     }
 
     function scaleFor(paramName) {

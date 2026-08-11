@@ -186,7 +186,16 @@ function oscCapabilities(target, app) {
       }
     }
   }
+  if (values.has("ttid-edit") || supportsSwingParameters(target.parameters, app)) {
+    values.add("block-attributes-edit");
+  }
   return Array.from(values).sort();
+}
+
+function supportsSwingParameters(parameters, app) {
+  if (!["analogsequencer", "listsequencer", "listvelsequencer", "triggerseq", "triggersequencer"].includes(app)) return false;
+  const names = new Set((parameters ?? []).map((parameter) => stringField(parameter?.key ?? parameter?.name).split("/").at(-1).toLowerCase().replace(/[^a-z0-9]+/g, "")));
+  return names.has("swing") && names.has("swingamt");
 }
 
 function baseAddressFromRnboTarget(target) {

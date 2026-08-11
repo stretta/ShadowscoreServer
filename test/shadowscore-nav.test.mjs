@@ -51,6 +51,11 @@ test("grouped navigation resolves current group and item for every route family"
     groupLabel: "OSC",
     itemLabel: "Drumbox"
   });
+  assert.deepEqual(activeNavigationForPath("/editors/ttid"), {
+    groupId: "osc",
+    groupLabel: "OSC",
+    itemLabel: "Block Attributes"
+  });
   assert.deepEqual(activeNavigationForPath("/tools/osc-macros"), {
     groupId: "osc",
     groupLabel: "OSC",

@@ -189,6 +189,7 @@
       for (const target of nextTargets) {
         for (const param of target.parameters || []) {
           if (mapNumber(param.name) || muteNumber(param.name)) continue;
+          if (isBlockSwingParam(param.name)) continue;
           if (!byName.has(param.name)) byName.set(param.name, { name: param.name, paramsByTarget: new Map() });
           byName.get(param.name).paramsByTarget.set(target.id, param);
         }

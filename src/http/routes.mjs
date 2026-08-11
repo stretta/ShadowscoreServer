@@ -1560,10 +1560,11 @@ export async function routeRequest(request, response, store, config, runtime = {
         ? store.updateBlockTtid(blockId, body.ttid ?? body.value, revisionOptions(body))
         : store.getScore();
       const active = score.structureState?.activeBlockId === blockId;
+      const explicitTargets = Array.isArray(body.destinationTargets) ? body.destinationTargets : undefined;
       const distribution = await distributeTtidForBlock(score, config, runtime, blockId, {
-        targetIds: request.method === "POST" || active
+        targetIds: explicitTargets ?? (request.method === "POST" || active
           ? undefined
-          : Array.isArray(body.auditionTargets) ? body.auditionTargets : []
+          : Array.isArray(body.auditionTargets) ? body.auditionTargets : [])
       });
       writeJson(response, distribution.ok ? 200 : 502, {
         ok: distribution.ok,
@@ -1587,10 +1588,11 @@ export async function routeRequest(request, response, store, config, runtime = {
         ? store.updateBlockSwing(blockId, body, revisionOptions(body))
         : store.getScore();
       const active = score.structureState?.activeBlockId === blockId;
+      const explicitTargets = Array.isArray(body.destinationTargets) ? body.destinationTargets : undefined;
       const distribution = await distributeSwingForBlock(score, config, runtime, blockId, {
-        targetIds: request.method === "POST" || active
+        targetIds: explicitTargets ?? (request.method === "POST" || active
           ? undefined
-          : Array.isArray(body.auditionTargets) ? body.auditionTargets : []
+          : Array.isArray(body.auditionTargets) ? body.auditionTargets : [])
       });
       writeJson(response, distribution.ok ? 200 : 502, {
         ok: distribution.ok,

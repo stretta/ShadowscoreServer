@@ -731,6 +731,84 @@ test("block Swing route stores one shared groove and does not create per-instanc
   assert.equal(result.distribution.attemptedCount, 0);
 });
 
+test("block TTID route sends an inactive block mask only to explicitly selected compatible destinations", async () => {
+  const sends = [];
+  const context = createRouteContext({
+    runtime: {
+      oscSender: async (write) => { sends.push(write); return { ok: true }; },
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() {
+          return [1, 2].map((index) => ({
+            id: `rnbo-inst-${index}:quantizer`,
+            localId: `rnbo-inst-${index}:quantizer`,
+            host: "192.168.68.101",
+            port: 1234,
+            baseAddress: `/rnbo/inst/${index}`,
+            app: "quantizer",
+            instance: String(index),
+            hardwareUnitId: "rack",
+            deviceId: "rack",
+            available: true,
+            parameters: [{ name: "Scale", address: `/rnbo/inst/${index}/params/Scale`, meta: { editor: "ttid" } }]
+          }));
+        }
+      }
+    }
+  });
+  const result = await requestJson(context, "PUT", "/mesostructure/B/ttid", {
+    expectedScoreRevision: 0,
+    ttid: 2741,
+    destinationTargets: ["rack:quantizer:2"]
+  });
+  assert.equal(result.distribution.succeededCount, 1);
+  assert.equal(result.distribution.attemptedCount, 1);
+  assert.equal(sends.length, 1);
+  assert.match(sends[0].address, /\/rnbo\/inst\/2\/params\/Scale$/);
+});
+
+test("block Swing route sends an inactive block groove only to explicitly selected compatible destinations", async () => {
+  const sends = [];
+  const apps = ["analogsequencer", "listsequencer", "listvelsequencer", "triggersequencer"];
+  const context = createRouteContext({
+    runtime: {
+      oscSender: async (write) => { sends.push(write); return { ok: true }; },
+      manualOscQueryDevices: {
+        async rnboTargets() { return []; },
+        async rnboDevices() { return []; },
+        async oscTargets() {
+          return apps.map((app, index) => ({
+            id: `rnbo-inst-${index + 1}:${app}`,
+            localId: `rnbo-inst-${index + 1}:${app}`,
+            host: "192.168.68.101",
+            port: 1234,
+            baseAddress: `/rnbo/inst/${index + 1}`,
+            app,
+            instance: "main",
+            hardwareUnitId: "rack",
+            deviceId: "rack",
+            available: true,
+            parameters: [
+              { name: "Swing", address: `/rnbo/inst/${index + 1}/params/Clock/Swing`, type: "s", values: ["Off", "On"] },
+              { name: "SwingAmt", address: `/rnbo/inst/${index + 1}/params/Clock/SwingAmt` }
+            ]
+          }));
+        }
+      }
+    }
+  });
+  const result = await requestJson(context, "PUT", "/mesostructure/B/swing", {
+    expectedScoreRevision: 0,
+    swing: "On",
+    swingAmt: 0.625,
+    destinationTargets: ["rack:analogsequencer:main", "rack:triggersequencer:main"]
+  });
+  assert.equal(result.distribution.succeededCount, 2);
+  assert.equal(result.distribution.attemptedCount, 2);
+  assert.equal(sends.length, 4);
+});
+
 test("OSC clip and block layer routes create, reuse, replace, and safely delete state", async () => {
   const context = createRouteContext();
   await requestJson(context, "PUT", "/osc/assignments/list-a", { app: "listsequencer", deviceId: "finch" });
@@ -4147,10 +4225,10 @@ test("editor manifest route lists registered instrument editors", async () => {
     },
     {
       id: "ttid",
-      label: "TTID",
+      label: "Block Attributes",
       route: "/editors/ttid",
       targetFilter: {
-        app: "ttid"
+        capability: "block-attributes-edit"
       }
     },
     {
@@ -4441,14 +4519,14 @@ test("Poland editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /displaySavedState/);
 });
 
-test("TTID editor route serves the OSC target integration page", async () => {
+test("Block Attributes editor route serves the mixed-capability OSC target integration page", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/editors/ttid");
 
   assert.equal(response.status, 200);
   assert.match(response.headers["Content-Type"], /text\/html/);
-  assert.match(response.body, /TTID Editor/);
-  assert.match(response.body, /\/osc\/targets\?capability=ttid-edit/);
+  assert.match(response.body, /Block Attributes Editor/);
+  assert.match(response.body, /\/osc\/targets\?capability=block-attributes-edit/);
   assert.match(response.body, /ChromaticTranspose/);
   assert.match(response.body, /ScalarTranspose/);
   assert.match(response.body, /editor: ttid/);
@@ -4465,6 +4543,10 @@ test("TTID editor route serves the OSC target integration page", async () => {
   assert.match(response.body, /serializeSnapshotState/);
   assert.match(response.body, /displaySavedState/);
   assert.match(response.body, /snapshotClient\?\.syncScore\(body\.score\)/);
+  assert.match(response.body, /Block Attributes/);
+  assert.match(response.body, /Send Swing To Selected/);
+  assert.match(response.body, /Not all selected destinations support all the data/);
+  assert.match(response.body, /destinationTargets: selected/);
   assert.doesNotMatch(response.body, /Runtime TTID differs/);
 });
 
@@ -4878,7 +4960,7 @@ test("OSC editors place controls above Block State and live destinations below i
     const targetsIndex = response.body.indexOf('id="targets"');
     assert.ok(controlsIndex >= 0 && controlsIndex < blockStateIndex, `${editor} controls should precede Block State`);
     assert.ok(blockStateIndex < targetsIndex, `${editor} live destinations should follow Block State`);
-    assert.match(response.body, /Live And Save Destinations/);
+    assert.match(response.body, /(?:Live And Save Destinations|Block Attribute Destinations)/);
     assert.match(response.body, /liveTargetRoot: targetsEl/);
     assert.match(response.body, /serializeState:/);
     assert.match(response.body, /displayState:/);

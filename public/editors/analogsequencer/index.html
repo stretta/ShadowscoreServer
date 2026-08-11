@@ -215,7 +215,7 @@
 
     function renderParameters() {
       const source = readSourceTarget() || { parameters: [] };
-      const params = (source.parameters || []).filter(param => !/Stage(?:Value|Step)/i.test(param.name) && !isTtidParam(param));
+      const params = (source.parameters || []).filter(param => !/Stage(?:Value|Step)/i.test(param.name) && !isTtidParam(param) && !isBlockSwingParam(param));
       parametersEl.replaceChildren(...params.map(createParameterControl));
       if (!params.length) parametersEl.innerHTML = `<span class="empty">No additional parameters reported.</span>`;
     }

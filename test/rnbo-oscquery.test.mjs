@@ -565,6 +565,7 @@ test("extracts TTID OSC control targets from editor metadata", () => {
   assert.equal(targets[0].app, "ttid");
   assert.equal(targets[0].label, "TTID 12");
   assert.equal(targets[0].oscCapabilities.includes("ttid-edit"), true);
+  assert.equal(targets[0].oscCapabilities.includes("block-attributes-edit"), true);
   assert.deepEqual(targets[0].parameters[0].meta, {
     tags: ["ttid", "display_precision:0", "display_as:int", "edit_as:int"],
     editor: "ttid",
@@ -657,6 +658,7 @@ test("extracts ListSequencer OSC control targets with message inports and TTID p
   assert.equal(targets[0].label, "Listsequencer 13");
   assert.equal(targets[0].oscCapabilities.includes("listsequencer-edit"), true);
   assert.equal(targets[0].oscCapabilities.includes("ttid-edit"), true);
+  assert.equal(targets[0].oscCapabilities.includes("block-attributes-edit"), true);
   assert.deepEqual(targets[0].inputPorts.map((inputPort) => inputPort.name), [
     "Duration",
     "Oct",

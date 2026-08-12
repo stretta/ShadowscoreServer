@@ -64,7 +64,7 @@
       { title: "Envelope", controls: ["MaxRandomTimeDomain", "Attack", "Release"] },
       { title: "Pitch", controls: ["PitchBias", "PitchModAmtRandom", "PitchModAmtAD"] },
       { title: "FM", controls: ["ModulationIndex", "ModulationRatioRange", "ModulationRatioRangeFine"] },
-      { title: "Quantizer", controls: ["Quantizer_1_/ScalarTranspose", "Quantizer_1_.2/ChromaticTranspose", "Quantizer_1_.1/Portamento", "Quantizer_1_.3/Scale"] }
+      { title: "Quantizer", controls: ["Quantizer/ScalarTranspose", "Quantizer/ChromaticTranspose", "Quantizer/Portamento", "Quantizer/Scale"] }
     ];
     const LABELS = {
       MaxRandomTimeDomain: "Maximum Random Time",
@@ -304,7 +304,7 @@
     function scalarValue(value) { return Array.isArray(value) ? value[0] : value; }
     function byIndex(a, b) { return (a.index ?? 9999) - (b.index ?? 9999); }
     function labelFor(param) { return LABELS[param?.name] || param?.meta?.label || splitCamel(param?.displayName || param?.name || "Parameter"); }
-    function stepFor(param, min, max) { const step = finite(param.meta?.edit_step, NaN); if (step > 0) return step; const range = Math.abs(max - min); return range > 64 ? 1 : range > 8 ? .1 : .01; }
+    function stepFor(param, min, max) { const steps = finite(param.steps, NaN); if (steps > 1) return (max - min) / (steps - 1); const step = finite(param.meta?.edit_step, NaN); if (step > 0) return step; const range = Math.abs(max - min); return range > 64 ? 1 : range > 8 ? .1 : .01; }
     function shouldCurve(param, min, max) { const name = String(param?.name || ""); const unit = String(param?.unit || param?.meta?.unit || "").toLowerCase(); return /(?:attack|release|randomtime|portamento)/i.test(name) || (unit === "ms" && Math.abs(max - min) >= 1000); }
     function curveExponent(param) { return /release/i.test(String(param?.name || "")) ? 5 : 3; }
     function valueToSliderPosition(param, value, min, max) { return Math.pow(clamp((finite(value, min) - min) / (max - min), 0, 1), 1 / curveExponent(param)); }

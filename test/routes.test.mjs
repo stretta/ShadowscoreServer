@@ -4902,6 +4902,8 @@ test("AnalogSequencer editor route serves the 16-stage OSC control surface", asy
   assert.match(response.body, /Voltage Shift/);
   assert.match(response.body, /Middle C = 0 V/);
   assert.match(response.body, /portamento/);
+  assert.match(response.body, /Number\(param\.steps\)/);
+  assert.match(response.body, /span \/ \(steps - 1\)/);
   assert.match(response.body, /\$\{formatted\} ms/);
   assert.match(response.body, /param: "Clock"/);
   assert.match(response.body, /renderParameters/);
@@ -4977,7 +4979,10 @@ test("SingleHalfKrell editor route follows the live synthesis and quantizer cont
   assert.match(response.body, /MaxRandomTimeDomain/);
   assert.match(response.body, /PitchModAmtRandom/);
   assert.match(response.body, /ModulationRatioRangeFine/);
-  assert.match(response.body, /Quantizer_1_\.3\/Scale/);
+  assert.match(response.body, /Quantizer\/Scale/);
+  assert.doesNotMatch(response.body, /Quantizer_1_/);
+  assert.match(response.body, /steps > 1/);
+  assert.match(response.body, /\(max - min\) \/ \(steps - 1\)/);
   assert.match(response.body, /keys\.id = "ttid-keys"/);
   assert.match(response.body, /\/harmonic\/scales/);
   assert.match(response.body, /encodeScale/);

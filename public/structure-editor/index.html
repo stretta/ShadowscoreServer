@@ -508,7 +508,7 @@
               <select id="block-swing"><option value="0">Off</option><option value="1">On</option></select>
             </label>
             <label>Block Swing Amount
-              <input id="block-swing-amt" type="number" min="0" max="1" step="0.001">
+              <input id="block-swing-amt" type="number" min="0.5" max="1" step="0.001">
             </label>
           </div>
           <div>
@@ -1268,7 +1268,7 @@
       }
       const desiredTtid = Math.max(0, Math.min(4095, Math.round(numberValue(els.blockTtid.value, 2741))));
       const desiredSwing = els.blockSwing.value === "1" ? 1 : 0;
-      const desiredSwingAmt = Math.max(0, Math.min(1, numberValue(els.blockSwingAmt.value, 0.5)));
+      const desiredSwingAmt = Math.max(0.5, Math.min(1, numberValue(els.blockSwingAmt.value, 0.5)));
       const block = blockFromForm();
       setStatus(`Saving block ${nextId}...`);
       try {

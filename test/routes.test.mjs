@@ -418,6 +418,43 @@ test("transport routes store JACK snapshots and report freshness", async () => {
   assert.equal(stale.unusable, false);
 });
 
+test("external JACK tempo changes reassert assigned playback ClockInterval", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        stagesPerBeat: 16,
+        targets: [{
+          id: "source-client",
+          host: "192.168.68.96",
+          port: 9000,
+          address: "/rnbo/inst/2/messages/in/shadowscore"
+        }]
+      }
+    }),
+    runtime: {
+      jackTransport: createJackTransportState(defaultConfig),
+      rnboParamWriter: async (write) => writes.push(write)
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "source-client",
+    rnboHost: "192.168.68.96",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+
+  await requestJson(context, "POST", "/transport/jack/snapshot", jackSnapshot({ beatsPerMinute: 122 }));
+  await requestJson(context, "POST", "/transport/jack/snapshot", jackSnapshot({ beatsPerMinute: 122 }));
+
+  assert.deepEqual(writes, [{
+    host: "192.168.68.96",
+    port: 9000,
+    path: "/rnbo/inst/2/messages/in/ClockInterval",
+    value: 30
+  }]);
+});
+
 test("transport route rejects malformed JACK snapshots", async () => {
   const context = createRouteContext({
     runtime: {
@@ -1658,6 +1695,12 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     {
       host: "192.168.68.96",
       port: 9000,
+      path: "/rnbo/inst/2/messages/in/ClockInterval",
+      value: 30
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
       path: "/rnbo/inst/2/messages/in/SetStage",
       value: 0
     },
@@ -1986,7 +2029,9 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
     }),
     runtime: {
       rnboParamWriter: async (write) => {
-        sequence.push(write.path.endsWith("/SetStage") ? "SetStage" : "Clock");
+        sequence.push(write.path.endsWith("/SetStage")
+          ? "SetStage"
+          : write.path.endsWith("/ClockInterval") ? "ClockInterval" : "Clock");
       },
       rnboAdapter: {
         enabled: true,
@@ -2038,6 +2083,7 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
   const started = await requestJson(context, "POST", "/transport/play", { mode: "timer" });
 
   assert.deepEqual(sequence, [
+    "ClockInterval",
     "SetStage",
     "activation_scheduled",
     "Clock",
@@ -2063,7 +2109,9 @@ test("transport play prefers atomic block activation for continuing clients", as
     }),
     runtime: {
       rnboParamWriter: async (write) => {
-        sequence.push(write.path.endsWith("/SetStage") ? "SetStage" : "Clock");
+        sequence.push(write.path.endsWith("/SetStage")
+          ? "SetStage"
+          : write.path.endsWith("/ClockInterval") ? "ClockInterval" : "Clock");
       },
       rnboAdapter: {
         enabled: true,
@@ -2118,6 +2166,7 @@ test("transport play prefers atomic block activation for continuing clients", as
   assert.deepEqual(sequence, [
     "prepare:A:transport-start",
     "apply:A:now",
+    "ClockInterval",
     "SetStage",
     "Clock",
     "playback_started"
@@ -4419,6 +4468,8 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /class="performance-group" aria-label="Arrangement"/);
   assert.match(response.body, /id="arrangement-hold" type="button">Hold/);
   assert.match(response.body, /Follow Block Tempo/);
+  assert.match(response.body, /id="block-swing-amt" type="number" min="0\.5" max="1"/);
+  assert.match(response.body, /Math\.max\(0\.5, Math\.min\(1, numberValue\(els\.blockSwingAmt\.value, 0\.5\)\)\)/);
   assert.match(response.body, /liveTempoDirty: false/);
   assert.match(response.body, /els\.liveTempo\.addEventListener\("input", \(\) => \{\s+state\.liveTempoDirty = true/);
   assert.match(response.body, /if \(!state\.liveTempoDirty\) \{\s+els\.liveTempo\.value = String\(state\.tempoPolicy\.live \?\? 120\)/);
@@ -4545,6 +4596,8 @@ test("Block Attributes editor route serves the mixed-capability OSC target integ
   assert.match(response.body, /snapshotClient\?\.syncScore\(body\.score\)/);
   assert.match(response.body, /Block Attributes/);
   assert.match(response.body, /Send Swing To Selected/);
+  assert.match(response.body, /id="block-swing-amt" type="number" min="0\.5" max="1"/);
+  assert.match(response.body, /Swing Amount must be from 0\.5 through 1/);
   assert.match(response.body, /Not all selected destinations support all the data/);
   assert.match(response.body, /destinationTargets: selected/);
   assert.doesNotMatch(response.body, /Runtime TTID differs/);
@@ -5906,7 +5959,7 @@ function jackSnapshot(options = {}) {
     beatsPerBar: 4,
     beatType: 4,
     ticksPerBeat: 1920,
-    beatsPerMinute: 120,
+    beatsPerMinute: options.beatsPerMinute ?? 120,
     absoluteBeat,
     observedAt: 1782580000000
   };

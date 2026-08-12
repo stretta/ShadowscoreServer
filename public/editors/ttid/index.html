@@ -382,7 +382,7 @@
         </label>
         <label class="block-attribute-control" for="block-swing-amt">
           <span class="meta">Swing Amount</span>
-          <input id="block-swing-amt" type="number" min="0" max="1" step="0.001" value="0.5">
+          <input id="block-swing-amt" type="number" min="0.5" max="1" step="0.001" value="0.5">
         </label>
         <button id="broadcast-swing" class="primary" type="button">Send Swing To Selected</button>
       </div>
@@ -797,7 +797,7 @@
       const blockId = state?.blockId;
       if (!blockId) throw new Error("Choose an EDITING block");
       const swingAmt = Number(blockSwingAmtInput.value);
-      if (!Number.isFinite(swingAmt) || swingAmt < 0 || swingAmt > 1) throw new Error("Swing Amount must be from 0 through 1");
+      if (!Number.isFinite(swingAmt) || swingAmt < 0.5 || swingAmt > 1) throw new Error("Swing Amount must be from 0.5 through 1");
       const selected = selectedSwingTargets();
       broadcastSwingButton.disabled = true;
       setStatus(`Sending ${blockId} Swing...`);

@@ -798,7 +798,7 @@ export async function routeRequest(request, response, store, config, runtime = {
       const body = await readJson(request);
       transport.update(body);
       if (Number.isFinite(Number(body.beatsPerMinute)) && Number(body.beatsPerMinute) > 0) {
-        tempoPolicyFor(store, config, runtime).observeExternalTempo(body.beatsPerMinute);
+        await observeExternalTempoAndRefreshClocks(store, config, runtime, body.beatsPerMinute);
       }
       writeJson(response, 200, {
         ok: true,
@@ -847,7 +847,7 @@ export async function routeRequest(request, response, store, config, runtime = {
       const body = await readJson(request);
       const bpm = positiveNumber(body.bpm ?? body.tempo, "bpm");
       const result = await controller.tempo(bpm);
-      tempoPolicyFor(store, config, runtime).observeExternalTempo(bpm);
+      await observeExternalTempoAndRefreshClocks(store, config, runtime, bpm);
       writeJson(response, 200, result);
     } catch (error) {
       writeJson(response, jackControllerStatus(error), { ok: false, error: messageForError(error) });
@@ -2035,6 +2035,27 @@ export async function writeTransportControlsToPlaybackTargets(score, config, run
 
 export const writeTransportParamsToPlaybackTargets = writeTransportControlsToPlaybackTargets;
 
+export async function reassertPlaybackClockIntervals(score, config, runtime) {
+  const targets = (await readAllRnboTargets(config, runtime)).filter((target) => target.available !== false);
+  const targetWrites = await Promise.all(targets.map(async (target) => {
+    const assignedVoiceId = assignedVoiceForTarget(score, target);
+    if (!assignedVoiceId) {
+      return [];
+    }
+    const compiled = compileScoreTransaction(score, config, 0, { ...target, voiceId: assignedVoiceId });
+    const writes = await writeRnboTransportControls(config, target, {
+      ClockInterval: compiled.timing.ticksPerStage
+    }, {
+      writer: runtime.rnboParamWriter
+    });
+    return writes.map((write) => ({
+      ...write,
+      targetId: target.id
+    }));
+  }));
+  return targetWrites.flat();
+}
+
 function prepareRnboTransportControls(score, config, target, controls) {
   const entries = Object.entries(controls ?? {});
   const assignedVoiceId = assignedVoiceForTarget(score, target);
@@ -2115,6 +2136,22 @@ function tempoPolicyFor(store, config, runtime) {
     });
   }
   return runtime.tempoPolicy;
+}
+
+async function observeExternalTempoAndRefreshClocks(store, config, runtime, value) {
+  const policy = tempoPolicyFor(store, config, runtime);
+  const previousTempo = Number(policy.snapshot().live);
+  const nextTempo = Number(value);
+  policy.observeExternalTempo(nextTempo);
+  if (Number.isFinite(previousTempo) && Math.abs(previousTempo - nextTempo) < 0.000001) {
+    return [];
+  }
+  try {
+    return await reassertPlaybackClockIntervals(store.getScore(), config, runtime);
+  } catch (error) {
+    console.error(`[transport] clock interval refresh failed: ${messageForError(error)}`);
+    return [];
+  }
 }
 
 function performanceTransportFor(runtime) {
@@ -2619,6 +2656,8 @@ export async function applyLiveTempo(store, config, runtime, tempo) {
       { Tempo: bpm }
     );
   }
+  const clockIntervalWrites = await reassertPlaybackClockIntervals(store.getScore(), config, runtime);
+  rnboWrites.push(...clockIntervalWrites);
   return { jack, rnboWrites };
 }
 

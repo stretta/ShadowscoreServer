@@ -30,7 +30,8 @@ The canonical block harmonic shape is:
 
 Initialization normalizes omitted new-score harmonic values to this C Ionian
 default, omitted written tempo to 120 BPM, and omitted Swing to Off with an
-amount of `0.5`. Every stored block contains these fields. OSC roles may
+amount of `0.5`. Swing amount accepts `0.5` through `1`, where `0.5` is straight
+timing. Every stored block contains these fields. OSC roles may
 independently set `ignoreRecall` and `ignoreScale`.
 
 Legacy requests that still provide `macrostructure.tempo` use it only to fill

@@ -477,6 +477,10 @@ test("block Swing edits are revision-aware block state and cannot use generic bl
   assert.equal(edited.mesostructure.A.swing, 1);
   assert.equal(edited.mesostructure.A.swingAmt, 0.625);
   assert.equal(events.at(-1).type, "mesostructure.swing.updated");
+  assert.throws(() => store.updateBlockSwing("A", {
+    swing: "On",
+    swingAmt: 0.499
+  }), /0\.5 through 1/);
   assert.throws(() => store.replaceMesoBlock("A", {
     ...edited.mesostructure.A,
     swingAmt: 0.75

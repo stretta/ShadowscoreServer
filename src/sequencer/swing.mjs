@@ -11,8 +11,8 @@ export function normalizeSwing(value) {
 
 export function normalizeSwingAmt(value) {
   const number = Number(value);
-  if (!Number.isFinite(number) || number < 0 || number > 1) {
-    throw new Error("SwingAmt must be a number from 0 through 1");
+  if (!Number.isFinite(number) || number < 0.5 || number > 1) {
+    throw new Error("SwingAmt must be a number from 0.5 through 1");
   }
   return number;
 }

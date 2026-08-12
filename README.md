@@ -350,7 +350,7 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `PUT /mesostructure/:blockId/ttid`: non-destructively update block TTID with the normal revision guard; active-block edits distribute immediately to eligible online targets.
 - `POST /mesostructure/:blockId/ttid`: manually resend the stored block TTID without changing the score.
 - `PUT /mesostructure/:blockId/swing`: update the block-owned `swing` and
-  `swingAmt` pair with the normal revision guard; active-block edits distribute
+  `swingAmt` (`0.5` through `1`) pair with the normal revision guard; active-block edits distribute
   immediately to eligible online sequencers.
 - `POST /mesostructure/:blockId/swing`: manually resend the stored block Swing
   pair without changing the score.

@@ -51,6 +51,25 @@ export function pitchClassesToTtid(pitchClasses) {
   return normalizeIntervals(pitchClasses).reduce((mask, pitchClass) => mask | (1 << pitchClass), 0);
 }
 
+export function ttidToPitchClasses(value) {
+  const ttid = normalizeTtid(value);
+  return Array.from({ length: 12 }, (_, pitchClass) => pitchClass)
+    .filter((pitchClass) => (ttid & (1 << pitchClass)) !== 0);
+}
+
+export function quantizePitchToTtid(pitch, value) {
+  const pitchClasses = ttidToPitchClasses(value);
+  const original = Math.max(0, Math.min(127, Math.round(Number(pitch) || 0)));
+  if (!pitchClasses.length) return original;
+  for (let distance = 0; distance <= 127; distance += 1) {
+    const lower = original - distance;
+    if (lower >= 0 && pitchClasses.includes(lower % 12)) return lower;
+    const upper = original + distance;
+    if (distance > 0 && upper <= 127 && pitchClasses.includes(upper % 12)) return upper;
+  }
+  return original;
+}
+
 export function scaleToTtid(scale) {
   return pitchClassesToTtid(scaleToPitchClasses(scale));
 }

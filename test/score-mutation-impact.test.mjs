@@ -41,6 +41,19 @@ test("block timing changes affect all players in that block", () => {
   assert.equal(impact.timingChanged, true);
 });
 
+test("block TTID changes affect every assigned playback voice in that block", () => {
+  const current = score(12);
+  current.mesostructure.A.ttid = 4095;
+  const impact = scoreMutationImpact({
+    type: "mesostructure.ttid.updated",
+    detail: { blockId: "A", ttid: 4095 },
+    score: current
+  }, score(11));
+  assert.deepEqual(impact.blockIds, ["A"]);
+  assert.deepEqual(impact.voiceIdsByBlock.A, ["alto", "soprano"]);
+  assert.equal(impactAffectsRnbo(impact), true);
+});
+
 test("destructive score replacement invalidates every block", () => {
   const current = score(12);
   const impact = scoreMutationImpact({ type: "admin.restore", detail: {}, score: current }, score(11));

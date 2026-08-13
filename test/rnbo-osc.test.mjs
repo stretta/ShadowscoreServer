@@ -542,7 +542,7 @@ test("clip bar duration uses the clip time signature when looped in a block", ()
   assert.deepEqual(compiled.messages.slice(1, 3).map((message) => message.values[5]), [0, 48]);
 });
 
-test("mesostructural block scale transposes assigned clips during playback compilation", () => {
+test("mesostructural block TTID quantizes playback independently of scale metadata", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
       stagesPerBeat: 16,
@@ -566,7 +566,8 @@ test("mesostructural block scale transposes assigned clips during playback compi
   score.mesostructure = {
     A: {
       duration: { beats: 4 },
-      scale: { root_note: 2, scale_name: "major" },
+      scale: { root_note: 0, scale_name: "major" },
+      ttid: 2774,
       players: {
         "player-1": { clipId: "melody" }
       }
@@ -577,7 +578,47 @@ test("mesostructural block scale transposes assigned clips during playback compi
   const compiled = compileScoreTransaction(score, config, 555);
 
   assert.equal(compiled.noteCount, 2);
-  assert.deepEqual(compiled.messages.slice(1, 3).map((message) => message.values[4]), [62, 66]);
+  assert.deepEqual(compiled.messages.slice(1, 3).map((message) => message.values[4]), [59, 64]);
+});
+
+test("chromatic block TTID preserves stored pitches despite non-chromatic scale metadata", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      stagesPerBeat: 16,
+      clearRowCount: 0
+    }
+  });
+  const score = createScore();
+  delete score.context.clip.time_selection_end;
+  score.clips = {
+    melody: {
+      notes: [
+        { note_id: 1, pitch: 51, start_time: 0, duration: 1, velocity: 96 },
+        { note_id: 2, pitch: 58, start_time: 1, duration: 1, velocity: 96 },
+        { note_id: 3, pitch: 63, start_time: 2, duration: 1, velocity: 96 }
+      ],
+      context: { clip: {}, scale: {}, grid: {}, seed: 0 },
+      duration: { beats: 4 },
+      playbackType: "one-shot",
+      behavior: { followsPitch: false, followsScale: true, transposeMode: "scale-degree" }
+    }
+  };
+  score.mesostructure = {
+    A: {
+      duration: { beats: 4 },
+      scale: { root_note: 0, scale_name: "Ionian", scale_intervals: [0, 2, 4, 5, 7, 9, 11] },
+      ttid: 4095,
+      players: {
+        "player-1": { clipId: "melody" }
+      }
+    }
+  };
+  score.macrostructure = { tempo: 120, blocks: ["A"] };
+
+  const compiled = compileScoreTransaction(score, config, 556);
+
+  assert.equal(compiled.noteCount, 3);
+  assert.deepEqual(compiled.messages.slice(1, 4).map((message) => message.values[4]), [51, 58, 63]);
 });
 
 test("mandatory compact replacement clears an empty score without padded rows", () => {
@@ -1149,6 +1190,7 @@ test("RNBO adapter resends score transactions when assignments change", () => {
   assert.equal(shouldSendScoreTransaction({ type: "clip.replaced", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "mesostructure.block.replaced", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "mesostructure.block.duplicated", detail: {} }), true);
+  assert.equal(shouldSendScoreTransaction({ type: "mesostructure.ttid.updated", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "macrostructure.updated", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "structure.playhead.updated", detail: {} }), true);
   assert.equal(shouldSendScoreTransaction({ type: "voice.assignment.cleared", detail: {} }), false);

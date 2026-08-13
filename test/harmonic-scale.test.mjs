@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeTtid, scaleCatalog, scaleToPitchClasses, scaleToTtid } from "../src/harmonic/scale.mjs";
+import { normalizeTtid, quantizePitchToTtid, scaleCatalog, scaleToPitchClasses, scaleToTtid, ttidToPitchClasses } from "../src/harmonic/scale.mjs";
 
 test("canonical scales encode pitch class zero as TTID bit zero", () => {
   const scales = scaleCatalog();
@@ -18,4 +18,17 @@ test("TTID validation is strict", () => {
   assert.equal(normalizeTtid(4095), 4095);
   assert.throws(() => normalizeTtid(4096), /0 through 4095/);
   assert.throws(() => normalizeTtid(2.5), /integer/);
+});
+
+test("TTID converts back to its absolute pitch-class set", () => {
+  assert.deepEqual(ttidToPitchClasses(2741), [0, 2, 4, 5, 7, 9, 11]);
+  assert.deepEqual(ttidToPitchClasses(4095), [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
+  assert.deepEqual(ttidToPitchClasses(0), []);
+});
+
+test("TTID pitch quantization preserves chromatic pitches and breaks ties downward", () => {
+  assert.equal(quantizePitchToTtid(63, 4095), 63);
+  assert.equal(quantizePitchToTtid(60, 2774), 59);
+  assert.equal(quantizePitchToTtid(63, 2774), 62);
+  assert.equal(quantizePitchToTtid(63, 0), 63);
 });

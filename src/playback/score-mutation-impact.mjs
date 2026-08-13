@@ -44,6 +44,9 @@ export function scoreMutationImpact(event = {}, previousScore = {}) {
       addBlockVoices(base, detail.blockId, score.mesostructure?.[detail.blockId]);
       base.timingChanged = true;
       break;
+    case "mesostructure.ttid.updated":
+      addBlockVoices(base, detail.blockId, score.mesostructure?.[detail.blockId]);
+      break;
     case "context.updated":
       addEveryBlock(base, score);
       base.timingChanged = true;

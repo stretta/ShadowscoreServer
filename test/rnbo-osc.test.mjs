@@ -1378,6 +1378,106 @@ test("RNBO adapter restores the upcoming block after applying the playing block"
   }
 });
 
+test("RNBO adapter reactivates a populated block after the arrangement activates an empty block", async () => {
+  let expectedTransaction = 1501;
+  let expectedNoteCount = 2;
+  let activationRequested = false;
+  const activatedTransactions = [];
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1500,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        instanceId: "20",
+        clientId: 90,
+        voiceId: "player-1",
+        address: "/rnbo/inst/20/messages/in/shadowscore",
+        capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true, continuingScoreActivation: true }
+      }],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 },
+      activation: { timeoutMs: 20, beatMarginMs: 0, pollIntervalMs: 1, requestTimeoutMs: 20 }
+    }
+  });
+  const base = scoreWithBlock(12);
+  const score = {
+    ...base,
+    clips: {
+      ...base.clips,
+      empty: { ...base.clips.main, notes: [] }
+    },
+    mesostructure: {
+      A: base.mesostructure.A,
+      B: { duration: { beats: 2 }, players: { "player-1": { clipId: "empty" } } }
+    },
+    macrostructure: { tempo: 120, blocks: ["A", "B"] }
+  };
+  const fetchImpl = async () => ({
+    ok: true,
+    async json() {
+      return {
+        VALUE: activationRequested
+          ? [90, 93, expectedTransaction, expectedNoteCount, 7, 1]
+          : [90, 92, expectedTransaction, expectedNoteCount, 32, 1]
+      };
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        if (readOscAddress(packet).endsWith("/ActivatePrepared")) {
+          activationRequested = true;
+          activatedTransactions.push(expectedTransaction);
+        }
+        callback();
+      },
+      close() {}
+    },
+    fetchImpl
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    const apply = async (blockId, transactionId, noteCount) => {
+      expectedTransaction = transactionId;
+      expectedNoteCount = noteCount;
+      activationRequested = false;
+      return adapter.applyBlockUpdate(blockId, {
+        activationMode: "continue",
+        expectedScoreRevision: 12,
+        fetchImpl
+      });
+    };
+
+    const firstA = await apply("A", 1501, 2);
+    const emptyB = await apply("B", 1502, 0);
+    expectedTransaction = 1503;
+    expectedNoteCount = 2;
+    activationRequested = false;
+    await adapter.resendCurrentScore("lookahead:A", { immediate: true, stagedOnly: true, fetchImpl });
+    const secondA = await adapter.applyBlockUpdate("A", {
+      activationMode: "continue",
+      expectedScoreRevision: 12,
+      fetchImpl
+    });
+
+    assert.equal(firstA.action, "active");
+    assert.equal(emptyB.action, "active");
+    assert.equal(secondA.action, "active");
+    assert.deepEqual(activatedTransactions, [1501, 1502, 1503]);
+    assert.equal(secondA.targets.finch.activeTransaction, 1503);
+    assert.equal((await adapter.playbackUpdates("B")).targets.finch.state, "saved-not-active");
+  } finally {
+    adapter.close();
+  }
+});
+
 test("RNBO adapter serializes overlapping block activation operations", async () => {
   let activationRequested = false;
   let releaseFirst;

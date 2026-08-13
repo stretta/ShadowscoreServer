@@ -690,6 +690,18 @@ export function createRnboOscAdapter(config, runtime = {}) {
     const previous = playbackUpdateState.get(key) ?? {};
     const prepared = compiled?.stagedScoreActivation === true && compiled?.ack?.status === "prepared";
     const active = compiled?.stagedScoreActivation !== true && compiled?.ack?.ok === true;
+    if (prepared) {
+      for (const [otherKey, otherState] of playbackUpdateState.entries()) {
+        if (otherKey === key || otherState.targetId !== targetId || !Number.isInteger(otherState.preparedTransaction)) continue;
+        playbackUpdateState.set(otherKey, {
+          ...otherState,
+          preparedTransaction: null,
+          preparedHash: null,
+          state: Number.isInteger(otherState.activeTransaction) ? "active" : "saved-not-active",
+          updatedAt: new Date().toISOString()
+        });
+      }
+    }
     playbackUpdateState.set(key, {
       ...previous,
       blockId,
@@ -709,18 +721,29 @@ export function createRnboOscAdapter(config, runtime = {}) {
 
   function promotePlaybackUpdate(targetId, transactionId, acknowledgement) {
     for (const [key, state] of playbackUpdateState.entries()) {
-      if (state.targetId !== targetId || state.preparedTransaction !== transactionId) continue;
-      playbackUpdateState.set(key, {
-        ...state,
-        activeTransaction: transactionId,
-        activeHash: state.preparedHash,
-        preparedTransaction: null,
-        preparedHash: null,
-        state: "active",
-        lastError: null,
-        activationAcknowledgement: acknowledgement,
-        updatedAt: new Date().toISOString()
-      });
+      if (state.targetId !== targetId) continue;
+      const promoted = state.preparedTransaction === transactionId;
+      playbackUpdateState.set(key, promoted
+        ? {
+            ...state,
+            activeTransaction: transactionId,
+            activeHash: state.preparedHash,
+            preparedTransaction: null,
+            preparedHash: null,
+            state: "active",
+            lastError: null,
+            activationAcknowledgement: acknowledgement,
+            updatedAt: new Date().toISOString()
+          }
+        : {
+            ...state,
+            activeTransaction: null,
+            activeHash: null,
+            preparedTransaction: null,
+            preparedHash: null,
+            state: "saved-not-active",
+            updatedAt: new Date().toISOString()
+          });
     }
   }
 

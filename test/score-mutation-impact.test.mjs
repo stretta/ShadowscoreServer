@@ -23,6 +23,19 @@ test("clip mutation impact includes every referencing block and voice", () => {
   assert.equal(impactAffectsRnbo(impact), true);
 });
 
+test("orchestration move impact includes source and destination clip players", () => {
+  const previous = score(11);
+  const current = score(12);
+  const impact = scoreMutationImpact({
+    type: "clip.note.moved",
+    detail: { sourceClipId: "shared", destinationClipId: "other" },
+    score: current
+  }, previous);
+  assert.deepEqual(impact.blockIds, ["A", "B"]);
+  assert.deepEqual(impact.voiceIdsByBlock, { A: ["alto", "soprano"], B: ["alto"] });
+  assert.equal(impactAffectsRnbo(impact), true);
+});
+
 test("unreferenced clip and macro ordering changes cause no RNBO payload impact", () => {
   const current = score(12);
   const clipImpact = scoreMutationImpact({ type: "clip.replaced", detail: { clipId: "unused" }, score: current }, score(11));

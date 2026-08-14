@@ -1432,11 +1432,12 @@ export function adminPage() {
       const response = await fetch("/admin/scores/new", { method: "POST" });
       const score = await response.json();
       if (score.ok === false) {
+        if (score.score) render(score.score);
         setStatus(score.error);
         return;
       }
       render(score);
-      setStatus("Created new score from defaults.");
+      setStatus("Created new score from defaults and updated players.");
       await loadSavedScores();
     }
 

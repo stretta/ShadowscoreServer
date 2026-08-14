@@ -153,3 +153,51 @@ export function hitTestNotes(notes, options) {
     );
   return matches.at(-1);
 }
+
+export function hitTestNoteEntries(entries, options) {
+  return (entries || []).filter((entry) =>
+    Number(entry?.note?.pitch) === Number(options.pitch)
+    && Number(options.time) >= Number(entry.note.start_time)
+    && Number(options.time) <= Number(entry.note.start_time) + Number(entry.note.duration)
+  ).at(-1);
+}
+
+export function assignedClipId(assignment) {
+  return typeof assignment === "string" ? assignment : assignment?.clipId || "";
+}
+
+export function playerClipReferences(score, clipId) {
+  const references = [];
+  for (const [blockId, block] of Object.entries(score?.mesostructure || {})) {
+    for (const [playerId, assignment] of Object.entries(block?.players || {})) {
+      if (assignedClipId(assignment) === clipId) references.push({ blockId, playerId });
+    }
+  }
+  return references;
+}
+
+export function orchestrationDestinations(score, blockId, source = {}) {
+  const block = score?.mesostructure?.[blockId];
+  const players = [...new Set([
+    ...Object.keys(score?.voices || {}),
+    ...Object.keys(score?.assignments || {}),
+    ...Object.keys(block?.players || {})
+  ])];
+  return players.map((playerId) => {
+    const assignment = block?.players?.[playerId];
+    const clipId = assignedClipId(assignment);
+    const clip = clipId ? score?.clips?.[clipId] : undefined;
+    let state = "ready";
+    if (playerId === source.playerId) state = "current";
+    else if (!clipId) state = "create";
+    else if (!clip) state = "broken";
+    else if (clipId === source.clipId) state = "same-clip";
+    return {
+      playerId,
+      label: score?.assignments?.[playerId]?.label || playerId,
+      clipId,
+      state,
+      references: clipId && clip ? playerClipReferences(score, clipId) : []
+    };
+  });
+}

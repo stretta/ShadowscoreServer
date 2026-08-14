@@ -28,6 +28,7 @@ test("playback snapshot keeps JACK playhead separate from target execution witne
     },
     playback: {
       running: true,
+      mode: "jack",
       activeBlockId: "D",
       macroIndex: 7,
       beatIntoBlock: 40.25,
@@ -37,7 +38,7 @@ test("playback snapshot keeps JACK playhead separate from target execution witne
     jack: {
       status: "fresh",
       ageMs: 12,
-      latest: { beatsPerMinute: 100 }
+      latest: { state: "rolling", beatsPerMinute: 100 }
     },
     targets: [{
       id: "finch",
@@ -63,6 +64,8 @@ test("playback snapshot keeps JACK playhead separate from target execution witne
   });
 
   assert.equal(snapshot.transport.authority, "jack");
+  assert.equal(snapshot.transport.running, true);
+  assert.equal(snapshot.transport.rolling, true);
   assert.equal(snapshot.transport.tempo, 108);
   assert.equal(snapshot.tempo.source, "manual");
   assert.equal(snapshot.controls.players.playing, true);
@@ -75,6 +78,41 @@ test("playback snapshot keeps JACK playhead separate from target execution witne
   assert.equal(snapshot.targets.finch.payloadHash, "abc123");
   assert.equal(snapshot.targets.finch.noteCount, 392);
   assert.equal(snapshot.targets.finch.preparedTransaction, null);
+});
+
+test("playback snapshot freezes transport motion when JACK stops without holding the arrangement", () => {
+  const snapshot = buildPlaybackSnapshot({
+    playback: {
+      running: true,
+      mode: "jack",
+      activeBlockId: "A",
+      beatIntoBlock: 3.5,
+      witness: { source: "jack", usable: false, fresh: false, reason: "JACK transport stopped" }
+    },
+    jack: {
+      status: "fresh",
+      latest: { state: "stopped", beatsPerMinute: 120 }
+    }
+  });
+
+  assert.equal(snapshot.playback.running, true);
+  assert.equal(snapshot.transport.running, true);
+  assert.equal(snapshot.transport.rolling, false);
+  assert.equal(snapshot.transport.beatIntoBlock, 3.5);
+});
+
+test("playback snapshot keeps timer transport moving without JACK", () => {
+  const snapshot = buildPlaybackSnapshot({
+    playback: {
+      running: true,
+      mode: "timer",
+      activeBlockId: "A",
+      beatIntoBlock: 2
+    }
+  });
+
+  assert.equal(snapshot.transport.running, true);
+  assert.equal(snapshot.transport.rolling, true);
 });
 
 test("playback snapshot distinguishes prepared and active RNBO transactions", () => {

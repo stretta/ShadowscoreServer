@@ -786,6 +786,95 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "clip.replaced", score, { clipId: id, clip }, options);
       return structuredClone(score);
     },
+    moveClipNote(request = {}, options = {}) {
+      const blockId = normalizeBlockId(request.blockId);
+      const sourcePlayerId = normalizeVoiceId(request.sourcePlayerId);
+      const destinationPlayerId = normalizeVoiceId(request.destinationPlayerId);
+      const sourceClipId = normalizeClipId(request.sourceClipId);
+      const block = score.mesostructure?.[blockId];
+      if (!block) throw new Error(`unknown mesostructural block '${blockId}'`);
+      assertKnownVoice(score, sourcePlayerId);
+      assertKnownVoice(score, destinationPlayerId);
+      if (sourcePlayerId === destinationPlayerId) throw new Error("source and destination players must be different");
+      if (mesoPlayerClipId(block.players?.[sourcePlayerId]) !== sourceClipId) {
+        throw new Error(`block '${blockId}' player '${sourcePlayerId}' is not assigned to clip '${sourceClipId}'`);
+      }
+      const sourceClip = score.clips?.[sourceClipId];
+      if (!sourceClip) throw new Error(`unknown source clip '${sourceClipId}'`);
+      const noteIndex = Number(request.noteIndex);
+      if (!Number.isInteger(noteIndex) || noteIndex < 0 || noteIndex >= sourceClip.notes.length) {
+        throw new Error("noteIndex must identify an existing source note");
+      }
+      const sourceNote = sourceClip.notes[noteIndex];
+      if (request.noteId !== undefined && request.noteId !== null && String(sourceNote.note_id) !== String(request.noteId)) {
+        throw new Error(`source note identity changed at index ${noteIndex}`);
+      }
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+
+      const destinationAssignment = block.players?.[destinationPlayerId];
+      let destinationClipId = mesoPlayerClipId(destinationAssignment);
+      let destinationClip = destinationClipId ? score.clips?.[destinationClipId] : undefined;
+      if (destinationClipId && !destinationClip) {
+        throw new Error(`block '${blockId}' player '${destinationPlayerId}' references missing clip '${destinationClipId}'`);
+      }
+      if (destinationClipId === sourceClipId) throw new Error("source and destination players use the same clip");
+
+      const createdDestinationClip = !destinationClipId;
+      if (createdDestinationClip) {
+        destinationClipId = uniqueId(`${blockId.toLowerCase()}-${destinationPlayerId}`, score.clips ?? {});
+        destinationClip = normalizeClipDocument({ ...sourceClip, notes: [] });
+      }
+
+      const sharedReferences = [
+        ...clipReferences(score.mesostructure, sourceClipId)
+          .filter((reference) => reference !== `${blockId}/${sourcePlayerId}`)
+          .map((reference) => `source:${reference}`),
+        ...clipReferences(score.mesostructure, destinationClipId)
+          .filter((reference) => reference !== `${blockId}/${destinationPlayerId}`)
+          .map((reference) => `destination:${reference}`)
+      ];
+      if (sharedReferences.length && !options.confirmShared) {
+        const error = new Error(`moving this note changes shared clips used by ${sharedReferences.join(", ")}`);
+        error.code = "shared_clip_confirmation_required";
+        error.references = sharedReferences;
+        throw error;
+      }
+
+      const nextSourceNotes = structuredClone(sourceClip.notes);
+      const [movedNote] = nextSourceNotes.splice(noteIndex, 1);
+      const nextDestinationNotes = structuredClone(destinationClip.notes);
+      const destinationNote = uniqueDestinationNoteIdentity(movedNote, nextDestinationNotes);
+      nextDestinationNotes.push(destinationNote);
+      const nextClips = {
+        ...score.clips,
+        [sourceClipId]: normalizeClipDocument({ ...sourceClip, notes: nextSourceNotes }),
+        [destinationClipId]: normalizeClipDocument({ ...destinationClip, notes: nextDestinationNotes })
+      };
+      const nextPlayers = createdDestinationClip
+        ? { ...block.players, [destinationPlayerId]: { clipId: destinationClipId } }
+        : block.players;
+      score = {
+        ...score,
+        ...nextRevisionFields(score, { structure: createdDestinationClip }),
+        clips: nextClips,
+        mesostructure: createdDestinationClip
+          ? { ...score.mesostructure, [blockId]: { ...block, players: nextPlayers } }
+          : score.mesostructure
+      };
+      const move = {
+        blockId,
+        sourcePlayerId,
+        sourceClipId,
+        destinationPlayerId,
+        destinationClipId,
+        noteId: destinationNote.note_id,
+        createdDestinationClip,
+        sharedReferences
+      };
+      emitChange(events, "clip.note.moved", score, move, options);
+      return { score: structuredClone(score), move: structuredClone(move) };
+    },
     renameClip(oldClipId, newClipId, options = {}) {
       const oldId = normalizeClipId(oldClipId);
       const newId = normalizeClipId(newClipId);
@@ -1509,6 +1598,23 @@ function clipReferences(mesostructure, clipId) {
     }
   }
   return references;
+}
+
+function mesoPlayerClipId(assignment) {
+  return typeof assignment === "string" ? stringField(assignment) : stringField(assignment?.clipId);
+}
+
+function uniqueDestinationNoteIdentity(note, destinationNotes) {
+  const moved = structuredClone(note);
+  const existingIds = new Set(destinationNotes
+    .map((entry) => entry?.note_id)
+    .filter((value) => value !== undefined && value !== null)
+    .map(String));
+  if (moved.note_id === undefined || moved.note_id === null || existingIds.has(String(moved.note_id))) {
+    const numericIds = destinationNotes.map((entry) => Number(entry?.note_id)).filter(Number.isFinite);
+    moved.note_id = Math.max(0, ...numericIds) + 1;
+  }
+  return moved;
 }
 
 function renameClipReferences(mesostructure, oldClipId, newClipId) {

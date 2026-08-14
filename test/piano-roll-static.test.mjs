@@ -25,6 +25,10 @@ test("Piano Roll exposes autosave recovery and editing surfaces", async () => {
   assert.match(html, /id="velocity"/);
   assert.match(html, /id="velocity-wiper"[^>]*class="wiper-overlay"/);
   assert.match(html, /id="playback-update"/);
+  assert.match(html, /id="note-menu"[^>]*role="menu"/);
+  assert.match(html, /id="move-to"[^>]*aria-haspopup="menu"/);
+  assert.match(html, /id="move-to-menu"[^>]*role="menu"/);
+  assert.match(html, /Alt-click or right-click any visible note to orchestrate it/);
 });
 
 test("Piano Roll autosaves revision-aware clip drafts and supports right-edge resize", async () => {
@@ -62,4 +66,16 @@ test("Piano Roll autosaves revision-aware clip drafts and supports right-edge re
   assert.match(js, /Autosave failed:/);
   assert.match(js, /function queueAutosave/);
   assert.match(js, /createPlaybackUpdateControl/);
+  assert.match(js, /event\.altKey/);
+  assert.match(js, /event\.button!==0/);
+  assert.match(js, /hitOrchestrationNote/);
+  assert.match(js, /hitTestNoteEntries/);
+  assert.match(js, /orchestrationDestinations/);
+  assert.match(js, /\/clips\/actions\/move-note/);
+  assert.match(js, /shared_clip_confirmation_required/);
+  assert.match(js, /destinationPlayerId/);
+  assert.match(js, /Add players in Setup…/);
+  assert.match(js, /Review assignments in Arrange…/);
+  assert.match(js, /event\.key==="ContextMenu"/);
+  assert.match(js, /event\.shiftKey&&event\.key==="F10"/);
 });

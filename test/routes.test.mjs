@@ -3004,6 +3004,36 @@ test("clip routes expose and mutate reusable clips", async () => {
   assert.match(rejected.body, /clip 'bass-main' is assigned in A\/player-1/);
 });
 
+test("Piano Roll orchestration route moves a note atomically", async () => {
+  const context = createRouteContext();
+  const result = await requestJson(context, "POST", "/clips/actions/move-note", {
+    blockId: "A",
+    sourcePlayerId: "player-1",
+    sourceClipId: "a-player-1",
+    noteIndex: 0,
+    noteId: 1,
+    destinationPlayerId: "player-2",
+    expectedVersion: 0
+  });
+
+  assert.equal(result.score.version, 1);
+  assert.equal(result.score.clips["a-player-1"].notes.length, 1);
+  assert.equal(result.score.clips["a-player-2"].notes.length, 3);
+  assert.equal(result.move.destinationPlayerId, "player-2");
+
+  const stale = await request(context, "POST", "/clips/actions/move-note", {
+    blockId: "A",
+    sourcePlayerId: "player-1",
+    sourceClipId: "a-player-1",
+    noteIndex: 0,
+    noteId: 2,
+    destinationPlayerId: "player-3",
+    expectedVersion: 0
+  });
+  assert.equal(stale.status, 400);
+  assert.match(stale.body, /stale score version 0; current version is 1/);
+});
+
 test("mesostructure duplicate route copies assigned clips for the new block", async () => {
   const context = createRouteContext();
 
@@ -3062,6 +3092,51 @@ test("admin new score route restores configured score defaults", async () => {
   assert.equal(Object.keys(created.clips).length, 36);
   assert.equal(created.mesostructure.A.players["player-1"].clipId, "a-player-1");
   assert.deepEqual(created.macrostructure.blocks, ["A", "B", "C", "D", "E", "F"]);
+});
+
+test("admin new score route immediately activates the empty replacement on RNBO clients", async () => {
+  const calls = [];
+  const context = createRouteContext({
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async applyBlockUpdate(blockId, options) {
+          calls.push({ blockId, options });
+          return { state: "active" };
+        }
+      }
+    }
+  });
+
+  const created = await requestJson(context, "POST", "/admin/scores/new");
+
+  assert.equal(created.scoreRevision, 1);
+  assert.deepEqual(calls, [{
+    blockId: "A",
+    options: { activationMode: "now", expectedScoreRevision: 1 }
+  }]);
+});
+
+test("admin new score route reports a client update failure without hiding the created score", async () => {
+  const context = createRouteContext({
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async applyBlockUpdate() {
+          throw new Error("READY acknowledgement timed out");
+        }
+      }
+    }
+  });
+
+  const response = await request(context, "POST", "/admin/scores/new");
+  const body = JSON.parse(response.body);
+
+  assert.equal(response.status, 502);
+  assert.equal(body.ok, false);
+  assert.match(body.error, /New score was created, but clients could not be updated/);
+  assert.equal(body.score.scoreRevision, 1);
+  assert.equal(context.store.getScore().scoreRevision, 1);
 });
 
 test("admin new score route ignores persisted boot mutations", async () => {

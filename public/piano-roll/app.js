@@ -1,9 +1,12 @@
 import {
+  assignedClipId,
   clamp,
   gridStepsPerBeat,
+  hitTestNoteEntries,
   hitTestNotes,
   moveNote,
   nudgeNote,
+  orchestrationDestinations,
   playbackBeatForVoice,
   projectClipOccurrences,
   resizeNoteRight,
@@ -15,15 +18,15 @@ import { createPlaybackUpdateControl } from "/shared/playback-update-control.js"
 import { createWiperEstimator } from "/shared/wiper-estimator.js";
 
 const $ = (id) => document.getElementById(id);
-const ui = { block:$("block"), player:$("player"), clip:$("clip"), grid:$("grid"), zoomX:$("zoom-x"), zoomY:$("zoom-y"), chase:$("chase"), fold:$("fold"), revert:$("revert"), dirty:$("dirty"), editing:$("editing"), playing:$("playing"), selection:$("selection"), status:$("status"), playbackUpdate:$("playback-update"), roll:$("roll"), velocity:$("velocity"), rollWiper:$("roll-wiper"), velocityWiper:$("velocity-wiper"), rollScroll:$("roll-scroll"), velocityScroll:$("velocity-scroll"), velocityValue:$("velocity-value") };
+const ui = { block:$("block"), player:$("player"), clip:$("clip"), grid:$("grid"), zoomX:$("zoom-x"), zoomY:$("zoom-y"), chase:$("chase"), fold:$("fold"), revert:$("revert"), dirty:$("dirty"), editing:$("editing"), playing:$("playing"), selection:$("selection"), status:$("status"), playbackUpdate:$("playback-update"), roll:$("roll"), velocity:$("velocity"), rollWiper:$("roll-wiper"), velocityWiper:$("velocity-wiper"), rollScroll:$("roll-scroll"), velocityScroll:$("velocity-scroll"), velocityValue:$("velocity-value"), noteMenu:$("note-menu"), noteMenuHeading:$("note-menu-heading"), moveTo:$("move-to"), moveToMenu:$("move-to-menu") };
 const ctx = ui.roll.getContext("2d"); const vctx = ui.velocity.getContext("2d");
 const draftStore=createClipDraftStore();
-const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, saving:false, pendingSaves:new Set(), saveTimer:null, chasing:false, folded:false, drag:null, playback:null, playbackGeneration:0, playbackRequest:null, wiperFrame:null, rnboTargets:[], timingContracts:[], dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, minPitch:36, maxPitch:84 };
+const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, saving:false, pendingSaves:new Set(), saveTimer:null, chasing:false, folded:false, drag:null, menuNote:null, orchestrationBusy:false, playback:null, playbackGeneration:0, playbackRequest:null, wiperFrame:null, rnboTargets:[], timingContracts:[], dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, minPitch:36, maxPitch:84 };
 const wiperEstimator=createWiperEstimator({staleAfterMs:750,correctionMs:180,snapThresholdBeats:.25});
 createPlaybackUpdateControl({ root:ui.playbackUpdate, getBlockId:()=>ui.block.value });
 
 const clone = (value) => structuredClone(value);
-const assignmentId = (value) => typeof value === "string" ? value : value?.clipId || "";
+const assignmentId = assignedClipId;
 const beatWidth = () => Number(ui.zoomX.value);
 const rowHeight = () => Number(ui.zoomY.value);
 const snap = (beat) => snapBeat(beat, Number(ui.grid.value));
@@ -52,11 +55,146 @@ function players(){ const block=state.score?.mesostructure?.[ui.block.value]; re
 function clipsForPlayer(){ const assigned=assignmentId(state.score?.mesostructure?.[ui.block.value]?.players?.[ui.player.value]); return assigned ? [assigned] : []; }
 function playerColor(player){ return state.score?.assignments?.[player]?.color || "#6ee7ff"; }
 
+function orchestrationNoteEntries(){
+  const block=state.score?.mesostructure?.[ui.block.value];
+  const entries=[];
+  for(const [playerId,assignment] of Object.entries(block?.players||{})){
+    const clipId=assignmentId(assignment);
+    if(!clipId||clipId===state.clipId)continue;
+    const clip=state.score?.clips?.[clipId];
+    for(const occurrence of projectClipOccurrences(clip?.notes||[],{clipDuration:clipBeats(clip),timelineDuration:timelineBeats(),playbackType:clip?.playbackType})){
+      entries.push({blockId:ui.block.value,playerId,clipId,sourceIndex:occurrence.sourceIndex,occurrenceIndex:occurrence.occurrenceIndex,alias:occurrence.alias,note:occurrence.note,sourceNote:clip.notes[occurrence.sourceIndex]});
+    }
+  }
+  for(const occurrence of projectClipOccurrences(state.draft?.notes||[],{clipDuration:clipBeats(),timelineDuration:timelineBeats(),playbackType:state.draft?.playbackType})){
+    entries.push({blockId:ui.block.value,playerId:ui.player.value,clipId:state.clipId,sourceIndex:occurrence.sourceIndex,occurrenceIndex:occurrence.occurrenceIndex,alias:occurrence.alias,note:occurrence.note,sourceNote:state.draft.notes[occurrence.sourceIndex]});
+  }
+  return entries;
+}
+
+function hitOrchestrationNote(x,y){
+  return hitTestNoteEntries(orchestrationNoteEntries(),{pitch:pitchForY(y),time:(x-state.left)/beatWidth()});
+}
+
+function openNoteMenu(hit,clientX,clientY){
+  if(!hit)return;
+  state.menuNote={...hit,sourceNote:clone(hit.sourceNote||hit.note)};
+  const playerLabel=state.score?.assignments?.[hit.playerId]?.label||hit.playerId;
+  ui.noteMenuHeading.textContent=`${pitchName(hit.note.pitch)} · beat ${fmt(hit.note.start_time)} · ${playerLabel} · ${hit.clipId}`;
+  renderMoveDestinations();
+  ui.moveTo.setAttribute("aria-expanded","false");
+  ui.moveToMenu.hidden=true;
+  ui.noteMenu.hidden=false;
+  ui.noteMenu.style.left=`${clientX}px`;
+  ui.noteMenu.style.top=`${clientY}px`;
+  ui.noteMenu.classList.remove("open-left");
+  const bounds=ui.noteMenu.getBoundingClientRect();
+  ui.noteMenu.style.left=`${clamp(clientX,8,innerWidth-bounds.width-8)}px`;
+  ui.noteMenu.style.top=`${clamp(clientY,8,innerHeight-bounds.height-8)}px`;
+  ui.moveTo.focus({preventScroll:true});
+}
+
+function closeNoteMenu(){
+  state.menuNote=null;
+  ui.noteMenu.hidden=true;
+  ui.moveToMenu.hidden=true;
+  ui.moveTo.setAttribute("aria-expanded","false");
+}
+
+function renderMoveDestinations(){
+  const source=state.menuNote;
+  const destinations=orchestrationDestinations(state.score,source.blockId,{playerId:source.playerId,clipId:source.clipId});
+  const items=destinations.map(destination=>{
+    const button=document.createElement("button");
+    button.type="button";
+    button.role="menuitem";
+    button.style.setProperty("--player-color",playerColor(destination.playerId));
+    const copy=document.createElement("span");
+    const label=document.createElement("span");
+    label.textContent=destination.label;
+    const detail=document.createElement("small");
+    if(destination.state==="current")detail.textContent="current player";
+    else if(destination.state==="create")detail.textContent="create part in this section";
+    else if(destination.state==="broken")detail.textContent=`missing clip ${destination.clipId}`;
+    else if(destination.state==="same-clip")detail.textContent=`already uses ${destination.clipId}`;
+    else detail.textContent=`${destination.clipId}${destination.references.length>1?` · shared ${destination.references.length} places`:""}`;
+    copy.append(label,detail);button.append(copy);
+    button.disabled=["current","broken","same-clip"].includes(destination.state);
+    if(!button.disabled)button.addEventListener("click",()=>void moveOrchestrationNote(destination));
+    return button;
+  });
+  if(!destinations.some(destination=>["ready","create"].includes(destination.state)))items.push(contextMenuLink("/admin","Add players in Setup…"));
+  if(destinations.some(destination=>destination.state==="broken"))items.push(contextMenuLink("/structure-editor","Review assignments in Arrange…"));
+  ui.moveToMenu.replaceChildren(...items);
+}
+
+function contextMenuLink(href,label){const link=document.createElement("a");link.href=href;link.role="menuitem";link.textContent=label;return link;}
+
+function openMoveSubmenu(focusFirst=false){
+  ui.moveToMenu.hidden=false;
+  ui.moveTo.setAttribute("aria-expanded","true");
+  const menuBounds=ui.noteMenu.getBoundingClientRect();
+  ui.noteMenu.classList.toggle("open-left",menuBounds.right+260>innerWidth);
+  if(focusFirst)ui.moveToMenu.querySelector("button:not(:disabled)")?.focus({preventScroll:true});
+}
+
+async function settleAutosaves(){
+  if(state.drag)throw new Error("Finish the current note gesture before orchestrating.");
+  clearTimeout(state.saveTimer);
+  for(const clipId of draftStore.dirtyClipIds())state.pendingSaves.add(clipId);
+  const deadline=Date.now()+6000;
+  while(state.saving||draftStore.hasDirty()){
+    if(draftStore.staleCount())throw new Error("Resolve the stale clip draft before orchestrating.");
+    if(Date.now()>deadline)throw new Error("Pending clip edits did not finish saving.");
+    if(!state.saving){
+      if(!state.pendingSaves.size)throw new Error("Pending clip edits could not be saved.");
+      await saveNextClip();
+    }else await new Promise(resolve=>setTimeout(resolve,25));
+  }
+}
+
+async function moveOrchestrationNote(destination){
+  if(state.orchestrationBusy||!state.menuNote)return;
+  const source=clone(state.menuNote);
+  state.orchestrationBusy=true;
+  closeNoteMenu();
+  try{
+    status("Finishing pending edits before moving the note…");
+    await settleAutosaves();
+    let confirmShared=false;
+    let payload;
+    for(;;){
+      const response=await fetch("/clips/actions/move-note",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({blockId:source.blockId,sourcePlayerId:source.playerId,sourceClipId:source.clipId,noteIndex:source.sourceIndex,noteId:source.sourceNote?.note_id,destinationPlayerId:destination.playerId,expectedVersion:state.score.version,confirmShared})});
+      payload=await response.json();
+      if(response.ok)break;
+      if(payload.code==="shared_clip_confirmation_required"&&!confirmShared){
+        const locations=(payload.references||[]).map(reference=>String(reference).replace(":", " clip at ")).join("\n");
+        if(!window.confirm(`This move changes a clip shared elsewhere in the score:\n\n${locations}\n\nMove the note anyway?`))return;
+        confirmShared=true;
+        continue;
+      }
+      throw new Error(payload.error||`HTTP ${response.status}`);
+    }
+    state.score=payload.score;
+    draftStore.reconcile(payload.score);
+    populateSelectors(true);
+    loadClip();
+    resize();
+    const targetLabel=state.score?.assignments?.[destination.playerId]?.label||destination.playerId;
+    status(`Moved ${pitchName(source.sourceNote.pitch)} at beat ${fmt(source.sourceNote.start_time)} to ${targetLabel}${payload.move.createdDestinationClip?` and created ${payload.move.destinationClipId}`:""}.`);
+  }catch(error){
+    status(`Move failed: ${error.message}`,true);
+  }finally{
+    state.orchestrationBusy=false;
+  }
+}
+
 async function loadScore(preserve=false){
+  if(state.orchestrationBusy)return;
   try { const [response,timingResponse]=await Promise.all([fetch("/score",{cache:"no-store"}),fetch("/playback/timing-contracts",{cache:"no-store"})]); if(!response.ok) throw new Error(`HTTP ${response.status}`); const score=await response.json();
     if(timingResponse.ok){const timing=await timingResponse.json();state.timingContracts=timing.contracts||[];}
     if(preserve && score.version === state.score?.version){ state.score=score;if(followChase())return; updateLabels(); render(); return; }
-    state.score=score;draftStore.reconcile(score);populateSelectors(preserve);loadClip(true);const entry=activeDraftEntry();status(entry?.stale?`${state.clipId} changed on the server. Revert before continuing or review it in Event List.`:`Score revision ${score.scoreRevision ?? score.version}. ${draftStore.dirtyCount()} unsaved clip draft${draftStore.dirtyCount()===1?"":"s"}.`);render();
+    closeNoteMenu();state.score=score;draftStore.reconcile(score);populateSelectors(preserve);loadClip(true);const entry=activeDraftEntry();status(entry?.stale?`${state.clipId} changed on the server. Revert before continuing or review it in Event List.`:`Score revision ${score.scoreRevision ?? score.version}. ${draftStore.dirtyCount()} unsaved clip draft${draftStore.dirtyCount()===1?"":"s"}.`);render();
   } catch(error){ status(`Load failed: ${error.message}`,true); }
 }
 function populateSelectors(preserve){
@@ -99,7 +237,8 @@ function pitchName(p){const names=["C","C♯","D","E♭","E","F","F♯","G","A�
 
 function pointer(event,lane){ const rect=event.currentTarget.getBoundingClientRect(); return {x:event.clientX-rect.left,y:event.clientY-rect.top}; }
 function hitNote(x,y){ return hitTestNotes(state.draft?.notes||[], { pitch:pitchForY(y), time:(x-state.left)/beatWidth() }); }
-ui.roll.addEventListener("pointerdown",event=>{ if(!state.clipId)return;ui.roll.focus({preventScroll:true});const wasDirty=state.dirty,pitches=visiblePitches(); const p=pointer(event);const hit=hitNote(p.x,p.y);ui.roll.setPointerCapture(event.pointerId);if(hit){state.selected=hit.index;const right=state.left+(Number(hit.note.start_time)+Number(hit.note.duration))*beatWidth();state.drag={kind:right-p.x<=9?"resize":"move",start:p,note:clone(hit.note),wasDirty,pitches};}else{const start=Math.max(0,snap((p.x-state.left)/beatWidth()));const pitch=pitchForY(p.y,pitches)??60;mutate(()=>{state.draft.notes.push({note_id:nextNoteId(),pitch,start_time:start,duration:gridStep(),velocity:100,mute:0,probability:1,velocity_deviation:0,release_velocity:64});state.selected=state.draft.notes.length-1;});state.drag={kind:"resize",start:p,note:clone(selectedNote()),wasDirty,created:true,pitches};}updateSelection();render();});
+ui.roll.addEventListener("pointerdown",event=>{ if(!state.clipId||event.button!==0)return;ui.roll.focus({preventScroll:true});const p=pointer(event);if(event.altKey){event.preventDefault();const orchestrationHit=hitOrchestrationNote(p.x,p.y);if(orchestrationHit)openNoteMenu(orchestrationHit,event.clientX,event.clientY);else closeNoteMenu();return;}closeNoteMenu();const wasDirty=state.dirty,pitches=visiblePitches();const hit=hitNote(p.x,p.y);ui.roll.setPointerCapture(event.pointerId);if(hit){state.selected=hit.index;const right=state.left+(Number(hit.note.start_time)+Number(hit.note.duration))*beatWidth();state.drag={kind:right-p.x<=9?"resize":"move",start:p,note:clone(hit.note),wasDirty,pitches};}else{const start=Math.max(0,snap((p.x-state.left)/beatWidth()));const pitch=pitchForY(p.y,pitches)??60;mutate(()=>{state.draft.notes.push({note_id:nextNoteId(),pitch,start_time:start,duration:gridStep(),velocity:100,mute:0,probability:1,velocity_deviation:0,release_velocity:64});state.selected=state.draft.notes.length-1;});state.drag={kind:"resize",start:p,note:clone(selectedNote()),wasDirty,created:true,pitches};}updateSelection();render();});
+ui.roll.addEventListener("contextmenu",event=>{const p=pointer(event);const hit=hitOrchestrationNote(p.x,p.y);if(!hit)return;event.preventDefault();openNoteMenu(hit,event.clientX,event.clientY);});
 ui.roll.addEventListener("pointermove",event=>{if(!state.drag)return;const p=pointer(event),dx=(p.x-state.drag.start.x)/beatWidth();mutate(()=>{let next;if(state.drag.kind==="move"){const targetPitch=pitchForY(p.y,state.drag.pitches);next=moveNote(state.drag.note,{deltaTime:dx,deltaPitch:targetPitch-Number(state.drag.note.pitch),subdivision:Number(ui.grid.value),clipDuration:clipBeats()});}else next=resizeNoteRight(state.drag.note,{deltaTime:dx,subdivision:Number(ui.grid.value),clipDuration:clipBeats()});state.draft.notes[state.selected]=next;});});
 ui.roll.addEventListener("pointerup",()=>state.drag=null);ui.roll.addEventListener("pointercancel",cancelDrag);
 ui.velocity.addEventListener("pointerdown",event=>{const p=pointer(event);const nearest=(state.draft?.notes||[]).map((n,i)=>({i,d:Math.abs(state.left+Number(n.start_time)*beatWidth()-p.x)})).sort((a,b)=>a.d-b.d)[0];if(nearest&&nearest.d<18)state.selected=nearest.i;if(!selectedNote())return;ui.velocity.setPointerCapture(event.pointerId);state.drag={kind:"velocity",note:clone(selectedNote()),wasDirty:state.dirty};editVelocity(p.y);});
@@ -108,14 +247,18 @@ function editVelocity(y){if(!selectedNote())return;mutate(()=>selectedNote().vel
 function nextNoteId(){return Math.max(0,...(state.draft?.notes||[]).map((n,i)=>Number(noteId(n,i))||0))+1;}
 function cancelDrag(){if(!state.drag)return;if(state.drag.created)state.draft.notes.splice(state.selected,1);else if(state.drag.note&&selectedNote())state.draft.notes[state.selected]=state.drag.note;const entry=activeDraftEntry();if(entry){entry.dirty=state.drag.wasDirty;entry.draft=state.draft;}state.drag=null;if(state.selected>=state.draft.notes.length)state.selected=state.draft.notes.length-1;markDirty();updateSelection();render();}
 
-ui.roll.addEventListener("keydown",event=>{const note=selectedNote();if(event.key==="Escape"){state.selected=-1;updateSelection();render();return;}if(!note)return;if(event.key==="Delete"||event.key==="Backspace"){event.preventDefault();mutate(()=>{state.draft.notes.splice(state.selected,1);state.selected=Math.min(state.selected,state.draft.notes.length-1);});return;}const directions={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"};const direction=directions[event.key];if(!direction)return;event.preventDefault();mutate(()=>{state.draft.notes[state.selected]=nudgeNote(note,{direction,resize:event.shiftKey,subdivision:Number(ui.grid.value),clipDuration:clipBeats()});});});
+ui.roll.addEventListener("keydown",event=>{const note=selectedNote();if((event.key==="ContextMenu"||(event.shiftKey&&event.key==="F10"))&&note){event.preventDefault();const rect=ui.roll.getBoundingClientRect(),row=rowForPitch(note.pitch);openNoteMenu({blockId:ui.block.value,playerId:ui.player.value,clipId:state.clipId,sourceIndex:state.selected,occurrenceIndex:0,alias:false,note,sourceNote:note},rect.left+state.left+(Number(note.start_time)+Number(note.duration))*beatWidth(),rect.top+state.top+(row+.5)*rowHeight());return;}if(event.key==="Escape"){state.selected=-1;updateSelection();render();return;}if(!note)return;if(event.key==="Delete"||event.key==="Backspace"){event.preventDefault();mutate(()=>{state.draft.notes.splice(state.selected,1);state.selected=Math.min(state.selected,state.draft.notes.length-1);});return;}const directions={ArrowLeft:"left",ArrowRight:"right",ArrowUp:"up",ArrowDown:"down"};const direction=directions[event.key];if(!direction)return;event.preventDefault();mutate(()=>{state.draft.notes[state.selected]=nudgeNote(note,{direction,resize:event.shiftKey,subdivision:Number(ui.grid.value),clipDuration:clipBeats()});});});
 
-async function loadPlayback(){if(state.playbackRequest)return;const controller=new AbortController();state.playbackRequest=controller;try{const response=await fetch("/playback/snapshot",{cache:"no-store",signal:controller.signal});if(!response.ok)return;const snapshot=await response.json();const receivedAt=Date.now();if(!Number.isInteger(snapshot.generation)||snapshot.generation<=state.playbackGeneration)return;state.playbackGeneration=snapshot.generation;state.rnboTargets=Object.values(snapshot.targets||{});state.timingContracts=snapshot.timingContracts||[];state.playback={...(snapshot.playback||{}),playing:Boolean(snapshot.transport?.running)};followChase();const beat=playbackBeatForVoice({playback:state.playback,blockId:ui.block.value,voiceId:ui.player.value,assignment:state.score?.assignments?.[ui.player.value],targets:state.rnboTargets,contracts:state.timingContracts});if(Number.isFinite(beat)){wiperEstimator.update({beat,tempo:snapshot.transport?.tempo,running:state.playback.playing,blockId:state.playback.activeBlockId,observedAt:snapshot.observedAt},receivedAt);}else wiperEstimator.clear();scheduleWiperFrame();ui.playing.textContent=Number.isFinite(beat)?`${state.playback.activeBlockId} · ${state.playback.playing?"":"client "}beat ${fmt(beat)}`:state.playback.playing?state.playback.activeBlockId:"Stopped";render();}catch(error){if(error?.name!=="AbortError")console.warn("Playback snapshot refresh failed",error);}finally{if(state.playbackRequest===controller)state.playbackRequest=null;}}
+async function loadPlayback(){if(state.playbackRequest)return;const controller=new AbortController();state.playbackRequest=controller;try{const response=await fetch("/playback/snapshot",{cache:"no-store",signal:controller.signal});if(!response.ok)return;const snapshot=await response.json();const receivedAt=Date.now();if(!Number.isInteger(snapshot.generation)||snapshot.generation<=state.playbackGeneration)return;state.playbackGeneration=snapshot.generation;state.rnboTargets=Object.values(snapshot.targets||{});state.timingContracts=snapshot.timingContracts||[];state.playback={...(snapshot.playback||{}),playing:Boolean(snapshot.transport?.rolling??snapshot.transport?.running)};followChase();const beat=playbackBeatForVoice({playback:state.playback,blockId:ui.block.value,voiceId:ui.player.value,assignment:state.score?.assignments?.[ui.player.value],targets:state.rnboTargets,contracts:state.timingContracts});if(Number.isFinite(beat)){wiperEstimator.update({beat,tempo:snapshot.transport?.tempo,running:state.playback.playing,blockId:state.playback.activeBlockId,observedAt:snapshot.observedAt},receivedAt);}else wiperEstimator.clear();scheduleWiperFrame();ui.playing.textContent=Number.isFinite(beat)?`${state.playback.activeBlockId} · ${state.playback.playing?"":"client "}beat ${fmt(beat)}`:state.playback.playing?state.playback.activeBlockId:"Stopped";render();}catch(error){if(error?.name!=="AbortError")console.warn("Playback snapshot refresh failed",error);}finally{if(state.playbackRequest===controller)state.playbackRequest=null;}}
 
-ui.block.addEventListener("change",()=>{populateSelectors(true);loadClip();resize();});ui.player.addEventListener("change",()=>{setOptions(ui.clip,clipsForPlayer(),clipsForPlayer()[0]||"");loadClip();resize();});ui.clip.addEventListener("change",()=>{loadClip();resize();});
+ui.block.addEventListener("change",()=>{closeNoteMenu();populateSelectors(true);loadClip();resize();});ui.player.addEventListener("change",()=>{closeNoteMenu();setOptions(ui.clip,clipsForPlayer(),clipsForPlayer()[0]||"");loadClip();resize();});ui.clip.addEventListener("change",()=>{closeNoteMenu();loadClip();resize();});
 ui.chase.addEventListener("change",()=>{state.chasing=ui.chase.checked;ui.block.disabled=state.chasing;if(state.chasing)followChase();});
 ui.fold.addEventListener("click",()=>{state.folded=!state.folded;ui.fold.setAttribute("aria-pressed",String(state.folded));ui.rollScroll.scrollTop=0;resize();});
 ui.revert.addEventListener("click",()=>{const entry=draftStore.revert(state.clipId);state.snapshot=entry.snapshot;state.draft=entry.draft;state.selected=-1;markDirty();updateSelection();resize();status(`Reverted ${state.clipId} to its last server snapshot.`);});
 [ui.grid,ui.zoomX,ui.zoomY].forEach(control=>control.addEventListener("input",resize));ui.rollScroll.addEventListener("scroll",()=>{ui.velocityScroll.scrollLeft=ui.rollScroll.scrollLeft;});addEventListener("resize",resize);addEventListener("beforeunload",event=>{clearTimeout(state.saveTimer);if(draftStore.hasDirty()){event.preventDefault();event.returnValue="";}});
+ui.moveTo.addEventListener("mouseenter",()=>openMoveSubmenu());
+ui.moveTo.addEventListener("click",()=>openMoveSubmenu(true));
+ui.noteMenu.addEventListener("keydown",event=>{if(event.key==="Escape"){event.preventDefault();if(!ui.moveToMenu.hidden){ui.moveToMenu.hidden=true;ui.moveTo.setAttribute("aria-expanded","false");ui.moveTo.focus();}else{closeNoteMenu();ui.roll.focus();}}else if(event.key==="ArrowRight"&&event.target===ui.moveTo){event.preventDefault();openMoveSubmenu(true);}else if(event.key==="ArrowLeft"&&ui.moveToMenu.contains(event.target)){event.preventDefault();ui.moveToMenu.hidden=true;ui.moveTo.setAttribute("aria-expanded","false");ui.moveTo.focus();}});
+document.addEventListener("pointerdown",event=>{if(!ui.noteMenu.hidden&&!ui.noteMenu.contains(event.target)&&!event.defaultPrevented)closeNoteMenu();});
 document.addEventListener("visibilitychange",()=>{if(!document.hidden)scheduleWiperFrame();});
 setInterval(()=>loadScore(true),5000);setInterval(loadPlayback,250);await loadScore();await loadPlayback();resize();

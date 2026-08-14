@@ -549,6 +549,105 @@ test("clips can be added, replaced, renamed, and removed", () => {
   assert.equal(removed.clips["bass-main"], undefined);
 });
 
+test("orchestration moves a note atomically between assigned player clips", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const events = [];
+  store.events.on("change", (event) => events.push(event));
+  const sourceNote = store.getScore().clips["a-player-1"].notes[0];
+
+  const result = store.moveClipNote({
+    blockId: "A",
+    sourcePlayerId: "player-1",
+    sourceClipId: "a-player-1",
+    noteIndex: 0,
+    noteId: sourceNote.note_id,
+    destinationPlayerId: "player-2"
+  }, { expectedVersion: 0 });
+
+  assert.equal(result.score.version, 1);
+  assert.equal(result.score.structureRevision, 0);
+  assert.equal(result.score.clips["a-player-1"].notes.length, 1);
+  assert.equal(result.score.clips["a-player-2"].notes.length, 3);
+  assert.equal(result.score.clips["a-player-2"].notes.at(-1).pitch, sourceNote.pitch);
+  assert.equal(result.score.clips["a-player-2"].notes.at(-1).note_id, 3);
+  assert.deepEqual(result.move, {
+    blockId: "A",
+    sourcePlayerId: "player-1",
+    sourceClipId: "a-player-1",
+    destinationPlayerId: "player-2",
+    destinationClipId: "a-player-2",
+    noteId: 3,
+    createdDestinationClip: false,
+    sharedReferences: []
+  });
+  assert.equal(events.length, 1);
+  assert.equal(events[0].type, "clip.note.moved");
+  assert.equal(events[0].detail.destinationClipId, "a-player-2");
+});
+
+test("orchestration creates and assigns a missing player part in the same transaction", () => {
+  const initial = createInitialScore(defaultConfig);
+  delete initial.mesostructure.A.players["player-3"];
+  const store = createScoreStore(initial);
+  const sourceClip = store.getScore().clips["a-player-1"];
+  const result = store.moveClipNote({
+    blockId: "A",
+    sourcePlayerId: "player-1",
+    sourceClipId: "a-player-1",
+    noteIndex: 0,
+    noteId: sourceClip.notes[0].note_id,
+    destinationPlayerId: "player-3"
+  });
+
+  assert.equal(result.move.createdDestinationClip, true);
+  assert.equal(result.move.destinationClipId, "a-player-3-2");
+  assert.equal(result.score.structureRevision, 1);
+  assert.equal(result.score.mesostructure.A.players["player-3"].clipId, "a-player-3-2");
+  assert.deepEqual(result.score.clips["a-player-3-2"].duration, sourceClip.duration);
+  assert.equal(result.score.clips["a-player-3-2"].notes.length, 1);
+  assert.equal(result.score.clips["a-player-3-2"].notes[0].note_id, sourceClip.notes[0].note_id);
+});
+
+test("orchestration protects shared clips and stale note identity without partial mutation", () => {
+  const initial = createInitialScore(defaultConfig);
+  initial.mesostructure.B.players["player-6"] = { clipId: "a-player-1" };
+  const store = createScoreStore(initial);
+  const request = {
+    blockId: "A",
+    sourcePlayerId: "player-1",
+    sourceClipId: "a-player-1",
+    noteIndex: 0,
+    noteId: 1,
+    destinationPlayerId: "player-2"
+  };
+
+  assert.throws(() => store.moveClipNote(request), (error) => {
+    assert.equal(error.code, "shared_clip_confirmation_required");
+    assert.deepEqual(error.references, ["source:B/player-6"]);
+    return true;
+  });
+  assert.equal(store.getScore().version, 0);
+  assert.throws(() => store.moveClipNote({ ...request, noteId: 999 }, { confirmShared: true }), /source note identity changed/);
+  assert.equal(store.getScore().version, 0);
+  const moved = store.moveClipNote(request, { confirmShared: true });
+  assert.equal(moved.score.version, 1);
+});
+
+test("orchestration rejects broken destination clip references", () => {
+  const initial = createInitialScore(defaultConfig);
+  initial.mesostructure.A.players["player-2"] = { clipId: "missing" };
+  const store = createScoreStore(initial);
+  assert.throws(() => store.moveClipNote({
+    blockId: "A",
+    sourcePlayerId: "player-1",
+    sourceClipId: "a-player-1",
+    noteIndex: 0,
+    noteId: 1,
+    destinationPlayerId: "player-2"
+  }), /references missing clip 'missing'/);
+  assert.equal(store.getScore().version, 0);
+});
+
 test("new score restores configured defaults after persisted-state boot", () => {
   const defaultScore = createInitialScore(defaultConfig);
   const persistedScore = structuredClone(defaultScore);

@@ -27,6 +27,7 @@ export function buildPlaybackSnapshot({
   const observedAtIso = new Date(observedAtMs).toISOString();
   const contractByTarget = new Map(timingContracts.map((contract) => [contract.targetId, contract]));
   const jackAuthoritative = jack?.status === "fresh" && playback?.witness?.source === "jack";
+  const transportRolling = timingSourceRolling(playback, jack);
   const authoritativeBeat = jackAuthoritative ? finiteOrNull(playback.beatIntoBlock) : null;
   const targetSnapshots = {};
 
@@ -96,6 +97,7 @@ export function buildPlaybackSnapshot({
     transport: {
       authority: "jack",
       running: Boolean(playback.running),
+      rolling: transportRolling,
       tempo: finiteOrNull(tempo?.live ?? jack?.latest?.beatsPerMinute ?? playback?.witness?.tempo),
       macroIndex: playback.macroIndex ?? score.structureState?.macroIndex ?? 0,
       blockId: playback.activeBlockId ?? score.structureState?.activeBlockId ?? "",
@@ -115,6 +117,15 @@ export function buildPlaybackSnapshot({
     lifecycleEvents: lifecycleEvents.slice(-100),
     updates
   };
+}
+
+function timingSourceRolling(playback, jack) {
+  if (!playback?.running) return false;
+  if (playback.mode === "timer") return true;
+  if (playback.mode === "jack") {
+    return jack?.status === "fresh" && jack?.latest?.state === "rolling";
+  }
+  return playback?.witness?.usable === true;
 }
 
 function queuedTransactionForTarget(sendQueue, targetId) {

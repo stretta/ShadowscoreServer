@@ -1125,10 +1125,29 @@ export async function routeRequest(request, response, store, config, runtime = {
   }
 
   if (request.method === "POST" && url.pathname === "/admin/scores/new") {
+    let score;
     try {
-      writeJson(response, 200, store.createNewScore());
+      score = store.createNewScore();
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
+      return;
+    }
+
+    try {
+      const adapter = runtime.rnboAdapter;
+      if (adapter?.enabled && typeof adapter.applyBlockUpdate === "function") {
+        await adapter.applyBlockUpdate(score.structureState?.activeBlockId, {
+          activationMode: "now",
+          expectedScoreRevision: score.scoreRevision ?? score.version
+        });
+      }
+      writeJson(response, 200, score);
+    } catch (error) {
+      writeJson(response, 502, {
+        ok: false,
+        error: `New score was created, but clients could not be updated: ${messageForError(error)}`,
+        score
+      });
     }
     return;
   }
@@ -1282,6 +1301,27 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const body = await readJson(request);
       writeJson(response, 200, store.renameClip(decodeURIComponent(clipRenameMatch[1]), body.clipId ?? body.id, revisionOptions(body)));
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/clips/actions/move-note") {
+    try {
+      const body = await readJson(request);
+      const result = store.moveClipNote({
+        blockId: body.blockId,
+        sourcePlayerId: body.sourcePlayerId,
+        sourceClipId: body.sourceClipId,
+        noteIndex: body.noteIndex,
+        noteId: body.noteId,
+        destinationPlayerId: body.destinationPlayerId
+      }, {
+        ...revisionOptions(body),
+        confirmShared: Boolean(body.confirmShared)
+      });
+      writeJson(response, 200, result);
     } catch (error) {
       writeError(response, error);
     }

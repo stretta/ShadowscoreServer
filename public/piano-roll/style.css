@@ -27,4 +27,17 @@ canvas { display:block; touch-action:none; user-select:none; }
 #roll:focus-visible { outline:2px solid #ffd166; outline-offset:-2px; }
 .velocity-heading { height:24px; display:flex; justify-content:space-between; align-items:center; padding:0 10px; color:var(--ss-muted); background:var(--ss-panel); font-size:11px; font-weight:800; text-transform:uppercase; }
 .help { margin:0; color:var(--ss-muted); font-size:11px; }
+.context-menu { position:fixed; z-index:20; min-width:220px; padding:6px; border:1px solid #526077; border-radius:8px; background:#171d28; box-shadow:0 14px 34px rgba(0,0,0,.48); color:#eef3fb; }
+.context-menu[hidden],.context-submenu[hidden] { display:none; }
+.context-menu-heading { max-width:300px; padding:6px 9px 8px; border-bottom:1px solid #343d4d; color:#aeb9cc; font-size:11px; line-height:1.35; }
+.context-menu-action,.context-submenu button,.context-submenu a { width:100%; min-height:34px; display:flex; align-items:center; justify-content:space-between; gap:16px; padding:7px 9px; border:0; border-radius:5px; background:transparent; color:inherit; text-align:left; text-decoration:none; font:600 12px system-ui,sans-serif; }
+.context-menu-action:hover,.context-menu-action:focus-visible,.context-submenu button:hover,.context-submenu button:focus-visible,.context-submenu a:hover,.context-submenu a:focus-visible { outline:none; background:#2b3546; }
+.context-submenu { position:absolute; top:36px; left:calc(100% - 2px); min-width:250px; max-height:min(420px,70vh); overflow:auto; padding:6px; border:1px solid #526077; border-radius:8px; background:#171d28; box-shadow:0 14px 34px rgba(0,0,0,.48); }
+.context-menu.open-left .context-submenu { right:calc(100% - 2px); left:auto; }
+.context-submenu button { display:grid; grid-template-columns:12px minmax(0,1fr); justify-content:initial; }
+.context-submenu button::before { content:""; width:8px; height:8px; border-radius:50%; background:var(--player-color,#718096); }
+.context-submenu button small { display:block; margin-top:2px; color:#9da9bd; font-size:10px; font-weight:550; }
+.context-submenu button:disabled { color:#727d90; cursor:not-allowed; }
+.context-submenu button:disabled::before { opacity:.35; }
+.context-submenu a { margin-top:5px; border-top:1px solid #343d4d; border-radius:0 0 5px 5px; color:#b9d8ff; }
 @media(max-width:760px){ main{height:auto;min-height:calc(100vh - 42px);overflow:auto}.editor-shell{height:70vh;flex:none}.summary{align-items:flex-start;flex-wrap:wrap}#status{max-width:none;margin-left:0;text-align:left;width:100%}.toolbar label:nth-of-type(n+4){display:none} }

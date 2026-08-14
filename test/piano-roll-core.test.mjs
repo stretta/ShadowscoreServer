@@ -1,13 +1,17 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  assignedClipId,
   hitTestNotes,
+  hitTestNoteEntries,
   gridStepsPerBeat,
   moveNote,
   nudgeNote,
   executionBeatForVoice,
   playbackBeatForVoice,
   projectClipOccurrences,
+  orchestrationDestinations,
+  playerClipReferences,
   resizeNoteRight,
   sourceTimeForProjectedTime,
   velocityFromLanePosition
@@ -203,6 +207,54 @@ test("overlap hit testing chooses the last deterministic candidate", () => {
   ], { pitch: 60, time: 0.5 });
   assert.equal(hit.index, 1);
   assert.equal(hit.note.note_id, 43);
+});
+
+test("condensed-score hit testing preserves the winning note provenance", () => {
+  const entries = [
+    { playerId: "player-1", clipId: "one", sourceIndex: 0, note: sourceNote },
+    { playerId: "player-2", clipId: "two", sourceIndex: 3, note: { ...sourceNote, note_id: 43 } }
+  ];
+  const hit = hitTestNoteEntries(entries, { pitch: 60, time: 0.5 });
+  assert.equal(hit.playerId, "player-2");
+  assert.equal(hit.clipId, "two");
+  assert.equal(hit.sourceIndex, 3);
+});
+
+test("orchestration destinations distinguish ready, create, current, same-clip, and broken parts", () => {
+  const score = {
+    voices: { "player-1": {}, "player-2": {}, "player-3": {}, "player-4": {}, "player-5": {} },
+    assignments: Object.fromEntries([1, 2, 3, 4, 5].map((number) => [`player-${number}`, { label: `Player ${number}` }])),
+    clips: { source: { notes: [] }, target: { notes: [] } },
+    mesostructure: {
+      A: {
+        players: {
+          "player-1": { clipId: "source" },
+          "player-2": { clipId: "target" },
+          "player-4": { clipId: "source" },
+          "player-5": { clipId: "missing" }
+        }
+      },
+      B: { players: { "player-2": { clipId: "target" } } }
+    }
+  };
+  const destinations = Object.fromEntries(orchestrationDestinations(score, "A", {
+    playerId: "player-1",
+    clipId: "source"
+  }).map((entry) => [entry.playerId, entry]));
+  assert.equal(destinations["player-1"].state, "current");
+  assert.equal(destinations["player-2"].state, "ready");
+  assert.equal(destinations["player-3"].state, "create");
+  assert.equal(destinations["player-4"].state, "same-clip");
+  assert.equal(destinations["player-5"].state, "broken");
+  assert.deepEqual(destinations["player-2"].references, [
+    { blockId: "A", playerId: "player-2" },
+    { blockId: "B", playerId: "player-2" }
+  ]);
+  assert.equal(assignedClipId("legacy"), "legacy");
+  assert.deepEqual(playerClipReferences(score, "source"), [
+    { blockId: "A", playerId: "player-1" },
+    { blockId: "A", playerId: "player-4" }
+  ]);
 });
 
 test("velocity hit testing spans the full enlarged lane", () => {

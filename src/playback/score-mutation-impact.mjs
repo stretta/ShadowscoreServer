@@ -27,6 +27,13 @@ export function scoreMutationImpact(event = {}, previousScore = {}) {
       addClipReferences(base, score, detail.newClipId);
       break;
     }
+    case "clip.note.moved": {
+      addClipReferences(base, previousScore, detail.sourceClipId);
+      addClipReferences(base, score, detail.sourceClipId);
+      addClipReferences(base, previousScore, detail.destinationClipId);
+      addClipReferences(base, score, detail.destinationClipId);
+      break;
+    }
     case "mesostructure.block.replaced": {
       const blockId = stringField(detail.blockId);
       addBlockVoices(base, blockId, previousScore.mesostructure?.[blockId]);
@@ -108,6 +115,7 @@ export function impactVoicesForBlock(impact, blockId) {
 
 function resourceForEvent(event) {
   const detail = event.detail ?? {};
+  if (detail.sourceClipId) return { type: "clip", id: stringField(detail.sourceClipId) };
   if (detail.clipId || detail.oldClipId) return { type: "clip", id: stringField(detail.clipId ?? detail.oldClipId) };
   if (detail.blockId) return { type: "block", id: stringField(detail.blockId) };
   if (detail.voiceId) return { type: "voice", id: stringField(detail.voiceId) };

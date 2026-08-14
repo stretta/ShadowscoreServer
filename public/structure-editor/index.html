@@ -568,6 +568,7 @@
             <div class="playback-status" id="macro-playback-status">
               <strong id="macro-playback-state">Players stopped · Arrangement held</strong>
               <span id="macro-playback-detail">A · 1/6 · -- remaining</span>
+              <span id="section-cue-state">No section cue pending</span>
             </div>
           </div>
           <div class="chain" id="chain"></div>
@@ -651,6 +652,7 @@
       macroPlaybackStatus: document.querySelector("#macro-playback-status"),
       macroPlaybackState: document.querySelector("#macro-playback-state"),
       macroPlaybackDetail: document.querySelector("#macro-playback-detail"),
+      sectionCueState: document.querySelector("#section-cue-state"),
       chain: document.querySelector("#chain"),
       addChain: document.querySelector("#add-chain"),
       revertMacro: document.querySelector("#revert-macro"),
@@ -958,7 +960,10 @@
         return option;
       }));
       const activeBlockId = state.score?.structureState?.activeBlockId;
-      els.activeBlock.value = blockIds.includes(activeBlockId) ? activeBlockId : blockIds[0] ?? "";
+      const cueBlockId = state.macroPlayback?.cue?.blockId;
+      els.activeBlock.value = blockIds.includes(cueBlockId)
+        ? cueBlockId
+        : blockIds.includes(activeBlockId) ? activeBlockId : blockIds[0] ?? "";
       renderMacroPlaybackStatus();
     }
 
@@ -967,6 +972,7 @@
       const playersPlaying = Boolean(state.performanceControls?.players?.playing);
       const arrangementRunning = Boolean(state.performanceControls?.arrangement?.running ?? playback?.running);
       els.macroPlaybackState.textContent = `${playersPlaying ? "Players playing" : "Players stopped"} · ${arrangementRunning ? "Arrangement running" : "Arrangement held"}`;
+      els.sectionCueState.textContent = sectionCueText(playback?.cue);
       if (state.tempoPolicy) {
         if (!state.liveTempoDirty) {
           els.liveTempo.value = String(state.tempoPolicy.live ?? 120);
@@ -980,6 +986,24 @@
       }
       els.macroPlaybackDetail.textContent = playbackDetailText(playback);
       startMacroPlaybackTimer();
+    }
+
+    function sectionCueText(cue) {
+      if (!cue?.blockId) return "No section cue pending";
+      const labels = {
+        selected: "Selected",
+        preparing: "Preparing",
+        ready: "Ready",
+        armed: "Armed",
+        active: "Active",
+        missed: "Missed · waiting for next boundary"
+      };
+      const stateLabel = labels[cue.state] ?? cue.state ?? "Selected";
+      const boundary = cue.boundary === "end-of-section"
+        ? "end of section"
+        : cue.boundary === "next-beat" ? "next beat" : cue.boundary === "now" ? "now" : cue.boundary;
+      const error = cue.error ? ` · ${cue.error}` : "";
+      return `Cue ${cue.blockId}: ${stateLabel}${boundary ? ` · ${boundary}` : ""}${error}`;
     }
 
     function playbackDetailText(playback = state.macroPlayback) {
@@ -1589,17 +1613,26 @@
       setStatus("Updating playback block...");
       try {
         state.saving = true;
-        state.score = await fetchJson(`${state.serverUrl}${path}`, undefined, {
+        const result = await fetchJson(`${state.serverUrl}${path}`, undefined, {
           method: "POST",
           body: {
             ...body,
             ...expectedRevisionFields()
           }
         });
+        state.score = result;
+        state.macroPlayback = result.playback ?? {
+          ...state.macroPlayback,
+          cue: result.cue ?? state.macroPlayback?.cue
+        };
         state.client?.adoptServerScore(state.score);
-        state.selectedBlockId = state.score.structureState?.activeBlockId || state.selectedBlockId;
+        if (result.cue?.state === "active") {
+          state.selectedBlockId = state.score.structureState?.activeBlockId || state.selectedBlockId;
+        }
         renderAll();
-        setStatus(`Playing block ${state.score.structureState?.activeBlockId ?? ""}.`);
+        setStatus(result.cue?.state === "active"
+          ? `Block ${result.cue.blockId} is ACTIVE${result.cue.boundary === "now" ? " with Players stopped" : ""}.`
+          : `Cueing block ${result.cue?.blockId ?? ""}; current block remains ${state.score.structureState?.activeBlockId ?? ""}.`);
       } catch (error) {
         if (!options.retried && isStaleScoreError(error)) {
           state.score = await fetchJson(`${state.serverUrl}/score`);

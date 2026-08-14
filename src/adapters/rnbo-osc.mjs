@@ -274,11 +274,17 @@ export function createRnboOscAdapter(config, runtime = {}) {
         throw error;
       }
       const activationMode = options.activationMode === "now" ? "now" : "continue";
-      await adapter.prepareBlock(selectedBlockId, activationMode === "now" ? "update-now" : "apply-next-beat", {
-        fetchImpl: options.fetchImpl ?? runtime.fetchImpl
-      });
-      await adapter.waitForIdle();
-      const updates = await adapter.playbackUpdates(selectedBlockId);
+      let updates = options.reusePrepared === true
+        ? await adapter.playbackUpdates(selectedBlockId)
+        : null;
+      const reusable = updates && Object.values(updates.targets).every((update) => ["prepared", "active"].includes(update.state));
+      if (!reusable) {
+        await adapter.prepareBlock(selectedBlockId, activationMode === "now" ? "update-now" : "apply-next-beat", {
+          fetchImpl: options.fetchImpl ?? runtime.fetchImpl
+        });
+        await adapter.waitForIdle();
+        updates = await adapter.playbackUpdates(selectedBlockId);
+      }
       const pending = Object.values(updates.targets).filter((update) => update.state !== "active");
       if (!pending.length) {
         result = { ...updates, activationMode, action: "already-active", activations: [] };
@@ -332,6 +338,12 @@ export function createRnboOscAdapter(config, runtime = {}) {
             boundary: request.boundary
           });
         }));
+        await options.onArmed?.({
+          blockId: selectedBlockId,
+          scoreRevision,
+          activationMode,
+          requests: structuredClone(requests)
+        });
         const runtimeTempo = Number(runtime.getTempo?.());
         const activations = await adapter.confirmPreparedActivations(requests, {
           tempo: Number.isFinite(runtimeTempo) && runtimeTempo > 0 ? runtimeTempo : activeWrittenTempo(canonical),

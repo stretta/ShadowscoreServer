@@ -122,6 +122,53 @@ test("timer playback adopts an edited arrangement at the next block boundary", (
   playback.close();
 });
 
+test("timer playback prepares and activates the next block before committing the playhead", async () => {
+  const config = {
+    ...defaultConfig,
+    rnbo: {
+      ...defaultConfig.rnbo,
+      lookAheadBeats: 2,
+      activation: { ...defaultConfig.rnbo.activation, armLeadBeats: 0.75 }
+    }
+  };
+  const store = createScoreStore(createInitialScore(config));
+  store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ blocks: ["A", "B"] });
+  const timers = createFakeTimers();
+  let observedAt = 1000;
+  const calls = [];
+  const playback = createMacroPlayback(store, config, {
+    timers,
+    now: () => observedAt,
+    beforeAdvance: async ({ nextBlockId }) => {
+      calls.push(`prepare:${nextBlockId}`);
+      return { prepared: nextBlockId };
+    },
+    armAdvance: async ({ nextBlockId }) => {
+      calls.push(`active:${nextBlockId}`);
+      return { active: nextBlockId };
+    }
+  });
+
+  playback.start({ mode: "timer" });
+  observedAt = 2000;
+  timers.fire(1);
+  await new Promise((resolve) => setImmediate(resolve));
+  observedAt = 2625;
+  timers.fire(1);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(store.getScore().structureState.activeBlockId, "A");
+  assert.deepEqual(calls, ["prepare:B", "active:B"]);
+
+  observedAt = 3000;
+  timers.fire(0);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(store.getScore().structureState.activeBlockId, "B");
+  playback.close();
+});
+
 test("JACK playback holds its latched occurrence until an edited arrangement boundary", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceMesoBlock("A", { tempo: 120, duration: { beats: 4 }, players: {} });
@@ -514,6 +561,87 @@ test("JACK macro playback retries a failed transition arm before the boundary", 
 
   assert.equal(armCount, 2);
   assert.equal(playback.snapshot().activationArm.last.ok, true);
+  playback.close();
+});
+
+test("manual JACK cue prepares an arbitrary section and commits it only after activation", async () => {
+  const config = {
+    ...defaultConfig,
+    rnbo: {
+      ...defaultConfig.rnbo,
+      lookAheadBeats: 2,
+      activation: { ...defaultConfig.rnbo.activation, armLeadBeats: 0.75 }
+    }
+  };
+  const store = createScoreStore(createInitialScore(config));
+  for (const blockId of ["A", "B", "C"]) {
+    store.replaceMesoBlock(blockId, { duration: { beats: 4 }, players: {} });
+  }
+  store.updateMacrostructure({ blocks: ["A", "B", "C"] });
+  const jackTransport = createJackTransportState(config, { now: () => 1000 });
+  const calls = [];
+  const playback = createMacroPlayback(store, config, {
+    jackTransport,
+    beforeAdvance: async ({ nextBlockId }) => {
+      calls.push(`prepare:${nextBlockId}`);
+      return { prepared: nextBlockId };
+    },
+    armAdvance: async ({ nextBlockId }) => {
+      calls.push(`active:${nextBlockId}`);
+      return { active: nextBlockId };
+    }
+  });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack" });
+  playback.cue({ blockId: "C", macroIndex: 2, source: "cue-section" });
+  assert.equal(store.getScore().structureState.activeBlockId, "A");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(playback.snapshot().cue.state, "ready");
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 102.1 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(playback.snapshot().cue.state, "ready");
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 103.3 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(store.getScore().structureState.activeBlockId, "A");
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 104 }));
+  playback.snapshot();
+  assert.equal(store.getScore().structureState.activeBlockId, "C");
+  assert.deepEqual(calls, ["prepare:C", "active:C"]);
+  playback.close();
+});
+
+test("transactional JACK playback holds the current block when the next block is not ACTIVE", async () => {
+  const config = {
+    ...defaultConfig,
+    rnbo: { ...defaultConfig.rnbo, lookAheadBeats: 2 }
+  };
+  const store = createScoreStore(createInitialScore(config));
+  store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ blocks: ["A", "B"] });
+  const jackTransport = createJackTransportState(config, { now: () => 1000 });
+  const playback = createMacroPlayback(store, config, {
+    jackTransport,
+    beforeAdvance: async () => { throw new Error("client offline"); },
+    armAdvance: async () => assert.fail("an unprepared block must not be armed")
+  });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack" });
+  jackTransport.update(jackSnapshot({ absoluteBeat: 102.1 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+  jackTransport.update(jackSnapshot({ absoluteBeat: 104 }));
+  playback.snapshot();
+
+  assert.equal(store.getScore().structureState.activeBlockId, "A");
+  assert.equal(playback.snapshot().activeBlockStartBeat, 104);
   playback.close();
 });
 

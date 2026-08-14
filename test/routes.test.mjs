@@ -1528,6 +1528,68 @@ test("structure playhead routes select, advance, and reset active blocks", async
   assert.match(rejected.body, /unknown mesostructural block 'missing'/);
 });
 
+test("running Cue Section queues a coordinated transition without moving the playhead", async () => {
+  const cues = [];
+  const context = createRouteContext({
+    runtime: {
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          mode: "jack",
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: { source: "jack", usable: true, fresh: true }
+        }),
+        cue(request) {
+          cues.push(request);
+          return {
+            ...this.snapshot(),
+            cue: {
+              blockId: request.blockId,
+              macroIndex: request.macroIndex,
+              boundary: "end-of-section",
+              state: "preparing"
+            }
+          };
+        }
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/structure/playhead", { activeBlockId: "C" });
+
+  assert.equal(result.structureState.activeBlockId, "A");
+  assert.equal(result.cue.blockId, "C");
+  assert.equal(result.cue.state, "preparing");
+  assert.deepEqual(cues, [{ blockId: "C", macroIndex: 2, source: "cue-section" }]);
+});
+
+test("held Cue Section activates required note clients before committing the playhead", async () => {
+  const sequence = [];
+  let context;
+  context = createRouteContext({
+    runtime: {
+      performanceTransport: { playersPlaying: false, arrangementRequestedMode: "hold" },
+      rnboAdapter: {
+        enabled: true,
+        async applyBlockUpdate(blockId, options) {
+          sequence.push(`apply:${blockId}:${options.activationMode}`);
+          assert.equal(context.store.getScore().structureState.activeBlockId, "A");
+          assert.equal(options.reusePrepared, true);
+          return { state: "active", blockId };
+        }
+      }
+    }
+  });
+
+  const result = await requestJson(context, "POST", "/structure/playhead", { activeBlockId: "C" });
+
+  sequence.push(`commit:${context.store.getScore().structureState.activeBlockId}`);
+  assert.deepEqual(sequence, ["apply:C:now", "commit:C"]);
+  assert.equal(result.cue.state, "active");
+  assert.equal(result.cue.boundary, "now");
+});
+
 test("macro playback routes expose, start, and stop the chain runner", async () => {
   let running = false;
   let startOptions = null;

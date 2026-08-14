@@ -1389,7 +1389,11 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/structure/playhead") {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.updateStructureState(body.structureState ?? withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body)));
+      const requested = body.structureState ?? withoutControlFields(body, REVISION_CONTROL_FIELDS);
+      writeJson(response, 200, await cueStructurePlayhead(store, config, runtime, {
+        ...requested,
+        source: "cue-section"
+      }, revisionOptions(body)));
     } catch (error) {
       writeError(response, error);
     }
@@ -1399,7 +1403,15 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/macrostructure/advance") {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.advanceStructurePlayhead(revisionOptions(body)));
+      const score = store.getScore();
+      const blocks = score.macrostructure?.blocks ?? [];
+      const currentIndex = Math.min(Math.max(Number(score.structureState?.macroIndex) || 0, 0), Math.max(0, blocks.length - 1));
+      const nextMacroIndex = blocks.length ? (currentIndex + 1) % blocks.length : 0;
+      writeJson(response, 200, await cueStructurePlayhead(store, config, runtime, {
+        activeBlockId: blocks[nextMacroIndex] ?? score.structureState?.activeBlockId ?? "",
+        macroIndex: nextMacroIndex,
+        source: "next-section"
+      }, revisionOptions(body)));
     } catch (error) {
       writeError(response, error);
     }
@@ -1409,7 +1421,12 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/macrostructure/reset") {
     try {
       const body = await readJson(request);
-      writeJson(response, 200, store.resetStructurePlayhead(revisionOptions(body)));
+      const score = store.getScore();
+      writeJson(response, 200, await cueStructurePlayhead(store, config, runtime, {
+        activeBlockId: score.macrostructure?.blocks?.[0] ?? score.structureState?.activeBlockId ?? "",
+        macroIndex: 0,
+        source: "return-to-start"
+      }, revisionOptions(body)));
     } catch (error) {
       writeError(response, error);
     }
@@ -2412,6 +2429,89 @@ function nextMacroBlockId(score, activeBlockId) {
     : blocks.indexOf(activeBlockId);
   if (activeIndex < 0) return "";
   return blocks[(activeIndex + 1) % blocks.length] ?? "";
+}
+
+async function cueStructurePlayhead(store, config, runtime, request, revisions = {}) {
+  const score = store.getScore();
+  assertCueRevisions(score, revisions);
+  const blockId = optionalString(request.activeBlockId);
+  if (!blockId || !score.mesostructure?.[blockId]) {
+    throw new Error(`unknown mesostructural block '${blockId}'`);
+  }
+  const blocks = score.macrostructure?.blocks ?? [];
+  const requestedIndex = Number(request.macroIndex);
+  const macroIndex = Number.isInteger(requestedIndex) && blocks[requestedIndex] === blockId
+    ? requestedIndex
+    : blocks.indexOf(blockId);
+  const targetMacroIndex = macroIndex >= 0 ? macroIndex : Math.max(0, Number(score.structureState?.macroIndex) || 0);
+
+  const playback = await macroPlaybackSnapshot(runtime, store, config);
+  if (playback.running) {
+    if (typeof runtime.macroPlayback?.cue !== "function") {
+      throw new Error("coordinated section cueing is not available");
+    }
+    const queued = runtime.macroPlayback.cue({
+      blockId,
+      macroIndex: targetMacroIndex,
+      source: request.source ?? "manual"
+    });
+    return {
+      ...store.getScore(),
+      cue: queued.cue,
+      playback: queued
+    };
+  }
+
+  const controls = performanceTransportSnapshot(runtime, playback);
+  const activationMode = controls.players.playing ? "continue" : "now";
+  let update = null;
+  if (runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.applyBlockUpdate === "function") {
+    update = await runtime.rnboAdapter.applyBlockUpdate(blockId, {
+      activationMode,
+      expectedScoreRevision: score.scoreRevision ?? score.version,
+      reusePrepared: true
+    });
+    if (!["active", "no-targets"].includes(update.state)) {
+      const error = new Error(`block '${blockId}' did not reach ACTIVE on every required client`);
+      error.code = "SECTION_CUE_NOT_ACTIVE";
+      throw error;
+    }
+  }
+  const committed = store.updateStructureState({ activeBlockId: blockId, macroIndex: targetMacroIndex }, {
+    ...revisions,
+    sourceClientId: request.source ?? "manual"
+  });
+  runtime.macroPlayback?.clearCue?.();
+  return {
+    ...committed,
+    cue: {
+      source: request.source ?? "manual",
+      blockId,
+      macroIndex: targetMacroIndex,
+      boundary: activationMode === "now" ? "now" : "next-beat",
+      state: "active",
+      error: ""
+    },
+    playbackUpdate: update
+  };
+}
+
+function assertCueRevisions(score, revisions) {
+  const checks = [
+    [revisions.expectedVersion, score.version, "score version"],
+    [revisions.expectedScoreRevision, score.scoreRevision ?? score.version, "score revision"],
+    [revisions.expectedStructureRevision, score.structureRevision ?? 0, "structure revision"]
+  ];
+  for (const [expected, current, label] of checks) {
+    if (expected !== undefined && expected !== null && Number(expected) !== Number(current)) {
+      const error = new Error(`stale ${label} ${expected}; current ${label} is ${current}`);
+      error.code = `stale_${label.replaceAll(" ", "_")}`;
+      error.currentVersion = score.version;
+      error.currentScoreRevision = score.scoreRevision ?? score.version;
+      error.currentStructureRevision = score.structureRevision ?? 0;
+      throw error;
+    }
+  }
 }
 
 async function coherentPlaybackSnapshot(runtime, store, config) {

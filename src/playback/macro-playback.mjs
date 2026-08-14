@@ -11,6 +11,8 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   let running = false;
   let mode = "stopped";
   let timer = undefined;
+  let lookAheadTimer = undefined;
+  let activationArmTimer = undefined;
   let nextAdvanceAt = null;
   let currentBlockDurationMs = 0;
   let timerTempo = null;
@@ -31,9 +33,11 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   let lastPhaseAlignment = null;
   let lastLookAheadKey = "";
   let lookAheadPending = false;
+  let lookAheadPromise = null;
   let lastLookAhead = null;
   let lastActivationArmKey = "";
   let activationArmPending = false;
+  let activationArmPromise = null;
   let lastActivationArm = null;
   let traversalBlocks = [];
   let traversalMacroIndex = 0;
@@ -46,6 +50,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   let rnboWitnessTargetId = "";
   let rnboWitnessRawBeat = null;
   let rnboWitnessEpochBeats = 0;
+  let pendingCue = null;
+  let cueSequence = 0;
+  let transitionGeneration = 0;
 
   const onChange = (event) => {
     if (!running) {
@@ -140,6 +147,36 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       resetWitnessNormalization();
       return snapshot();
     },
+    cue(cueRequest = {}) {
+      const score = store.getScore();
+      const target = normalizeCueTarget(score, cueRequest);
+      if (activationArmPending || pendingCue?.state === "armed") {
+        throw new Error("the current cue is already armed and cannot be replaced");
+      }
+      resetTransitionAttempt({ preserveCue: true });
+      pendingCue = {
+        id: ++cueSequence,
+        source: String(cueRequest.source ?? "manual"),
+        requestedAt: new Date().toISOString(),
+        blockId: target.blockId,
+        macroIndex: target.macroIndex,
+        boundary: running ? "end-of-section" : "now",
+        state: "selected",
+        error: ""
+      };
+      if (running && mode === "jack") {
+        preparePendingCue();
+        followSelectedWitness();
+      } else if (running && mode === "timer") {
+        scheduleTimerTransition({ prepareImmediately: true });
+      }
+      return snapshot();
+    },
+    clearCue() {
+      pendingCue = null;
+      resetTransitionAttempt();
+      return snapshot();
+    },
     tempoChanged() {
       if (!running) return snapshot();
       if (mode === "timer") {
@@ -186,16 +223,106 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       if (!running) {
         return;
       }
-      try {
-        adoptPendingArrangement();
-        store.advanceStructurePlayhead({ sourceClientId: "macro-playback" });
-      } catch (error) {
-        running = false;
-        nextAdvanceAt = null;
-        currentBlockDurationMs = 0;
-        console.error(`[macro-playback] advance failed: ${messageForError(error)}`);
+      if (!transactionalAdvanceEnabled()) {
+        try {
+          adoptPendingArrangement();
+          store.advanceStructurePlayhead({ sourceClientId: "macro-playback" });
+        } catch (error) {
+          running = false;
+          nextAdvanceAt = null;
+          currentBlockDurationMs = 0;
+          console.error(`[macro-playback] advance failed: ${messageForError(error)}`);
+        }
+        return;
       }
+      void completeTimerTransition();
     }, delayMs);
+    scheduleTimerTransition();
+  }
+
+  function scheduleTimerTransition(options = {}) {
+    clearTransitionTimers();
+    if (!running || mode !== "timer" || !transactionalAdvanceEnabled()) return;
+    const score = traversalScore(store.getScore());
+    const durationBeats = macroBlockDurationBeats(score, config);
+    const tempo = effectiveTempo(score);
+    const elapsedBeats = timerElapsedBeats + (timerBlockStartedAt === null ? 0 : Math.max(0, now() - timerBlockStartedAt) * tempo / 60000);
+    const remainingBeats = Math.max(0, durationBeats - elapsedBeats);
+    const lookAheadBeats = Math.max(0, Number(config.rnbo?.lookAheadBeats ?? 12));
+    const armLeadBeats = Math.min(0.999, Math.max(0, Number(config.rnbo?.activation?.armLeadBeats ?? 0.75)));
+    const prepareDelayMs = options.prepareImmediately ? 0 : durationMsAtTempo(Math.max(0, remainingBeats - lookAheadBeats), tempo);
+    const armDelayMs = durationMsAtTempo(Math.max(0, remainingBeats - armLeadBeats), tempo);
+    lookAheadTimer = timers.setTimeout(() => {
+      lookAheadTimer = undefined;
+      runTimerBeforeAdvance({ force: options.prepareImmediately === true });
+    }, Math.max(1, prepareDelayMs));
+    activationArmTimer = timers.setTimeout(() => {
+      activationArmTimer = undefined;
+      runTimerArmAdvance();
+    }, Math.max(1, armDelayMs));
+  }
+
+  function timerDerivedPosition() {
+    const score = traversalScore(store.getScore());
+    const durationBeats = macroBlockDurationBeats(score, config);
+    const tempo = effectiveTempo(score);
+    const elapsed = timerBlockStartedAt === null ? 0 : Math.max(0, now() - timerBlockStartedAt) * tempo / 60000;
+    const beatIntoBlock = Math.max(0, Math.min(durationBeats, timerElapsedBeats + elapsed));
+    return {
+      activeBlockId: traversalBlockId,
+      macroIndex: traversalMacroIndex,
+      durationBeats,
+      beatIntoBlock,
+      compositionBeat: cumulativeBeatsBeforeIndex(score, traversalMacroIndex) + beatIntoBlock
+    };
+  }
+
+  function runTimerBeforeAdvance(options = {}) {
+    runBeforeAdvance(traversalScore(store.getScore()), timerDerivedPosition(), { source: "timer" }, options);
+  }
+
+  function runTimerArmAdvance() {
+    runArmAdvance(traversalScore(store.getScore()), timerDerivedPosition(), { source: "timer" });
+  }
+
+  function preparePendingCue() {
+    const score = traversalScore(store.getScore());
+    const durationBeats = activeBlockDurationBeats || macroBlockDurationBeats(score, config);
+    runBeforeAdvance(score, {
+      activeBlockId: traversalBlockId,
+      macroIndex: traversalMacroIndex,
+      durationBeats,
+      beatIntoBlock: Math.max(0, Number(beatIntoBlock) || 0),
+      compositionBeat: Math.max(0, Number(compositionBeat) || cumulativeBeatsBeforeIndex(score, traversalMacroIndex))
+    }, selectedWitness(), { force: true });
+  }
+
+  async function completeTimerTransition() {
+    try {
+      if (activationArmPending && activationArmPromise) {
+        await activationArmPromise.catch(() => undefined);
+      }
+      const score = traversalScore(store.getScore());
+      const current = { macroIndex: traversalMacroIndex, activeBlockId: traversalBlockId };
+      const next = nextArrangementEntry(score, current);
+      if (!next) {
+        scheduleNext();
+        return;
+      }
+      if (transitionIsActive(current.activeBlockId, next.nextBlockId)) {
+        commitTransition(next);
+        return;
+      }
+      markCueMissed(`block '${next.nextBlockId}' was not ACTIVE at the requested boundary`);
+      resetTransitionAttempt({ preserveCue: true });
+      scheduleNext();
+    } catch (error) {
+      running = false;
+      nextAdvanceAt = null;
+      currentBlockDurationMs = 0;
+      markCueMissed(messageForError(error));
+      console.error(`[macro-playback] advance failed: ${messageForError(error)}`);
+    }
   }
 
   function reanchorTimerTempo() {
@@ -213,6 +340,18 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     if (timer !== undefined) {
       timers.clearTimeout(timer);
       timer = undefined;
+    }
+    clearTransitionTimers();
+  }
+
+  function clearTransitionTimers() {
+    if (lookAheadTimer !== undefined) {
+      timers.clearTimeout(lookAheadTimer);
+      lookAheadTimer = undefined;
+    }
+    if (activationArmTimer !== undefined) {
+      timers.clearTimeout(activationArmTimer);
+      activationArmTimer = undefined;
     }
   }
 
@@ -314,16 +453,25 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       return;
     }
 
+    let committed = { nextMacroIndex: derived.macroIndex, nextBlockId: derived.activeBlockId };
+    if (transactionalAdvanceEnabled()) {
+      const next = nextArrangementEntry(score, current);
+      if (!next) return;
+      if (activationArmPending) return;
+      if (!transitionIsActive(current.activeBlockId, next.nextBlockId)) {
+        holdAtCurrentBlock(witness, `block '${next.nextBlockId}' was not ACTIVE at the requested boundary`);
+        return;
+      }
+      committed = next;
+    }
+
     if (pendingArrangement) {
       adoptPendingArrangementAtBeatBoundary(witness, derived, previousBlockEndBeat);
       return;
     }
 
     try {
-      store.updateStructureState({
-        macroIndex: derived.macroIndex,
-        activeBlockId: derived.activeBlockId
-      }, { sourceClientId: "macro-playback" });
+      commitTransition(committed);
     } catch (error) {
       running = false;
       mode = "stopped";
@@ -331,8 +479,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       console.error(`[macro-playback] beat-derived advance failed: ${messageForError(error)}`);
       return;
     }
-    traversalMacroIndex = derived.macroIndex;
-    traversalBlockId = derived.activeBlockId;
+    if (transactionalAdvanceEnabled()) {
+      reanchorCommittedTransition(witness, committed, previousBlockEndBeat);
+    }
     runAfterBeatDerivedAdvance({
       anchorBeat: activeBlockStartBeat,
       boundaryBeat: activeBlockStartBeat,
@@ -489,8 +638,26 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       activationArm: {
         pending: activationArmPending,
         last: lastActivationArm
-      }
+      },
+      cue: cueSnapshot()
     };
+  }
+
+  function cueSnapshot() {
+    if (pendingCue) return { ...pendingCue };
+    if (lastActivationArm?.ok && lastActivationArm.nextBlockId) {
+      return {
+        id: null,
+        source: "automatic",
+        requestedAt: null,
+        blockId: lastActivationArm.nextBlockId,
+        macroIndex: null,
+        boundary: "end-of-section",
+        state: "active",
+        error: ""
+      };
+    }
+    return null;
   }
 
   function timerBeatsRemaining(score) {
@@ -612,11 +779,11 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       });
   }
 
-  function runBeforeAdvance(score, derived, witness) {
+  function runBeforeAdvance(score, derived, witness, options = {}) {
     if (typeof beforeAdvance !== "function" || lookAheadPending) return;
     const threshold = Math.max(0, Number(config.rnbo?.lookAheadBeats ?? 12));
     const beatsRemaining = Math.max(0, derived.durationBeats - derived.beatIntoBlock);
-    if (beatsRemaining > threshold) return;
+    if (!options.force && beatsRemaining > threshold) return;
     const next = nextArrangementEntry(score, derived);
     if (!next) return;
     const { nextMacroIndex, nextBlockId } = next;
@@ -625,7 +792,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     if (key === lastLookAheadKey) return;
     lastLookAheadKey = key;
     lookAheadPending = true;
-    Promise.resolve(beforeAdvance({
+    const generation = transitionGeneration;
+    if (pendingCue) pendingCue.state = "preparing";
+    lookAheadPromise = Promise.resolve(beforeAdvance({
       activeBlockId: derived.activeBlockId,
       macroIndex: derived.macroIndex,
       nextBlockId,
@@ -634,6 +803,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       boundaryBeat: activeBlockEndBeat,
       witnessSource: witness.source
     })).then((result) => {
+      if (generation !== transitionGeneration) return;
       lookAheadPending = false;
       lastLookAhead = {
         ok: true,
@@ -643,7 +813,10 @@ export function createMacroPlayback(store, config = {}, options = {}) {
         boundaryBeat: activeBlockEndBeat,
         result: result ?? null
       };
+      if (pendingCue && pendingCue.blockId === nextBlockId) pendingCue.state = "ready";
+      if (mode === "timer" && activationArmTimer === undefined) runTimerArmAdvance();
     }).catch((error) => {
+      if (generation !== transitionGeneration) return;
       lookAheadPending = false;
       lastLookAheadKey = "";
       lastLookAhead = {
@@ -656,6 +829,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       };
       console.error(`[macro-playback] look-ahead preparation failed: ${messageForError(error)}`);
     });
+    return lookAheadPromise;
   }
 
   function runArmAdvance(score, derived, witness) {
@@ -677,7 +851,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     const boundaryBeat = activeBlockEndBeat;
     lastActivationArmKey = key;
     activationArmPending = true;
-    Promise.resolve(armAdvance({
+    const generation = transitionGeneration;
+    if (pendingCue) pendingCue.state = "armed";
+    activationArmPromise = Promise.resolve(armAdvance({
       activeBlockId: derived.activeBlockId,
       macroIndex: derived.macroIndex,
       nextBlockId,
@@ -687,6 +863,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       witnessSource: witness.source,
       preparation: lastLookAhead.result
     })).then((result) => {
+      if (generation !== transitionGeneration) return;
       activationArmPending = false;
       lastActivationArm = {
         ok: true,
@@ -696,7 +873,10 @@ export function createMacroPlayback(store, config = {}, options = {}) {
         boundaryBeat,
         result: result ?? null
       };
+      if (pendingCue && pendingCue.blockId === nextBlockId) pendingCue.state = "active";
+      if (mode === "jack") followSelectedWitness();
     }).catch((error) => {
+      if (generation !== transitionGeneration) return;
       activationArmPending = false;
       lastActivationArmKey = "";
       lastActivationArm = {
@@ -709,9 +889,16 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       };
       console.error(`[macro-playback] activation arm failed: ${messageForError(error)}`);
     });
+    return activationArmPromise;
   }
 
   function nextArrangementEntry(traversal, derived) {
+    if (pendingCue) {
+      return {
+        nextMacroIndex: pendingCue.macroIndex,
+        nextBlockId: pendingCue.blockId
+      };
+    }
     if (pendingArrangement) {
       const canonical = store.getScore();
       const blocks = pendingArrangement.blocks;
@@ -733,6 +920,92 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       nextBlockId: blocks[nextMacroIndex]
     };
   }
+
+  function transactionalAdvanceEnabled() {
+    return typeof beforeAdvance === "function" && typeof armAdvance === "function";
+  }
+
+  function transitionIsActive(activeBlockId, nextBlockId) {
+    return lastActivationArm?.ok === true &&
+      lastActivationArm.activeBlockId === activeBlockId &&
+      lastActivationArm.nextBlockId === nextBlockId;
+  }
+
+  function commitTransition(next) {
+    adoptPendingArrangement();
+    store.updateStructureState({
+      macroIndex: next.nextMacroIndex,
+      activeBlockId: next.nextBlockId
+    }, { sourceClientId: "macro-playback" });
+    traversalMacroIndex = next.nextMacroIndex;
+    traversalBlockId = next.nextBlockId;
+    pendingCue = null;
+    resetTransitionAttempt();
+  }
+
+  function holdAtCurrentBlock(witness, reason) {
+    markCueMissed(reason);
+    const score = traversalScore(store.getScore());
+    macroStartIndex = traversalMacroIndex;
+    macroStartOffsetBeats = cumulativeBeatsBeforeIndex(score, traversalMacroIndex);
+    macroStartBeat = witness.absoluteBeat;
+    activeBlockStartBeat = witness.absoluteBeat;
+    activeBlockDurationBeats = macroBlockDurationBeats(score, config);
+    activeBlockEndBeat = witness.absoluteBeat + activeBlockDurationBeats;
+    compositionBeat = macroStartOffsetBeats;
+    beatIntoBlock = 0;
+    resetTransitionAttempt({ preserveCue: true });
+  }
+
+  function reanchorCommittedTransition(witness, committed, boundaryBeat) {
+    const score = traversalScore(store.getScore());
+    const anchor = Number.isFinite(boundaryBeat) ? boundaryBeat : witness.absoluteBeat;
+    macroStartIndex = committed.nextMacroIndex;
+    macroStartOffsetBeats = cumulativeBeatsBeforeIndex(score, committed.nextMacroIndex);
+    macroStartBeat = anchor;
+    activeBlockStartBeat = anchor;
+    activeBlockDurationBeats = macroBlockDurationBeats(score, config);
+    activeBlockEndBeat = anchor + activeBlockDurationBeats;
+    const overshoot = Math.max(0, witness.absoluteBeat - anchor);
+    compositionBeat = macroStartOffsetBeats + overshoot;
+    beatIntoBlock = Math.min(activeBlockDurationBeats, overshoot);
+  }
+
+  function markCueMissed(error) {
+    if (pendingCue) {
+      pendingCue.state = "missed";
+      pendingCue.error = error;
+    }
+  }
+
+  function resetTransitionAttempt(options = {}) {
+    transitionGeneration += 1;
+    lastLookAheadKey = "";
+    lookAheadPending = false;
+    lookAheadPromise = null;
+    lastLookAhead = null;
+    lastActivationArmKey = "";
+    activationArmPending = false;
+    activationArmPromise = null;
+    lastActivationArm = null;
+    if (!options.preserveCue) pendingCue = null;
+  }
+}
+
+function normalizeCueTarget(score, cueRequest) {
+  const blockId = String(cueRequest.blockId ?? "").trim();
+  if (!blockId || !score.mesostructure?.[blockId]) {
+    throw new Error(`unknown mesostructural block '${blockId}'`);
+  }
+  const blocks = score.macrostructure?.blocks ?? [];
+  const requestedIndex = Number(cueRequest.macroIndex);
+  const macroIndex = Number.isInteger(requestedIndex) && blocks[requestedIndex] === blockId
+    ? requestedIndex
+    : blocks.indexOf(blockId);
+  return {
+    blockId,
+    macroIndex: macroIndex >= 0 ? macroIndex : Math.max(0, Number(score.structureState?.macroIndex) || 0)
+  };
 }
 
 export function macroBlockDurationBeats(score, config = {}) {

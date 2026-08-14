@@ -53,8 +53,12 @@ Design and implementation notes:
   display-rate browser wiper interpolation, shared Matrix/Piano Roll playback
   observation, and server-owned RNBO polling consolidation.
 - [`piano-roll-clip-editor-plan.md`](piano-roll-clip-editor-plan.md):
-  piano-roll clip editor plan, note-duration resizing, shared Matrix Edit
-  foundations, and enlarged velocity-lane rollout.
+  historical first-version plan for note-duration resizing, explicit Save, and
+  shared Matrix Edit foundations. The explicit-Save behavior has been
+  superseded by autosave with recoverable drafts and Revert.
+- [`piano-roll-orchestration-plan.md`](piano-roll-orchestration-plan.md):
+  current condensed-score model and the implemented atomic **Move to...**
+  workflow across player clips.
 - [`shadowscore-user-facing-style-plan.md`](shadowscore-user-facing-style-plan.md):
   Smol-derived visual direction, shared UI tokens, page-by-page application
   notes, and styling rollout plan for server-hosted user-facing pages.

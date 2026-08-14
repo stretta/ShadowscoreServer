@@ -188,9 +188,10 @@ update only the nested diagnostic connection indicator.
 
 The `/editors` route serves the registered OSC-generator index from
 `public/editors`, and `/editors/manifest` exposes the generator manifest JSON.
-The bundled ListSequencer, ListVelSequencer, AnalogSequencer,
-TriggerSequencer, Drumbox, Vantor, Plate, Poland, SoftPiano, Element, and TTID
-editors share the mesostructural OSC state workflow. Their focused instance
+The twelve bundled ListSequencer, ListVelSequencer, AnalogSequencer,
+TriggerSequencer, SingleHalfKrell, Drumbox, Vantor, Plate, Poland, SoftPiano,
+Element, and Block Attributes editors share the mesostructural OSC state
+workflow. Their focused instance
 determines the score role, PLAYING and
 EDITING identify the transport and write destinations, and CHASE optionally
 keeps them together.
@@ -216,7 +217,11 @@ compiled into the numeric ShadowScore OSC transaction stream and sent to the
 configured RNBO inport address. RNBO compilation follows the active
 mesostructural block: each assignment-bound target receives that player's
 resolved clip material for the current block. Looped clips repeat across the
-containing block duration; one-shot clips play once.
+containing block duration; one-shot clips play once. For clips whose
+`behavior.followsScale` is not `false`, the compiled sounding pitches are
+quantized to the destination block's TTID. This runtime interpretation does not
+rewrite the stored notes or their rooted scale metadata; scale-exempt clips keep
+their stored pitches.
 
 Active macro entry changes also enqueue composition-owned OSC snapshot recall.
 The entry key includes macro index and block id, so repeated observations do
@@ -237,9 +242,13 @@ play.
 - **Matrix Edit** owns block-context interlock editing: select a block, edit one
   assigned player's clip on the grid, and see other assigned clips as read-only
   reference layers.
-- **Piano Roll** owns duration, onset, pitch, and note-specific velocity edits
-  for an assigned clip. It preserves per-clip drafts until explicit Save and
-  shows projected loop aliases, reference clips, and live playback position.
+- **Piano Roll** is a condensed-score orchestration surface. It owns duration,
+  onset, pitch, and note-specific velocity edits for a focused assigned clip,
+  autosaves completed gestures while retaining recoverable per-clip drafts and
+  Revert, and shows projected loop aliases, every assigned player's reference
+  notes, and live playback position. Alt-click, right-click, or use the keyboard
+  context menu on any visible note to move it atomically to another player's
+  assigned clip or create that player's part in the current block.
 - **Admin** owns lab operations: assignments, saved scores, backup/restore,
   migration from legacy voice notes, and reset tools.
 
@@ -283,6 +292,9 @@ For the session-day operator flow, see
   for one block and one or more checked instances. The first write creates the
   required role, clip, and layer; later writes replace the same independent
   instance state.
+- `POST /osc/block-state/capture`: read complete state from one or more checked
+  online instances and atomically save each independent Block State in the
+  requested block.
 - `POST /osc/block-state/duplicate`: copy checked instances' written state
   between blocks, requiring explicit replacement intent when the destination
   is already Written.
@@ -296,6 +308,8 @@ For the session-day operator flow, see
 - `POST /osc/broadcast`: expand filtered OSC targets at request time and send one OSC message or named parameter write to each resolved target.
 - `GET /osc/macros`: list saved OSC macros from the host macro library.
 - `POST /osc/macros`: save or replace an OSC macro.
+- `POST /osc/macros/run`: validate, dry-run, or execute an inline macro without
+  saving it.
 - `POST /osc/macros/:macroId/run`: validate, dry-run, or execute one saved OSC macro.
 - `GET /editors/manifest`: registered instrument-editor manifest.
 - `GET /playback/timing-contracts`: target-specific compiled playback timing contracts for the active block, including selected stage resolution, `ClockInterval`/ticks-per-stage, `MaxSteps`/pattern length, target capacities, compact/full-clear replacement mode, and quantization diagnostics when adaptive fidelity modes are enabled.
@@ -340,6 +354,11 @@ For the session-day operator flow, see
 - `POST /clips`: add one reusable clip with `{ "clipId": "...", "clip": { ... } }`.
 - `POST /clips/:clipId`: add or replace one reusable clip.
 - `POST /clips/:clipId/rename`: rename one reusable clip and update mesostructural references.
+- `POST /clips/actions/move-note`: atomically move one note from its source
+  player clip to another player's clip in the selected block. The route can
+  create and assign a missing destination part, preserves expressive note
+  fields, rejects stale or broken references, and requires `confirmShared` when
+  either clip is reused elsewhere.
 - `DELETE /clips/:clipId`: remove one reusable clip. The server rejects removal while a clip is assigned in a mesostructural block.
 
 Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
@@ -384,7 +403,11 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `POST /admin/restore`: restore a score snapshot JSON body through the normal score normalization path.
 - `GET /admin/scores`: list named score JSON files saved on the host.
 - `POST /admin/scores`: save the current score to the host score library with an optional `{ "name": "..." }`.
-- `POST /admin/scores/new`: replace the current score with a fresh score from the configured ensemble defaults.
+- `POST /admin/scores/new`: replace the current score with a fresh score from
+  the configured ensemble defaults and immediately activate its empty active
+  block on RNBO clients. If client activation fails, the route returns `502`
+  with the already-created score in the response; the canonical replacement is
+  not rolled back.
 - `POST /admin/scores/initialize/preview`: validate a declarative score-initialization request without mutation and return its exact score skeleton, summary, and current revision base.
 - `POST /admin/scores/initialize`: atomically create the previewed player, clip, block, macro, and OSC-role skeleton. Include the preview's `expectedVersion`, `expectedScoreRevision`, and `expectedStructureRevision` to reject a stale apply. Live device mappings and OSC clips remain separate onboarding operations.
 - `POST /admin/scores/:scoreId/load`: restore a saved score from the host score library.
@@ -399,6 +422,9 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /editors/analogsequencer`: bundled 16-stage analog sequencer OSC editor with canonical instant-write block state and explicit recall.
 - `GET /editors/triggersequencer`: bundled 16-step bitmask trigger sequencer
   OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/singlehalfkrell`: bundled SingleHalfKrell envelope, pitch, FM,
+  and quantizer editor with canonical instant-write block state and explicit
+  recall.
 - `GET /editors/drumbox`: bundled synth-drum, sample-voice, and plate-reverb
   OSC editor with one focused read source and checked live write destinations.
 - `GET /editors/vantor`: bundled three-oscillator Vantor OSC editor with one
@@ -407,11 +433,13 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /editors/plate`: bundled Plate reverb OSC editor with canonical instant-write block state and explicit recall.
 - `GET /editors/poland`: bundled Poland OSC editor with canonical instant-write block state and explicit recall.
 - `GET /editors/softpiano`: bundled SoftPiano OSC editor with canonical instant-write block state and explicit recall.
-- `GET /editors/ttid`: bundled TTID mask and transpose OSC editor with canonical instant-write block state and explicit recall.
+- `GET /editors/ttid`: bundled Block Attributes editor for block-owned TTID,
+  Swing/SwingAmt, and compatible transpose destinations.
 - `GET /tools/osc-volume`: OSC target volume trim tool.
 - `GET /tools/osc-macros`: OSC macro builder and validator.
 - `GET /event-list`: canonical clip attribute and note-event editor.
-- `GET /piano-roll`: assigned-clip piano-roll editor with explicit per-clip drafts and Save.
+- `GET /piano-roll`: autosaving condensed-score editor with recoverable
+  per-clip drafts, Revert, and atomic cross-player note orchestration.
 - `GET /structure-editor`: meso/macro structure editor.
 - `GET /events`: server-sent event stream of score changes.
 - `GET /collab`: WebSocket collaboration endpoint for realtime JSON commands.

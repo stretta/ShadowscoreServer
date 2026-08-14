@@ -1,5 +1,15 @@
 # Piano Roll Orchestration Plan
 
+## Implementation Status
+
+The initial condensed-score orchestration slice is implemented. Piano Roll
+autosaves completed note gestures, preserves recoverable drafts and Revert, and
+supports Alt-click, browser context-menu, and keyboard access to **Move to...**.
+The atomic server transaction handles existing destination clips, creates and
+assigns missing parts, protects shared clips, preserves expressive note fields,
+and rejects stale or broken references. The actions in **Deferred Actions**
+remain unimplemented.
+
 ## Intent
 
 Evolve the Piano Roll from a focused clip editor into a condensed-score

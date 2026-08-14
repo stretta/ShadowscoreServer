@@ -1,5 +1,17 @@
 # Piano Roll Clip Editor Plan
 
+## Historical Status
+
+This document records the first-version design. The route, duration editing,
+loop projection, reference layers, zoom, velocity lane, and recoverable
+per-clip drafts were delivered, but the explicit-Save decision below has been
+superseded. The current editor autosaves completed gestures after a short quiet
+window, retains Revert and stale-draft recovery, and exposes playback application
+separately. It has also evolved into the condensed-score orchestration surface
+described in
+[`piano-roll-orchestration-plan.md`](piano-roll-orchestration-plan.md), including
+atomic cross-player **Move to...** operations.
+
 ## Intent
 
 Create a piano-roll style editor for ShadowScore clips. The first version should

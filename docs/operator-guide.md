@@ -12,7 +12,8 @@ ShadowscoreServer host.
 - Arrange (`/structure-editor`) is the main form and assignment surface.
 - Event List is the canonical clip editor.
 - Matrix Edit is the live block-context performance workspace.
-- Piano Roll is the explicit-save time, duration, pitch, and velocity editor.
+- Piano Roll is the autosaving time, duration, pitch, velocity, and condensed-score
+  orchestration editor. Recoverable drafts and Revert remain available.
 - Admin is for lab operations: score backup/restore, saved scores, assignment
   presets, resets, migration tools, and RNBO resend.
 
@@ -143,7 +144,11 @@ Use Piano Roll for:
 - resizing a note from its right edge;
 - note-specific velocity edits and keyboard nudges;
 - reviewing loop aliases, reference clips, and the live playback wiper;
-- accumulating per-clip drafts and saving them explicitly.
+- autosaving completed gestures while retaining recoverable per-clip drafts and
+  Revert; and
+- Alt-clicking, right-clicking, or using the keyboard context menu on any visible
+  player note to **Move to...** another player. The move is atomic and can create
+  and assign a missing destination part in the current block.
 
 Piano Roll is a first-class clip editor for performance timing. Event List
 remains the exact-review surface for full clip attributes and advanced note
@@ -151,7 +156,8 @@ fields such as probability, deviation, and release velocity. Arrange owns block
 duration and player-to-clip assignment and remains served at
 `/structure-editor`.
 
-Use `/editors` and its eleven bundled instrument editors, plus
+Use `/editors` and its twelve bundled instrument editors, including
+SingleHalfKrell and the Block Attributes editor, plus
 `/tools/osc-volume` and `/tools/osc-macros`, for instrument-control surfaces.
 Persistent control gestures send to the checked live instances and save their
 complete canonical block state at the gesture's commit boundary. There is no
@@ -162,11 +168,19 @@ clip. ListSequencer list controls and ListVelSequencer rows can be rotated in
 the browser, and ListVelSequencer row mute buttons write the export's available
 mute parameters.
 
+Block TTID also controls ShadowScore playback pitch interpretation. When RNBO
+transactions are compiled, notes in clips that follow scale are quantized to
+the destination block's TTID without rewriting the stored notes or rooted scale
+metadata. Clips with `behavior.followsScale: false` keep their stored pitches.
+
 ## Score Operations
 
 Admin exposes the usual session operations:
 
-- New Score creates a fresh score from the configured ensemble defaults.
+- New Score replaces the canonical score from the configured ensemble defaults
+  and immediately activates the empty replacement on RNBO clients. If the UI
+  reports that players could not be updated, the new canonical score was still
+  created; restore or reload the intended score before retrying client recovery.
 - Save Current Score writes a named JSON score under `data/scores/`.
 - Load restores a saved score through the normal normalization path.
 - Download Backup downloads the current active score JSON.

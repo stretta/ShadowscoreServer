@@ -11,7 +11,10 @@ reference documents the ownership contract. Matrix Edit now writes block TTID
 non-destructively, folds the visible pitch grid to that mask, and reserves pitch
 mutation for an explicit focused-document `Quantize to TTID` action. The atomic
 scale-transform endpoint remains available as a server API but is no longer the
-Matrix Edit scale-selection path.
+Matrix Edit scale-selection path. RNBO score compilation now also interprets
+the destination block TTID at playback time: pitches from clips that follow
+scale are quantized to the TTID without mutating their stored notes or scale
+metadata, while `behavior.followsScale: false` clips remain unchanged.
 
 The deployed `wren` topology was verified on 2026-07-17 with the host
 ListSequencer, the remote `finch` ListSequencer, and a Quantizer export; all
@@ -70,6 +73,9 @@ The ownership rules are:
   again.
 - Matrix Edit changes focused note data only after explicit confirmation through
   `Quantize to TTID`; that action does not infer or write rooted scale metadata.
+- RNBO score compilation quantizes the sounding pitches of scale-following
+  clips to the destination block's TTID. This is a runtime projection, not a
+  stored-note mutation; `behavior.followsScale: false` opts a clip out.
 - OSC editors write block TTID only.
 - TTID never belongs to an OSC clip or instance snapshot.
 - Direct TTID editing may intentionally diverge from rooted scale metadata and

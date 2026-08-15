@@ -1,5 +1,7 @@
 #!/usr/bin/env node
+import fs from "node:fs/promises";
 import os from "node:os";
+import path from "node:path";
 import { configuredRnboTargets, discoverRnboControlTargets, discoverRnboDevices, discoverRnboTargets } from "./adapters/rnbo-oscquery.mjs";
 import { loadConfig } from "./config.mjs";
 import { createOscQueryBonjourDiscovery } from "./coordinator/bonjour-discovery.mjs";
@@ -31,6 +33,7 @@ export async function runRegistrationAgent(config, options = {}) {
       fetchImpl: options.fetchImpl,
       wait: options.wait
     });
+    await writeRegistrationState(config, { sessionHostUrl, unitId }, options);
     await refreshRegistration(config, sessionHostUrl, unitId, options);
   };
 
@@ -51,6 +54,23 @@ export async function runRegistrationAgent(config, options = {}) {
       console.error(`[registration-agent] refresh failed: ${messageForError(error)}`);
     });
   }, intervalMs);
+}
+
+export async function writeRegistrationState(config, state, options = {}) {
+  if (typeof options.writeRegistrationState === "function") {
+    return options.writeRegistrationState(state);
+  }
+  const statePath = String(config.registration?.statePath ?? "data/registration-state.json").trim();
+  if (!statePath) return;
+  const resolvedPath = path.resolve(statePath);
+  const temporaryPath = `${resolvedPath}.${process.pid}.tmp`;
+  await fs.mkdir(path.dirname(resolvedPath), { recursive: true });
+  await fs.writeFile(temporaryPath, `${JSON.stringify({
+    sessionHostUrl: stripTrailingSlash(state.sessionHostUrl),
+    unitId: stringField(state.unitId),
+    updatedAt: new Date().toISOString()
+  }, null, 2)}\n`, "utf8");
+  await fs.rename(temporaryPath, resolvedPath);
 }
 
 export async function resolveSessionHostUrl(config, options = {}) {

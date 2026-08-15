@@ -593,12 +593,16 @@ test("transport status page exposes host transport controls", async () => {
   assert.doesNotMatch(response.body, /<details[^>]+id="recent-transport-events"[^>]+open/);
   assert.match(response.body, /transport-events-status/);
   assert.match(response.body, /transportEvents\.onerror = \(\) => \{\s+fields\["transport-events-status"\]\.textContent = "Disconnected"/);
+  assert.match(response.body, /Cannot reach ShadowScore at/);
   assert.match(response.body, /\/transport\/players\/play/);
   assert.match(response.body, /\/transport\/players\/stop/);
   assert.match(response.body, /\/transport\/arrangement\/run/);
   assert.match(response.body, /\/transport\/arrangement\/hold/);
   assert.match(response.body, /\/macrostructure\/advance/);
   assert.match(response.body, /\/macrostructure\/reset/);
+  assert.match(response.body, /Join Running Players/);
+  assert.match(response.body, /let actionError = ""/);
+  assert.match(response.body, /if \(!actionError\) fields\.status\.textContent/);
 });
 
 test("playback timing contracts include one entry per playback target", async () => {
@@ -1966,6 +1970,242 @@ test("Players Play ignores stale readiness failures for deleted playback targets
   assert.equal(played.transport.arrangement.running, true);
 });
 
+test("Players Play ignores a failed redundant prepare when the desired payload is already active", async () => {
+  let prepareCount = 0;
+  let applyCount = 0;
+  let running = false;
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: { targets: [{ id: "finch", host: "finch.local", port: 1234, address: "/rnbo/inst/2/messages/in/shadowscore" }] }
+    }),
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async waitForIdle() {},
+        async prepareBlock() { prepareCount += 1; },
+        async applyBlockUpdate() { applyCount += 1; },
+        async playbackUpdates() {
+          return { targets: { finch: { targetId: "finch", state: "active", activeTransaction: 1005 } } };
+        },
+        sendStatus: () => [{ targetId: "finch", ack: { ok: false, status: "rejected", transactionId: 1010 } }],
+        sendQueueStatus: () => ({ inProgress: false, queued: false })
+      },
+      rnboParamWriter: async () => {},
+      macroPlayback: {
+        snapshot: () => ({ running, mode: running ? "timer" : "stopped", activeBlockId: "A", macroIndex: 0 }),
+        start: () => { running = true; return context.runtime.macroPlayback.snapshot(); },
+        stop: () => { running = false; return context.runtime.macroPlayback.snapshot(); }
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "finch",
+    rnboHost: "finch.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+
+  const played = await requestJson(context, "POST", "/transport/players/play", { mode: "timer" });
+  assert.equal(played.transport.players.playing, true);
+  assert.equal(prepareCount, 0);
+  assert.equal(applyCount, 0);
+  assert.equal(played.rnboReadiness.source, "playback-updates");
+  assert.equal(played.rnboReadiness.allActive, true);
+});
+
+test("Transport Play adopts externally moving active players without reset or payload writes", async () => {
+  let startOptions;
+  let prepareCount = 0;
+  let applyCount = 0;
+  let jackStartCount = 0;
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [{
+          id: "finch",
+          host: "finch.local",
+          port: 1234,
+          address: "/rnbo/inst/2/messages/in/shadowscore",
+          currentStage: 40,
+          stageMovement: "moving"
+        }]
+      }
+    }),
+    runtime: {
+      rnboStageCollector: {
+        async ensureObservations() {},
+        targets: (targets) => targets.map((target) => ({
+          ...target,
+          currentStage: 40,
+          stageMovement: "moving",
+          stageReadbackStatus: "fresh"
+        }))
+      },
+      rnboAdapter: {
+        enabled: true,
+        async waitForIdle() {},
+        async prepareBlock() { prepareCount += 1; },
+        async applyBlockUpdate() { applyCount += 1; },
+        async playbackUpdates() {
+          return { targets: { finch: { targetId: "finch", state: "saved-not-active", activeTransaction: null } } };
+        },
+        sendStatus: () => [],
+        sendQueueStatus: () => ({ inProgress: false, queued: false })
+      },
+      rnboParamWriter: async (write) => { writes.push(write); },
+      jackController: { async start() { jackStartCount += 1; return { ok: true }; } },
+      macroPlayback: {
+        snapshot: () => ({
+          running: Boolean(startOptions),
+          mode: startOptions?.mode ?? "stopped",
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: startOptions ? { source: "rnbo-client", usable: true, fresh: true } : { source: "none", usable: false }
+        }),
+        start: (options) => { startOptions = options; return context.runtime.macroPlayback.snapshot(); },
+        stop: () => context.runtime.macroPlayback.snapshot()
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "finch",
+    rnboHost: "finch.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+
+  const played = await requestJson(context, "POST", "/transport/play", {});
+  assert.equal(played.adopted, true);
+  assert.equal(played.payloadVerified, false);
+  assert.equal(startOptions.mode, "jack");
+  assert.equal(startOptions.anchorOffsetBeats, 2.5);
+  assert.equal(startOptions.reset, false);
+  assert.equal(prepareCount, 0);
+  assert.equal(applyCount, 0);
+  assert.equal(writes.length, 0);
+  assert.equal(jackStartCount, 1);
+  assert.equal(played.clockWrites.length, 0);
+  assert.equal(played.phaseWrites.length, 0);
+  assert.equal(played.transport.players.controlOrigin, "adopted");
+  assert.equal(played.transport.players.payloadVerified, false);
+  assert.match(played.transport.warnings.join(" "), /preserved without server-side hash verification/);
+});
+
+test("Shadowbox transport intent starts and stops arrangement ownership without payload or clock writes", async () => {
+  let startOptions = null;
+  let running = false;
+  let prepareCount = 0;
+  let applyCount = 0;
+  const writes = [];
+  const context = createRouteContext({
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async prepareBlock() { prepareCount += 1; },
+        async applyBlockUpdate() { applyCount += 1; },
+        sendStatus: () => [],
+        sendQueueStatus: () => ({ inProgress: false, queued: false })
+      },
+      rnboParamWriter: async (write) => { writes.push(write); },
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          mode: running ? "jack" : "stopped",
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: running
+            ? { source: "jack", usable: true, fresh: true }
+            : { source: "none", usable: false, reason: "macro playback stopped" }
+        }),
+        start: (options) => {
+          startOptions = options;
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => {
+          running = false;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  const started = await requestJson(context, "POST", "/transport/external", {
+    source: "shadowbox",
+    unitId: "wren",
+    rolling: true
+  });
+  assert.equal(started.adopted, true);
+  assert.equal(startOptions.mode, "jack");
+  assert.equal(startOptions.reset, false);
+  assert.equal(startOptions.anchorOffsetBeats, 0);
+  assert.equal(prepareCount, 0);
+  assert.equal(applyCount, 0);
+  assert.equal(writes.length, 0);
+  assert.equal(started.transport.players.playing, true);
+  assert.equal(started.transport.players.controlOrigin, "shadowbox");
+  assert.deepEqual(
+    started.transport.players.lastExternalIntent,
+    { source: "shadowbox", unitId: "wren", rolling: true, receivedAt: started.transport.players.lastExternalIntent.receivedAt }
+  );
+
+  const stopped = await requestJson(context, "POST", "/transport/external", {
+    source: "shadowbox",
+    unitId: "wren",
+    rolling: false
+  });
+  assert.equal(stopped.released, true);
+  assert.equal(stopped.transport.players.playing, false);
+  assert.equal(stopped.transport.arrangement.running, false);
+  assert.equal(writes.length, 0);
+});
+
+test("external transport intent rejects an ambiguous rolling value", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "POST", "/transport/external", {
+    source: "shadowbox",
+    rolling: "true"
+  });
+  assert.equal(response.status, 400);
+  assert.match(response.body, /rolling must be a boolean/);
+});
+
+test("playback snapshot reports externally running RNBO players before adoption", async () => {
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: { targets: [{ id: "finch", host: "finch.local", port: 1234, address: "/rnbo/inst/2/messages/in/shadowscore" }] }
+    }),
+    runtime: {
+      rnboStageCollector: {
+        async ensureObservations() {},
+        targets: (targets) => targets.map((target) => ({
+          ...target,
+          currentStage: 48,
+          stageMovement: "moving",
+          stageReadbackStatus: "fresh"
+        }))
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "finch",
+    rnboHost: "finch.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  context.runtime.macroPlayback = createMacroPlayback(context.store, context.config);
+
+  const snapshot = await requestJson(context, "GET", "/playback/snapshot");
+  assert.equal(snapshot.playback.running, false);
+  assert.equal(snapshot.playback.witness.source, "none");
+  assert.equal(snapshot.playback.externalPlayback.running, true);
+  assert.equal(snapshot.playback.externalPlayback.witness.source, "rnbo-client");
+  assert.equal(snapshot.controls.players.playing, false);
+  assert.equal(snapshot.controls.players.externallyPlaying, true);
+  context.runtime.macroPlayback.close();
+});
+
 test("transport auto mode selects JACK after the controller starts rolling", async () => {
   let now = 1000;
   let startOptions = null;
@@ -2425,6 +2665,7 @@ test("macro playback route reports RNBO client readback as beat witness", async 
     targetId: "source-client",
     currentStage: 40,
     stagesPerBeat: 16,
+    cycleBeats: 16,
     skewBeats: 0,
     targetCount: 1,
     reason: "RNBO current_stage readback"

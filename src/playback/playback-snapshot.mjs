@@ -81,6 +81,8 @@ export function buildPlaybackSnapshot({
       activationAcknowledgement: sendStatus?.activationAck ?? null,
       stateObservedAt: stateObservedAt === null ? null : new Date(stateObservedAt).toISOString(),
       stateAgeMs,
+      stageChangedAt: target.stageChangedAt ?? null,
+      stageMovement: target.stageMovement ?? "unknown",
       stageReadbackStatus: target.stageReadbackStatus ?? (currentStage === null ? "unavailable" : "fresh"),
       stageReadbackError: target.stageReadbackError ?? "",
       timing: contract?.timing ?? null

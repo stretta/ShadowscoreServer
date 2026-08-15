@@ -39,6 +39,13 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   let traversalMacroIndex = 0;
   let traversalBlockId = "";
   let pendingArrangement = null;
+  let witnessPollTimer;
+  let witnessPollPending = false;
+  let lastWitnessContext = {};
+  let anchoredWitnessSource = "";
+  let rnboWitnessTargetId = "";
+  let rnboWitnessRawBeat = null;
+  let rnboWitnessEpochBeats = 0;
 
   const onChange = (event) => {
     if (!running) {
@@ -80,11 +87,14 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   return {
     start(startOptions = {}) {
       const requestedMode = startOptions.mode === "jack" ? "jack" : "timer";
+      lastWitnessContext = startOptions.witnessContext ?? lastWitnessContext;
       if (running && mode === requestedMode) {
         clearTimer();
         if (mode === "jack") {
-          anchorBeatDerivedPlayback();
-          followSelectedWitness();
+          resetWitnessNormalization();
+          anchorBeatDerivedPlayback(lastWitnessContext, startOptions.anchorOffsetBeats);
+          followSelectedWitness(lastWitnessContext);
+          startWitnessPolling();
         } else {
           scheduleNext();
         }
@@ -99,14 +109,17 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       lookAheadPending = false;
       lastActivationArmKey = "";
       activationArmPending = false;
+      resetWitnessNormalization();
       if (startOptions.reset) {
         store.resetStructurePlayhead({ sourceClientId: startOptions.sourceClientId });
       }
       if (mode === "jack") {
-        anchorBeatDerivedPlayback();
+        anchorBeatDerivedPlayback(lastWitnessContext, startOptions.anchorOffsetBeats);
         updateJackStatus(jackTransport?.snapshot?.());
-        followSelectedWitness();
+        followSelectedWitness(lastWitnessContext);
+        startWitnessPolling();
       } else {
+        clearWitnessPolling();
         scheduleNext();
       }
       return snapshot();
@@ -115,6 +128,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       running = false;
       mode = "stopped";
       clearTimer();
+      clearWitnessPolling();
       nextAdvanceAt = null;
       currentBlockDurationMs = 0;
       pendingArrangement = null;
@@ -123,6 +137,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       traversalBlockId = "";
       clearTimerAnchor();
       clearBeatAnchor();
+      resetWitnessNormalization();
       return snapshot();
     },
     tempoChanged() {
@@ -143,6 +158,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       running = false;
       mode = "stopped";
       clearTimer();
+      clearWitnessPolling();
       store.events.off("change", onChange);
       jackTransport?.events?.off?.("snapshot", onJackSnapshot);
     }
@@ -206,7 +222,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     timerBlockStartedAt = null;
   }
 
-  function anchorBeatDerivedPlayback(snapshotOptions = {}) {
+  function anchorBeatDerivedPlayback(snapshotOptions = {}, requestedOffsetBeats = 0) {
     clearTimer();
     const score = traversalScore(store.getScore());
     const witness = selectedWitness(snapshotOptions);
@@ -214,17 +230,19 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     macroStartOffsetBeats = cumulativeBeatsBeforeIndex(score, macroStartIndex);
     activeBlockDurationBeats = macroBlockDurationBeats(score, config);
     currentBlockDurationMs = durationMsAtTempo(activeBlockDurationBeats, effectiveTempo(score));
-    compositionBeat = macroStartOffsetBeats;
-    beatIntoBlock = 0;
+    const offsetBeats = Math.max(0, Math.min(activeBlockDurationBeats, finiteNumber(requestedOffsetBeats, 0)));
+    compositionBeat = macroStartOffsetBeats + offsetBeats;
+    beatIntoBlock = offsetBeats;
     if (!witness.usable || !Number.isFinite(witness.absoluteBeat)) {
       macroStartBeat = null;
       activeBlockStartBeat = null;
       activeBlockEndBeat = null;
       return;
     }
-    macroStartBeat = witness.absoluteBeat;
+    macroStartBeat = witness.absoluteBeat - offsetBeats;
     activeBlockStartBeat = macroStartBeat;
     activeBlockEndBeat = activeBlockStartBeat + activeBlockDurationBeats;
+    anchoredWitnessSource = witness.source;
   }
 
   function updateJackStatus(transport) {
@@ -248,7 +266,19 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       anchorBeatDerivedPlayback(snapshotOptions);
       return;
     }
+    if (anchoredWitnessSource && witness.source !== anchoredWitnessSource) {
+      reanchorWitnessSource(witness);
+    }
+    anchoredWitnessSource = witness.source;
     deriveMacroLocation(witness);
+  }
+
+  function reanchorWitnessSource(witness) {
+    const offsetFromMacroStart = finiteNumber(compositionBeat, macroStartOffsetBeats) - macroStartOffsetBeats;
+    macroStartBeat = witness.absoluteBeat - offsetFromMacroStart;
+    const currentOffset = finiteNumber(beatIntoBlock, 0);
+    activeBlockStartBeat = witness.absoluteBeat - currentOffset;
+    activeBlockEndBeat = activeBlockStartBeat + activeBlockDurationBeats;
   }
 
   function deriveMacroLocation(witness) {
@@ -406,6 +436,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     lastJackAbsoluteBeat = null;
     lastJackState = "";
     lastJackStatus = "unusable";
+    anchoredWitnessSource = "";
   }
 
   function snapshot(snapshotOptions = {}) {
@@ -478,14 +509,72 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   }
 
   function selectedWitness(snapshotOptions = {}) {
-    return selectBeatWitness({
+    if (snapshotOptions?.rnboTargets) lastWitnessContext = snapshotOptions;
+    return normalizeWitness(selectBeatWitness({
       mode,
       running,
       jackTransport: jackTransport?.snapshot?.(),
-      rnboTargets: snapshotOptions.rnboTargets,
-      timingContracts: snapshotOptions.timingContracts,
+      rnboTargets: snapshotOptions.rnboTargets ?? lastWitnessContext.rnboTargets,
+      timingContracts: snapshotOptions.timingContracts ?? lastWitnessContext.timingContracts,
       rnboClient: config.transport?.rnboClient
-    });
+    }));
+  }
+
+  function normalizeWitness(witness) {
+    if (witness.source !== "rnbo-client" || !Number.isFinite(witness.absoluteBeat)) return witness;
+    const targetId = String(witness.targetId ?? "");
+    if (targetId !== rnboWitnessTargetId) {
+      rnboWitnessTargetId = targetId;
+      rnboWitnessRawBeat = null;
+      rnboWitnessEpochBeats = 0;
+    }
+    if (
+      Number.isFinite(rnboWitnessRawBeat) &&
+      witness.absoluteBeat < rnboWitnessRawBeat - 0.25 &&
+      Number.isFinite(witness.cycleBeats) &&
+      witness.cycleBeats > 0
+    ) {
+      rnboWitnessEpochBeats += witness.cycleBeats;
+    }
+    rnboWitnessRawBeat = witness.absoluteBeat;
+    return {
+      ...witness,
+      absoluteBeat: witness.absoluteBeat + rnboWitnessEpochBeats
+    };
+  }
+
+  function resetWitnessNormalization() {
+    anchoredWitnessSource = "";
+    rnboWitnessTargetId = "";
+    rnboWitnessRawBeat = null;
+    rnboWitnessEpochBeats = 0;
+  }
+
+  function startWitnessPolling() {
+    clearWitnessPolling();
+    if (typeof options.loadWitnessContext !== "function" || typeof timers.setInterval !== "function") return;
+    const intervalMs = Math.max(25, finiteNumber(config.transport?.rnboClient?.pollIntervalMs, 125));
+    witnessPollTimer = timers.setInterval(async () => {
+      if (witnessPollPending || !running || mode !== "jack") return;
+      witnessPollPending = true;
+      try {
+        const context = await options.loadWitnessContext();
+        if (context) followSelectedWitness(context);
+      } catch (error) {
+        console.error(`[macro-playback] witness poll failed: ${messageForError(error)}`);
+      } finally {
+        witnessPollPending = false;
+      }
+    }, intervalMs);
+    witnessPollTimer?.unref?.();
+  }
+
+  function clearWitnessPolling() {
+    if (witnessPollTimer !== undefined && typeof timers.clearInterval === "function") {
+      timers.clearInterval(witnessPollTimer);
+    }
+    witnessPollTimer = undefined;
+    witnessPollPending = false;
   }
 
   function runAfterBeatDerivedAdvance(detail) {

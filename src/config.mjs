@@ -15,6 +15,7 @@ export const defaultConfig = Object.freeze({
   registration: {
     enabled: true,
     sessionHostUrl: "",
+    statePath: "data/registration-state.json",
     heartbeatIntervalMs: 10000,
     heartbeatTtlMs: 30000,
     discovery: {

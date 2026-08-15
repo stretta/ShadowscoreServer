@@ -203,6 +203,7 @@ export function transportPage() {
     let lastTransport = null;
     let refreshPending = false;
     let lastPlaybackGeneration = 0;
+    let actionError = "";
 
     fields["players-play"].addEventListener("click", () => runAction(() => startPlayers("auto")));
     fields["players-stop"].addEventListener("click", () => runAction(stopPlayers));
@@ -244,7 +245,7 @@ export function transportPage() {
         renderPlayback(snapshot.playback || {}, snapshot.controls || {});
         renderContracts(snapshot.timingContracts || []);
         const age = Math.max(0, Date.now() - Date.parse(snapshot.observedAt));
-        fields.status.textContent = "JACK authority · snapshot " + snapshot.generation + " · " + age + " ms old";
+        if (!actionError) fields.status.textContent = "JACK authority · snapshot " + snapshot.generation + " · " + age + " ms old";
       } catch (error) {
         fields.status.textContent = String(error.message || error);
       } finally {
@@ -286,21 +287,23 @@ export function transportPage() {
     async function runAction(action) {
       try {
         await action();
+        actionError = "";
       } catch (error) {
         const message = String(error?.message || error);
+        actionError = message;
         fields.status.textContent = message;
         log("error: " + message);
       }
     }
 
     async function fetchJson(url) {
-      const response = await fetch(url);
+      const response = await request(url);
       if (!response.ok) throw new Error(await response.text());
       return response.json();
     }
 
     async function postJson(url, body) {
-      const response = await fetch(url, {
+      const response = await request(url, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body)
@@ -309,6 +312,15 @@ export function transportPage() {
       const payload = await response.json();
       log(url + " ok");
       return payload;
+    }
+
+    async function request(url, options) {
+      try {
+        return await fetch(url, options);
+      } catch (error) {
+        const detail = String(error?.message || error || "request failed");
+        throw new Error("Cannot reach ShadowScore at " + location.host + url + ". " + detail);
+      }
     }
 
     function renderTransport(transport) {
@@ -324,14 +336,19 @@ export function transportPage() {
     }
 
     function renderPlayback(playback, controls) {
-      const players = controls.players?.playing ? "Players playing" : "Players stopped";
+      const externallyPlaying = controls.players?.externallyPlaying === true;
+      const players = controls.players?.playing
+        ? "Players playing"
+        : externallyPlaying ? "Players running externally" : "Players stopped";
       const arrangement = controls.arrangement?.running
         ? "Arrangement running"
         : "Arrangement held" + (playback.activeBlockId ? " on " + playback.activeBlockId : "");
       fields["macro-mode"].textContent = players + " · " + arrangement;
-      fields["beat-witness"].textContent = witnessLabel(playback.witness);
-      fields["beat-witness"].className = "value small " + (playback.witness?.usable ? "ok" : playback.witness?.degraded ? "warn" : "bad");
-      fields["beat-witness-detail"].textContent = witnessDetail(playback.witness);
+      const displayedWitness = playback.witness?.usable ? playback.witness : playback.externalPlayback?.witness ?? playback.witness;
+      fields["beat-witness"].textContent = witnessLabel(displayedWitness, !playback.running && externallyPlaying);
+      fields["beat-witness"].className = "value small " + (displayedWitness?.usable ? "ok" : displayedWitness?.degraded ? "warn" : "bad");
+      fields["beat-witness-detail"].textContent = witnessDetail(displayedWitness);
+      fields["players-play"].textContent = externallyPlaying ? "Join Running Players" : "Play";
       fields["active-block"].textContent = playback.activeBlockId || "-";
       fields["macro-index"].textContent = String(playback.macroIndex ?? "-");
       fields["composition-beat"].textContent = formatNumber(playback.compositionBeat, 3);
@@ -424,9 +441,10 @@ export function transportPage() {
       return last.ok ? "SetStage " + last.value + " / " + last.writeCount + " writes" : "failed";
     }
 
-    function witnessLabel(witness) {
+    function witnessLabel(witness, available = false) {
       if (!witness) return "-";
-      return witness.usable ? witness.source : witness.source + " unavailable";
+      const source = witness.source === "rnbo-client" ? "RNBO" : witness.source;
+      return witness.usable ? source + (available ? " available" : "") : source + " unavailable";
     }
 
     function witnessDetail(witness) {

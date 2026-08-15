@@ -224,6 +224,55 @@ test("JACK macro playback advances at anchored beat boundaries", () => {
   playback.close();
 });
 
+test("RNBO adoption preserves the current block offset and follows stage wrap", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ tempo: 120, blocks: ["A", "B"] });
+  const playback = createMacroPlayback(store, defaultConfig);
+  const context = (currentStage) => ({
+    rnboTargets: [{ id: "finch", currentStage, stageMovement: "moving" }],
+    timingContracts: [{ targetId: "finch", timing: { stagesPerBeat: 16, patternLength: 64 } }]
+  });
+
+  const started = playback.start({
+    mode: "jack",
+    witnessContext: context(32),
+    anchorOffsetBeats: 2
+  });
+  assert.equal(started.beatIntoBlock, 2);
+  assert.equal(started.compositionBeat, 2);
+
+  assert.equal(playback.snapshot(context(48)).beatIntoBlock, 3);
+  const wrapped = playback.snapshot(context(0));
+  assert.equal(store.getScore().structureState.activeBlockId, "B");
+  assert.equal(wrapped.compositionBeat, 4);
+  assert.equal(wrapped.beatIntoBlock, 0);
+  playback.close();
+});
+
+test("RNBO adoption reanchors without jumping when JACK becomes available", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  store.replaceMesoBlock("A", { duration: { beats: 8 }, players: {} });
+  store.updateMacrostructure({ tempo: 120, blocks: ["A"] });
+  const jackTransport = createJackTransportState(defaultConfig, { now: () => 1000 });
+  jackTransport.update(jackSnapshot({ absoluteBeat: 20, state: "stopped" }));
+  const context = {
+    rnboTargets: [{ id: "finch", currentStage: 40, stageMovement: "moving" }],
+    timingContracts: [{ targetId: "finch", timing: { stagesPerBeat: 16, patternLength: 128 } }]
+  };
+  const playback = createMacroPlayback(store, defaultConfig, { jackTransport });
+  playback.start({ mode: "jack", witnessContext: context, anchorOffsetBeats: 2.5 });
+  assert.equal(playback.snapshot(context).compositionBeat, 2.5);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100, state: "rolling" }));
+  const switched = playback.snapshot(context);
+  assert.equal(switched.witness.source, "jack");
+  assert.equal(switched.compositionBeat, 2.5);
+  assert.equal(switched.beatIntoBlock, 2.5);
+  playback.close();
+});
+
 test("JACK macro playback does not reverse when Link rewrites BBT after a tempo change", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });

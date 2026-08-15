@@ -15,7 +15,7 @@ import { createOscSnapshotRecallService } from "../osc/snapshot-recall.mjs";
 import { buildOscTargets } from "../osc/targets.mjs";
 import { buildOscResourceReport } from "../osc/resources.mjs";
 import { runAutomaticOscOnboarding } from "../osc/onboarding.mjs";
-import { selectBeatWitness } from "../playback/beat-witness.mjs";
+import { rnboClientBeatWitness, selectBeatWitness } from "../playback/beat-witness.mjs";
 import { buildPlaybackSnapshot, nextPlaybackSnapshotGeneration } from "../playback/playback-snapshot.mjs";
 import { createTempoPolicy } from "../playback/tempo-policy.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
@@ -653,6 +653,22 @@ export async function routeRequest(request, response, store, config, runtime = {
       });
     } catch (error) {
       writeJson(response, 400, { ok: false, error: messageForError(error) });
+    }
+    return;
+  }
+
+  if (request.method === "POST" && url.pathname === "/transport/external") {
+    try {
+      const body = await readJson(request);
+      const result = await observeExternalTransportIntent(store, config, runtime, body);
+      writeJson(response, 200, {
+        ok: true,
+        action: body.rolling ? "external-play" : "external-stop",
+        ...result,
+        transport: performanceTransportSnapshot(runtime, requireMacroPlayback(runtime).snapshot())
+      });
+    } catch (error) {
+      writeError(response, error, error?.statusCode ?? 400);
     }
     return;
   }
@@ -2198,7 +2214,10 @@ function performanceTransportFor(runtime) {
   if (!runtime.performanceTransport) {
     runtime.performanceTransport = {
       playersPlaying: false,
-      arrangementRequestedMode: "run"
+      playerControlOrigin: "none",
+      adoptionPayloadVerified: null,
+      arrangementRequestedMode: "run",
+      lastExternalIntent: null
     };
   }
   return runtime.performanceTransport;
@@ -2206,9 +2225,15 @@ function performanceTransportFor(runtime) {
 
 function performanceTransportSnapshot(runtime, playback = runtime.macroPlayback?.snapshot?.() ?? {}) {
   const performance = performanceTransportFor(runtime);
+  const observedPlaying = playback.externalPlayback?.running === true;
   return {
     players: {
-      playing: Boolean(performance.playersPlaying)
+      playing: Boolean(performance.playersPlaying),
+      observedPlaying,
+      externallyPlaying: observedPlaying && !performance.playersPlaying,
+      controlOrigin: performance.playerControlOrigin,
+      payloadVerified: performance.adoptionPayloadVerified,
+      lastExternalIntent: performance.lastExternalIntent
     },
     arrangement: {
       running: Boolean(playback.running),
@@ -2221,7 +2246,9 @@ function performanceTransportSnapshot(runtime, playback = runtime.macroPlayback?
 }
 
 function performanceStateText(controls) {
-  const players = controls.players.playing ? "Players playing" : "Players stopped";
+  const players = controls.players.playing
+    ? "Players playing"
+    : controls.players.externallyPlaying ? "Players running externally" : "Players stopped";
   const arrangement = controls.arrangement.running
     ? "Arrangement running"
     : `Arrangement held${controls.arrangement.activeBlockId ? ` on ${controls.arrangement.activeBlockId}` : ""}`;
@@ -2270,8 +2297,10 @@ async function macroPlaybackSnapshot(runtime, store, config, witnessContext) {
   const tempo = tempoPolicyFor(store, config, runtime).snapshot();
   if (runtime.macroPlayback?.snapshot) {
     const context = witnessContext ?? await readBeatWitnessContext(store.getScore(), config, runtime);
+    const snapshot = runtime.macroPlayback.snapshot(context);
     return {
-      ...runtime.macroPlayback.snapshot(context),
+      ...snapshot,
+      externalPlayback: observedRnboPlayback(context),
       tempo,
       oscSnapshotRecall: automaticOscSnapshotRecallStatus(runtime)
     };
@@ -2312,6 +2341,20 @@ async function macroPlaybackSnapshot(runtime, store, config, witnessContext) {
       last: null
     },
     oscSnapshotRecall: automaticOscSnapshotRecallStatus(runtime)
+  };
+}
+
+function observedRnboPlayback(context = {}) {
+  const witness = rnboClientBeatWitness({
+    targets: context.rnboTargets ?? [],
+    contracts: context.timingContracts ?? [],
+    maxSkewBeats: context.rnboClient?.maxSkewBeats,
+    requireMoving: true
+  });
+  return {
+    running: witness.usable === true,
+    source: witness.usable ? "rnbo-client" : "none",
+    witness
   };
 }
 
@@ -2422,7 +2465,7 @@ async function transportFacadeStatus(store, config, runtime) {
   const targets = await readAllRnboTargets(config, runtime);
   const assignedTargets = targets.filter((target) => assignedVoiceForTarget(score, target));
   const onlineTargets = assignedTargets.filter((target) => target.available !== false);
-  const witness = playback.witness ?? selectBeatWitness({
+  const selectedWitness = playback.witness ?? selectBeatWitness({
     mode: playback.mode === "jack" ? "jack" : "timer",
     running: Boolean(playback.running),
     jackTransport: jackTransportSnapshot(runtime),
@@ -2430,7 +2473,10 @@ async function transportFacadeStatus(store, config, runtime) {
     timingContracts: targets.map((target) => playbackTimingContractForTarget(score, config, target)),
     rnboClient: config.transport?.rnboClient
   });
+  const availableWitness = playback.externalPlayback?.witness;
+  const witness = selectedWitness.usable ? selectedWitness : availableWitness?.usable ? availableWitness : selectedWitness;
   const syncSource = witness.source === "rnbo-client" ? "rnbo" : witness.source === "jack" ? "jack" : playback.mode === "timer" ? "timer" : "none";
+  const controls = performanceTransportSnapshot(runtime, playback);
   const warnings = [];
   if (assignedTargets.length === 0) {
     warnings.push("No assigned playback clients.");
@@ -2440,7 +2486,9 @@ async function transportFacadeStatus(store, config, runtime) {
   if (playback.running && witness.usable === false && witness.reason) {
     warnings.push(witness.reason);
   }
-  const controls = performanceTransportSnapshot(runtime, playback);
+  if (controls.players.controlOrigin === "adopted" && controls.players.payloadVerified === false) {
+    warnings.push("Running RNBO payload was preserved without server-side hash verification.");
+  }
   return {
     playing: controls.players.playing,
     activeBlockId: playback.activeBlockId ?? score.structureState?.activeBlockId ?? "",
@@ -2454,7 +2502,9 @@ async function transportFacadeStatus(store, config, runtime) {
       source: syncSource,
       fresh: Boolean(witness.fresh ?? witness.usable),
       label: syncLabel(syncSource),
-      reason: witness.reason ?? ""
+      reason: witness.reason ?? "",
+      selected: Boolean(playback.running && selectedWitness.usable),
+      available: Boolean(witness.usable)
     },
     clients: {
       assigned: assignedTargets.length,
@@ -2497,11 +2547,49 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   }
   const score = store.getScore();
   const targetId = optionalString(body.targetId);
-  if (runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.prepareBlock === "function") {
+  const witnessContext = await readBeatWitnessContext(score, config, runtime);
+  const externalPlayback = observedRnboPlayback(witnessContext);
+  const initialReadiness = await rnboPlaybackReadiness(runtime, score, { waitForIdle: true });
+  if (externalPlayback.running && body.forceRestart !== true) {
+    const jackStart = await maybeStartJack(runtime);
+    const mode = "jack";
+    if (requestedArrangementMode === "run") {
+      playback.start({
+        mode,
+        reset: false,
+        sourceClientId,
+        witnessContext,
+        anchorOffsetBeats: externalPlayback.witness.absoluteBeat
+      });
+    } else {
+      playback.stop();
+    }
+    performance.playersPlaying = true;
+    performance.playerControlOrigin = "adopted";
+    performance.adoptionPayloadVerified = initialReadiness.allActive;
+    return {
+      adopted: true,
+      payloadVerified: initialReadiness.allActive,
+      mode,
+      rnboReadiness: initialReadiness,
+      jackStart,
+      jackTempo: null,
+      tempoWrites: [],
+      ttidDistribution: null,
+      swingDistribution: null,
+      snapshotRecall: null,
+      playbackUpdate: null,
+      activations: [],
+      clockWrites: [],
+      oscClockWrites: [],
+      phaseWrites: []
+    };
+  }
+  if (!initialReadiness.allActive && runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.prepareBlock === "function") {
     await runtime.rnboAdapter.prepareBlock(score.structureState?.activeBlockId, "transport-start");
   }
   const rnboReadiness = await awaitRnboPlaybackReady(runtime, score);
-  const playbackUpdate = body.phaseReset === false || typeof runtime.rnboAdapter?.applyBlockUpdate !== "function"
+  const playbackUpdate = initialReadiness.allActive || body.phaseReset === false || typeof runtime.rnboAdapter?.applyBlockUpdate !== "function"
     ? null
     : await runtime.rnboAdapter.applyBlockUpdate(score.structureState?.activeBlockId, {
       activationMode: "now",
@@ -2531,12 +2619,15 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     playback.start({
       mode,
       reset: Boolean(body.reset),
-      sourceClientId
+      sourceClientId,
+      witnessContext
     });
   } else {
     playback.stop();
   }
   performance.playersPlaying = true;
+  performance.playerControlOrigin = "shadowscore";
+  performance.adoptionPayloadVerified = null;
   const activations = playbackUpdate?.activations ?? (activationSchedule.length
     ? await runtime.rnboAdapter.confirmPreparedActivations(activationSchedule, {
       tempo
@@ -2559,25 +2650,114 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   };
 }
 
+async function observeExternalTransportIntent(store, config, runtime, body = {}) {
+  if (typeof body.rolling !== "boolean") {
+    const error = new Error("rolling must be a boolean");
+    error.statusCode = 400;
+    throw error;
+  }
+  const playback = requireMacroPlayback(runtime);
+  const performance = performanceTransportFor(runtime);
+  const source = optionalString(body.source) || "external";
+  const unitId = optionalString(body.unitId);
+  performance.lastExternalIntent = {
+    source,
+    unitId,
+    rolling: body.rolling,
+    receivedAt: new Date().toISOString()
+  };
+
+  if (!body.rolling) {
+    playback.stop();
+    performance.playersPlaying = false;
+    performance.playerControlOrigin = "none";
+    performance.adoptionPayloadVerified = null;
+    return { adopted: false, released: true, mode: "stopped" };
+  }
+
+  performance.playersPlaying = true;
+  performance.playerControlOrigin = source === "shadowbox" ? "shadowbox" : "external";
+  performance.adoptionPayloadVerified = null;
+  if (performance.arrangementRequestedMode !== "run") {
+    playback.stop();
+    return { adopted: true, arrangementHeld: true, mode: "stopped" };
+  }
+
+  const result = playback.start({
+    mode: "jack",
+    reset: false,
+    sourceClientId: source,
+    witnessContext: { rnboTargets: [], timingContracts: [] },
+    anchorOffsetBeats: Number.isFinite(Number(body.beatIntoBlock))
+      ? Math.max(0, Number(body.beatIntoBlock))
+      : 0
+  });
+  return {
+    adopted: true,
+    arrangementHeld: false,
+    mode: result.mode,
+    witnessAvailable: result.witness?.usable === true
+  };
+}
+
 async function awaitRnboPlaybackReady(runtime, score) {
-  if (!runtime.rnboAdapter?.enabled) return null;
-  if (typeof runtime.rnboAdapter.waitForIdle === "function") {
+  const readiness = await rnboPlaybackReadiness(runtime, score, { waitForIdle: true });
+  if (!runtime.rnboAdapter?.enabled) return readiness;
+  if (!readiness.ready) {
+    throw new Error(`RNBO playback is not ready: ${readiness.failures.join(", ")}`);
+  }
+  return readiness;
+}
+
+async function rnboPlaybackReadiness(runtime, score, { waitForIdle = false } = {}) {
+  if (!runtime.rnboAdapter?.enabled) {
+    return { ready: true, allActive: false, source: "disabled", failures: [], queue: null };
+  }
+  if (waitForIdle && typeof runtime.rnboAdapter.waitForIdle === "function") {
     await runtime.rnboAdapter.waitForIdle();
   }
   const assignedTargetKeys = new Set(Object.values(score.assignments ?? {})
     .flatMap((assignment) => [assignment?.rnboTargetId, assignment?.rnboAddress])
     .map(optionalString)
     .filter(Boolean));
+  const assignedTargetIds = new Set(Object.values(score.assignments ?? {})
+    .map((assignment) => optionalString(assignment?.rnboTargetId))
+    .filter(Boolean));
+  if (typeof runtime.rnboAdapter.playbackUpdates === "function") {
+    const updates = await runtime.rnboAdapter.playbackUpdates(score.structureState?.activeBlockId ?? "");
+    const entries = Object.entries(updates?.targets ?? {})
+      .filter(([targetId, update]) => assignedTargetKeys.size === 0 || assignedTargetKeys.has(optionalString(targetId))
+        || assignedTargetKeys.has(optionalString(update?.targetId)));
+    if (entries.length) {
+      const presentTargetIds = new Set(entries.flatMap(([targetId, update]) => [optionalString(targetId), optionalString(update?.targetId)]).filter(Boolean));
+      const missing = [...assignedTargetIds].filter((targetId) => !presentTargetIds.has(targetId));
+      const failures = entries
+        .filter(([, update]) => !["active", "prepared"].includes(update?.state))
+        .map(([targetId, update]) => `${targetId} ${update?.state ?? "unknown"}`);
+      failures.push(...missing.map((targetId) => `${targetId} missing`));
+      return {
+        ready: failures.length === 0,
+        allActive: missing.length === 0 && entries.every(([, update]) => update?.state === "active"),
+        source: "playback-updates",
+        failures,
+        queue: runtime.rnboAdapter.sendQueueStatus?.() ?? { inProgress: false, queued: false },
+        updates
+      };
+    }
+  }
   const statuses = runtime.rnboAdapter.sendStatus?.() ?? [];
   const relevantStatuses = assignedTargetKeys.size === 0
     ? statuses
     : statuses.filter((status) => assignedTargetKeys.has(optionalString(status.targetId))
       || assignedTargetKeys.has(optionalString(status.address)));
   const failed = relevantStatuses.filter((status) => status.ack?.ok === false);
-  if (failed.length) {
-    throw new Error(`RNBO playback is not ready: ${failed.map((status) => `${status.targetId} ${status.ack?.status ?? "failed"}`).join(", ")}`);
-  }
-  return runtime.rnboAdapter.sendQueueStatus?.() ?? { inProgress: false, queued: false };
+  return {
+    ready: failed.length === 0,
+    allActive: false,
+    source: "send-status",
+    failures: failed.map((status) => `${status.targetId} ${status.ack?.status ?? "failed"}`),
+    queue: runtime.rnboAdapter.sendQueueStatus?.() ?? { inProgress: false, queued: false }
+  };
 }
 
 async function stopUnifiedTransport(store, config, runtime, body = {}) {
@@ -2596,6 +2776,8 @@ async function stopUnifiedTransport(store, config, runtime, body = {}) {
   playback.stop();
   const jackStop = await maybeStopJack(runtime);
   performance.playersPlaying = false;
+  performance.playerControlOrigin = "none";
+  performance.adoptionPayloadVerified = null;
   return {
     jackStop,
     clockWrites,
@@ -2714,12 +2896,17 @@ function syncLabel(source) {
   }
 }
 
-async function readBeatWitnessContext(score, config, runtime) {
-  const rnboTargets = await readAllRnboTargets(config, runtime);
+export async function readBeatWitnessContext(score, config, runtime) {
+  let rnboTargets = await readAllRnboTargets(config, runtime);
+  if (runtime.rnboStageCollector?.ensureObservations) {
+    await runtime.rnboStageCollector.ensureObservations(rnboTargets);
+    rnboTargets = runtime.rnboStageCollector.targets(rnboTargets);
+  }
   const timingContracts = rnboTargets.map((target) => playbackTimingContractForTarget(score, config, target));
   return {
     rnboTargets,
-    timingContracts
+    timingContracts,
+    rnboClient: config.transport?.rnboClient ?? {}
   };
 }
 

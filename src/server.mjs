@@ -4,7 +4,7 @@ import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
 import { createCoordinatorManager } from "./coordinator/coordinator-manager.mjs";
-import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "./http/routes.mjs";
+import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, readBeatWitnessContext, recallOscSnapshotsForBlock, routeRequest } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { createTempoPolicy } from "./playback/tempo-policy.mjs";
 import { createRnboStageCollector } from "./playback/rnbo-stage-collector.mjs";
@@ -55,6 +55,7 @@ runtime.tempoPolicy = tempoPolicy;
 const macroPlayback = createMacroPlayback(store, config, {
   jackTransport,
   getTempo: () => runtime.tempoPolicy.snapshot().live,
+  loadWitnessContext: () => readBeatWitnessContext(store.getScore(), config, runtime),
   beforeAdvance: ({ nextBlockId }) => rnbo.prepareBlock(nextBlockId),
   armAdvance: async ({ nextBlockId }) => {
     const update = await rnbo.applyBlockUpdate(nextBlockId, {

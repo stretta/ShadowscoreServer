@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { buildPeerConfig, parseArgs, run as runConfigurePeer } from "../bin/configure-peer.mjs";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { readLocalOscTargets, readLocalTargets, refreshRegistration, resolveSessionHostUrl } from "../src/registration-agent.mjs";
+import { readLocalOscTargets, readLocalTargets, refreshRegistration, resolveSessionHostUrl, writeRegistrationState } from "../src/registration-agent.mjs";
 
 test("peer registration rewrites loopback RNBO targets to the unit hostname", async () => {
   const config = mergeConfig(defaultConfig, {
@@ -252,6 +252,22 @@ test("configured coordinator is used only when discovery is disabled", async () 
   });
 
   assert.equal(await resolveSessionHostUrl(config), "http://manual-host.local:8790");
+});
+
+test("registration agent publishes its resolved coordinator for local Shadowbox transport intent", async () => {
+  const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-registration-state-"));
+  const statePath = path.join(tmp, "registration-state.json");
+  const config = mergeConfig(defaultConfig, { registration: { statePath } });
+
+  await writeRegistrationState(config, {
+    sessionHostUrl: "http://wren.local:8790/",
+    unitId: "finch"
+  });
+
+  const state = JSON.parse(await fs.readFile(statePath, "utf8"));
+  assert.equal(state.sessionHostUrl, "http://wren.local:8790");
+  assert.equal(state.unitId, "finch");
+  assert.match(state.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
 });
 
 test("peer config generator writes repeatable local peer config", async () => {

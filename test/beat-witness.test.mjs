@@ -207,3 +207,35 @@ test("beat witness selector prefers RNBO client readback when JACK is unusable",
   assert.equal(witness.source, "rnbo-client");
   assert.equal(witness.absoluteBeat, 2);
 });
+
+test("external RNBO witness requires proven stage movement", () => {
+  const contracts = [{ targetId: "finch", timing: { stagesPerBeat: 16, patternLength: 64 } }];
+  assert.equal(rnboClientBeatWitness({
+    targets: [{ id: "finch", currentStage: 16, stageMovement: "stopped" }],
+    contracts,
+    requireMoving: true
+  }).usable, false);
+
+  const moving = rnboClientBeatWitness({
+    targets: [{ id: "finch", currentStage: 16, stageMovement: "moving" }],
+    contracts,
+    requireMoving: true
+  });
+  assert.equal(moving.usable, true);
+  assert.equal(moving.absoluteBeat, 1);
+  assert.equal(moving.cycleBeats, 4);
+
+  const partial = rnboClientBeatWitness({
+    targets: [
+      { id: "finch", currentStage: 16, stageMovement: "moving" },
+      { id: "raven", currentStage: 16, stageMovement: "stopped" }
+    ],
+    contracts: [
+      { targetId: "finch", assignedVoiceId: "player-1", timing: { stagesPerBeat: 16 } },
+      { targetId: "raven", assignedVoiceId: "player-2", timing: { stagesPerBeat: 16 } }
+    ],
+    requireMoving: true
+  });
+  assert.equal(partial.usable, false);
+  assert.match(partial.reason, /1 assigned RNBO current_stage readback is not advancing/);
+});

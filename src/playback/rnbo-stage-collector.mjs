@@ -1,6 +1,7 @@
 const DEFAULT_POLL_INTERVAL_MS = 125;
 const DEFAULT_TIMEOUT_MS = 300;
 const DEFAULT_STALE_AFTER_MS = 750;
+const DEFAULT_MOTION_STALE_AFTER_MS = 1500;
 
 export function createRnboStageCollector(config = {}, options = {}) {
   const settings = collectorSettings(config);
@@ -78,12 +79,17 @@ async function pollTargets(targets, fetchImpl, now, settings, observations) {
       const body = await response.json();
       const currentStage = firstFiniteNumber(body?.VALUE);
       if (currentStage === null) throw new Error("current_stage VALUE is unavailable");
+      const previous = observations.get(target.id);
+      const changed = Number.isFinite(previous?.currentStage) && previous.currentStage !== currentStage;
+      const observedAt = now();
       observations.set(target.id, {
         targetId: target.id,
         url,
         currentStage,
-        observedAt: now(),
+        observedAt,
         requestedAt,
+        sampleCount: (previous?.sampleCount ?? 0) + 1,
+        changedAt: changed ? observedAt : previous?.changedAt ?? null,
         status: "fresh",
         error: ""
       });
@@ -107,6 +113,8 @@ function withObservation(target, observation, now, settings) {
     ...(state.currentStage === null ? {} : { currentStage: state.currentStage }),
     stateObservedAt: state.observedAt,
     stateAgeMs: state.ageMs,
+    stageChangedAt: state.changedAt,
+    stageMovement: state.movement,
     stageReadbackStatus: state.status,
     stageReadbackError: state.error
   };
@@ -115,12 +123,19 @@ function withObservation(target, observation, now, settings) {
 function observationSnapshot(observation, now, settings) {
   const ageMs = observation.observedAt === null ? null : Math.max(0, now - observation.observedAt);
   const stale = ageMs === null || ageMs > settings.staleAfterMs;
+  const changedAgeMs = observation.changedAt === null ? null : Math.max(0, now - observation.changedAt);
+  const movement = observation.sampleCount < 2 || observation.changedAt === null
+    ? "unknown"
+    : changedAgeMs <= settings.motionStaleAfterMs ? "moving" : "stopped";
   return {
     targetId: observation.targetId,
     url: observation.url,
     currentStage: observation.currentStage,
     observedAt: observation.observedAt === null ? null : new Date(observation.observedAt).toISOString(),
     ageMs,
+    changedAt: observation.changedAt === null ? null : new Date(observation.changedAt).toISOString(),
+    changedAgeMs,
+    movement,
     fresh: observation.status === "fresh" && !stale,
     stale,
     status: stale ? "stale" : observation.status,
@@ -147,7 +162,11 @@ function collectorSettings(config) {
   return {
     pollIntervalMs: nonNegative(source.pollIntervalMs, DEFAULT_POLL_INTERVAL_MS),
     timeoutMs: positive(source.timeoutMs, DEFAULT_TIMEOUT_MS),
-    staleAfterMs: nonNegative(source.staleAfterMs, DEFAULT_STALE_AFTER_MS)
+    staleAfterMs: nonNegative(source.staleAfterMs, DEFAULT_STALE_AFTER_MS),
+    motionStaleAfterMs: nonNegative(
+      source.motionStaleAfterMs,
+      Math.max(DEFAULT_MOTION_STALE_AFTER_MS, nonNegative(source.pollIntervalMs, DEFAULT_POLL_INTERVAL_MS) * 4)
+    )
   };
 }
 

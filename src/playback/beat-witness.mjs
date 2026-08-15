@@ -37,15 +37,31 @@ export function timerBeatWitness({ running = false, mode = "stopped" } = {}) {
   };
 }
 
-export function rnboClientBeatWitness({ targets = [], contracts = [], maxSkewBeats = 0.25 } = {}) {
+export function rnboClientBeatWitness({
+  targets = [],
+  contracts = [],
+  maxSkewBeats = 0.25,
+  requireMoving = false
+} = {}) {
   const contractByTargetId = new Map(contracts.map((contract) => [contract.targetId, contract]));
   const candidates = [];
+  let unavailableAssignedCount = 0;
   for (const target of targets) {
+    const contract = contractByTargetId.get(target.id) ?? contracts.find((entry) => entry.assignedVoiceId);
+    const assigned = Boolean(contract?.assignedVoiceId);
     const currentStage = Number(target?.currentStage);
     if (!Number.isFinite(currentStage)) {
+      if (requireMoving && assigned) unavailableAssignedCount += 1;
       continue;
     }
-    const contract = contractByTargetId.get(target.id) ?? contracts.find((entry) => entry.assignedVoiceId);
+    if (target?.fresh === false || ["stale", "error"].includes(target?.stageReadbackStatus)) {
+      if (requireMoving && assigned) unavailableAssignedCount += 1;
+      continue;
+    }
+    if (target?.stageMovement === "stopped" || (requireMoving && target?.stageMovement !== "moving")) {
+      if (requireMoving && assigned) unavailableAssignedCount += 1;
+      continue;
+    }
     const stagesPerBeat = Number(contract?.timing?.stagesPerBeat);
     if (!Number.isFinite(stagesPerBeat) || stagesPerBeat <= 0) {
       continue;
@@ -55,12 +71,22 @@ export function rnboClientBeatWitness({ targets = [], contracts = [], maxSkewBea
       assignedVoiceId: contract?.assignedVoiceId || undefined,
       currentStage,
       stagesPerBeat,
-      absoluteBeat: currentStage / stagesPerBeat
+      absoluteBeat: currentStage / stagesPerBeat,
+      cycleBeats: positiveCycleBeats(contract?.timing?.patternLength, stagesPerBeat)
     }));
   }
 
+  if (requireMoving && unavailableAssignedCount > 0) {
+    return unusableWitness(
+      "rnbo-client",
+      `${unavailableAssignedCount} assigned RNBO current_stage readback${unavailableAssignedCount === 1 ? " is" : "s are"} not advancing`
+    );
+  }
   if (!candidates.length) {
-    return unusableWitness("rnbo-client", "no RNBO current_stage readback");
+    return unusableWitness(
+      "rnbo-client",
+      requireMoving ? "RNBO current_stage is not advancing" : "no RNBO current_stage readback"
+    );
   }
 
   const assigned = candidates.filter((candidate) => candidate.assignedVoiceId);
@@ -94,6 +120,7 @@ export function rnboClientBeatWitness({ targets = [], contracts = [], maxSkewBea
     assignedVoiceId: selected.assignedVoiceId,
     currentStage: selected.currentStage,
     stagesPerBeat: selected.stagesPerBeat,
+    cycleBeats: selected.cycleBeats,
     skewBeats,
     targetCount: comparable.length,
     reason: selected.assignedVoiceId ? "assigned RNBO current_stage readback" : "RNBO current_stage readback"
@@ -168,6 +195,11 @@ function unusableWitness(source, reason) {
 function finiteNonNegative(value, fallback) {
   const number = Number(value);
   return Number.isFinite(number) && number >= 0 ? number : fallback;
+}
+
+function positiveCycleBeats(patternLength, stagesPerBeat) {
+  const stages = Number(patternLength);
+  return Number.isFinite(stages) && stages > 0 ? stages / stagesPerBeat : undefined;
 }
 
 function formatNumber(value) {

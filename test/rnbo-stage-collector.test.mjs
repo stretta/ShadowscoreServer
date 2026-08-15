@@ -59,6 +59,30 @@ test("RNBO stage collector retains the last value and reports read failures", as
   assert.equal(observed.stageReadbackError, "peer offline");
 });
 
+test("RNBO stage collector distinguishes advancing, stopped, and unknown readback", async () => {
+  let now = 1000;
+  let stage = 12;
+  const collector = createRnboStageCollector({
+    transport: { rnboClient: { pollIntervalMs: 0, motionStaleAfterMs: 250 } }
+  }, {
+    autoStart: false,
+    now: () => now,
+    fetchImpl: async () => ({ ok: true, async json() { return { VALUE: [stage] }; } })
+  });
+
+  await collector.refresh([targets[0]]);
+  assert.equal(collector.targets([targets[0]])[0].stageMovement, "unknown");
+
+  now = 1100;
+  stage = 16;
+  await collector.refresh();
+  assert.equal(collector.targets([targets[0]])[0].stageMovement, "moving");
+
+  now = 1400;
+  await collector.refresh();
+  assert.equal(collector.targets([targets[0]])[0].stageMovement, "stopped");
+});
+
 test("RNBO stage collector coalesces overlapping refreshes", async () => {
   let finish;
   let calls = 0;

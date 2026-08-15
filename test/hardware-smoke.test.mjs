@@ -108,7 +108,8 @@ test("hardware smoke fails when peer is not visible on the session host", async 
       hostIdentity: "shadowbox-b"
     },
     registration: {
-      sessionHostUrl: "http://shadowbox-host.local:8790"
+      sessionHostUrl: "http://shadowbox-host.local:8790",
+      discovery: { enabled: false }
     }
   });
   const result = await runHardwareSmoke(config, {
@@ -135,7 +136,7 @@ test("hardware smoke fails when peer is not visible on the session host", async 
 test("peer hardware smoke skips host-only web checks", async () => {
   const config = mergeConfig(defaultConfig, {
     server: { role: "peer", hostIdentity: "finch" },
-    registration: { sessionHostUrl: "http://wren.local:8790" },
+    registration: { sessionHostUrl: "http://wren.local:8790", discovery: { enabled: false } },
     rnbo: { oscQuery: { enabled: true, url: "http://127.0.0.1:5678" } }
   });
   const result = await runHardwareSmoke(config, {
@@ -151,6 +152,33 @@ test("peer hardware smoke skips host-only web checks", async () => {
   assert.equal(result.checks.find((check) => check.name === "coordinator").status, "skip");
   assert.equal(result.checks.find((check) => check.name === "http port").status, "skip");
   assert.equal(result.checks.find((check) => check.name === "RNBOOSCQuery").status, "pass");
+  assert.equal(result.checks.find((check) => check.name === "peer registration").status, "pass");
+});
+
+test("peer hardware smoke verifies registration through discovered authority", async () => {
+  const config = mergeConfig(defaultConfig, {
+    server: { role: "peer", hostIdentity: "finch" },
+    registration: { sessionHostUrl: "", discovery: { enabled: true, timeoutMs: 0 } },
+    rnbo: { oscQuery: { enabled: true, url: "http://127.0.0.1:5678" } }
+  });
+  const result = await runHardwareSmoke(config, {
+    discovery: fakeDiscovery([{
+      id: "wren",
+      address: "192.168.68.99",
+      shadowscoreUrl: "http://wren.local:8790"
+    }]),
+    fetchImpl: createFetch({
+      "http://127.0.0.1:5678": { CONTENTS: { rnbo: {} } },
+      "http://192.168.68.99:8790/coordinator": {
+        local: { id: "wren" },
+        selection: { mode: "local", coordinatorId: "wren" }
+      },
+      "http://192.168.68.99:8790/hardware/units": { hardwareUnits: [{ id: "finch" }] }
+    }),
+    timeoutMs: 20
+  });
+
+  assert.equal(result.ok, true);
   assert.equal(result.checks.find((check) => check.name === "peer registration").status, "pass");
 });
 
@@ -190,6 +218,15 @@ function createFetch(payloads) {
         return String(payload);
       }
     };
+  };
+}
+
+function fakeDiscovery(candidates) {
+  return {
+    start() {},
+    refresh() {},
+    snapshot() { return structuredClone(candidates); },
+    close() {}
   };
 }
 

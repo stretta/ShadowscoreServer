@@ -23,7 +23,7 @@ Options:
   --branch NAME                 Git branch to checkout. Default: $BRANCH
   --install-dir PATH            Install directory. Default: $INSTALL_DIR
   --public-url URL              Host public URL, for example http://pt5.local:8790
-  --session-host-url URL        Required for peer role, for example http://pt5.local:8790
+  --session-host-url URL        Disable discovery and pin a peer to this explicit coordinator URL
   --host-identity ID            Stable unit id. Default: hostname
   --advertised-name NAME        Display name. Default: hostname
   --enable-jack-transport       Install and run the host JACK transport bridge
@@ -60,11 +60,6 @@ fi
 
 if [[ "$ROLE" == "host" && -z "$PUBLIC_URL" ]]; then
   PUBLIC_URL="http://${HOST_IDENTITY}.local:8790"
-fi
-
-if [[ "$ROLE" == "peer" && -z "$SESSION_HOST_URL" ]]; then
-  echo "--session-host-url is required for peer installs" >&2
-  exit 2
 fi
 
 if [[ "$(id -u)" -eq 0 ]]; then

@@ -106,7 +106,7 @@ Add a command or deploy helper path that writes a peer-local config without
 manual editing:
 
 ```sh
-npm run configure-peer -- --id heron --ip 192.168.68.101 --host 192.168.68.102
+npm run configure-peer -- --id heron
 ```
 
 The command should create or update `config/shadowscore.peer.local.json` with:
@@ -114,15 +114,16 @@ The command should create or update `config/shadowscore.peer.local.json` with:
 - `server.role: "peer"`
 - `server.hostIdentity`
 - `server.advertisedName`
-- `registration.sessionHostUrl`
+- coordinator discovery settings, with `registration.sessionHostUrl` reserved
+  for an explicit static override
 - `rnbo.port: 1234`
-- `rnbo.registrationHost`
-- `rnbo.oscQuery.oscHost`
+- RNBO host identity derived from `server.hostIdentity`, with an explicit
+  address override only when requested
 
 It should be usable for arbitrary client names, not only bird names:
 
 ```sh
-npm run configure-peer -- --id bob --ip 192.168.68.111 --host 192.168.68.102
+npm run configure-peer -- --id bob
 ```
 
 Future work: optionally extend `tools/deploy_pi.sh --role peer` so deployment

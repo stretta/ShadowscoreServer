@@ -5,7 +5,7 @@ import path from "node:path";
 import test from "node:test";
 import { buildPeerConfig, parseArgs, run as runConfigurePeer } from "../bin/configure-peer.mjs";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { readLocalOscTargets, readLocalTargets, refreshRegistration } from "../src/registration-agent.mjs";
+import { readLocalOscTargets, readLocalTargets, refreshRegistration, resolveSessionHostUrl } from "../src/registration-agent.mjs";
 
 test("peer registration rewrites loopback RNBO targets to the unit hostname", async () => {
   const config = mergeConfig(defaultConfig, {
@@ -194,14 +194,72 @@ test("registration refresh advertises Poland OSC control targets", async () => {
   assert.equal(requests[0].body.oscTargets[0].parameters[0].name, "VolA");
 });
 
+test("peer registration discovers the single self-declared coordinator", async () => {
+  const config = mergeConfig(defaultConfig, {
+    registration: { discovery: { enabled: true, timeoutMs: 0 } }
+  });
+  const discovery = fakeDiscovery([
+    coordinatorCandidate("finch", "192.168.68.104"),
+    coordinatorCandidate("wren", "192.168.68.99")
+  ]);
+
+  const url = await resolveSessionHostUrl(config, {
+    discovery,
+    fetchImpl: async (requestUrl) => {
+      if (requestUrl === "http://192.168.68.99:8790/coordinator") {
+        return jsonResponse({
+          local: { id: "wren" },
+          selection: { mode: "local", coordinatorId: "wren" }
+        });
+      }
+      throw new Error("connection refused");
+    }
+  });
+
+  assert.equal(url, "http://192.168.68.99:8790");
+});
+
+test("peer registration refuses ambiguous discovered authority", async () => {
+  const config = mergeConfig(defaultConfig, {
+    registration: { discovery: { enabled: true, timeoutMs: 0 } }
+  });
+  const discovery = fakeDiscovery([
+    coordinatorCandidate("elm", "192.168.68.90"),
+    coordinatorCandidate("wren", "192.168.68.99")
+  ]);
+
+  await assert.rejects(
+    resolveSessionHostUrl(config, {
+      discovery,
+      fetchImpl: async (requestUrl) => {
+        const id = requestUrl.includes("192.168.68.90") ? "elm" : "wren";
+        return jsonResponse({
+          local: { id },
+          selection: { mode: "local", coordinatorId: id }
+        });
+      }
+    }),
+    /multiple coordinators discovered: elm, wren/
+  );
+});
+
+test("configured coordinator is used only when discovery is disabled", async () => {
+  const config = mergeConfig(defaultConfig, {
+    registration: {
+      sessionHostUrl: "http://manual-host.local:8790/",
+      discovery: { enabled: false }
+    }
+  });
+
+  assert.equal(await resolveSessionHostUrl(config), "http://manual-host.local:8790");
+});
+
 test("peer config generator writes repeatable local peer config", async () => {
   const tmp = await fs.mkdtemp(path.join(os.tmpdir(), "shadowscore-peer-config-"));
   const output = path.join(tmp, "config", "shadowscore.peer.local.json");
 
   const result = await runConfigurePeer([
     "--id", "bob",
-    "--ip", "192.168.68.111",
-    "--host", "192.168.68.102",
     "--output", output
   ]);
   const written = JSON.parse(await fs.readFile(output, "utf8"));
@@ -210,10 +268,11 @@ test("peer config generator writes repeatable local peer config", async () => {
   assert.equal(written.server.role, "peer");
   assert.equal(written.server.hostIdentity, "bob");
   assert.equal(written.server.advertisedName, "bob");
-  assert.equal(written.registration.sessionHostUrl, "http://192.168.68.102:8790");
+  assert.equal(written.registration.sessionHostUrl, "");
+  assert.equal(written.registration.discovery.enabled, true);
   assert.equal(written.rnbo.port, 1234);
-  assert.equal(written.rnbo.registrationHost, "192.168.68.111");
-  assert.equal(written.rnbo.oscQuery.oscHost, "192.168.68.111");
+  assert.equal(written.rnbo.registrationHost, undefined);
+  assert.equal(written.rnbo.oscQuery.oscHost, undefined);
 });
 
 test("peer config generator accepts urls, names, and explicit RNBO ports", () => {
@@ -227,6 +286,7 @@ test("peer config generator accepts urls, names, and explicit RNBO ports", () =>
 
   assert.equal(config.server.advertisedName, "Heron");
   assert.equal(config.registration.sessionHostUrl, "http://wren.local:8790");
+  assert.equal(config.registration.discovery.enabled, false);
   assert.equal(config.rnbo.port, 9000);
   assert.equal(config.rnbo.registrationHost, "192.168.68.101");
 });
@@ -246,6 +306,24 @@ function jsonResponse(body) {
     async json() {
       return body;
     }
+  };
+}
+
+function coordinatorCandidate(id, address) {
+  return {
+    id,
+    name: id,
+    address,
+    shadowscoreUrl: `http://${id}.local:8790`
+  };
+}
+
+function fakeDiscovery(candidates) {
+  return {
+    start() {},
+    refresh() {},
+    snapshot() { return structuredClone(candidates); },
+    close() {}
   };
 }
 

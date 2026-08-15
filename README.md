@@ -115,12 +115,17 @@ The bridge posts JACK BBT snapshots to `/transport/jack/snapshot`; `/transport`
 and `/transport/status` expose freshness, tempo authority, and macro playback
 alignment state.
 
-For a peer Shadowbox hardware unit that should register with the selected host,
-set `registration.sessionHostUrl` in its config and run:
+For a peer Shadowbox hardware unit, leave coordinator discovery enabled and run:
 
 ```sh
 npm run agent -- --config config/shadowbox.peer.json
 ```
+
+The agent browses RNBOOSCQuery `_oscjson._tcp` advertisements, probes advertised
+birds on port `8790`, and registers with the single Shadowscore host that
+declares itself the local coordinator. It refuses to guess when no authority or
+multiple authorities are found. `registration.sessionHostUrl` is only an
+explicit override when `registration.discovery.enabled` is `false`.
 
 When the peer's local RNBO target is configured as `127.0.0.1`, the registration
 agent advertises it to the host as `<server.hostIdentity>.local` so the session

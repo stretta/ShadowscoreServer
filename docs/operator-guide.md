@@ -93,13 +93,17 @@ curl -X POST http://<host>.local:8790/hardware/units/<unitId>/targets/<targetId>
 To provision or refresh a peer-local config without manual editing:
 
 ```sh
-npm run configure-peer -- --id heron --ip 192.168.68.101 --host 192.168.68.102
-npm run configure-peer -- --id bob --ip 192.168.68.111 --host http://wren.local:8790
+npm run configure-peer -- --id heron
+npm run configure-peer -- --id bob
 ```
 
 This writes `config/shadowscore.peer.local.json` with peer role metadata,
 continuous registration settings, local RNBO port `1234`, and the RNBO host
-identity used when the peer advertises loopback RNBO targets.
+identity used when the peer advertises loopback RNBO targets. Those targets use
+`<id>.local` unless `--ip` is supplied as an explicit override. Omit `--host` for
+normal operation: the peer discovers the single advertised Shadowscore host
+that declares itself coordinator. Supplying `--host` is an explicit static
+override and disables coordinator discovery.
 
 When a peer returns with the same `deviceId`, the host reattaches assignment
 endpoint fields automatically if the peer advertises exactly one ShadowScore

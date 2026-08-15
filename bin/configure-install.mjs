@@ -42,16 +42,22 @@ export function buildInstallConfig(templateConfig, localConfig, options) {
   };
   config.editors = mergeEditorRegistries(defaultConfig.editors, config.editors ?? []);
   config.registration ??= {};
+  config.registration.discovery = {
+    ...clone(defaultConfig.registration.discovery),
+    ...(config.registration.discovery ?? {})
+  };
 
   if (options.role === "host") {
     config.http.publicUrl = options.publicUrl;
     config.registration.sessionHostUrl = "";
   } else {
     config.http.publicUrl = "";
-    config.registration.sessionHostUrl = options.sessionHostUrl;
+    config.registration.sessionHostUrl = options.sessionHostUrl || "";
+    config.registration.discovery.enabled = !options.sessionHostUrl;
     config.rnbo ??= {};
+    delete config.rnbo.registrationHost;
     config.rnbo.oscQuery ??= {};
-    config.rnbo.oscQuery.oscHost ||= `${options.hostIdentity}.local`;
+    config.rnbo.oscQuery.oscHost = `${options.hostIdentity}.local`;
   }
 
   return config;

@@ -28,8 +28,8 @@ export async function run(argv = process.argv.slice(2), options = {}) {
 
 export function buildPeerConfig(options) {
   const id = requiredString(options.id, "--id");
-  const ip = requiredString(options.ip, "--ip");
-  const host = requiredString(options.host, "--host");
+  const ip = optionalString(options.ip);
+  const host = optionalString(options.host);
   const rnboPort = positiveInteger(options.rnboPort ?? DEFAULT_RNBO_PORT, "--rnbo-port");
 
   return {
@@ -45,22 +45,28 @@ export function buildPeerConfig(options) {
     },
     registration: {
       enabled: true,
-      sessionHostUrl: sessionHostUrl(host),
+      sessionHostUrl: host ? sessionHostUrl(host) : "",
       heartbeatIntervalMs: 10000,
-      heartbeatTtlMs: 30000
+      heartbeatTtlMs: 30000,
+      discovery: {
+        enabled: !host,
+        timeoutMs: 5000,
+        pollIntervalMs: 200,
+        probeTimeoutMs: 1500
+      }
     },
     rnbo: {
       enabled: true,
       host: "127.0.0.1",
       port: rnboPort,
       address: "/rnbo/inst/2/messages/in/shadowscore",
-      registrationHost: ip,
+      ...(ip ? { registrationHost: ip } : {}),
       oscQuery: {
         enabled: true,
         url: "http://127.0.0.1:5678/",
         timeoutMs: 1000,
         addressPattern: "shadowscore",
-        oscHost: ip
+        ...(ip ? { oscHost: ip } : {})
       }
     }
   };
@@ -121,6 +127,10 @@ function requiredString(value, name) {
     throw new Error(`${name} is required`);
   }
   return stringValue;
+}
+
+function optionalString(value) {
+  return value === undefined || value === null ? "" : String(value).trim();
 }
 
 function positiveInteger(value, name) {

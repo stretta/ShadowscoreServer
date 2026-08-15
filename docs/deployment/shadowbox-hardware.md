@@ -27,7 +27,7 @@ For a peer unit:
 
 ```sh
 curl -L https://raw.githubusercontent.com/stretta/ShadowscoreServer/main/deploy/install-shadowscore.sh -o /tmp/install-shadowscore.sh
-bash /tmp/install-shadowscore.sh --role peer --host-identity pt6 --advertised-name pt6 --session-host-url http://pt5.local:8790
+bash /tmp/install-shadowscore.sh --role peer --host-identity pt6 --advertised-name pt6
 ```
 
 The installer installs missing `git`, `curl`, `nodejs`, and `npm` packages,
@@ -64,18 +64,29 @@ server code.
 
 For a peer unit, copy `config/shadowbox.hardware-peer.json` instead and set:
 
-- `registration.sessionHostUrl` to the selected host URL.
 - `server.advertisedName` and `server.hostIdentity` to this peer unit.
 - `rnbo.oscQuery.oscHost` to the peer's LAN name, for example `pt6.local`, if
   the local RNBO OSC target is otherwise configured as `127.0.0.1`.
 
+Keep `registration.discovery.enabled` true for normal operation. The
+registration agent browses `_oscjson._tcp`, probes advertised birds on port
+`8790`, and registers with the one Shadowscore host that declares itself the
+local coordinator. Set `registration.discovery.enabled` false together with
+`registration.sessionHostUrl` only for an intentional static override.
+
 ## Coordinator discovery and selection
 
-Current installations can select the session coordinator from the root
-dashboard instead of editing `registration.sessionHostUrl`. Shadowscore uses
+Current host installations can select the session coordinator from the root
+dashboard. Shadowscore uses
 Bonjour `_oscjson._tcp` advertisements from RNBOOSCQuery as genuine LAN
 discovery, probes each discovered unit on port `8790`, and labels units that do
 not yet run Shadowscore separately.
+
+Peer-only registration agents use the same advertisements and probes. They
+accept only a host whose `/coordinator` response says that host is the local
+authority. They continuously rediscover, so a DHCP address change does not
+require editing peer configuration. Zero or multiple authorities are reported
+as errors instead of being resolved by an arbitrary choice.
 
 On the intended authority, open `http://<unit>.local:8790/`, then use **Make
 this tree coordinator**. That choice is saved in `data/coordinator.json`, and

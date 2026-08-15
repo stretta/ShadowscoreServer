@@ -76,3 +76,36 @@ test("installer writes a fresh config and then updates it in place", () => {
   assert.equal(updated.localOnly, "keep-me");
   assert.equal(updated.server.advertisedName, "Wren Updated");
 });
+
+test("peer installs discover the coordinator unless an explicit override is supplied", () => {
+  const template = {
+    http: {},
+    registration: {},
+    static: {},
+    rnbo: {
+      registrationHost: "192.168.68.104",
+      oscQuery: { oscHost: "192.168.68.104" }
+    }
+  };
+  const peerOptions = {
+    ...hostOptions,
+    role: "peer",
+    publicUrl: "",
+    sessionHostUrl: "",
+    hostIdentity: "finch",
+    advertisedName: "Finch"
+  };
+
+  const discovered = buildInstallConfig(template, null, peerOptions);
+  assert.equal(discovered.registration.sessionHostUrl, "");
+  assert.equal(discovered.registration.discovery.enabled, true);
+  assert.equal(discovered.rnbo.registrationHost, undefined);
+  assert.equal(discovered.rnbo.oscQuery.oscHost, "finch.local");
+
+  const pinned = buildInstallConfig(template, null, {
+    ...peerOptions,
+    sessionHostUrl: "http://manual-host.local:8790"
+  });
+  assert.equal(pinned.registration.sessionHostUrl, "http://manual-host.local:8790");
+  assert.equal(pinned.registration.discovery.enabled, false);
+});

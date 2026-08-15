@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import net from "node:net";
 import { loadConfig } from "../src/config.mjs";
+import { createOscQueryBonjourDiscovery } from "../src/coordinator/bonjour-discovery.mjs";
+import { resolveSessionHostUrl } from "../src/registration-agent.mjs";
 
 const cliOptions = readCliOptions(process.argv.slice(2));
 
@@ -46,7 +48,7 @@ export async function runHardwareSmoke(config, options = {}) {
   }
 
   if (config.server?.role === "peer") {
-    checks.push(await checkPeerRegistration(config, fetchImpl, timeoutMs));
+    checks.push(await checkPeerRegistration(config, fetchImpl, timeoutMs, options.discovery));
   } else {
     checks.push(skipCheck("peer registration", "host role"));
   }
@@ -118,17 +120,18 @@ async function checkTcpPort(name, host, port, timeoutMs, netConnect = net.connec
   });
 }
 
-async function checkPeerRegistration(config, fetchImpl, timeoutMs) {
-  const sessionHostUrl = stripTrailingSlash(config.registration?.sessionHostUrl);
+async function checkPeerRegistration(config, fetchImpl, timeoutMs, providedDiscovery) {
   const unitId = config.server?.hostIdentity;
-  if (!sessionHostUrl) {
-    return failCheck("peer registration", "registration.sessionHostUrl is empty");
-  }
   if (!unitId) {
     return failCheck("peer registration", "server.hostIdentity is empty");
   }
-  const url = `${sessionHostUrl}/hardware/units`;
+  const discoveryEnabled = config.registration?.discovery?.enabled !== false;
+  const discovery = providedDiscovery ?? (discoveryEnabled ? createOscQueryBonjourDiscovery() : undefined);
   try {
+    discovery?.start();
+    discovery?.refresh();
+    const sessionHostUrl = await resolveSessionHostUrl(config, { discovery, fetchImpl });
+    const url = `${sessionHostUrl}/hardware/units`;
     const response = await fetchWithTimeout(fetchImpl, url, timeoutMs);
     if (!response.ok) {
       return failCheck("peer registration", `${url} returned HTTP ${response.status}`);
@@ -138,7 +141,9 @@ async function checkPeerRegistration(config, fetchImpl, timeoutMs) {
     const found = units.some((unit) => unit.id === unitId || unit.hostIdentity === unitId);
     return found ? passCheck("peer registration", `${unitId} visible on host`) : failCheck("peer registration", `${unitId} is not visible on host`);
   } catch (error) {
-    return failCheck("peer registration", `${url} failed: ${messageForError(error)}`);
+    return failCheck("peer registration", messageForError(error));
+  } finally {
+    discovery?.close();
   }
 }
 

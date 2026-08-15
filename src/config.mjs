@@ -16,7 +16,13 @@ export const defaultConfig = Object.freeze({
     enabled: true,
     sessionHostUrl: "",
     heartbeatIntervalMs: 10000,
-    heartbeatTtlMs: 30000
+    heartbeatTtlMs: 30000,
+    discovery: {
+      enabled: true,
+      timeoutMs: 5000,
+      pollIntervalMs: 200,
+      probeTimeoutMs: 1500
+    }
   },
   coordinator: {
     statePath: "data/coordinator.json",

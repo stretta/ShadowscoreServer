@@ -585,6 +585,51 @@ test("orchestration moves a note atomically between assigned player clips", () =
   assert.equal(events[0].detail.destinationClipId, "a-player-2");
 });
 
+test("MIDI player import atomically creates fresh clips, players, and block assignments without changing routing", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const before = store.getScore();
+  const result = store.importMidiToPlayers({
+    blockId: "A",
+    sourceName: "quartet.mid",
+    format: 1,
+    ppq: 480,
+    durationBeats: 8.5,
+    tempo: 96,
+    timeSignature: { numerator: 4, denominator: 4 },
+    lanes: [
+      { playerId: "player-1", label: "Cello · ch 1", trackIndex: 0, trackName: "Cello", channel: 1, program: 42, notes: [{ pitch: 48, start_time: 0, duration: 2, velocity: 90 }] },
+      { playerId: "player-7", createPlayer: true, playerLabel: "Violin", label: "Violin · ch 2", trackIndex: 1, trackName: "Violin", channel: 2, program: 40, notes: [{ pitch: 72, start_time: 1, duration: 1.5, velocity: 84 }] }
+    ]
+  }, { expectedVersion: 0, expectedStructureRevision: 0 });
+
+  assert.equal(result.score.version, 1);
+  assert.equal(result.score.structureRevision, 1);
+  assert.deepEqual(result.import.createdPlayerIds, ["player-7"]);
+  assert.deepEqual(result.import.clipIds, ["a-player-1-midi", "a-player-7-midi"]);
+  assert.equal(result.score.mesostructure.A.tempo, 96);
+  assert.deepEqual(result.score.mesostructure.A.duration, { beats: 8.5 });
+  assert.equal(result.score.mesostructure.A.players["player-1"].clipId, "a-player-1-midi");
+  assert.equal(result.score.mesostructure.A.players["player-7"].clipId, "a-player-7-midi");
+  assert.equal(result.score.clips["a-player-1-midi"].playbackType, "one-shot");
+  assert.equal(result.score.clips["a-player-1-midi"].behavior.followsScale, false);
+  assert.equal(result.score.clips["a-player-1-midi"].context.clip.MidiImport.sourceName, "quartet.mid");
+  assert.deepEqual(result.score.assignments["player-1"], before.assignments["player-1"]);
+  assert.equal(result.score.assignments["player-7"].label, "Violin");
+});
+
+test("MIDI player import rejects duplicate destinations and stale revisions without partial mutation", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const base = {
+    blockId: "A",
+    durationBeats: 4,
+    lanes: [{ playerId: "player-1", notes: [{ pitch: 60, start_time: 0, duration: 1, velocity: 100 }] }]
+  };
+  assert.throws(() => store.importMidiToPlayers({ ...base, lanes: [...base.lanes, ...base.lanes] }), /more than one lane to player 'player-1'/);
+  assert.equal(store.getScore().version, 0);
+  assert.throws(() => store.importMidiToPlayers(base, { expectedVersion: 4 }), /stale score version 4/);
+  assert.equal(store.getScore().version, 0);
+});
+
 test("orchestration creates and assigns a missing player part in the same transaction", () => {
   const initial = createInitialScore(defaultConfig);
   delete initial.mesostructure.A.players["player-3"];

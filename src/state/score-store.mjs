@@ -786,6 +786,87 @@ export function createScoreStore(initialScore, options = {}) {
       emitChange(events, "clip.replaced", score, { clipId: id, clip }, options);
       return structuredClone(score);
     },
+    importMidiToPlayers(request = {}, options = {}) {
+      const blockId = normalizeBlockId(request.blockId);
+      const block = score.mesostructure?.[blockId];
+      if (!block) throw new Error(`unknown mesostructural block '${blockId}'`);
+      assertExpectedScoreVersion(score, options.expectedVersion);
+      assertExpectedRevisions(score, options);
+      const imported = normalizeMidiPlayerImport(request);
+      const nextVoices = { ...score.voices };
+      const nextAssignments = { ...ensureAssignments(score, assignmentDefaults) };
+      const nextClips = { ...score.clips };
+      const nextPlayers = { ...(block.players ?? {}) };
+      const createdPlayerIds = [];
+      const clipIds = [];
+
+      imported.lanes.forEach((lane, index) => {
+        const playerId = normalizeVoiceId(lane.playerId);
+        if (!nextVoices[playerId]) {
+          if (!lane.createPlayer) throw new Error(`unknown voice '${playerId}'`);
+          nextVoices[playerId] = { version: 0, notes: [] };
+          nextAssignments[playerId] = createEmptyAssignment({
+            label: lane.playerLabel || lane.label || playerId,
+            color: lane.color || importedPlayerColor(index)
+          });
+          createdPlayerIds.push(playerId);
+        }
+        const clipId = uniqueId(`${blockId.toLowerCase()}-${playerId}-midi`, nextClips);
+        nextClips[clipId] = normalizeClipDocument({
+          notes: lane.notes,
+          context: {
+            clip: {
+              TimeSignature: imported.timeSignature,
+              MidiImport: {
+                sourceName: imported.sourceName,
+                format: imported.format,
+                ppq: imported.ppq,
+                trackIndex: lane.trackIndex,
+                trackName: lane.trackName,
+                channel: lane.channel,
+                program: lane.program
+              }
+            },
+            scale: {},
+            grid: {},
+            seed: 0
+          },
+          duration: { beats: imported.durationBeats },
+          playbackType: "one-shot",
+          behavior: { followsPitch: true, followsScale: false, transposeMode: "chromatic" }
+        });
+        nextPlayers[playerId] = { clipId };
+        clipIds.push(clipId);
+      });
+
+      const nextBlock = {
+        ...block,
+        ...(imported.applyTempo ? { tempo: imported.tempo } : {}),
+        ...(imported.applyDuration ? { duration: { beats: imported.durationBeats } } : {}),
+        players: nextPlayers
+      };
+      score = {
+        ...score,
+        ...nextRevisionFields(score, { structure: true }),
+        voices: nextVoices,
+        assignments: nextAssignments,
+        clips: nextClips,
+        mesostructure: { ...score.mesostructure, [blockId]: nextBlock }
+      };
+      const summary = {
+        blockId,
+        sourceName: imported.sourceName,
+        laneCount: imported.lanes.length,
+        noteCount: imported.lanes.reduce((sum, lane) => sum + lane.notes.length, 0),
+        playerIds: imported.lanes.map((lane) => lane.playerId),
+        createdPlayerIds,
+        clipIds,
+        durationBeats: imported.durationBeats,
+        tempo: imported.applyTempo ? imported.tempo : undefined
+      };
+      emitChange(events, "midi.players.imported", score, summary, options);
+      return { score: structuredClone(score), import: structuredClone(summary) };
+    },
     moveClipNote(request = {}, options = {}) {
       const blockId = normalizeBlockId(request.blockId);
       const sourcePlayerId = normalizeVoiceId(request.sourcePlayerId);
@@ -1563,6 +1644,83 @@ function normalizeClipDocument(clipDocument = {}) {
     playbackType: normalizePlaybackType(clipDocument.playbackType),
     behavior: normalizeClipBehavior(clipDocument.behavior ?? {})
   };
+}
+
+function normalizeMidiPlayerImport(request) {
+  if (!isPlainObject(request)) throw new Error("MIDI import must be an object");
+  if (!Array.isArray(request.lanes) || request.lanes.length === 0) throw new Error("MIDI import requires at least one mapped lane");
+  if (request.lanes.length > 128) throw new Error("MIDI import cannot contain more than 128 mapped lanes");
+  const durationBeats = Number(request.durationBeats);
+  if (!Number.isFinite(durationBeats) || durationBeats <= 0) throw new Error("MIDI import durationBeats must be a positive number");
+  const tempo = Number(request.tempo ?? 120);
+  if (!Number.isFinite(tempo) || tempo <= 0) throw new Error("MIDI import tempo must be a positive number");
+  const numerator = Number(request.timeSignature?.numerator ?? 4);
+  const denominator = Number(request.timeSignature?.denominator ?? 4);
+  if (!Number.isInteger(numerator) || numerator <= 0 || !Number.isInteger(denominator) || denominator <= 0) {
+    throw new Error("MIDI import time signature must contain positive integer numerator and denominator values");
+  }
+  const players = new Set();
+  let noteCount = 0;
+  const lanes = request.lanes.map((lane, laneIndex) => {
+    if (!isPlainObject(lane)) throw new Error(`MIDI lane ${laneIndex + 1} must be an object`);
+    const playerId = normalizeVoiceId(lane.playerId);
+    if (players.has(playerId)) throw new Error(`MIDI import maps more than one lane to player '${playerId}'`);
+    players.add(playerId);
+    if (!Array.isArray(lane.notes) || lane.notes.length === 0) throw new Error(`MIDI lane '${lane.label || laneIndex + 1}' has no notes`);
+    noteCount += lane.notes.length;
+    if (noteCount > 100000) throw new Error("MIDI import cannot contain more than 100000 notes");
+    const notes = lane.notes.map((note, noteIndex) => normalizeMidiNote(note, laneIndex, noteIndex));
+    return {
+      playerId,
+      createPlayer: Boolean(lane.createPlayer),
+      playerLabel: stringField(lane.playerLabel),
+      color: stringField(lane.color),
+      label: stringField(lane.label),
+      trackIndex: Number.isInteger(lane.trackIndex) ? lane.trackIndex : laneIndex,
+      trackName: stringField(lane.trackName),
+      channel: Number.isInteger(lane.channel) ? lane.channel : null,
+      program: Number.isInteger(lane.program) ? lane.program : null,
+      notes
+    };
+  });
+  return {
+    sourceName: stringField(request.sourceName) || "import.mid",
+    format: Number.isInteger(request.format) ? request.format : null,
+    ppq: Number.isInteger(request.ppq) && request.ppq > 0 ? request.ppq : null,
+    durationBeats,
+    tempo,
+    timeSignature: { numerator, denominator },
+    applyTempo: request.applyTempo !== false,
+    applyDuration: request.applyDuration !== false,
+    lanes
+  };
+}
+
+function normalizeMidiNote(note, laneIndex, noteIndex) {
+  if (!isPlainObject(note)) throw new Error(`MIDI lane ${laneIndex + 1} note ${noteIndex + 1} must be an object`);
+  const pitch = Number(note.pitch);
+  const startTime = Number(note.start_time);
+  const duration = Number(note.duration);
+  const velocity = Number(note.velocity);
+  if (!Number.isInteger(pitch) || pitch < 0 || pitch > 127) throw new Error(`MIDI note pitch must be an integer from 0 to 127`);
+  if (!Number.isFinite(startTime) || startTime < 0) throw new Error("MIDI note start_time must be a non-negative number");
+  if (!Number.isFinite(duration) || duration <= 0) throw new Error("MIDI note duration must be a positive number");
+  if (!Number.isInteger(velocity) || velocity < 1 || velocity > 127) throw new Error("MIDI note velocity must be an integer from 1 to 127");
+  return {
+    note_id: noteIndex + 1,
+    pitch,
+    start_time: startTime,
+    duration,
+    velocity,
+    release_velocity: Number.isInteger(note.release_velocity) ? Math.max(0, Math.min(127, note.release_velocity)) : 64,
+    mute: 0,
+    probability: 1,
+    velocity_deviation: 0
+  };
+}
+
+function importedPlayerColor(index) {
+  return ["#6ee7ff", "#ff9f6e", "#a78bfa", "#6ee7b7", "#ffd166", "#f472b6", "#93c5fd", "#c4b5fd"][index % 8];
 }
 
 function normalizeDuration(duration) {

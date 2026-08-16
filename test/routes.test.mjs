@@ -3275,6 +3275,34 @@ test("Piano Roll orchestration route moves a note atomically", async () => {
   assert.match(stale.body, /stale score version 0; current version is 1/);
 });
 
+test("Piano Roll MIDI import route maps normalized lanes to players atomically", async () => {
+  const context = createRouteContext();
+  const result = await requestJson(context, "POST", "/clips/actions/import-midi-to-players", {
+    blockId: "A",
+    sourceName: "demo.mid",
+    format: 0,
+    ppq: 96,
+    durationBeats: 4,
+    tempo: 120,
+    timeSignature: { numerator: 3, denominator: 4 },
+    expectedVersion: 0,
+    expectedStructureRevision: 0,
+    lanes: [{
+      playerId: "player-1",
+      label: "Demo · ch 1",
+      trackIndex: 0,
+      trackName: "Demo",
+      channel: 1,
+      notes: [{ pitch: 60, start_time: 0, duration: 2, velocity: 100 }]
+    }]
+  });
+
+  assert.equal(result.score.version, 1);
+  assert.equal(result.import.noteCount, 1);
+  assert.equal(result.score.mesostructure.A.players["player-1"].clipId, "a-player-1-midi");
+  assert.deepEqual(result.score.clips["a-player-1-midi"].context.clip.TimeSignature, { numerator: 3, denominator: 4 });
+});
+
 test("mesostructure duplicate route copies assigned clips for the new block", async () => {
   const context = createRouteContext();
 

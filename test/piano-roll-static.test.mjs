@@ -28,6 +28,11 @@ test("Piano Roll exposes autosave recovery and editing surfaces", async () => {
   assert.match(html, /id="note-menu"[^>]*role="menu"/);
   assert.match(html, /id="move-to"[^>]*aria-haspopup="menu"/);
   assert.match(html, /id="move-to-menu"[^>]*role="menu"/);
+  assert.match(html, /id="import-midi"/);
+  assert.match(html, /id="midi-import-dialog"/);
+  assert.match(html, /id="midi-file"[^>]*type="file"/);
+  assert.match(html, /id="midi-lanes"/);
+  assert.match(html, /Each mapped lane creates a fresh one-shot clip/);
   assert.match(html, /Alt-click or right-click any visible note to orchestrate it/);
 });
 
@@ -78,4 +83,8 @@ test("Piano Roll autosaves revision-aware clip drafts and supports right-edge re
   assert.match(js, /Review assignments in Arrange…/);
   assert.match(js, /event\.key==="ContextMenu"/);
   assert.match(js, /event\.shiftKey&&event\.key==="F10"/);
+  assert.match(js, /parseStandardMidiFile/);
+  assert.match(js, /\/clips\/actions\/import-midi-to-players/);
+  assert.match(js, /expectedStructureRevision:state\.score\.structureRevision/);
+  assert.match(js, /Each MIDI lane needs a different destination player/);
 });

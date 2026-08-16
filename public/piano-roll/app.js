@@ -14,14 +14,15 @@ import {
   velocityFromLanePosition
 } from "/piano-roll/clip-editor-core.js";
 import { createClipDraftStore } from "/piano-roll/clip-draft-store.js";
+import { parseStandardMidiFile } from "/piano-roll/midi-import.js";
 import { createPlaybackUpdateControl } from "/shared/playback-update-control.js";
 import { createWiperEstimator } from "/shared/wiper-estimator.js";
 
 const $ = (id) => document.getElementById(id);
-const ui = { block:$("block"), player:$("player"), clip:$("clip"), grid:$("grid"), zoomX:$("zoom-x"), zoomY:$("zoom-y"), chase:$("chase"), fold:$("fold"), revert:$("revert"), dirty:$("dirty"), editing:$("editing"), playing:$("playing"), selection:$("selection"), status:$("status"), playbackUpdate:$("playback-update"), roll:$("roll"), velocity:$("velocity"), rollWiper:$("roll-wiper"), velocityWiper:$("velocity-wiper"), rollScroll:$("roll-scroll"), velocityScroll:$("velocity-scroll"), velocityValue:$("velocity-value"), noteMenu:$("note-menu"), noteMenuHeading:$("note-menu-heading"), moveTo:$("move-to"), moveToMenu:$("move-to-menu") };
+const ui = { block:$("block"), player:$("player"), clip:$("clip"), grid:$("grid"), zoomX:$("zoom-x"), zoomY:$("zoom-y"), chase:$("chase"), fold:$("fold"), importMidi:$("import-midi"), revert:$("revert"), dirty:$("dirty"), editing:$("editing"), playing:$("playing"), selection:$("selection"), status:$("status"), playbackUpdate:$("playback-update"), roll:$("roll"), velocity:$("velocity"), rollWiper:$("roll-wiper"), velocityWiper:$("velocity-wiper"), rollScroll:$("roll-scroll"), velocityScroll:$("velocity-scroll"), velocityValue:$("velocity-value"), noteMenu:$("note-menu"), noteMenuHeading:$("note-menu-heading"), moveTo:$("move-to"), moveToMenu:$("move-to-menu"), midiDialog:$("midi-import-dialog"), midiForm:$("midi-import-form"), midiFile:$("midi-file"), midiSummary:$("midi-summary"), midiWarnings:$("midi-warnings"), midiPreview:$("midi-preview"), midiLanes:$("midi-lanes"), midiApplyTempo:$("midi-apply-tempo"), midiApplyDuration:$("midi-apply-duration"), midiImportStatus:$("midi-import-status"), midiImportCommit:$("midi-import-commit"), midiImportClose:$("midi-import-close"), midiImportCancel:$("midi-import-cancel") };
 const ctx = ui.roll.getContext("2d"); const vctx = ui.velocity.getContext("2d");
 const draftStore=createClipDraftStore();
-const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, saving:false, pendingSaves:new Set(), saveTimer:null, chasing:false, folded:false, drag:null, menuNote:null, orchestrationBusy:false, playback:null, playbackGeneration:0, playbackRequest:null, wiperFrame:null, rnboTargets:[], timingContracts:[], dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, minPitch:36, maxPitch:84 };
+const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, saving:false, pendingSaves:new Set(), saveTimer:null, chasing:false, folded:false, drag:null, menuNote:null, orchestrationBusy:false, midiImport:null, playback:null, playbackGeneration:0, playbackRequest:null, wiperFrame:null, rnboTargets:[], timingContracts:[], dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, minPitch:36, maxPitch:84 };
 const wiperEstimator=createWiperEstimator({staleAfterMs:750,correctionMs:180,snapThresholdBeats:.25});
 createPlaybackUpdateControl({ root:ui.playbackUpdate, getBlockId:()=>ui.block.value });
 
@@ -153,6 +154,116 @@ async function settleAutosaves(){
   }
 }
 
+function openMidiImport(){
+  if(!state.score||!ui.block.value)return;
+  state.midiImport=null;
+  ui.midiForm.reset();
+  ui.midiPreview.hidden=true;
+  ui.midiLanes.replaceChildren();
+  ui.midiWarnings.hidden=true;
+  ui.midiWarnings.textContent="";
+  ui.midiSummary.textContent=`Import into section ${ui.block.value}. Choose a format 0 or format 1 Standard MIDI file; nothing changes until Import is pressed.`;
+  ui.midiImportStatus.textContent="";
+  ui.midiImportCommit.disabled=true;
+  ui.midiDialog.showModal();
+}
+
+async function readMidiFile(){
+  const file=ui.midiFile.files?.[0];
+  if(!file)return;
+  ui.midiImportCommit.disabled=true;
+  ui.midiImportStatus.textContent="Reading MIDI…";
+  try{
+    const parsed=parseStandardMidiFile(await file.arrayBuffer(),{sourceName:file.name});
+    state.midiImport=parsed;
+    renderMidiPreview(parsed);
+    ui.midiImportStatus.textContent="Review every destination before importing.";
+    ui.midiImportCommit.disabled=false;
+  }catch(error){
+    state.midiImport=null;
+    ui.midiPreview.hidden=true;
+    ui.midiSummary.textContent=`Could not read ${file.name}: ${error.message}`;
+    ui.midiImportStatus.textContent="";
+  }
+}
+
+function renderMidiPreview(parsed){
+  const signature=`${parsed.timeSignature.numerator}/${parsed.timeSignature.denominator}`;
+  ui.midiSummary.textContent=`${parsed.sourceName} · format ${parsed.format} · ${parsed.trackCount} track${parsed.trackCount===1?"":"s"} · ${parsed.ppq} PPQ · ${parsed.lanes.length} musical lane${parsed.lanes.length===1?"":"s"} · ${fmt(parsed.durationBeats)} beats · ${fmt(parsed.tempo)} BPM · ${signature}`;
+  const warnings=[...parsed.warnings,...parsed.lanes.flatMap(lane=>lane.warnings.map(message=>`${lane.label}: ${message}`))];
+  ui.midiWarnings.textContent=warnings.join("\n");
+  ui.midiWarnings.hidden=warnings.length===0;
+  const existingPlayers=Object.keys(state.score?.voices||{});
+  ui.midiLanes.replaceChildren(...parsed.lanes.map((lane,index)=>{
+    const row=document.createElement("tr");
+    row.dataset.laneId=lane.id;
+    const source=document.createElement("td");
+    const sourceLabel=document.createElement("strong");sourceLabel.textContent=lane.label;
+    const detail=document.createElement("small");detail.textContent=`track ${lane.trackIndex+1}${lane.program===undefined?"":` · program ${lane.program}`}${lane.percussion?" · percussion":""}`;
+    source.append(sourceLabel,detail);
+    const count=document.createElement("td");count.textContent=String(lane.noteCount);
+    const range=document.createElement("td");range.textContent=`${pitchName(lane.lowestPitch)}–${pitchName(lane.highestPitch)}`;
+    const destination=document.createElement("td");
+    const select=document.createElement("select");select.setAttribute("aria-label",`Destination for ${lane.label}`);
+    select.append(new Option("Ignore lane",""));
+    existingPlayers.forEach(playerId=>select.append(new Option(state.score?.assignments?.[playerId]?.label||playerId,`existing:${playerId}`)));
+    select.append(new Option(`New player: ${lane.trackName||lane.label}`,`new:${lane.id}`));
+    select.value=index<existingPlayers.length?`existing:${existingPlayers[index]}`:`new:${lane.id}`;
+    destination.append(select);row.append(source,count,range,destination);return row;
+  }));
+  ui.midiPreview.hidden=false;
+}
+
+function nextImportedPlayerId(reserved){
+  let number=1;
+  while(reserved.has(`player-${number}`))number+=1;
+  const id=`player-${number}`;
+  reserved.add(id);
+  return id;
+}
+
+async function commitMidiImport(event){
+  event.preventDefault();
+  const parsed=state.midiImport;
+  if(!parsed)return;
+  const selectedRows=[...ui.midiLanes.querySelectorAll("tr")].map((row,index)=>({row,lane:parsed.lanes[index],value:row.querySelector("select").value})).filter(entry=>entry.value);
+  if(!selectedRows.length){ui.midiImportStatus.textContent="Map at least one MIDI lane to a player.";return;}
+  const reservedPlayerIds=new Set(Object.keys(state.score?.voices||{}));
+  const destinations=selectedRows.map(({value})=>value.startsWith("new:")?{kind:"new",playerId:nextImportedPlayerId(reservedPlayerIds)}:{kind:"existing",playerId:value.slice(value.indexOf(":")+1)});
+  const playerIds=destinations.map(destination=>destination.playerId);
+  if(new Set(playerIds).size!==playerIds.length){ui.midiImportStatus.textContent="Each MIDI lane needs a different destination player.";return;}
+  state.orchestrationBusy=true;
+  ui.midiImportCommit.disabled=true;
+  ui.midiFile.disabled=true;
+  try{
+    ui.midiImportStatus.textContent="Finishing pending note edits…";
+    await settleAutosaves();
+    ui.midiImportStatus.textContent="Importing fresh player clips…";
+    const lanes=selectedRows.map(({lane},index)=>{
+      const destination=destinations[index];
+      return {...lane,playerId:destination.playerId,createPlayer:destination.kind==="new",playerLabel:lane.trackName||lane.label};
+    });
+    const response=await fetch("/clips/actions/import-midi-to-players",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({blockId:ui.block.value,sourceName:parsed.sourceName,format:parsed.format,ppq:parsed.ppq,durationBeats:parsed.durationBeats,tempo:parsed.tempo,timeSignature:parsed.timeSignature,applyTempo:ui.midiApplyTempo.checked,applyDuration:ui.midiApplyDuration.checked,lanes,expectedVersion:state.score.version,expectedScoreRevision:state.score.scoreRevision,expectedStructureRevision:state.score.structureRevision})});
+    const payload=await response.json();
+    if(!response.ok)throw new Error(payload.error||`HTTP ${response.status}`);
+    state.score=payload.score;
+    draftStore.reconcile(payload.score);
+    const firstPlayerId=payload.import.playerIds[0];
+    populateSelectors(true);
+    if(players().includes(firstPlayerId))ui.player.value=firstPlayerId;
+    setOptions(ui.clip,clipsForPlayer(),clipsForPlayer()[0]||"");
+    loadClip();resize();
+    ui.midiDialog.close();
+    status(`Imported ${payload.import.noteCount} notes from ${payload.import.sourceName} into ${payload.import.laneCount} player${payload.import.laneCount===1?"":"s"} in section ${payload.import.blockId}.`);
+  }catch(error){
+    ui.midiImportStatus.textContent=`Import failed: ${error.message}`;
+  }finally{
+    state.orchestrationBusy=false;
+    ui.midiImportCommit.disabled=false;
+    ui.midiFile.disabled=false;
+  }
+}
+
 async function moveOrchestrationNote(destination){
   if(state.orchestrationBusy||!state.menuNote)return;
   const source=clone(state.menuNote);
@@ -254,6 +365,11 @@ async function loadPlayback(){if(state.playbackRequest)return;const controller=n
 ui.block.addEventListener("change",()=>{closeNoteMenu();populateSelectors(true);loadClip();resize();});ui.player.addEventListener("change",()=>{closeNoteMenu();setOptions(ui.clip,clipsForPlayer(),clipsForPlayer()[0]||"");loadClip();resize();});ui.clip.addEventListener("change",()=>{closeNoteMenu();loadClip();resize();});
 ui.chase.addEventListener("change",()=>{state.chasing=ui.chase.checked;ui.block.disabled=state.chasing;if(state.chasing)followChase();});
 ui.fold.addEventListener("click",()=>{state.folded=!state.folded;ui.fold.setAttribute("aria-pressed",String(state.folded));ui.rollScroll.scrollTop=0;resize();});
+ui.importMidi.addEventListener("click",openMidiImport);
+ui.midiFile.addEventListener("change",()=>void readMidiFile());
+ui.midiForm.addEventListener("submit",event=>void commitMidiImport(event));
+ui.midiImportClose.addEventListener("click",()=>ui.midiDialog.close());
+ui.midiImportCancel.addEventListener("click",()=>ui.midiDialog.close());
 ui.revert.addEventListener("click",()=>{const entry=draftStore.revert(state.clipId);state.snapshot=entry.snapshot;state.draft=entry.draft;state.selected=-1;markDirty();updateSelection();resize();status(`Reverted ${state.clipId} to its last server snapshot.`);});
 [ui.grid,ui.zoomX,ui.zoomY].forEach(control=>control.addEventListener("input",resize));ui.rollScroll.addEventListener("scroll",()=>{ui.velocityScroll.scrollLeft=ui.rollScroll.scrollLeft;});addEventListener("resize",resize);addEventListener("beforeunload",event=>{clearTimeout(state.saveTimer);if(draftStore.hasDirty()){event.preventDefault();event.returnValue="";}});
 ui.moveTo.addEventListener("mouseenter",()=>openMoveSubmenu());

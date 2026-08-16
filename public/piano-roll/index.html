@@ -25,6 +25,7 @@
       <label>Pitch zoom <input id="zoom-y" type="range" min="12" max="32" value="20"></label>
       <label class="toggle"><input id="chase" type="checkbox"> Chase</label>
       <button id="fold" type="button" aria-pressed="false" title="Show only note lanes used in this block">Fold</button>
+      <button id="import-midi" type="button">Import MIDI…</button>
       <button id="revert" type="button" disabled>Revert</button>
       <span id="dirty" class="badge">Saved</span>
     </header>
@@ -50,8 +51,39 @@
       </button>
       <div id="move-to-menu" class="context-submenu" role="menu" aria-label="Move note to player" hidden></div>
     </div>
+    <dialog id="midi-import-dialog" aria-labelledby="midi-import-title">
+      <form id="midi-import-form" method="dialog">
+        <header>
+          <div><small>Condensed-score orchestration</small><h2 id="midi-import-title">Import MIDI to players</h2></div>
+          <button id="midi-import-close" class="icon-button" type="button" aria-label="Close MIDI import">×</button>
+        </header>
+        <section class="midi-file-step">
+          <label class="midi-file-picker">Standard MIDI file <input id="midi-file" type="file" accept=".mid,.midi,audio/midi,audio/x-midi"></label>
+          <p id="midi-summary">Choose a format 0 or format 1 Standard MIDI file. Nothing changes until Import is pressed.</p>
+          <div id="midi-warnings" class="midi-warnings" hidden></div>
+        </section>
+        <section id="midi-preview" hidden>
+          <div class="midi-options">
+            <label><input id="midi-apply-tempo" type="checkbox" checked> Use MIDI tempo as written block tempo</label>
+            <label><input id="midi-apply-duration" type="checkbox" checked> Fit block duration to the imported performance</label>
+          </div>
+          <div class="midi-lane-table-wrap">
+            <table class="midi-lane-table">
+              <thead><tr><th>MIDI source</th><th>Notes</th><th>Range</th><th>Destination player</th></tr></thead>
+              <tbody id="midi-lanes"></tbody>
+            </table>
+          </div>
+          <p class="midi-fresh-clips">Each mapped lane creates a fresh one-shot clip. Existing clips and player-to-client routing are left unchanged.</p>
+        </section>
+        <footer>
+          <span id="midi-import-status" role="status"></span>
+          <button id="midi-import-cancel" type="button">Cancel</button>
+          <button id="midi-import-commit" type="submit" disabled>Import into section</button>
+        </footer>
+      </form>
+    </dialog>
     <p class="help">Click empty space to add. Drag a note to move it or its right edge to resize. Alt-click or right-click any visible note to orchestrate it. Completed gestures save automatically. Chase follows the playing section; Fold hides note lanes unused by the current block. Arrow keys nudge; Shift+Left/Right resizes; Delete removes. Playback application is shown separately. Event List remains the exact-field review surface.</p>
   </main>
-  <script type="module" src="/piano-roll/app.js?v=orchestration-3"></script>
+  <script type="module" src="/piano-roll/app.js?v=midi-import-1"></script>
 </body>
 </html>

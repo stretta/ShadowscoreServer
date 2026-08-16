@@ -1344,6 +1344,17 @@ export async function routeRequest(request, response, store, config, runtime = {
     return;
   }
 
+  if (request.method === "POST" && url.pathname === "/clips/actions/import-midi-to-players") {
+    try {
+      const body = await readJson(request);
+      const result = store.importMidiToPlayers(body, revisionOptions(body));
+      writeJson(response, 200, result);
+    } catch (error) {
+      writeError(response, error);
+    }
+    return;
+  }
+
   const clipMatch = url.pathname.match(/^\/clips\/([^/]+)$/);
   if ((request.method === "POST" || request.method === "DELETE") && clipMatch) {
     try {

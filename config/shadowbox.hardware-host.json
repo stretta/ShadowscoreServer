@@ -64,8 +64,13 @@
       "noteDataFloatCount": 16384
     },
     "stagesPerBeat": 16,
+    "resolution": {
+      "mode": "hybrid"
+    },
     "clearRowCount": 64,
-    "transactionStart": 1000,
+    "transactionStart": 10000,
+    "transactionIdMode": "persistent",
+    "transactionStatePath": "data/rnbo-transaction.json",
     "sendBatchSize": 4,
     "sendDelayMs": 5
   }

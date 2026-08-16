@@ -1,8 +1,32 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { compileScoreTransaction, compileTimingContract, createRnboOscAdapter, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority, validateScoreActivationAck, validateScoreTransactionAck } from "../src/adapters/rnbo-osc.mjs";
+import { compileScoreTransaction, compileTimingContract, createRnboOscAdapter, createScoreTransactionCounter, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority, validateScoreActivationAck, validateScoreTransactionAck } from "../src/adapters/rnbo-osc.mjs";
+
+test("hardware transaction ids remain exact and advance across server restarts", () => {
+  const directory = mkdtempSync(join(tmpdir(), "shadowscore-rnbo-transaction-"));
+  const statePath = join(directory, "rnbo-transaction.json");
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      transactionStart: 10000,
+      transactionIdMode: "persistent"
+    }
+  });
+
+  const firstProcess = createScoreTransactionCounter(config, { transactionStatePath: statePath });
+  assert.equal(firstProcess.next(), 10001);
+  assert.equal(firstProcess.next(), 10002);
+  assert.deepEqual(JSON.parse(readFileSync(statePath, "utf8")), { lastTransactionId: 10002 });
+
+  const restartedProcess = createScoreTransactionCounter(config, { transactionStatePath: statePath });
+  assert.equal(restartedProcess.current(), 10002);
+  assert.equal(restartedProcess.next(), 10003);
+  assert.ok(restartedProcess.next() < 2 ** 24);
+});
 
 test("compiles ensemble score into RNBO ShadowScore transaction messages", () => {
   const config = mergeConfig(defaultConfig, {
@@ -196,6 +220,62 @@ test("fit timing contract chooses the highest 480-grid resolution that fits targ
   assert.equal(longBlock.patternLength, 1024);
 });
 
+test("hybrid timing preserves the current long-form MIDI block boundary inside target capacity", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      resolution: {
+        mode: "hybrid"
+      }
+    }
+  });
+
+  const timing = compileTimingContract(createScore(), config, {
+    capabilities: { maxStages: 4096 }
+  }, {
+    blockId: "A",
+    selectionStart: 0,
+    selectionEnd: 404.25,
+    notes: [{ start_time: 0, duration: 1 }]
+  });
+
+  assert.equal(timing.stagesPerBeat, 4);
+  assert.equal(timing.ticksPerStage, 120);
+  assert.equal(timing.patternLength, 1617);
+  assert.equal(timing.resolutionMode, "hybrid");
+  assert.equal(timing.quantizationError.worstBlockBoundaryBeats, 0);
+  assert.ok(timing.patternLength <= timing.maxStages);
+});
+
+test("fixed timing refuses an oversized target contract before transmission", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      resolution: {
+        mode: "fixed",
+        defaultStagesPerBeat: 16
+      }
+    }
+  });
+
+  assert.throws(() => compileTimingContract(createScore(), config, {
+    capabilities: { maxStages: 4096 }
+  }, {
+    blockId: "A",
+    selectionStart: 0,
+    selectionEnd: 404.25
+  }), (error) => {
+    assert.equal(error.code, "RNBO_STAGE_CAPACITY_EXCEEDED");
+    assert.deepEqual(error.timing, {
+      blockId: "A",
+      blockBeats: 404.25,
+      stagesPerBeat: 16,
+      patternLength: 6468,
+      maxStages: 4096,
+      resolutionMode: "fixed"
+    });
+    return true;
+  });
+});
+
 test("fit transactions send derived ClockInterval with compiled MaxSteps", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
@@ -300,6 +380,7 @@ test("fidelity timing contract chooses the lowest grid that meets the error targ
     targetBeats: 0,
     noteCount: 2,
     worstBeats: 0,
+    worstBlockBoundaryBeats: 0,
     worstOnsetBeats: 0,
     worstDurationBeats: 0,
     meanAbsoluteBeats: 0,
@@ -333,6 +414,7 @@ test("fidelity timing contract reports quantization sloppiness and beat-relative
     targetBeats: 0,
     noteCount: 1,
     worstBeats: 0.03125,
+    worstBlockBoundaryBeats: 0,
     worstOnsetBeats: 0.03125,
     worstDurationBeats: 0.03125,
     meanAbsoluteBeats: 0.03125,
@@ -1086,7 +1168,57 @@ test("score transaction retries once when RNBO ACK reports a rejected commit", a
   assert.equal(result.ack.ok, true);
   assert.equal(result.ack.status, "prepared");
   assert.equal(result.ack.attempt, 1);
+  assert.deepEqual(result.deliveryProfile, {
+    attempt: 1,
+    batchSize: 2,
+    delayMs: 0,
+    mode: "conservative-retry"
+  });
   assert.equal(packets.length, 12);
+});
+
+test("score transaction retries with progressively safer delivery profiles", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      clearRowCount: 0,
+      sendBatchSize: 4,
+      sendDelayMs: 0,
+      log: false,
+      targets: [{
+        address: "/rnbo/inst/2/messages/in/shadowscore",
+        capabilities: compactReplaceCapabilities()
+      }],
+      oscQuery: { enabled: true, url: "http://127.0.0.1:5678/" },
+      ack: { enabled: true, retries: 2, retryDelayMs: 0, settleMs: 0 }
+    }
+  });
+  const lifecycle = [];
+  const ackValues = [
+    [91, 706, 2, 0, 0],
+    [91, 706, 2, 1, 0],
+    [92, 706, 2, 32, 1]
+  ];
+  const socket = { send(packet, port, host, callback) { callback(); } };
+
+  const result = await sendScoreTransaction(socket, config, createScore(), 706, {
+    onLifecycleEvent(event) { lifecycle.push(event); },
+    fetchImpl: async () => ({
+      ok: true,
+      async json() { return { VALUE: ackValues.shift() }; }
+    })
+  });
+
+  assert.equal(result.ack.ok, true);
+  assert.deepEqual(result.deliveryProfile, {
+    attempt: 2,
+    batchSize: 1,
+    delayMs: 0,
+    mode: "conservative-retry"
+  });
+  assert.deepEqual(lifecycle.at(-1).deliveryProfile, result.deliveryProfile);
 });
 
 test("score transaction surfaces stale or failed RNBO ACK state without throwing", async () => {
@@ -1145,6 +1277,25 @@ test("validates operational RNBO ACK failure states", () => {
   assert.equal(mismatch.status, "note count mismatch");
   assert.equal(rejected.ok, false);
   assert.equal(rejected.status, "rejected");
+  assert.equal(rejected.committedNoteCount, undefined);
+  assert.equal(rejected.rejectReason, 0);
+  assert.equal(rejected.rejectReasonLabel, "unknown");
+  assert.equal(rejected.receivedNoteCount, 0);
+});
+
+test("decodes client-prefixed note-count rejection diagnostics", () => {
+  const rejected = validateScoreTransactionAck([90, 91, 1006, 2, 65, 0], {
+    target: { clientId: 90 },
+    compiled: { noteCount: 277, transmittedRowCount: 277, stagedScoreActivation: true },
+    transactionId: 1006
+  });
+
+  assert.equal(rejected.ok, false);
+  assert.equal(rejected.status, "rejected");
+  assert.equal(rejected.rejectReason, 2);
+  assert.equal(rejected.rejectReasonLabel, "note-count");
+  assert.equal(rejected.receivedNoteCount, 65);
+  assert.equal(rejected.noteCount, 277);
 });
 
 test("validates client-prefixed RNBO commit ACKs", () => {

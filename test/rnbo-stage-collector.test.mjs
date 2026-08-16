@@ -59,6 +59,27 @@ test("RNBO stage collector retains the last value and reports read failures", as
   assert.equal(observed.stageReadbackError, "peer offline");
 });
 
+test("RNBO stage collector represents an initial read failure without invalid timestamps", async () => {
+  const collector = createRnboStageCollector({}, {
+    autoStart: false,
+    now: () => 1000,
+    fetchImpl: async () => { throw new Error("name lookup failed"); }
+  });
+
+  await collector.refresh([targets[0]]);
+  const observed = collector.targets([targets[0]])[0];
+  const snapshot = collector.snapshot()[targets[0].id];
+
+  assert.equal(observed.currentStage, undefined);
+  assert.equal(observed.stateObservedAt, null);
+  assert.equal(observed.stageChangedAt, null);
+  assert.equal(observed.stageMovement, "unknown");
+  assert.equal(observed.stageReadbackStatus, "stale");
+  assert.equal(observed.stageReadbackError, "name lookup failed");
+  assert.equal(snapshot.observedAt, null);
+  assert.equal(snapshot.changedAt, null);
+});
+
 test("RNBO stage collector distinguishes advancing, stopped, and unknown readback", async () => {
   let now = 1000;
   let stage = 12;

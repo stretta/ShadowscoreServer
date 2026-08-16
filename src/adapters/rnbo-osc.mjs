@@ -1,5 +1,7 @@
 import dgram from "node:dgram";
 import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 import { encodeOscMessage } from "./osc.mjs";
 import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
@@ -19,6 +21,17 @@ const TRANSACTION_FLAGS = Object.freeze({
   PREPARE_ONLY: 1
 });
 
+const TRANSACTION_REJECT_REASONS = Object.freeze({
+  1: "stale-transaction",
+  2: "note-count",
+  3: "row-range",
+  4: "protocol",
+  5: "row-order",
+  6: "checksum"
+});
+
+const MAX_EXACT_RNBO_TRANSACTION_ID = 16_777_215;
+
 export function createRnboOscAdapter(config, runtime = {}) {
   if (!config.rnbo.enabled) {
     return {
@@ -29,7 +42,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   }
 
   const socket = runtime.socket ?? dgram.createSocket("udp4");
-  let transactionId = Number(config.rnbo.transactionStart) || 1000;
+  const transactionCounter = createScoreTransactionCounter(config, runtime);
   let store;
   let discoveryTimer;
   let lastTargetSignature = "";
@@ -373,8 +386,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   }
 
   function nextTransactionId() {
-    transactionId += 1;
-    return transactionId;
+    return transactionCounter.next();
   }
 
   function resendScore(score, reason = "", options = {}) {
@@ -775,6 +787,54 @@ export function createRnboOscAdapter(config, runtime = {}) {
   }
 }
 
+export function createScoreTransactionCounter(config, runtime = {}) {
+  const configured = clampInt(
+    config.rnbo?.transactionStart ?? 1000,
+    0,
+    MAX_EXACT_RNBO_TRANSACTION_ID - 1
+  );
+  const persistent = config.rnbo?.transactionIdMode === "persistent";
+  const statePath = resolve(
+    runtime.transactionStatePath ?? config.rnbo?.transactionStatePath ?? "data/rnbo-transaction.json"
+  );
+  let transactionId = persistent
+    ? Math.max(configured, readPersistedTransactionId(statePath))
+    : configured;
+
+  return {
+    current() {
+      return transactionId;
+    },
+    next() {
+      if (transactionId >= MAX_EXACT_RNBO_TRANSACTION_ID) {
+        throw new RangeError(`RNBO transaction id capacity ${MAX_EXACT_RNBO_TRANSACTION_ID} exhausted`);
+      }
+      transactionId += 1;
+      if (persistent) persistTransactionId(statePath, transactionId);
+      return transactionId;
+    },
+    persistent,
+    statePath
+  };
+}
+
+function readPersistedTransactionId(statePath) {
+  try {
+    const state = JSON.parse(readFileSync(statePath, "utf8"));
+    return clampInt(state.lastTransactionId ?? 0, 0, MAX_EXACT_RNBO_TRANSACTION_ID - 1);
+  } catch (error) {
+    if (error?.code === "ENOENT") return 0;
+    throw new Error(`Could not read RNBO transaction state '${statePath}': ${messageForError(error)}`);
+  }
+}
+
+function persistTransactionId(statePath, transactionId) {
+  mkdirSync(dirname(statePath), { recursive: true });
+  const temporaryPath = `${statePath}.tmp-${process.pid}`;
+  writeFileSync(temporaryPath, `${JSON.stringify({ lastTransactionId: transactionId })}\n`);
+  renameSync(temporaryPath, statePath);
+}
+
 export async function sendScoreTransaction(socket, config, score, transactionId, options = {}) {
   const targets = await rnboTargetsForSend(config, score, options.runtime, options);
   const compiledTargets = await Promise.all(targets.map(async (target) => {
@@ -828,11 +888,16 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
   let acknowledgementMs = sendStartedMs;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    compiled = compileScoreTransaction(score, config, transactionId, target, options);
+    const deliveryProfile = scoreDeliveryProfile(config, attempt);
+    compiled = {
+      ...compileScoreTransaction(score, config, transactionId, target, options),
+      deliveryProfile
+    };
     if (attempt === 0) emitLifecycleEvent(options, "prepare_started", compiled, target, {
-      observedAt: new Date(sendStartedMs).toISOString()
+      observedAt: new Date(sendStartedMs).toISOString(),
+      deliveryProfile
     });
-    await sendCompiledMessages(socket, config, target, compiled);
+    await sendCompiledMessages(socket, config, target, compiled, deliveryProfile);
     sendCompletedMs = now();
     ack = await readScoreTransactionAck(config, target, compiled, transactionId, {
       ...options,
@@ -843,6 +908,7 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
       emitLifecycleEvent(options, "prepare_completed", compiled, target, {
         observedAt: new Date(acknowledgementMs).toISOString(),
         acknowledgement: ack,
+        deliveryProfile,
         preparationDurationMs: Math.max(0, acknowledgementMs - sendStartedMs)
       });
       break;
@@ -850,6 +916,7 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
     if (attempt === attempts - 1) emitLifecycleEvent(options, "prepare_failed", compiled, target, {
       observedAt: new Date(acknowledgementMs).toISOString(),
       acknowledgement: ack,
+      deliveryProfile,
       preparationDurationMs: Math.max(0, acknowledgementMs - sendStartedMs)
     });
     if (attempt < attempts - 1 && ackConfig.retryDelayMs > 0) {
@@ -872,21 +939,34 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
   };
 }
 
-async function sendCompiledMessages(socket, config, target, compiled) {
-  const batchSize = clampInt(config.rnbo.sendBatchSize ?? 1, 1, 64);
+async function sendCompiledMessages(socket, config, target, compiled, deliveryProfile = scoreDeliveryProfile(config, 0)) {
+  const { batchSize, delayMs } = deliveryProfile;
   for (let index = 0; index < compiled.messages.length; index += batchSize) {
     const batch = compiled.messages.slice(index, index + batchSize);
     await Promise.all(batch.map((message) => sendOscMessage(socket, config, target, message.values)));
-    if (config.rnbo.sendDelayMs > 0) {
-      await delay(config.rnbo.sendDelayMs);
+    if (delayMs > 0) {
+      await delay(delayMs);
     }
   }
   for (const message of scoreTransportInportMessages(config, compiled)) {
     await sendOscInportMessage(socket, target, message.name, message.value);
-    if (config.rnbo.sendDelayMs > 0) {
-      await delay(config.rnbo.sendDelayMs);
+    if (delayMs > 0) {
+      await delay(delayMs);
     }
   }
+}
+
+function scoreDeliveryProfile(config, attempt = 0) {
+  const baseBatchSize = clampInt(config.rnbo.sendBatchSize ?? 1, 1, 64);
+  const baseDelayMs = clampInt(config.rnbo.sendDelayMs ?? 0, 0, 10000);
+  const divisor = 2 ** Math.max(0, attempt);
+  const multiplier = 2 ** Math.max(0, attempt);
+  return {
+    attempt,
+    batchSize: Math.max(1, Math.ceil(baseBatchSize / divisor)),
+    delayMs: Math.min(10000, baseDelayMs * multiplier),
+    mode: attempt === 0 ? "normal" : "conservative-retry"
+  };
 }
 
 export async function readScoreTransactionAck(config, target, compiled, transactionId, options = {}) {
@@ -942,7 +1022,11 @@ export function validateScoreTransactionAck(value, { target = {}, compiled = {},
   const opcodeIndex = ackOpcodeIndex(values);
   const opcode = values[opcodeIndex];
   const txn = values[opcodeIndex + 1];
-  const committedNoteCount = values[opcodeIndex + 2];
+  const acknowledgementValue = values[opcodeIndex + 2];
+  const rejected = opcode === 91;
+  const committedNoteCount = rejected ? undefined : acknowledgementValue;
+  const rejectReason = rejected ? acknowledgementValue : undefined;
+  const receivedNoteCount = rejected ? values[opcodeIndex + 3] : undefined;
   const okFlag = values.at(-1);
   const clientId = opcodeIndex > 0 ? values[0] : undefined;
   const expectedClientId = target.clientId === undefined || target.clientId === null || target.clientId === ""
@@ -957,6 +1041,9 @@ export function validateScoreTransactionAck(value, { target = {}, compiled = {},
     transactionId: txn,
     expectedTransactionId: transactionId,
     committedNoteCount,
+    rejectReason,
+    rejectReasonLabel: rejectReason === undefined ? undefined : TRANSACTION_REJECT_REASONS[rejectReason] ?? "unknown",
+    receivedNoteCount,
     expectedClientId,
     noteCount: compiled.noteCount ?? 0,
     transmittedRowCount: compiled.transmittedRowCount ?? 0
@@ -1100,7 +1187,7 @@ function rnboAckConfig(config) {
   const enabled = ack.enabled === undefined ? Boolean(rnbo.oscQuery?.enabled) : Boolean(ack.enabled);
   return {
     enabled,
-    retries: clampInt(ack.retries ?? 1, 0, 5),
+    retries: clampInt(ack.retries ?? 2, 0, 5),
     retryDelayMs: clampInt(ack.retryDelayMs ?? 50, 0, 10000),
     settleMs: clampInt(ack.settleMs ?? 50, 0, 10000),
     timeoutMs: clampInt(ack.timeoutMs ?? rnbo.oscQuery?.timeoutMs ?? 1000, 1, 60000),
@@ -1286,8 +1373,24 @@ export function compileTimingContract(score, config, target = rnboTargets(config
   const blockBeats = Math.max(0, selectionEnd - selectionStart);
   const selected = chooseTimingResolution(mode, resolution, config, blockBeats, maxStages, options.notes ?? [], selectionStart);
   const stagesPerBeat = selected.stagesPerBeat;
-  const patternLength = clampInt((selectionEnd - selectionStart) * stagesPerBeat, 1, 2147483647);
+  const patternLength = clampInt(Math.ceil((selectionEnd - selectionStart) * stagesPerBeat), 1, 2147483647);
   const ticksPerStage = 480 / stagesPerBeat;
+
+  if (patternLength > maxStages) {
+    const error = new RangeError(
+      `RNBO timing contract requires ${patternLength} stages, exceeding target capacity ${maxStages}`
+    );
+    error.code = "RNBO_STAGE_CAPACITY_EXCEEDED";
+    error.timing = {
+      blockId: stringField(options.blockId, ""),
+      blockBeats,
+      stagesPerBeat,
+      patternLength,
+      maxStages,
+      resolutionMode: mode
+    };
+    throw error;
+  }
 
   return {
     blockId: stringField(options.blockId, ""),
@@ -1471,7 +1574,7 @@ function chooseTimingResolution(mode, resolution, config, blockBeats, maxStages,
   const targetBeats = finiteNumber(resolution.quantizationErrorTargetBeats, 1 / 480);
   const scored = (fitting.length ? fitting : [fallback]).map((candidate) => ({
     stagesPerBeat: candidate,
-    quantizationError: quantizationErrorForCandidate(candidate, notes, selectionStart, targetBeats)
+    quantizationError: quantizationErrorForCandidate(candidate, notes, selectionStart, targetBeats, blockBeats)
   }));
   const acceptable = scored.find((candidate) => candidate.quantizationError.worstBeats <= targetBeats);
   if (acceptable) {
@@ -1489,7 +1592,9 @@ function stageCandidates(values) {
     .sort((a, b) => a - b);
 }
 
-function quantizationErrorForCandidate(stagesPerBeat, notes, selectionStart, targetBeats) {
+function quantizationErrorForCandidate(stagesPerBeat, notes, selectionStart, targetBeats, blockBeats) {
+  const quantizedBlockBeats = Math.ceil(blockBeats * stagesPerBeat) / stagesPerBeat;
+  const blockBoundaryError = Math.abs(quantizedBlockBeats - blockBeats);
   const values = notes.flatMap((note) => [
     { type: "onset", value: readNumber(note.start_time, 0) - selectionStart },
     { type: "duration", value: readNumber(note.duration, 0) }
@@ -1498,7 +1603,8 @@ function quantizationErrorForCandidate(stagesPerBeat, notes, selectionStart, tar
     return {
       targetBeats,
       noteCount: 0,
-      worstBeats: 0,
+      worstBeats: roundBeat(blockBoundaryError),
+      worstBlockBoundaryBeats: roundBeat(blockBoundaryError),
       worstOnsetBeats: 0,
       worstDurationBeats: 0,
       meanAbsoluteBeats: 0,
@@ -1534,7 +1640,8 @@ function quantizationErrorForCandidate(stagesPerBeat, notes, selectionStart, tar
   return {
     targetBeats,
     noteCount: notes.length,
-    worstBeats: roundBeat(Math.max(worstOnsetBeats, worstDurationBeats)),
+    worstBeats: roundBeat(Math.max(blockBoundaryError, worstOnsetBeats, worstDurationBeats)),
+    worstBlockBoundaryBeats: roundBeat(blockBoundaryError),
     worstOnsetBeats: roundBeat(worstOnsetBeats),
     worstDurationBeats: roundBeat(worstDurationBeats),
     meanAbsoluteBeats: roundBeat(absoluteTotal / values.length),

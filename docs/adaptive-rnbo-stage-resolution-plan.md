@@ -302,3 +302,50 @@ For RNBO targets, the inspection response should include the target id, assigned
 Implement the helper and config shape first, but keep `mode: "fixed"` as the default. Then add `mode: "fit"` and test it locally without changing live behavior. Once fit mode is proven, add fidelity scoring and expose the selected timing contract in debug/session output.
 
 This keeps the first change low-risk while setting up the architecture for adaptive resolution and larger RNBO clients.
+
+## Checkpoint One: Capacity-Safe Fleet Playback
+
+The first live checkpoint applies the existing adaptive timing architecture to
+the hardware-host profile without constraining canonical score storage or MIDI
+import.
+
+- Use `hybrid` resolution on the hardware host. Choose the least expensive grid
+  that meets the fidelity target when possible, otherwise choose the
+  highest-resolution candidate that fits the target.
+- Refuse to transmit any compiled timing contract whose `patternLength` exceeds
+  the target's advertised `maxStages`, including explicit `fixed` configurations.
+- Keep compact staged replacement atomic: incomplete note delivery must reject
+  the staging transaction and must not change the active playback table.
+- Retry failed delivery with progressively smaller UDP bursts and longer pacing:
+  normal `4 / 5 ms`, then `2 / 10 ms`, then `1 / 20 ms` with current hardware
+  defaults.
+- Persist the hardware host's last transaction id under `data/` and atomically
+  advance it before each send. Keep ids below `2^24` so RNBO float list values
+  represent them exactly, while ensuring a server restart cannot move behind a
+  transaction retained by a client.
+- Decode rejection ACK fields as `rejectReason` and `receivedNoteCount` instead
+  of presenting the rejection reason as a committed row count.
+- Prove the checkpoint against the current long-form MIDI import on Wren using
+  the canonical score, `/playback/timing-contracts`, `/playback/updates`, direct
+  target ACKs, and prepared-versus-active state.
+
+Chunk acknowledgements/selective retransmission and playback paging remain
+later checkpoints. They are not prerequisites for preserving the complete
+imported score in ShadowScore.
+
+Checkpoint-one live proof completed on Wren and the four-bird fleet on
+2026-08-16 using the imported `On the Nature of Daylight - Max Richter.mid`
+score:
+
+- The canonical score retained `1,065` notes over `404.25` beats.
+- Hybrid timing selected `4` stages per beat, `120` ticks per stage, and a
+  `1,617`-stage pattern for every target, down from the invalid fixed
+  `6,468`-stage representation. Reported onset, duration, and block-boundary
+  quantization error were all zero.
+- Prepare-only transaction `10007` reached READY on Wren `151/151`, Finch
+  `277/277`, Heron `60/60`, and Raven `577/577`. Wren completed on the normal
+  delivery profile; all three peers completed on the conservative third
+  attempt. No target was activated and transport remained stopped.
+- Wren's persisted transaction state advanced across restart and remained in
+  the exact RNBO integer range. The live test also verified explicit rejection
+  decoding and null-safe target diagnostics during peer startup.

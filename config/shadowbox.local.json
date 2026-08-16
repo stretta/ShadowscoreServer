@@ -51,7 +51,12 @@
     "port": 1234,
     "address": "/rnbo/inst/2/messages/in/shadowscore",
     "stagesPerBeat": 16,
-    "transactionStart": 1000,
+    "resolution": {
+      "mode": "hybrid"
+    },
+    "transactionStart": 10000,
+    "transactionIdMode": "persistent",
+    "transactionStatePath": "data/rnbo-transaction.json",
     "sendBatchSize": 4,
     "sendDelayMs": 5
   }

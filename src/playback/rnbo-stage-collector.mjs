@@ -96,7 +96,14 @@ async function pollTargets(targets, fetchImpl, now, settings, observations) {
     } catch (error) {
       const previous = observations.get(target.id);
       observations.set(target.id, {
-        ...(previous ?? { targetId: target.id, url, currentStage: null, observedAt: null }),
+        ...(previous ?? {
+          targetId: target.id,
+          url,
+          currentStage: null,
+          observedAt: null,
+          changedAt: null,
+          sampleCount: 0
+        }),
         requestedAt,
         status: "error",
         error: error instanceof Error ? error.message : String(error)
@@ -121,19 +128,21 @@ function withObservation(target, observation, now, settings) {
 }
 
 function observationSnapshot(observation, now, settings) {
-  const ageMs = observation.observedAt === null ? null : Math.max(0, now - observation.observedAt);
+  const observedAt = finiteTimestamp(observation.observedAt);
+  const changedAt = finiteTimestamp(observation.changedAt);
+  const ageMs = observedAt === null ? null : Math.max(0, now - observedAt);
   const stale = ageMs === null || ageMs > settings.staleAfterMs;
-  const changedAgeMs = observation.changedAt === null ? null : Math.max(0, now - observation.changedAt);
-  const movement = observation.sampleCount < 2 || observation.changedAt === null
+  const changedAgeMs = changedAt === null ? null : Math.max(0, now - changedAt);
+  const movement = observation.sampleCount < 2 || changedAt === null
     ? "unknown"
     : changedAgeMs <= settings.motionStaleAfterMs ? "moving" : "stopped";
   return {
     targetId: observation.targetId,
     url: observation.url,
     currentStage: observation.currentStage,
-    observedAt: observation.observedAt === null ? null : new Date(observation.observedAt).toISOString(),
+    observedAt: observedAt === null ? null : new Date(observedAt).toISOString(),
     ageMs,
-    changedAt: observation.changedAt === null ? null : new Date(observation.changedAt).toISOString(),
+    changedAt: changedAt === null ? null : new Date(changedAt).toISOString(),
     changedAgeMs,
     movement,
     fresh: observation.status === "fresh" && !stale,
@@ -141,6 +150,12 @@ function observationSnapshot(observation, now, settings) {
     status: stale ? "stale" : observation.status,
     error: observation.error
   };
+}
+
+function finiteTimestamp(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function pollableTargets(targets) {

@@ -47,6 +47,7 @@ test("Piano Roll autosaves revision-aware clip drafts and supports right-edge re
   assert.match(js, /playbackGeneration/);
   assert.match(js, /state\.playbackRequest/);
   assert.match(js, /createWiperEstimator/);
+  assert.match(js, /createWiperEstimator\(\{staleAfterMs:3000,/);
   assert.match(js, /requestAnimationFrame/);
   assert.match(js, /renderWiperFrame/);
   assert.doesNotMatch(js, /function drawWiper/);

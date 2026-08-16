@@ -2695,20 +2695,75 @@ async function observeExternalTransportIntent(store, config, runtime, body = {})
     return { adopted: true, arrangementHeld: true, mode: "stopped" };
   }
 
+  const witnessContext = await readBeatWitnessContext(store.getScore(), config, runtime);
+  const anchor = externalTransportAnchor(body, unitId, witnessContext);
   const result = playback.start({
     mode: "jack",
     reset: false,
     sourceClientId: source,
-    witnessContext: { rnboTargets: [], timingContracts: [] },
-    anchorOffsetBeats: Number.isFinite(Number(body.beatIntoBlock))
-      ? Math.max(0, Number(body.beatIntoBlock))
-      : 0
+    witnessContext,
+    anchorOffsetBeats: anchor.beatIntoBlock
   });
   return {
     adopted: true,
     arrangementHeld: false,
     mode: result.mode,
+    anchor,
     witnessAvailable: result.witness?.usable === true
+  };
+}
+
+function externalTransportAnchor(body, unitId, context = {}) {
+  const explicitBeat = Number(body.beatIntoBlock);
+  if (Number.isFinite(explicitBeat)) {
+    return {
+      beatIntoBlock: Math.max(0, explicitBeat),
+      source: "external-intent",
+      unitId
+    };
+  }
+
+  const targets = context.rnboTargets ?? [];
+  const timingContracts = context.timingContracts ?? [];
+  const unitTargets = unitId
+    ? targets.filter((target) => [target.hardwareUnitId, target.hardwareUnitName]
+      .some((value) => optionalString(value) === unitId))
+    : [];
+  const unitTargetIds = new Set(unitTargets.map((target) => optionalString(target.id)).filter(Boolean));
+  const unitContracts = timingContracts.filter((contract) => unitTargetIds.has(optionalString(contract.targetId)));
+  const unitWitness = rnboClientBeatWitness({
+    targets: unitTargets,
+    contracts: unitContracts,
+    maxSkewBeats: context.rnboClient?.maxSkewBeats
+  });
+  if (unitWitness.usable && Number.isFinite(unitWitness.absoluteBeat)) {
+    return {
+      beatIntoBlock: Math.max(0, unitWitness.absoluteBeat),
+      source: "rnbo-client",
+      unitId,
+      targetId: unitWitness.targetId ?? ""
+    };
+  }
+
+  const ensembleWitness = rnboClientBeatWitness({
+    targets,
+    contracts: timingContracts,
+    maxSkewBeats: context.rnboClient?.maxSkewBeats
+  });
+  if (ensembleWitness.usable && Number.isFinite(ensembleWitness.absoluteBeat)) {
+    return {
+      beatIntoBlock: Math.max(0, ensembleWitness.absoluteBeat),
+      source: "rnbo-client",
+      unitId,
+      targetId: ensembleWitness.targetId ?? ""
+    };
+  }
+
+  return {
+    beatIntoBlock: 0,
+    source: "default",
+    unitId,
+    reason: unitWitness.reason || ensembleWitness.reason || "RNBO current_stage readback unavailable"
   };
 }
 

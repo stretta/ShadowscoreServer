@@ -63,3 +63,15 @@ test("wiper estimator freezes after the observation becomes stale", () => {
     stale: true
   });
 });
+
+test("wiper estimator keeps moving across a slow snapshot interval within its dropout grace", () => {
+  const estimator = createWiperEstimator({ staleAfterMs: 3000 });
+  estimator.update({ beat: 0, tempo: 120, running: true, blockId: "A" }, 1000);
+  assert.deepEqual(estimator.estimate(3000), {
+    beat: 4,
+    blockId: "A",
+    running: true,
+    stale: false
+  });
+  assert.equal(estimator.estimate(4000).stale, true);
+});

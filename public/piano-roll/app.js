@@ -25,7 +25,7 @@ const ctx = ui.roll.getContext("2d"); const vctx = ui.velocity.getContext("2d");
 const draftStore=createClipDraftStore();
 const canvasScales=new WeakMap();
 const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, saving:false, pendingSaves:new Set(), saveTimer:null, chasing:false, folded:false, drag:null, menuNote:null, orchestrationBusy:false, midiImport:null, playback:null, playbackGeneration:0, playbackRequest:null, wiperFrame:null, rnboTargets:[], timingContracts:[], dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, minPitch:36, maxPitch:84 };
-const wiperEstimator=createWiperEstimator({staleAfterMs:750,correctionMs:180,snapThresholdBeats:.25});
+const wiperEstimator=createWiperEstimator({staleAfterMs:3000,correctionMs:180,snapThresholdBeats:.25});
 createPlaybackUpdateControl({ root:ui.playbackUpdate, getBlockId:()=>ui.block.value });
 
 const clone = (value) => structuredClone(value);

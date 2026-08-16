@@ -2161,6 +2161,96 @@ test("Shadowbox transport intent starts and stops arrangement ownership without 
   assert.equal(writes.length, 0);
 });
 
+test("Shadowbox transport intent anchors arrangement to the initiating unit's RNBO stage", async () => {
+  let startOptions = null;
+  const config = mergeConfig(defaultConfig, {
+    server: { hostIdentity: "wren", advertisedName: "wren" },
+    rnbo: {
+      enabled: true,
+      oscQuery: { enabled: false },
+      targets: [{
+        id: "wren-client",
+        host: "127.0.0.1",
+        port: 1234,
+        address: "/rnbo/inst/2/messages/in/shadowscore"
+      }]
+    }
+  });
+  const currentStages = new Map([
+    ["wren-client", 40],
+    ["heron-client", 52]
+  ]);
+  const context = createRouteContext({
+    config,
+    runtime: {
+      peerRegistry: {
+        snapshot: () => [{ id: "heron", advertisedName: "heron", status: "online" }],
+        targets: () => [{
+          id: "heron-client",
+          host: "heron.local",
+          port: 1234,
+          address: "/rnbo/inst/7/messages/in/shadowscore",
+          hardwareUnitId: "heron",
+          hardwareUnitName: "heron",
+          available: true
+        }],
+        oscTargets: () => [],
+        rnboDevices: () => []
+      },
+      rnboStageCollector: {
+        async ensureObservations() {},
+        targets: (targets) => targets.map((target) => ({
+          ...target,
+          currentStage: currentStages.get(target.id),
+          stageMovement: "moving",
+          stageReadbackStatus: "fresh"
+        }))
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: Boolean(startOptions),
+          mode: startOptions ? "jack" : "stopped",
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: startOptions ? { source: "jack", usable: true, fresh: true } : { source: "none", usable: false }
+        }),
+        start: (options) => {
+          startOptions = options;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => context.runtime.macroPlayback.snapshot()
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "wren-client",
+    rnboHost: "127.0.0.1",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "heron-client",
+    rnboHost: "heron.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/7/messages/in/shadowscore"
+  });
+
+  const started = await requestJson(context, "POST", "/transport/external", {
+    source: "shadowbox",
+    unitId: "wren",
+    rolling: true
+  });
+
+  assert.equal(startOptions.anchorOffsetBeats, 2.5);
+  assert.equal(startOptions.witnessContext.rnboTargets.length, 2);
+  assert.deepEqual(started.anchor, {
+    beatIntoBlock: 2.5,
+    source: "rnbo-client",
+    unitId: "wren",
+    targetId: "wren-client"
+  });
+});
+
 test("external transport intent rejects an ambiguous rolling value", async () => {
   const context = createRouteContext();
   const response = await request(context, "POST", "/transport/external", {

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { playbackUpdatePresentation } from "../public/shared/playback-update-control.js";
+import { createPlaybackUpdateControl, playbackUpdatePresentation } from "../public/shared/playback-update-control.js";
 
 function snapshot({ running = true, state = "saved-not-active", targets = {}, affectedTargetCount } = {}) {
   return {
@@ -57,4 +57,65 @@ test("shared playback control reports unavailable ensemble members and upcoming 
   const upcoming = playbackUpdatePresentation(snapshot({}), "B");
   assert.equal(upcoming.label, "Saved · B is upcoming");
   assert.equal(upcoming.showAction, false);
+});
+
+test("shared playback control keeps an action error visible after refreshing", async () => {
+  const originalDocument = globalThis.document;
+  const elements = {
+    state: {},
+    action: {
+      addEventListener(_type, listener) { this.listener = listener; }
+    },
+    details: {},
+    targets: { replaceChildren() {} }
+  };
+  const root = {
+    classList: { add() {} },
+    set innerHTML(_value) {},
+    querySelector(selector) {
+      return {
+        "[data-playback-update-state]": elements.state,
+        "[data-playback-update-action]": elements.action,
+        "[data-playback-update-details]": elements.details,
+        "[data-playback-update-targets]": elements.targets
+      }[selector];
+    }
+  };
+  globalThis.document = { createElement: () => ({}) };
+  const current = snapshot({
+    running: false,
+    targets: { wren: { targetId: "wren", voiceId: "player-4", state: "saved-not-active" } },
+    affectedTargetCount: 1
+  });
+  let getCount = 0;
+  let finishRefresh;
+  const refreshed = new Promise((resolve) => { finishRefresh = resolve; });
+  const fetchImpl = async (_url, options = {}) => {
+    if (options.method === "POST") {
+      return {
+        ok: false,
+        status: 400,
+        statusText: "Bad Request",
+        clone: () => ({ json: async () => ({ error: "players were not READY" }) })
+      };
+    }
+    getCount += 1;
+    if (getCount === 2) finishRefresh();
+    return { ok: true, json: async () => structuredClone(current) };
+  };
+
+  try {
+    const control = createPlaybackUpdateControl({ root, fetchImpl, getBlockId: () => "A", pollIntervalMs: 0 });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    elements.action.listener();
+    await refreshed;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    assert.equal(elements.state.textContent, "Playback update failed · players were not READY");
+    assert.equal(elements.state.className, "ss-playback-update-state bad");
+    assert.equal(elements.action.disabled, false);
+    control.close();
+  } finally {
+    globalThis.document = originalDocument;
+  }
 });

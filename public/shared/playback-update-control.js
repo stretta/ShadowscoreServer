@@ -23,6 +23,7 @@ export function createPlaybackUpdateControl({
   const targetsElement = root.querySelector("[data-playback-update-targets]");
   let snapshot;
   let busy = false;
+  let actionError = "";
   let timer;
   let stopped = false;
 
@@ -48,6 +49,7 @@ export function createPlaybackUpdateControl({
     const presentation = playbackUpdatePresentation(snapshot, getBlockId());
     if (!presentation.actionEnabled || busy) return;
     busy = true;
+    actionError = "";
     actionElement.disabled = true;
     stateElement.textContent = presentation.running ? "Preparing affected players…" : "Updating players…";
     stateElement.className = "ss-playback-update-state";
@@ -64,8 +66,7 @@ export function createPlaybackUpdateControl({
       if (!response.ok) throw await responseError(response);
       await response.json();
     } catch (error) {
-      stateElement.textContent = `Playback update failed · ${error.message}`;
-      stateElement.className = "ss-playback-update-state bad";
+      actionError = error.message;
     } finally {
       busy = false;
       await refresh();
@@ -74,8 +75,10 @@ export function createPlaybackUpdateControl({
 
   function render() {
     const presentation = playbackUpdatePresentation(snapshot, getBlockId());
-    stateElement.textContent = presentation.label;
-    stateElement.className = `ss-playback-update-state${presentation.tone ? ` ${presentation.tone}` : ""}`;
+    stateElement.textContent = actionError ? `Playback update failed · ${actionError}` : presentation.label;
+    stateElement.className = actionError
+      ? "ss-playback-update-state bad"
+      : `ss-playback-update-state${presentation.tone ? ` ${presentation.tone}` : ""}`;
     actionElement.textContent = presentation.actionLabel;
     actionElement.disabled = busy || !presentation.actionEnabled;
     actionElement.hidden = !presentation.showAction;

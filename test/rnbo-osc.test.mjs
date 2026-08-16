@@ -318,6 +318,42 @@ test("fit transactions send derived ClockInterval with compiled MaxSteps", async
   ]);
 });
 
+test("staged look-ahead preparation does not retime the active block", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      log: false,
+      ack: { enabled: false },
+      targets: [{
+        id: "wren",
+        host: "127.0.0.1",
+        port: 9000,
+        instanceId: "2",
+        address: "/rnbo/inst/2/messages/in/shadowscore",
+        capabilities: { stagedScoreActivation: true }
+      }]
+    }
+  });
+  const packets = [];
+  const socket = {
+    send(packet, port, host, callback) {
+      packets.push({ packet, port, host });
+      callback();
+    }
+  };
+  const result = await sendScoreTransaction(socket, config, createScore(), 125, { stagedOnly: true });
+  const compiled = result.targets[0].compiled;
+
+  assert.equal(compiled.stagedScoreActivation, true);
+  assert.deepEqual(scoreTransportInportMessages(config, compiled, { stagedOnly: true }), []);
+  assert.equal(packets.some(({ packet }) => /\/messages\/in\/(ClockInterval|MaxSteps|Tempo)$/.test(readOscAddress(packet))), false);
+  assert.equal(packets.every(({ packet }) => readOscAddress(packet).endsWith("/shadowscore")), true);
+});
+
 test("score transactions queue ordered UDP bursts before pacing the next batch", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

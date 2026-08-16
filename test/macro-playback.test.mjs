@@ -645,6 +645,51 @@ test("transactional JACK playback holds the current block when the next block is
   playback.close();
 });
 
+test("transactional JACK hold never prepares beyond the uncommitted next block", async () => {
+  const config = {
+    ...defaultConfig,
+    rnbo: {
+      ...defaultConfig.rnbo,
+      lookAheadBeats: 2,
+      activation: { ...defaultConfig.rnbo.activation, armLeadBeats: 0.75 }
+    }
+  };
+  const store = createScoreStore(createInitialScore(config));
+  for (const blockId of ["A", "B", "C"]) {
+    store.replaceMesoBlock(blockId, { duration: { beats: 4 }, players: {} });
+  }
+  store.updateMacrostructure({ blocks: ["A", "B", "C"] });
+  const jackTransport = createJackTransportState(config, { now: () => 1000 });
+  const prepared = [];
+  const playback = createMacroPlayback(store, config, {
+    jackTransport,
+    beforeAdvance: async ({ nextBlockId }) => {
+      prepared.push(nextBlockId);
+      return { prepared: nextBlockId };
+    },
+    armAdvance: async () => { throw new Error("activation acknowledgement timed out"); }
+  });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack" });
+  jackTransport.update(jackSnapshot({ absoluteBeat: 102.1 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+  jackTransport.update(jackSnapshot({ absoluteBeat: 103.4 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+  jackTransport.update(jackSnapshot({ absoluteBeat: 104.1 }));
+  playback.snapshot();
+  jackTransport.update(jackSnapshot({ absoluteBeat: 106.2 }));
+  playback.snapshot();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(store.getScore().structureState.activeBlockId, "A");
+  assert.equal(prepared.includes("C"), false);
+  assert.deepEqual([...new Set(prepared)], ["B"]);
+  playback.close();
+});
+
 test("beat-derived macro position preserves repeated block ids", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceMesoBlock("A", { duration: { beats: 2 }, players: {} });

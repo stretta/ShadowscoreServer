@@ -928,7 +928,7 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
       deliveryProfile,
       delivery
     });
-    await sendCompiledMessages(socket, config, target, compiled, deliveryProfile, delivery);
+    await sendCompiledMessages(socket, config, target, compiled, deliveryProfile, delivery, options);
     sendCompletedMs = now();
     ack = await readScoreTransactionAck(config, target, compiled, transactionId, {
       ...options,
@@ -990,7 +990,7 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
   };
 }
 
-async function sendCompiledMessages(socket, config, target, compiled, deliveryProfile = scoreDeliveryProfile(config, 0), delivery = {}) {
+async function sendCompiledMessages(socket, config, target, compiled, deliveryProfile = scoreDeliveryProfile(config, 0), delivery = {}, options = {}) {
   const { batchSize, delayMs } = deliveryProfile;
   const resumeFromRow = clampInt(delivery.resumeFromRow ?? 0, 0, compiled.transmittedRowCount);
   const messages = resumeFromRow > 0
@@ -1003,7 +1003,7 @@ async function sendCompiledMessages(socket, config, target, compiled, deliveryPr
       await delay(delayMs);
     }
   }
-  for (const message of scoreTransportInportMessages(config, compiled)) {
+  for (const message of scoreTransportInportMessages(config, compiled, options)) {
     await sendOscInportMessage(socket, target, message.name, message.value);
     if (delayMs > 0) {
       await delay(delayMs);
@@ -1394,7 +1394,14 @@ export function rnboTargetSignature(targets = []) {
     .join("\u001e");
 }
 
-export function scoreTransportInportMessages(config, compiled) {
+export function scoreTransportInportMessages(config, compiled, options = {}) {
+  // A staged transaction carries its pattern length and resolution in
+  // BEGIN_REPLACE. Writing the corresponding live inports while merely
+  // preparing that transaction retimes the block that is still playing, and
+  // peer transfers finish at different times. The RNBO client applies the
+  // staged timing atomically when ActivatePrepared promotes the transaction.
+  if (options.stagedOnly === true && compiled?.stagedScoreActivation === true) return [];
+
   const transport = config.rnbo?.transport ?? {};
   const messages = [
     { name: "ClockInterval", value: finiteNumber(compiled.timing?.ticksPerStage, finiteNumber(transport.ClockInterval, 120)) },

@@ -2796,7 +2796,22 @@ async function observeExternalTransportIntent(store, config, runtime, body = {})
   }
 
   const witnessContext = await readBeatWitnessContext(store.getScore(), config, runtime);
-  const anchor = externalTransportAnchor(body, unitId, witnessContext);
+  const initialAnchor = externalTransportAnchor(body, unitId, witnessContext);
+  const phaseAlignment = await alignExternalTransportPhase(
+    store.getScore(),
+    config,
+    runtime,
+    body,
+    initialAnchor,
+    witnessContext
+  );
+  const anchor = phaseAlignment.applied
+    ? {
+        ...initialAnchor,
+        beatIntoBlock: phaseAlignment.beatIntoBlock,
+        phaseAligned: true
+      }
+    : initialAnchor;
   const result = playback.start({
     mode: "jack",
     reset: false,
@@ -2809,8 +2824,119 @@ async function observeExternalTransportIntent(store, config, runtime, body = {})
     arrangementHeld: false,
     mode: result.mode,
     anchor,
+    phaseAlignment,
+    phaseWrites: phaseAlignment.writes,
     witnessAvailable: result.witness?.usable === true
   };
+}
+
+async function alignExternalTransportPhase(score, config, runtime, body, anchor, context = {}) {
+  if (body.phaseAlign === false) {
+    return externalPhaseAlignmentResult("disabled");
+  }
+  if (anchor.source !== "rnbo-client" || !anchor.targetId) {
+    return externalPhaseAlignmentResult("source-stage-unavailable");
+  }
+
+  const targets = (context.rnboTargets ?? []).filter((target) =>
+    target.available !== false && assignedVoiceForTarget(score, target)
+  );
+  const contracts = context.timingContracts ?? [];
+  const sourceTarget = targets.find((target) => optionalString(target.id) === anchor.targetId);
+  const sourceContract = contracts.find((contract) => optionalString(contract.targetId) === anchor.targetId);
+  const stagesPerBeat = Number(sourceContract?.timing?.stagesPerBeat);
+  const patternLength = Number(sourceContract?.timing?.patternLength);
+  if (!sourceTarget || !Number.isFinite(sourceTarget.currentStage)
+    || !Number.isFinite(stagesPerBeat) || stagesPerBeat <= 0
+    || !Number.isFinite(patternLength) || patternLength <= 0) {
+    return externalPhaseAlignmentResult("source-stage-unavailable");
+  }
+
+  const activeBlockId = score.structureState?.activeBlockId ?? "";
+  const tempo = Number(score.mesostructure?.[activeBlockId]?.tempo)
+    || Number(sourceContract?.timing?.tempo)
+    || Number(config.rnbo?.transport?.Tempo)
+    || 120;
+  const comparable = targets.flatMap((target) => {
+    const contract = contracts.find((entry) => optionalString(entry.targetId) === optionalString(target.id));
+    if (Number(contract?.timing?.stagesPerBeat) !== stagesPerBeat
+      || Number(contract?.timing?.patternLength) !== patternLength
+      || !Number.isFinite(target.currentStage)
+      || ["stale", "error"].includes(target.stageReadbackStatus)) {
+      return [];
+    }
+    return [{
+      target,
+      stage: extrapolatedStage(target, stagesPerBeat, patternLength, tempo)
+    }];
+  });
+  if (comparable.length < 2) {
+    return externalPhaseAlignmentResult("insufficient-comparable-targets");
+  }
+
+  const source = comparable.find(({ target }) => optionalString(target.id) === anchor.targetId);
+  if (!source) {
+    return externalPhaseAlignmentResult("source-stage-unavailable");
+  }
+  const offsets = comparable.map(({ target, stage }) => ({
+    targetId: target.id,
+    stage,
+    offsetStages: circularStageOffset(stage, source.stage, patternLength)
+  }));
+  const maxOffsetStages = Math.max(...offsets.map(({ offsetStages }) => Math.abs(offsetStages)));
+  if (maxOffsetStages === 0) {
+    return {
+      ...externalPhaseAlignmentResult("already-aligned"),
+      sourceTargetId: source.target.id,
+      value: source.stage,
+      beatIntoBlock: source.stage / stagesPerBeat,
+      offsets
+    };
+  }
+  if (maxOffsetStages > stagesPerBeat) {
+    return {
+      ...externalPhaseAlignmentResult("skew-exceeds-one-beat"),
+      sourceTargetId: source.target.id,
+      value: source.stage,
+      beatIntoBlock: source.stage / stagesPerBeat,
+      offsets
+    };
+  }
+
+  const targetWrites = await Promise.all(comparable.map(async ({ target }) => {
+    const writes = await writeRnboTransportControls(config, target, { SetStage: source.stage }, {
+      writer: runtime.rnboParamWriter
+    });
+    return writes.map((write) => ({ ...write, targetId: target.id }));
+  }));
+  return {
+    applied: true,
+    reason: "source-stage-latched",
+    sourceTargetId: source.target.id,
+    value: source.stage,
+    beatIntoBlock: source.stage / stagesPerBeat,
+    offsets,
+    writes: targetWrites.flat()
+  };
+}
+
+function externalPhaseAlignmentResult(reason) {
+  return { applied: false, reason, writes: [] };
+}
+
+function extrapolatedStage(target, stagesPerBeat, patternLength, tempo) {
+  const ageMs = Math.max(0, Number(target.stateAgeMs) || 0);
+  const elapsedStages = ageMs * tempo * stagesPerBeat / 60000;
+  return positiveModulo(Math.floor(Number(target.currentStage) + elapsedStages), patternLength);
+}
+
+function circularStageOffset(stage, sourceStage, patternLength) {
+  const forward = positiveModulo(stage - sourceStage, patternLength);
+  return forward > patternLength / 2 ? forward - patternLength : forward;
+}
+
+function positiveModulo(value, modulus) {
+  return ((value % modulus) + modulus) % modulus;
 }
 
 function externalTransportAnchor(body, unitId, context = {}) {

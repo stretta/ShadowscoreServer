@@ -442,14 +442,14 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     activeBlockEndBeat = macroStartBeat + derived.blockEndBeat - macroStartOffsetBeats;
     activeBlockDurationBeats = derived.durationBeats;
     currentBlockDurationMs = durationMsAtTempo(derived.durationBeats, effectiveTempo(score));
-    runBeforeAdvance(score, derived, witness);
-    runArmAdvance(score, derived, witness);
 
     const current = {
       macroIndex: traversalMacroIndex,
       activeBlockId: traversalBlockId
     };
     if (derived.macroIndex === current.macroIndex && derived.activeBlockId === current.activeBlockId) {
+      runBeforeAdvance(score, derived, witness);
+      runArmAdvance(score, derived, witness);
       return;
     }
 

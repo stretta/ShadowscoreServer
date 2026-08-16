@@ -4,8 +4,9 @@ import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
 import { createCoordinatorManager } from "./coordinator/coordinator-manager.mjs";
-import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, readBeatWitnessContext, recallOscSnapshotsForBlock, routeRequest } from "./http/routes.mjs";
+import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, readBeatWitnessContext, recallOscSnapshotsForBlock, routeRequest, writeTransportControlsToPlaybackTargets } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
+import { activatePreparedBlockTransition } from "./playback/block-transition.mjs";
 import { createTempoPolicy } from "./playback/tempo-policy.mjs";
 import { createRnboStageCollector } from "./playback/rnbo-stage-collector.mjs";
 import { createOscSnapshotAutoRecall } from "./osc/snapshot-auto-recall.mjs";
@@ -57,22 +58,11 @@ const macroPlayback = createMacroPlayback(store, config, {
   getTempo: () => runtime.tempoPolicy.snapshot().live,
   loadWitnessContext: () => readBeatWitnessContext(store.getScore(), config, runtime),
   beforeAdvance: ({ nextBlockId }) => rnbo.prepareBlock(nextBlockId),
-  armAdvance: async ({ nextBlockId }) => {
-    const update = await rnbo.applyBlockUpdate(nextBlockId, {
-      activationMode: "continue",
-      reusePrepared: true
-    });
-    if (!["active", "no-targets"].includes(update.state)) {
-      throw new Error(`block '${nextBlockId}' activation did not reach ACTIVE on every required client`);
-    }
-    return {
-      action: "ActivatePrepared",
-      value: 1,
-      writes: [],
-      activations: update.activations ?? [],
-      update
-    };
-  }
+  armAdvance: ({ nextBlockId }) => activatePreparedBlockTransition({
+    rnbo,
+    nextBlockId,
+    resetPhase: () => writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 })
+  })
 });
 runtime.macroPlayback = macroPlayback;
 const oscSnapshotAutoRecall = createOscSnapshotAutoRecall(store, {

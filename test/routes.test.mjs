@@ -2240,11 +2240,12 @@ test("Shadowbox transport intent anchors arrangement to the initiating unit's RN
   });
   const currentStages = new Map([
     ["wren-client", 40],
-    ["heron-client", 52]
+    ["heron-client", 80]
   ]);
   const context = createRouteContext({
     config,
     runtime: {
+      rnboParamWriter: async () => {},
       peerRegistry: {
         snapshot: () => [{ id: "heron", advertisedName: "heron", status: "online" }],
         targets: () => [{
@@ -2311,6 +2312,106 @@ test("Shadowbox transport intent anchors arrangement to the initiating unit's RN
     unitId: "wren",
     targetId: "wren-client"
   });
+  assert.equal(started.phaseAlignment.applied, false);
+  assert.equal(started.phaseAlignment.reason, "skew-exceeds-one-beat");
+});
+
+test("Shadowbox transport intent latches assigned peers to the initiating unit's current stage", async () => {
+  let startOptions = null;
+  const writes = [];
+  const config = mergeConfig(defaultConfig, {
+    server: { hostIdentity: "wren", advertisedName: "wren" },
+    rnbo: {
+      enabled: true,
+      oscQuery: { enabled: false },
+      targets: [{
+        id: "wren-client",
+        host: "127.0.0.1",
+        port: 1234,
+        address: "/rnbo/inst/2/messages/in/shadowscore"
+      }]
+    }
+  });
+  const currentStages = new Map([
+    ["wren-client", 40],
+    ["heron-client", 39]
+  ]);
+  const context = createRouteContext({
+    config,
+    runtime: {
+      peerRegistry: {
+        snapshot: () => [{ id: "heron", advertisedName: "heron", status: "online" }],
+        targets: () => [{
+          id: "heron-client",
+          host: "heron.local",
+          port: 1234,
+          address: "/rnbo/inst/7/messages/in/shadowscore",
+          hardwareUnitId: "heron",
+          hardwareUnitName: "heron",
+          available: true
+        }],
+        oscTargets: () => [],
+        rnboDevices: () => []
+      },
+      rnboParamWriter: async (write) => { writes.push(write); },
+      rnboStageCollector: {
+        async ensureObservations() {},
+        targets: (targets) => targets.map((target) => ({
+          ...target,
+          currentStage: currentStages.get(target.id),
+          stateAgeMs: 0,
+          stageMovement: "moving",
+          stageReadbackStatus: "fresh"
+        }))
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: Boolean(startOptions),
+          mode: startOptions ? "jack" : "stopped",
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: startOptions ? { source: "jack", usable: true, fresh: true } : { source: "none", usable: false }
+        }),
+        start: (options) => {
+          startOptions = options;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => context.runtime.macroPlayback.snapshot()
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "wren-client",
+    rnboHost: "127.0.0.1",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "heron-client",
+    rnboHost: "heron.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/7/messages/in/shadowscore"
+  });
+
+  const started = await requestJson(context, "POST", "/transport/external", {
+    source: "shadowbox",
+    unitId: "wren",
+    rolling: true
+  });
+
+  assert.equal(started.phaseAlignment.applied, true);
+  assert.equal(started.phaseAlignment.reason, "source-stage-latched");
+  assert.equal(started.phaseAlignment.value, 40);
+  assert.equal(startOptions.anchorOffsetBeats, 2.5);
+  assert.equal(started.anchor.phaseAligned, true);
+  assert.deepEqual(started.phaseAlignment.offsets, [
+    { targetId: "wren-client", stage: 40, offsetStages: 0 },
+    { targetId: "heron-client", stage: 39, offsetStages: -1 }
+  ]);
+  assert.deepEqual(writes.map((write) => [write.path, write.value]), [
+    ["/rnbo/inst/2/messages/in/SetStage", 40],
+    ["/rnbo/inst/7/messages/in/SetStage", 40]
+  ]);
 });
 
 test("external transport intent rejects an ambiguous rolling value", async () => {

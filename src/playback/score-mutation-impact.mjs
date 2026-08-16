@@ -76,6 +76,7 @@ export function scoreMutationImpact(event = {}, previousScore = {}) {
       base.routingChanged = true;
       break;
     case "admin.legacyVoiceNotes.imported":
+    case "midi.players.imported":
       addBlockVoices(base, detail.blockId, score.mesostructure?.[detail.blockId]);
       break;
     case "macrostructure.updated":

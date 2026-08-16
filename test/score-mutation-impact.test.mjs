@@ -36,6 +36,19 @@ test("orchestration move impact includes source and destination clip players", (
   assert.equal(impactAffectsRnbo(impact), true);
 });
 
+test("MIDI player import marks every destination player in its block", () => {
+  const current = score(12);
+  const impact = scoreMutationImpact({
+    type: "midi.players.imported",
+    detail: { blockId: "A", playerIds: ["soprano", "alto"] },
+    score: current
+  }, score(11));
+
+  assert.deepEqual(impact.blockIds, ["A"]);
+  assert.deepEqual(impact.voiceIdsByBlock, { A: ["alto", "soprano"] });
+  assert.equal(impactAffectsRnbo(impact), true);
+});
+
 test("unreferenced clip and macro ordering changes cause no RNBO payload impact", () => {
   const current = score(12);
   const clipImpact = scoreMutationImpact({ type: "clip.replaced", detail: { clipId: "unused" }, score: current }, score(11));

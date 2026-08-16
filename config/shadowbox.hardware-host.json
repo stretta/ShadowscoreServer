@@ -60,6 +60,7 @@
       "activeRowCountCommit": true,
       "compactScoreReplace": true,
       "stagedScoreActivation": true,
+      "resumableScoreReplace": true,
       "maxNoteRows": 819,
       "noteDataFloatCount": 16384
     },

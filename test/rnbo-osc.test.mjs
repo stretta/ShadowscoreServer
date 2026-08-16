@@ -1221,6 +1221,116 @@ test("score transaction retries with progressively safer delivery profiles", asy
   assert.deepEqual(lifecycle.at(-1).deliveryProfile, result.deliveryProfile);
 });
 
+test("resumable staged targets retransmit only the missing dense suffix", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      clearRowCount: 0,
+      sendBatchSize: 4,
+      sendDelayMs: 0,
+      log: false,
+      targets: [{
+        address: "/rnbo/inst/2/messages/in/shadowscore",
+        capabilities: {
+          ...compactReplaceCapabilities(),
+          stagedScoreActivation: true,
+          resumableScoreReplace: true
+        }
+      }],
+      oscQuery: { enabled: true, url: "http://127.0.0.1:5678/" },
+      ack: { enabled: true, retries: 2, retryDelayMs: 0, settleMs: 0 }
+    }
+  });
+  const packets = [];
+  const lifecycle = [];
+  const ackValues = [
+    [91, 707, 2, 1, 0],
+    [92, 707, 2, 32, 1]
+  ];
+  const socket = {
+    send(packet, port, host, callback) {
+      packets.push({ packet, port, host });
+      callback();
+    }
+  };
+
+  const result = await sendScoreTransaction(socket, config, createScore(), 707, {
+    onLifecycleEvent(event) { lifecycle.push(event); },
+    fetchImpl: async () => ({
+      ok: true,
+      async json() { return { VALUE: ackValues.shift() }; }
+    })
+  });
+
+  assert.equal(result.ack.status, "prepared");
+  assert.equal(result.ack.attempt, 1);
+  assert.equal(result.resumableScoreReplace, true);
+  assert.equal(result.resumedRowCount, 1);
+  assert.equal(packets.length, 10);
+  assert.deepEqual(lifecycle.find((event) => event.type === "prepare_retry")?.nextDelivery, {
+    strategy: "resume-dense-prefix",
+    resumeFromRow: 1,
+    rowCount: 1
+  });
+  assert.deepEqual(lifecycle.at(-1).delivery, {
+    strategy: "resume-dense-prefix",
+    resumeFromRow: 1,
+    rowCount: 1
+  });
+});
+
+test("progress-making suffix delivery receives a bounded additional retry budget", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      clearRowCount: 0,
+      sendBatchSize: 4,
+      sendDelayMs: 5,
+      log: false,
+      targets: [{
+        address: "/rnbo/inst/2/messages/in/shadowscore",
+        capabilities: {
+          ...compactReplaceCapabilities(),
+          stagedScoreActivation: true,
+          resumableScoreReplace: true
+        }
+      }],
+      oscQuery: { enabled: true, url: "http://127.0.0.1:5678/" },
+      ack: { enabled: true, retries: 2, resumeRetries: 2, retryDelayMs: 0, settleMs: 0 }
+    }
+  });
+  const ackValues = [
+    [91, 708, 2, 1, 0],
+    [91, 708, 5, 1, 0],
+    [91, 708, 2, 1, 0],
+    [92, 708, 2, 32, 1]
+  ];
+  const lifecycle = [];
+
+  const result = await sendScoreTransaction({ send(packet, port, host, callback) { callback(); } }, config, createScore(), 708, {
+    onLifecycleEvent(event) { lifecycle.push(event); },
+    fetchImpl: async () => ({
+      ok: true,
+      async json() { return { VALUE: ackValues.shift() }; }
+    })
+  });
+
+  assert.equal(result.ack.status, "prepared");
+  assert.equal(result.ack.attempt, 3);
+  assert.equal(lifecycle.filter((event) => event.type === "prepare_retry")[1].acknowledgement.rejectReasonLabel, "row-order");
+  assert.equal(lifecycle.filter((event) => event.type === "prepare_retry")[1].nextDelivery.resumeFromRow, 1);
+  assert.deepEqual(result.deliveryProfile, {
+    attempt: 3,
+    batchSize: 1,
+    delayMs: 20,
+    mode: "conservative-retry"
+  });
+});
+
 test("score transaction surfaces stale or failed RNBO ACK state without throwing", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

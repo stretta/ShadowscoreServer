@@ -42,6 +42,7 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
   assert.equal(capabilities.activeRowCountCommit, true);
   assert.equal(capabilities.compactScoreReplace, true);
   assert.equal(capabilities.stagedScoreActivation, true);
+  assert.equal(capabilities.resumableScoreReplace, false);
   assert.equal(capabilities.continuingScoreActivation, false);
 });
 

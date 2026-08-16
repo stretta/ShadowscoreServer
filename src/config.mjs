@@ -322,6 +322,7 @@ export const defaultConfig = Object.freeze({
       activeRowCountCommit: true,
       compactScoreReplace: true,
       stagedScoreActivation: true,
+      resumableScoreReplace: false,
       maxNoteRows: 819,
       noteDataFloatCount: 16384
     },

@@ -349,3 +349,69 @@ score:
 - Wren's persisted transaction state advanced across restart and remained in
   the exact RNBO integer range. The live test also verified explicit rejection
   decoding and null-safe target diagnostics during peer startup.
+
+## Checkpoint Two: Resumable Dense-Prefix Delivery
+
+The second checkpoint reduces recovery traffic without weakening atomic staged
+replacement. The current RNBO receiver accepts dense note indexes, retains a
+rejected staging transaction, and reports `receivedNoteCount` when `COMMIT`
+rejects an incomplete transaction. A target may now explicitly advertise
+`resumableScoreReplace` when that behavior is present.
+
+- A note-count or row-order rejection for the same compact, prepare-only
+  transaction resumes at `receivedNoteCount` and retransmits only the missing
+  dense suffix followed by `COMMIT`.
+- `BEGIN_REPLACE` is not repeated for a resumable suffix, so the accepted prefix
+  remains in the inactive staging bank.
+- Stale transactions, unavailable ACKs, invalid counts, legacy/full-clear
+  targets, and targets without the capability continue to retry the complete
+  transaction.
+- Progress-making suffix retries receive a bounded additional retry budget and
+  stay at the conservative `1 / 20 ms` delivery ceiling. A failure that cannot
+  identify a retained dense prefix still stops at the original retry limit.
+- Delivery lifecycle diagnostics identify `full-transaction` versus
+  `resume-dense-prefix`, including each rejected attempt, the resume row, and
+  suffix row count.
+- Prepared/active state remains unchanged: a partial transaction cannot become
+  active, and a successful resumed transaction still stops at READY.
+
+The hardware-host and hardware-peer profiles opt in because the deployed
+double-buffer receiver already implements this contract. Live verification
+should compare packet recovery time and exact READY counts against checkpoint
+one, without activating transport.
+
+Checkpoint-two live proof completed on Wren and the four-bird fleet on
+2026-08-16. Final prepare-only transaction `10014` reached exact READY on Wren
+`151/151`, Finch `277/277`, Heron `60/60`, and Raven `577/577`. Wren completed
+on attempt zero; every peer completed on the conservative third attempt after
+reporting a retained dense prefix. Lifecycle events exposed each rejection,
+prefix, and next delivery decision. `/playback/updates` reported four prepared
+targets and zero active targets, while the playback snapshot confirmed players,
+transport, and arrangement playback were all stopped.
+
+The live failure-boundary run immediately before the final proof also showed
+why the additional bounded budget is necessary: an incomplete newer
+transaction on Finch and Raven exhausted the old three-attempt limit, reported
+its exact retained prefix, and left the previous READY transaction intact.
+Nothing partial became prepared or active. The bounded progress policy is
+covered by the automated protocol suite; a failure without a usable prefix
+still stops at the original limit.
+
+## Checkpoint Three: Shadowbox Transfer Feedback
+
+The physical Shadowbox display should make long score preparation legible to a
+player without implying that partial data is playable. The display contract
+should distinguish:
+
+- `RECEIVING current/expected` for the current transaction;
+- `RETRY n` or `RESUME current/expected` when a dense prefix is retained;
+- `READY` only after the exact row-count acknowledgement;
+- `ACTIVE` only after the separate activation acknowledgement;
+- `REJECTED reason` or `OFFLINE` when recovery stops.
+
+The server lifecycle events now contain the transaction id, target id, expected
+row count, received prefix, rejection reason, retry attempt, next delivery
+strategy, READY result, and elapsed time needed to drive this surface. The next
+implementation step is to inspect the existing Shadowbox display/status input
+path and choose a narrow transport from the coordinator to the appropriate
+bird, while keeping RNBO's own ACK as the authoritative playback witness.

@@ -54,6 +54,9 @@
     "resolution": {
       "mode": "hybrid"
     },
+    "capabilities": {
+      "resumableScoreReplace": true
+    },
     "transactionStart": 10000,
     "transactionIdMode": "persistent",
     "transactionStatePath": "data/rnbo-transaction.json",

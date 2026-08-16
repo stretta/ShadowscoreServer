@@ -29,6 +29,7 @@ export function rnboPlaybackCapabilities(config, override = {}) {
     activeRowCountCommit: true,
     compactScoreReplace: true,
     stagedScoreActivation: true,
+    resumableScoreReplace: boolCapability(override, configured, "resumableScoreReplace", false),
     continuingScoreActivation: boolCapability(override, configured, "continuingScoreActivation", false),
     contractTransport: String(override.contractTransport ?? configured.contractTransport ?? "rnbo-osc"),
     bestEffort: boolCapability(override, configured, "bestEffort", true),

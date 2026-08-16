@@ -571,6 +571,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
         replacementMode: compiled?.replacementMode ?? "legacy-full-clear",
         compactScoreReplace: compiled?.compactScoreReplace === true,
         stagedScoreActivation: compiled?.stagedScoreActivation === true,
+        resumableScoreReplace: compiled?.resumableScoreReplace === true,
         continuingScoreActivation: compiled?.continuingScoreActivation === true,
         forceFullClearRows: compiled?.forceFullClearRows === true,
         patternLength: compiled?.patternLength ?? 0,
@@ -579,6 +580,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
         sendCompletedAt: compiled?.sendCompletedAt ?? null,
         acknowledgementAt: compiled?.acknowledgementAt ?? null,
         preparationDurationMs: compiled?.preparationDurationMs ?? null,
+        resumedRowCount: compiled?.resumedRowCount ?? 0,
         activeTransaction: compiled?.stagedScoreActivation === true
           ? lastSendStatus.get(targetId)?.activeTransaction ?? null
           : compiled?.transactionId ?? compiled?.ack?.transactionId ?? null,
@@ -879,25 +881,42 @@ export async function sendScoreTransaction(socket, config, score, transactionId,
 
 async function sendCompiledScoreTransaction(socket, config, score, transactionId, target, options = {}) {
   const ackConfig = rnboAckConfig(config);
-  const attempts = ackConfig.enabled ? ackConfig.retries + 1 : 1;
+  const baseAttempts = ackConfig.enabled ? ackConfig.retries + 1 : 1;
+  const maxAttempts = target?.capabilities?.resumableScoreReplace === true
+    ? baseAttempts + ackConfig.resumeRetries
+    : baseAttempts;
   let compiled;
   let ack = skippedAck("disabled");
   const now = typeof options.now === "function" ? options.now : Date.now;
   const sendStartedMs = now();
   let sendCompletedMs = sendStartedMs;
   let acknowledgementMs = sendStartedMs;
+  let resumeFromRow = 0;
+  let resumedRowCount = 0;
 
-  for (let attempt = 0; attempt < attempts; attempt += 1) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const deliveryProfile = scoreDeliveryProfile(config, attempt);
     compiled = {
       ...compileScoreTransaction(score, config, transactionId, target, options),
       deliveryProfile
     };
+    const delivery = resumeFromRow > 0
+      ? {
+          strategy: "resume-dense-prefix",
+          resumeFromRow,
+          rowCount: Math.max(0, compiled.transmittedRowCount - resumeFromRow)
+        }
+      : {
+          strategy: "full-transaction",
+          resumeFromRow: 0,
+          rowCount: compiled.transmittedRowCount
+        };
     if (attempt === 0) emitLifecycleEvent(options, "prepare_started", compiled, target, {
       observedAt: new Date(sendStartedMs).toISOString(),
-      deliveryProfile
+      deliveryProfile,
+      delivery
     });
-    await sendCompiledMessages(socket, config, target, compiled, deliveryProfile);
+    await sendCompiledMessages(socket, config, target, compiled, deliveryProfile, delivery);
     sendCompletedMs = now();
     ack = await readScoreTransactionAck(config, target, compiled, transactionId, {
       ...options,
@@ -909,17 +928,36 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
         observedAt: new Date(acknowledgementMs).toISOString(),
         acknowledgement: ack,
         deliveryProfile,
+        delivery,
         preparationDurationMs: Math.max(0, acknowledgementMs - sendStartedMs)
       });
       break;
     }
-    if (attempt === attempts - 1) emitLifecycleEvent(options, "prepare_failed", compiled, target, {
+    const retryRow = resumableRetryRow(target, compiled, ack);
+    resumeFromRow = retryRow ?? 0;
+    if (resumeFromRow > 0) resumedRowCount += compiled.transmittedRowCount - resumeFromRow;
+    const canRetry = attempt < baseAttempts - 1 || (resumeFromRow > 0 && attempt < maxAttempts - 1);
+    const nextDelivery = resumeFromRow > 0
+      ? {
+          strategy: "resume-dense-prefix",
+          resumeFromRow,
+          rowCount: compiled.transmittedRowCount - resumeFromRow
+        }
+      : {
+          strategy: "full-transaction",
+          resumeFromRow: 0,
+          rowCount: compiled.transmittedRowCount
+        };
+    emitLifecycleEvent(options, canRetry ? "prepare_retry" : "prepare_failed", compiled, target, {
       observedAt: new Date(acknowledgementMs).toISOString(),
       acknowledgement: ack,
       deliveryProfile,
+      delivery,
+      nextDelivery: canRetry ? nextDelivery : undefined,
       preparationDurationMs: Math.max(0, acknowledgementMs - sendStartedMs)
     });
-    if (attempt < attempts - 1 && ackConfig.retryDelayMs > 0) {
+    if (!canRetry) break;
+    if (ackConfig.retryDelayMs > 0) {
       await delay(ackConfig.retryDelayMs);
     }
   }
@@ -933,16 +971,21 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
     sendCompletedAt: new Date(sendCompletedMs).toISOString(),
     acknowledgementAt: new Date(acknowledgementMs).toISOString(),
     preparationDurationMs: Math.max(0, acknowledgementMs - sendStartedMs),
+    resumedRowCount,
     targetId: target.id ?? target.address ?? "",
     voiceId: target.voiceId ?? "",
     ack
   };
 }
 
-async function sendCompiledMessages(socket, config, target, compiled, deliveryProfile = scoreDeliveryProfile(config, 0)) {
+async function sendCompiledMessages(socket, config, target, compiled, deliveryProfile = scoreDeliveryProfile(config, 0), delivery = {}) {
   const { batchSize, delayMs } = deliveryProfile;
-  for (let index = 0; index < compiled.messages.length; index += batchSize) {
-    const batch = compiled.messages.slice(index, index + batchSize);
+  const resumeFromRow = clampInt(delivery.resumeFromRow ?? 0, 0, compiled.transmittedRowCount);
+  const messages = resumeFromRow > 0
+    ? compiled.messages.slice(resumeFromRow + 1)
+    : compiled.messages;
+  for (let index = 0; index < messages.length; index += batchSize) {
+    const batch = messages.slice(index, index + batchSize);
     await Promise.all(batch.map((message) => sendOscMessage(socket, config, target, message.values)));
     if (delayMs > 0) {
       await delay(delayMs);
@@ -956,15 +999,25 @@ async function sendCompiledMessages(socket, config, target, compiled, deliveryPr
   }
 }
 
+function resumableRetryRow(target, compiled, ack) {
+  if (target?.capabilities?.resumableScoreReplace !== true) return null;
+  if (compiled?.compactScoreReplace !== true || compiled?.stagedScoreActivation !== true) return null;
+  if (ack?.status !== "rejected" || ![2, 5].includes(ack?.rejectReason)) return null;
+  const row = Number(ack.receivedNoteCount);
+  if (!Number.isInteger(row) || row <= 0 || row >= compiled.transmittedRowCount) return null;
+  return row;
+}
+
 function scoreDeliveryProfile(config, attempt = 0) {
   const baseBatchSize = clampInt(config.rnbo.sendBatchSize ?? 1, 1, 64);
   const baseDelayMs = clampInt(config.rnbo.sendDelayMs ?? 0, 0, 10000);
   const divisor = 2 ** Math.max(0, attempt);
   const multiplier = 2 ** Math.max(0, attempt);
+  const maxDelayMs = clampInt(config.rnbo.maxRetryDelayMs ?? 20, 0, 10000);
   return {
     attempt,
     batchSize: Math.max(1, Math.ceil(baseBatchSize / divisor)),
-    delayMs: Math.min(10000, baseDelayMs * multiplier),
+    delayMs: Math.min(maxDelayMs, baseDelayMs * multiplier),
     mode: attempt === 0 ? "normal" : "conservative-retry"
   };
 }
@@ -1188,6 +1241,7 @@ function rnboAckConfig(config) {
   return {
     enabled,
     retries: clampInt(ack.retries ?? 2, 0, 5),
+    resumeRetries: clampInt(ack.resumeRetries ?? 4, 0, 20),
     retryDelayMs: clampInt(ack.retryDelayMs ?? 50, 0, 10000),
     settleMs: clampInt(ack.settleMs ?? 50, 0, 10000),
     timeoutMs: clampInt(ack.timeoutMs ?? rnbo.oscQuery?.timeoutMs ?? 1000, 1, 60000),
@@ -1321,6 +1375,7 @@ export function rnboTargetSignature(targets = []) {
       target.capabilities?.activeRowCountCommit === true ? "active-row-count" : "",
       target.capabilities?.compactScoreReplace === true ? "compact" : "",
       target.capabilities?.stagedScoreActivation === true ? "staged-activation" : "",
+      target.capabilities?.resumableScoreReplace === true ? "resumable-replace" : "",
       target.capabilities?.continuingScoreActivation === true ? "continuing-activation" : ""
     ].join("\u001f"))
     .sort()
@@ -1434,6 +1489,7 @@ export function compileScoreTransaction(score, config, transactionId, target = r
   const replacementMode = compactScoreReplace ? "compact" : "legacy-full-clear";
   const stagedScoreActivation = target.capabilities?.stagedScoreActivation === true;
   const continuingScoreActivation = target.capabilities?.continuingScoreActivation === true;
+  const resumableScoreReplace = target.capabilities?.resumableScoreReplace === true;
   const transactionFlags = stagedScoreActivation ? TRANSACTION_FLAGS.PREPARE_ONLY : 0;
   const messages = [
     {
@@ -1471,6 +1527,7 @@ export function compileScoreTransaction(score, config, transactionId, target = r
     replacementMode,
     compactScoreReplace,
     stagedScoreActivation,
+    resumableScoreReplace,
     continuingScoreActivation,
     transactionFlags,
     forceFullClearRows,

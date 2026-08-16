@@ -2058,7 +2058,8 @@ function playbackTimingContractForTarget(score, config, target) {
     noteCount: compiled.noteCount,
     transmittedRowCount: compiled.transmittedRowCount,
     replacementMode: compiled.replacementMode,
-    compactScoreReplace: compiled.compactScoreReplace === true
+    compactScoreReplace: compiled.compactScoreReplace === true,
+    resumableScoreReplace: compiled.resumableScoreReplace === true
   };
 }
 
@@ -2954,6 +2955,8 @@ function summarizeCompiledTarget(target, compiled = {}) {
     transmittedRowCount: compiled.transmittedRowCount ?? 0,
     replacementMode: compiled.replacementMode ?? "legacy-full-clear",
     compactScoreReplace: compiled.compactScoreReplace === true,
+    resumableScoreReplace: compiled.resumableScoreReplace === true,
+    resumedRowCount: compiled.resumedRowCount ?? 0,
     forceFullClearRows: compiled.forceFullClearRows === true,
     patternLength: compiled.patternLength ?? 0,
     stagesPerBeat: compiled.stagesPerBeat ?? compiled.timing?.stagesPerBeat ?? 0,

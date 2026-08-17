@@ -38,6 +38,7 @@ export const defaultConfig = Object.freeze({
       enabled: false,
       host: "",
       freshnessMs: 500,
+      witnessGraceMs: 3000,
       pollIntervalMs: 75,
       python: "python3",
       bridgeScript: "bin/jack-transport-bridge.py",

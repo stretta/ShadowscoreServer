@@ -101,6 +101,25 @@ test("playback snapshot freezes transport motion when JACK stops without holding
   assert.equal(snapshot.transport.beatIntoBlock, 3.5);
 });
 
+test("playback snapshot remains rolling through an RNBO execution fallback", () => {
+  const snapshot = buildPlaybackSnapshot({
+    playback: {
+      running: true,
+      mode: "jack",
+      activeBlockId: "A",
+      beatIntoBlock: 6,
+      witness: { source: "rnbo-client", usable: true, fresh: true, absoluteBeat: 6 }
+    },
+    jack: {
+      status: "stale",
+      latest: { state: "rolling", beatsPerMinute: 120 }
+    }
+  });
+
+  assert.equal(snapshot.transport.rolling, true);
+  assert.equal(snapshot.playback.beatIntoBlock, 6);
+});
+
 test("playback snapshot keeps timer transport moving without JACK", () => {
   const snapshot = buildPlaybackSnapshot({
     playback: {

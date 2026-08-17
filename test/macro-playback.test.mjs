@@ -320,6 +320,53 @@ test("RNBO adoption reanchors without jumping when JACK becomes available", () =
   playback.close();
 });
 
+test("brief JACK gaps do not switch witnesses and genuine RNBO fallback phase-latches execution", () => {
+  let now = 1000;
+  const config = {
+    ...defaultConfig,
+    transport: {
+      ...defaultConfig.transport,
+      jack: {
+        ...defaultConfig.transport.jack,
+        freshnessMs: 100,
+        witnessGraceMs: 300
+      }
+    }
+  };
+  const store = createScoreStore(createInitialScore(config));
+  store.replaceMesoBlock("A", { duration: { beats: 8 }, players: {} });
+  store.updateMacrostructure({ tempo: 120, blocks: ["A"] });
+  const jackTransport = createJackTransportState(config, { now: () => now });
+  const context = (currentStage) => ({
+    rnboTargets: [{ id: "finch", currentStage, stageMovement: "moving" }],
+    timingContracts: [{ targetId: "finch", timing: { stagesPerBeat: 16, patternLength: 128 } }]
+  });
+  const playback = createMacroPlayback(store, config, { jackTransport });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack", witnessContext: context(80), anchorOffsetBeats: 2 });
+
+  now = 1150;
+  const held = playback.snapshot(context(84));
+  assert.equal(held.witness.source, "jack");
+  assert.equal(held.witness.degraded, true);
+  assert.ok(Math.abs(held.beatIntoBlock - 2.3) < 1e-9);
+
+  now = 1400;
+  const latched = playback.snapshot(context(96));
+  assert.equal(latched.witness.source, "rnbo-client");
+  assert.equal(latched.beatIntoBlock, 6);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 101 }));
+  assert.equal(playback.snapshot(context(96)).beatIntoBlock, 6);
+
+  now = 1800;
+  const relatched = playback.snapshot(context(104));
+  assert.equal(relatched.witness.source, "rnbo-client");
+  assert.equal(relatched.beatIntoBlock, 6.5);
+  playback.close();
+});
+
 test("JACK macro playback does not reverse when Link rewrites BBT after a tempo change", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });

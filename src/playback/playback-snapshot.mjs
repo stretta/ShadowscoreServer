@@ -125,7 +125,9 @@ function timingSourceRolling(playback, jack) {
   if (!playback?.running) return false;
   if (playback.mode === "timer") return true;
   if (playback.mode === "jack") {
-    return jack?.status === "fresh" && jack?.latest?.state === "rolling";
+    return jack?.latest?.state === "rolling"
+      && playback?.witness?.usable === true
+      && ["jack", "rnbo-client"].includes(playback.witness.source);
   }
   return playback?.witness?.usable === true;
 }

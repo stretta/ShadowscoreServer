@@ -30,6 +30,7 @@
       "enabled": false,
       "host": "shadowbox-host",
       "freshnessMs": 500,
+      "witnessGraceMs": 3000,
       "pollIntervalMs": 75
     }
   },

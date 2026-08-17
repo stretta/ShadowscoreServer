@@ -1,10 +1,7 @@
-export function jackBeatWitness(transport) {
+export function jackBeatWitness(transport, options = {}) {
   const latest = transport?.latest;
   if (!latest) {
     return unusableWitness("jack", "no JACK snapshot");
-  }
-  if (transport?.status !== "fresh") {
-    return unusableWitness("jack", transport?.reason || `JACK snapshot ${transport?.status || "unusable"}`);
   }
   if (latest.bbtValid !== true) {
     return unusableWitness("jack", "JACK BBT invalid");
@@ -14,6 +11,29 @@ export function jackBeatWitness(transport) {
   }
   if (!Number.isFinite(latest.absoluteBeat)) {
     return unusableWitness("jack", "JACK absolute beat unavailable");
+  }
+  if (transport?.status !== "fresh") {
+    const ageMs = Number(transport?.ageMs);
+    const staleGraceMs = finiteNonNegative(options.staleGraceMs, 0);
+    const tempo = Number(latest.beatsPerMinute);
+    if (
+      transport?.status === "stale"
+      && Number.isFinite(ageMs)
+      && ageMs <= staleGraceMs
+      && Number.isFinite(tempo)
+      && tempo > 0
+    ) {
+      return {
+        source: "jack",
+        usable: true,
+        absoluteBeat: latest.absoluteBeat + ageMs * tempo / 60000,
+        tempo,
+        fresh: false,
+        degraded: true,
+        reason: "extrapolating across a brief JACK snapshot gap"
+      };
+    }
+    return unusableWitness("jack", transport?.reason || `JACK snapshot ${transport?.status || "unusable"}`);
   }
   return {
     source: "jack",
@@ -131,6 +151,7 @@ export function selectBeatWitness({
   mode = "stopped",
   running = false,
   jackTransport,
+  jack = {},
   rnboTargets = [],
   timingContracts = [],
   rnboClient = {}
@@ -139,6 +160,7 @@ export function selectBeatWitness({
     mode,
     running,
     jackTransport,
+    jack,
     rnboTargets,
     timingContracts,
     rnboClient
@@ -152,6 +174,7 @@ export function beatWitnessCandidates({
   mode = "stopped",
   running = false,
   jackTransport,
+  jack = {},
   rnboTargets = [],
   timingContracts = [],
   rnboClient = {}
@@ -167,7 +190,9 @@ export function beatWitnessCandidates({
     }];
   }
 
-  const jack = jackBeatWitness(jackTransport);
+  const jackWitness = jackBeatWitness(jackTransport, {
+    staleGraceMs: jack.staleGraceMs
+  });
   const rnboClientWitness = rnboClientBeatWitness({
     targets: rnboTargets,
     contracts: timingContracts,
@@ -176,9 +201,9 @@ export function beatWitnessCandidates({
   const timer = timerBeatWitness({ running, mode });
 
   if (mode === "timer") {
-    return [timer, jack, rnboClientWitness];
+    return [timer, jackWitness, rnboClientWitness];
   }
-  return [jack, rnboClientWitness, timer];
+  return [jackWitness, rnboClientWitness, timer];
 }
 
 function unusableWitness(source, reason) {

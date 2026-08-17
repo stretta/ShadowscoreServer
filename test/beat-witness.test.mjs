@@ -38,6 +38,31 @@ test("JACK beat witness requires fresh rolling BBT", () => {
   });
 });
 
+test("JACK beat witness extrapolates only across the configured stale grace", () => {
+  const transport = {
+    status: "stale",
+    reason: "snapshot stale",
+    ageMs: 250,
+    latest: {
+      bbtValid: true,
+      state: "rolling",
+      absoluteBeat: 42.25,
+      beatsPerMinute: 120
+    }
+  };
+
+  assert.deepEqual(jackBeatWitness(transport, { staleGraceMs: 1000 }), {
+    source: "jack",
+    usable: true,
+    absoluteBeat: 42.75,
+    tempo: 120,
+    fresh: false,
+    degraded: true,
+    reason: "extrapolating across a brief JACK snapshot gap"
+  });
+  assert.equal(jackBeatWitness(transport, { staleGraceMs: 100 }).usable, false);
+});
+
 test("beat witness selector keeps timer fallback visibly degraded", () => {
   assert.deepEqual(timerBeatWitness({ running: true, mode: "timer" }), {
     source: "timer",

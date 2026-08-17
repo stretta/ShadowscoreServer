@@ -413,10 +413,30 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   }
 
   function reanchorWitnessSource(witness) {
+    if (witness.source === "rnbo-client") {
+      phaseLatchRnboWitness(witness);
+      return;
+    }
     const offsetFromMacroStart = finiteNumber(compositionBeat, macroStartOffsetBeats) - macroStartOffsetBeats;
     macroStartBeat = witness.absoluteBeat - offsetFromMacroStart;
     const currentOffset = finiteNumber(beatIntoBlock, 0);
     activeBlockStartBeat = witness.absoluteBeat - currentOffset;
+    activeBlockEndBeat = activeBlockStartBeat + activeBlockDurationBeats;
+  }
+
+  function phaseLatchRnboWitness(witness) {
+    const rawBeat = Number.isFinite(Number(witness.currentStage)) && Number(witness.stagesPerBeat) > 0
+      ? Number(witness.currentStage) / Number(witness.stagesPerBeat)
+      : witness.absoluteBeat;
+    const cycleBeats = Number(witness.cycleBeats) > 0
+      ? Number(witness.cycleBeats)
+      : activeBlockDurationBeats;
+    const executionBeat = positiveModulo(rawBeat, cycleBeats);
+    const currentBlockCompositionStart = finiteNumber(compositionBeat, macroStartOffsetBeats)
+      - finiteNumber(beatIntoBlock, 0);
+    const latchedCompositionBeat = currentBlockCompositionStart + executionBeat;
+    macroStartBeat = witness.absoluteBeat - latchedCompositionBeat + macroStartOffsetBeats;
+    activeBlockStartBeat = witness.absoluteBeat - executionBeat;
     activeBlockEndBeat = activeBlockStartBeat + activeBlockDurationBeats;
   }
 
@@ -681,6 +701,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       mode,
       running,
       jackTransport: jackTransport?.snapshot?.(),
+      jack: {
+        staleGraceMs: config.transport?.jack?.witnessGraceMs
+      },
       rnboTargets: snapshotOptions.rnboTargets ?? lastWitnessContext.rnboTargets,
       timingContracts: snapshotOptions.timingContracts ?? lastWitnessContext.timingContracts,
       rnboClient: config.transport?.rnboClient

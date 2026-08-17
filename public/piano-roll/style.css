@@ -22,6 +22,7 @@ main { height:calc(100vh - 42px); padding:10px 14px 12px; display:flex; flex-dir
 #status { margin-left:auto; display:block; max-width:42%; color:var(--ss-muted); font-size:12px; text-align:right; }
 .editor-shell { min-height:0; flex:1; display:grid; grid-template-rows:minmax(220px,1fr) auto 112px; border:1px solid var(--ss-border); border-radius:var(--ss-radius-ui); overflow:hidden; background:#10141d; }
 .roll-scroll,.velocity-scroll { overflow:auto; position:relative; }
+.roll-scroll { overflow-y:scroll; }
 .velocity-scroll { overflow-x:hidden; overflow-y:hidden; border-top:1px solid var(--ss-border); }
 canvas { display:block; touch-action:none; user-select:none; }
 .pitch-labels { position:absolute; left:0; top:0; width:58px; pointer-events:none; z-index:3; will-change:transform; }

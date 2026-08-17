@@ -25,7 +25,7 @@ const ui = { block:$("block"), player:$("player"), clip:$("clip"), grid:$("grid"
 const ctx = ui.roll.getContext("2d"); const vctx = ui.velocity.getContext("2d");
 const draftStore=createClipDraftStore();
 const canvasScales=new WeakMap();
-const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, saving:false, pendingSaves:new Set(), saveTimer:null, chasing:false, folded:false, drag:null, menuNote:null, orchestrationBusy:false, midiImport:null, playback:null, playbackGeneration:0, playbackRequest:null, wiperFrame:null, rnboTargets:[], timingContracts:[], dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, minPitch:36, maxPitch:84, lastBeatWidth:72 };
+const state = { score:null, snapshot:null, draft:null, clipId:"", selected:-1, dirty:false, stale:false, saving:false, pendingSaves:new Set(), saveTimer:null, chasing:false, folded:false, unfoldedScrollTop:null, drag:null, menuNote:null, orchestrationBusy:false, midiImport:null, playback:null, playbackGeneration:0, playbackRequest:null, wiperFrame:null, rnboTargets:[], timingContracts:[], dpr:Math.max(1,devicePixelRatio||1), left:58, top:22, lastBeatWidth:72 };
 const wiperEstimator=createWiperEstimator({staleAfterMs:3000,correctionMs:900,snapThresholdBeats:.25,deadbandBeats:.015});
 createPlaybackUpdateControl({ root:ui.playbackUpdate, getBlockId:()=>ui.block.value });
 
@@ -49,7 +49,7 @@ const referenceNotes = () => Object.values(state.score?.mesostructure?.[ui.block
   .flatMap(id => state.score?.clips?.[id]?.notes || []);
 const visiblePitches = () => state.folded
   ? [...new Set([...(state.draft?.notes || []), ...referenceNotes()].map(note => clamp(Math.round(Number(note.pitch)),0,127)))].sort((a,b)=>b-a)
-  : Array.from({length:state.maxPitch-state.minPitch+1},(_,index)=>state.maxPitch-index);
+  : Array.from({length:128},(_,index)=>127-index);
 const pitchForY = (y,pitches=visiblePitches()) => pitches[clamp(Math.floor((y-state.top)/rowHeight()),0,pitches.length-1)];
 const rowForPitch = (pitch,pitches=visiblePitches()) => pitches.indexOf(clamp(Math.round(Number(pitch)),0,127));
 
@@ -332,6 +332,11 @@ function fmt(n){ return Number(n).toFixed(3).replace(/\.0+$|(?<=\.[0-9]*)0+$/g,"
 function resize(){
   const beats=timelineBeats(); const rows=Math.max(1,visiblePitches().length); const width=Math.max(ui.rollScroll.clientWidth,state.left+beats*beatWidth()+30); const height=Math.max(ui.rollScroll.clientHeight,state.top+rows*rowHeight());
   sizeCanvas(ui.roll,width,height); sizeCanvas(ui.velocity,width,112);ui.rollWiper.style.height=`${height}px`;ui.velocityWiper.style.height="112px";renderPitchLabels(height);render();renderWiperFrame();
+  if(!state.folded&&state.unfoldedScrollTop===null){
+    // Retain the former C6-at-top starting view while exposing the full MIDI range.
+    state.unfoldedScrollTop=Math.min(ui.rollScroll.scrollHeight-ui.rollScroll.clientHeight,state.top+(127-84)*rowHeight());
+    ui.rollScroll.scrollTop=state.unfoldedScrollTop;
+  }
 }
 function renderPitchLabels(height){const rh=rowHeight();ui.pitchLabels.style.height=`${height}px`;ui.pitchLabels.replaceChildren(...visiblePitches().map((pitch,row)=>{const label=document.createElement("span");label.className=`pitch-label${[1,3,6,8,10].includes(pitch%12)?" black":""}`;label.style.top=`${state.top+row*rh}px`;label.style.height=`${rh}px`;label.textContent=pitchName(pitch);return label;}));syncScrollSurfaces();}
 function syncScrollSurfaces(){ui.velocityScroll.scrollLeft=ui.rollScroll.scrollLeft;ui.pitchLabels.style.transform=`translate3d(${ui.rollScroll.scrollLeft}px,0,0)`;}
@@ -370,14 +375,14 @@ async function loadPlayback(){if(state.playbackRequest)return;const controller=n
 ui.block.addEventListener("change",()=>{closeNoteMenu();populateSelectors(true);loadClip();resize();});ui.player.addEventListener("change",()=>{closeNoteMenu();setOptions(ui.clip,clipsForPlayer(),clipsForPlayer()[0]||"");loadClip();resize();});ui.clip.addEventListener("change",()=>{closeNoteMenu();loadClip();resize();});
 ui.chase.addEventListener("change",()=>{state.chasing=ui.chase.checked;ui.block.disabled=state.chasing;if(state.chasing)followChase();});
 ui.zoomFit.addEventListener("click",()=>{const fit=Math.max(Number(ui.zoomX.min),Math.min(Number(ui.zoomX.max),(ui.rollScroll.clientWidth-state.left-30)/timelineBeats()));ui.zoomX.value=String(fit);ui.rollScroll.scrollLeft=0;state.lastBeatWidth=fit;resize();});
-ui.fold.addEventListener("click",()=>{state.folded=!state.folded;ui.fold.setAttribute("aria-pressed",String(state.folded));ui.rollScroll.scrollTop=0;resize();});
+ui.fold.addEventListener("click",()=>{if(!state.folded)state.unfoldedScrollTop=ui.rollScroll.scrollTop;state.folded=!state.folded;ui.fold.setAttribute("aria-pressed",String(state.folded));resize();ui.rollScroll.scrollTop=state.folded?0:state.unfoldedScrollTop;});
 ui.importMidi.addEventListener("click",openMidiImport);
 ui.midiFile.addEventListener("change",()=>void readMidiFile());
 ui.midiForm.addEventListener("submit",event=>void commitMidiImport(event));
 ui.midiImportClose.addEventListener("click",()=>ui.midiDialog.close());
 ui.midiImportCancel.addEventListener("click",()=>ui.midiDialog.close());
 ui.revert.addEventListener("click",()=>{const entry=draftStore.revert(state.clipId);state.snapshot=entry.snapshot;state.draft=entry.draft;state.selected=-1;markDirty();updateSelection();resize();status(`Reverted ${state.clipId} to its last server snapshot.`);});
-[ui.grid,ui.zoomY].forEach(control=>control.addEventListener("input",resize));ui.zoomX.addEventListener("input",()=>{const oldBeatWidth=state.lastBeatWidth,newBeatWidth=beatWidth(),oldScrollLeft=ui.rollScroll.scrollLeft;resize();ui.rollScroll.scrollLeft=zoomAnchorScrollLeft({oldBeatWidth,newBeatWidth,scrollLeft:oldScrollLeft,viewportWidth:ui.rollScroll.clientWidth,contentWidth:ui.roll.scrollWidth,gutterWidth:state.left});state.lastBeatWidth=newBeatWidth;syncScrollSurfaces();renderWiperFrame();});ui.rollScroll.addEventListener("scroll",syncScrollSurfaces);addEventListener("resize",resize);addEventListener("beforeunload",event=>{clearTimeout(state.saveTimer);if(draftStore.hasDirty()){event.preventDefault();event.returnValue="";}});
+[ui.grid,ui.zoomY].forEach(control=>control.addEventListener("input",resize));ui.zoomX.addEventListener("input",()=>{const oldBeatWidth=state.lastBeatWidth,newBeatWidth=beatWidth(),oldScrollLeft=ui.rollScroll.scrollLeft;resize();ui.rollScroll.scrollLeft=zoomAnchorScrollLeft({oldBeatWidth,newBeatWidth,scrollLeft:oldScrollLeft,viewportWidth:ui.rollScroll.clientWidth,contentWidth:ui.roll.scrollWidth,gutterWidth:state.left});state.lastBeatWidth=newBeatWidth;syncScrollSurfaces();renderWiperFrame();});ui.rollScroll.addEventListener("scroll",()=>{if(!state.folded)state.unfoldedScrollTop=ui.rollScroll.scrollTop;syncScrollSurfaces();});addEventListener("resize",resize);addEventListener("beforeunload",event=>{clearTimeout(state.saveTimer);if(draftStore.hasDirty()){event.preventDefault();event.returnValue="";}});
 ui.moveTo.addEventListener("mouseenter",()=>openMoveSubmenu());
 ui.moveTo.addEventListener("click",()=>openMoveSubmenu(true));
 ui.noteMenu.addEventListener("keydown",event=>{if(event.key==="Escape"){event.preventDefault();if(!ui.moveToMenu.hidden){ui.moveToMenu.hidden=true;ui.moveTo.setAttribute("aria-expanded","false");ui.moveTo.focus();}else{closeNoteMenu();ui.roll.focus();}}else if(event.key==="ArrowRight"&&event.target===ui.moveTo){event.preventDefault();openMoveSubmenu(true);}else if(event.key==="ArrowLeft"&&ui.moveToMenu.contains(event.target)){event.preventDefault();ui.moveToMenu.hidden=true;ui.moveTo.setAttribute("aria-expanded","false");ui.moveTo.focus();}});

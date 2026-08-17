@@ -4,6 +4,7 @@ import test from "node:test";
 
 const htmlUrl = new URL("../public/piano-roll/index.html", import.meta.url);
 const jsUrl = new URL("../public/piano-roll/app.js", import.meta.url);
+const cssUrl = new URL("../public/piano-roll/style.css", import.meta.url);
 
 test("Piano Roll exposes autosave recovery and editing surfaces", async () => {
   const html = await readFile(htmlUrl, "utf8");
@@ -70,6 +71,8 @@ test("Piano Roll autosaves revision-aware clip drafts and supports right-edge re
   assert.match(js, /const referenceNotes = \(\) => Object\.values/);
   assert.match(js, /\.\.\.referenceNotes\(\)/);
   assert.match(js, /const visiblePitches = \(\) => state\.folded/);
+  assert.match(js, /Array\.from\(\{length:128\},\(_,index\)=>127-index\)/);
+  assert.match(js, /state\.top\+\(127-84\)\*rowHeight\(\)/);
   assert.match(js, /ui\.fold\.addEventListener\("click"/);
   assert.match(js, /ui\.chase\.addEventListener\("change"/);
   assert.match(js, /ui\.block\.disabled=state\.chasing/);
@@ -96,4 +99,9 @@ test("Piano Roll autosaves revision-aware clip drafts and supports right-edge re
   assert.match(js, /\/clips\/actions\/import-midi-to-players/);
   assert.match(js, /expectedStructureRevision:state\.score\.structureRevision/);
   assert.match(js, /Each MIDI lane needs a different destination player/);
+});
+
+test("Piano Roll uses the native vertical scrollbar for all MIDI pitches", async () => {
+  const css = await readFile(cssUrl, "utf8");
+  assert.match(css, /\.roll-scroll \{ overflow-y:scroll; \}/);
 });

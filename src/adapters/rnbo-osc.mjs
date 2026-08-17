@@ -100,12 +100,22 @@ export function createRnboOscAdapter(config, runtime = {}) {
       }
       return resendScore(store.getScore(), reason, options);
     },
-    prepareBlock(blockId, reason = "lookahead", options = {}) {
+    async prepareBlock(blockId, reason = "lookahead", options = {}) {
       if (!store) {
         return Promise.reject(new Error("RNBO adapter is not attached to a score store"));
       }
       const score = scoreWithActiveBlock(store.getScore(), blockId);
-      const voiceIds = dirtyVoiceSelection(score, blockId);
+      const updates = await adapter.playbackUpdates(blockId);
+      const unreadyVoiceIds = options.requireReady === true
+        ? Object.values(updates.targets)
+            .filter((update) => !["prepared", "active"].includes(update.state))
+            .map((update) => update.voiceId)
+            .filter(Boolean)
+        : [];
+      const voiceIds = mergeOptionalSelection(
+        options.voiceIds,
+        [...dirtyVoiceSelection(score, blockId), ...unreadyVoiceIds]
+      );
       return resendScore(score, `${reason}:${blockId}`, {
         ...options,
         immediate: true,
@@ -296,7 +306,8 @@ export function createRnboOscAdapter(config, runtime = {}) {
       const reusable = updates && Object.values(updates.targets).every((update) => ["prepared", "active"].includes(update.state));
       if (!reusable) {
         await adapter.prepareBlock(selectedBlockId, activationMode === "now" ? "update-now" : "apply-next-beat", {
-          fetchImpl: options.fetchImpl ?? runtime.fetchImpl
+          fetchImpl: options.fetchImpl ?? runtime.fetchImpl,
+          requireReady: true
         });
         await adapter.waitForIdle();
         updates = await adapter.playbackUpdates(selectedBlockId);
@@ -325,7 +336,13 @@ export function createRnboOscAdapter(config, runtime = {}) {
             error.code = "CONTINUING_ACTIVATION_UNSUPPORTED";
             throw error;
           }
-          if (!Number.isInteger(status?.preparedTransaction) || status?.ack?.ok !== true) {
+          const matchingPreparation =
+            Number.isInteger(status?.preparedTransaction) &&
+            status.preparedTransaction === update.preparedTransaction &&
+            status.blockId === selectedBlockId &&
+            status.payloadHash === update.desiredHash &&
+            status.ack?.ok === true;
+          if (!matchingPreparation) {
             const error = new Error(`RNBO target '${update.targetId}' is not READY for score revision ${scoreRevision} (ack=${status?.ack?.status ?? "missing"}, preparedTransaction=${status?.preparedTransaction ?? "none"}${status?.ack?.error ? `, error=${status.ack.error}` : ""})`);
             error.code = "PLAYBACK_UPDATE_NOT_READY";
             throw error;
@@ -382,7 +399,8 @@ export function createRnboOscAdapter(config, runtime = {}) {
     if (restoreBlockId && restoreBlockId !== String(blockId ?? "").trim()) {
       try {
         await adapter.prepareBlock(restoreBlockId, "restore-after-apply", {
-          fetchImpl: options.fetchImpl ?? runtime.fetchImpl
+          fetchImpl: options.fetchImpl ?? runtime.fetchImpl,
+          requireReady: true
         });
         await adapter.waitForIdle();
         restoredPreparation = { ok: true, blockId: restoreBlockId };

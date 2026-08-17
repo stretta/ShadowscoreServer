@@ -1816,7 +1816,7 @@ test("RNBO adapter restores the upcoming block after applying the playing block"
   }
 });
 
-test("RNBO adapter reactivates a populated block after the arrangement activates an empty block", async () => {
+test("RNBO adapter refills and reactivates a populated block after the arrangement activates an empty block", async () => {
   let expectedTransaction = 1501;
   let expectedNoteCount = 2;
   let activationRequested = false;
@@ -1898,7 +1898,6 @@ test("RNBO adapter reactivates a populated block after the arrangement activates
     expectedTransaction = 1503;
     expectedNoteCount = 2;
     activationRequested = false;
-    await adapter.resendCurrentScore("lookahead:A", { immediate: true, stagedOnly: true, fetchImpl });
     const secondA = await adapter.applyBlockUpdate("A", {
       activationMode: "continue",
       expectedScoreRevision: 12,

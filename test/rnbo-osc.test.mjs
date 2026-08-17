@@ -93,6 +93,105 @@ test("RNBO target signature is stable across ordering and changes on reload-sens
   assert.notEqual(rnboTargetSignature([a]), rnboTargetSignature([{ ...a, available: false }]));
 });
 
+test("target discovery ignores failed observations and reconciles only stable newly available targets", async () => {
+  const target = (id, instanceId, host, available = true) => ({
+    id,
+    instanceId,
+    host,
+    port: 1234,
+    address: `/rnbo/inst/${instanceId}/messages/in/shadowscore`,
+    available,
+    capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true }
+  });
+  const finch = target("finch", "18", "finch.local");
+  const heron = target("heron", "7", "heron.local");
+  let observation = [finch];
+  const sentHosts = [];
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      discoveryStabilityCount: 2,
+      log: false,
+      oscQuery: { enabled: true },
+      ack: { enabled: false }
+    }
+  });
+  const base = createScore();
+  const score = {
+    ...base,
+    assignments: {
+      "player-1": {
+        rnboTargetId: "finch",
+        rnboHost: "finch.local",
+        rnboPort: 1234,
+        rnboAddress: finch.address
+      },
+      "player-2": {
+        rnboTargetId: "heron",
+        rnboHost: "heron.local",
+        rnboPort: 1234,
+        rnboAddress: heron.address
+      }
+    }
+  };
+  const adapter = createRnboOscAdapter(config, {
+    discoverRnboTargets: async () => {
+      if (observation instanceof Error) throw observation;
+      return observation;
+    },
+    socket: {
+      send(packet, port, host, callback) {
+        sentHosts.push(host);
+        callback();
+      },
+      close() {}
+    }
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    assert.equal((await adapter.reconcileTargetDiscovery()).state, "observing");
+    observation = new Error("OSCQuery timed out");
+    const failed = await adapter.reconcileTargetDiscovery();
+    assert.equal(failed.state, "unknown");
+    assert.match(failed.lastError, /timed out/);
+    assert.equal(sentHosts.length, 0);
+
+    observation = [finch];
+    assert.equal((await adapter.reconcileTargetDiscovery()).candidateObservations, 1);
+    const initial = await adapter.reconcileTargetDiscovery();
+    assert.deepEqual(initial.reconciledTargetIds, ["finch"]);
+    assert.deepEqual(new Set(sentHosts), new Set(["finch.local"]));
+    const initialPacketCount = sentHosts.length;
+    await adapter.reconcileTargetDiscovery();
+    assert.equal(sentHosts.length, initialPacketCount);
+
+    observation = [finch, heron];
+    assert.equal((await adapter.reconcileTargetDiscovery()).state, "observing");
+    const added = await adapter.reconcileTargetDiscovery();
+    assert.deepEqual(added.reconciledTargetIds, ["heron"]);
+    assert.deepEqual(new Set(sentHosts.slice(initialPacketCount)), new Set(["heron.local"]));
+    assert.equal(adapter.sendStatus().some((status) => status.targetId === "finch"), true);
+    assert.equal(adapter.sendStatus().some((status) => status.targetId === "heron"), true);
+
+    const afterAddPacketCount = sentHosts.length;
+    observation = [finch, { ...heron, available: false }];
+    await adapter.reconcileTargetDiscovery();
+    const offline = await adapter.reconcileTargetDiscovery();
+    assert.deepEqual(offline.reconciledTargetIds, []);
+    assert.equal(sentHosts.length, afterAddPacketCount);
+
+    observation = [finch, heron];
+    await adapter.reconcileTargetDiscovery();
+    const returned = await adapter.reconcileTargetDiscovery();
+    assert.deepEqual(returned.reconciledTargetIds, ["heron"]);
+    assert.deepEqual(new Set(sentHosts.slice(afterAddPacketCount)), new Set(["heron.local"]));
+  } finally {
+    adapter.close();
+  }
+});
+
 test("staged-capable targets prepare score data without legacy commit activation", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

@@ -830,6 +830,25 @@ test("RNBOOSCQuery discovery returns an empty target list on fetch failure", asy
   assert.deepEqual(targets, []);
 });
 
+test("RNBOOSCQuery discovery can preserve fetch failure for inventory monitoring", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      oscQuery: {
+        enabled: true,
+        url: "http://pt5.local:5678/"
+      },
+      log: false
+    }
+  });
+
+  await assert.rejects(discoverRnboTargets(config, {
+    throwOnError: true,
+    fetchImpl: async () => {
+      throw new Error("offline");
+    }
+  }), /offline/);
+});
+
 test("plans scoped RNBO transport control writes", () => {
   const writes = rnboTransportControlWrites({
     id: "rnbo-inst-2:shadowscore",

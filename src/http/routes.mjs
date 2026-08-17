@@ -16,6 +16,7 @@ import { buildOscTargets } from "../osc/targets.mjs";
 import { buildOscResourceReport } from "../osc/resources.mjs";
 import { runAutomaticOscOnboarding } from "../osc/onboarding.mjs";
 import { rnboClientBeatWitness, selectBeatWitness } from "../playback/beat-witness.mjs";
+import { rnboCurrentStageUrl } from "../playback/rnbo-stage-collector.mjs";
 import { buildPlaybackSnapshot, nextPlaybackSnapshotGeneration } from "../playback/playback-snapshot.mjs";
 import { createTempoPolicy } from "../playback/tempo-policy.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
@@ -2246,7 +2247,8 @@ function performanceTransportFor(runtime) {
       playerControlOrigin: "none",
       adoptionPayloadVerified: null,
       arrangementRequestedMode: "run",
-      lastExternalIntent: null
+      lastExternalIntent: null,
+      lastExternalPhaseAlignment: null
     };
   }
   return runtime.performanceTransport;
@@ -2262,7 +2264,8 @@ function performanceTransportSnapshot(runtime, playback = runtime.macroPlayback?
       externallyPlaying: observedPlaying && !performance.playersPlaying,
       controlOrigin: performance.playerControlOrigin,
       payloadVerified: performance.adoptionPayloadVerified,
-      lastExternalIntent: performance.lastExternalIntent
+      lastExternalIntent: performance.lastExternalIntent,
+      phaseAlignment: performance.lastExternalPhaseAlignment
     },
     arrangement: {
       running: Boolean(playback.running),
@@ -2635,7 +2638,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     ? "run"
     : performance.arrangementRequestedMode;
   if (body.forceArrangementRun) performance.arrangementRequestedMode = "run";
-  if (performance.playersPlaying) {
+  if (performance.playersPlaying && body.forceRestart !== true) {
     if (requestedArrangementMode === "run" && !playback.snapshot().running) {
       const mode = await playbackStartMode(store.getScore(), config, runtime, optionalString(body.mode));
       playback.start({ mode, reset: Boolean(body.reset), sourceClientId });
@@ -2726,13 +2729,22 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId }),
     writeOscSequencerClocks(score, config, runtime, "On")
   ]);
+  const startWitnessContext = body.phaseReset === false
+    ? witnessContext
+    : await readBeatWitnessContext(score, config, runtime);
+  const phaseAnchor = body.phaseReset === false
+    ? null
+    : observedRnboPlayback(startWitnessContext).witness;
   const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
   if (requestedArrangementMode === "run") {
     playback.start({
       mode,
       reset: Boolean(body.reset),
       sourceClientId,
-      witnessContext
+      witnessContext: startWitnessContext,
+      anchorOffsetBeats: phaseAnchor?.usable && Number.isFinite(phaseAnchor.absoluteBeat)
+        ? phaseAnchor.absoluteBeat
+        : undefined
     });
   } else {
     playback.stop();
@@ -2758,7 +2770,8 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     activations,
     clockWrites,
     oscClockWrites,
-    phaseWrites
+    phaseWrites,
+    phaseAnchor
   };
 }
 
@@ -2795,7 +2808,7 @@ async function observeExternalTransportIntent(store, config, runtime, body = {})
     return { adopted: true, arrangementHeld: true, mode: "stopped" };
   }
 
-  const witnessContext = await readBeatWitnessContext(store.getScore(), config, runtime);
+  const witnessContext = await readExternalPhaseWitnessContext(store.getScore(), config, runtime);
   const initialAnchor = externalTransportAnchor(body, unitId, witnessContext);
   const phaseAlignment = await alignExternalTransportPhase(
     store.getScore(),
@@ -2805,13 +2818,34 @@ async function observeExternalTransportIntent(store, config, runtime, body = {})
     initialAnchor,
     witnessContext
   );
-  const anchor = phaseAlignment.applied
+  const phaseVerified = phaseAlignment.verified === true;
+  const anchor = phaseVerified
     ? {
         ...initialAnchor,
         beatIntoBlock: phaseAlignment.beatIntoBlock,
         phaseAligned: true
       }
     : initialAnchor;
+  performance.lastExternalPhaseAlignment = {
+    ...phaseAlignment,
+    observedAt: new Date().toISOString(),
+    source,
+    unitId,
+    anchor: structuredClone(anchor)
+  };
+  if (anchor.source !== "rnbo-client" || !Number.isFinite(anchor.beatIntoBlock)) {
+    const current = playback.snapshot();
+    return {
+      adopted: true,
+      arrangementHeld: !current.running,
+      arrangementSynchronized: false,
+      mode: current.mode,
+      anchor,
+      phaseAlignment,
+      phaseWrites: phaseAlignment.writes,
+      witnessAvailable: false
+    };
+  }
   const result = playback.start({
     mode: "jack",
     reset: false,
@@ -2826,6 +2860,7 @@ async function observeExternalTransportIntent(store, config, runtime, body = {})
     anchor,
     phaseAlignment,
     phaseWrites: phaseAlignment.writes,
+    arrangementSynchronized: phaseVerified,
     witnessAvailable: result.witness?.usable === true
   };
 }
@@ -2870,6 +2905,15 @@ async function alignExternalTransportPhase(score, config, runtime, body, anchor,
       stage: extrapolatedStage(target, stagesPerBeat, patternLength, tempo)
     }];
   });
+  if (comparable.length !== targets.length) {
+    const comparableIds = new Set(comparable.map(({ target }) => optionalString(target.id)));
+    return {
+      ...externalPhaseAlignmentResult("incomplete-comparable-targets"),
+      unavailableTargetIds: targets
+        .map((target) => optionalString(target.id))
+        .filter((targetId) => targetId && !comparableIds.has(targetId))
+    };
+  }
   if (comparable.length < 2) {
     return externalPhaseAlignmentResult("insufficient-comparable-targets");
   }
@@ -2884,15 +2928,6 @@ async function alignExternalTransportPhase(score, config, runtime, body, anchor,
     offsetStages: circularStageOffset(stage, source.stage, patternLength)
   }));
   const maxOffsetStages = Math.max(...offsets.map(({ offsetStages }) => Math.abs(offsetStages)));
-  if (maxOffsetStages === 0) {
-    return {
-      ...externalPhaseAlignmentResult("already-aligned"),
-      sourceTargetId: source.target.id,
-      value: source.stage,
-      beatIntoBlock: source.stage / stagesPerBeat,
-      offsets
-    };
-  }
   if (maxOffsetStages > stagesPerBeat) {
     return {
       ...externalPhaseAlignmentResult("skew-exceeds-one-beat"),
@@ -2903,20 +2938,181 @@ async function alignExternalTransportPhase(score, config, runtime, body, anchor,
     };
   }
 
-  const targetWrites = await Promise.all(comparable.map(async ({ target }) => {
-    const writes = await writeRnboTransportControls(config, target, { SetStage: source.stage }, {
-      writer: runtime.rnboParamWriter
-    });
-    return writes.map((write) => ({ ...write, targetId: target.id }));
-  }));
+  const phaseTargets = comparable.map(({ target }) => target);
+  const clockOffWrites = await writeTransportControlPhase(
+    config,
+    runtime,
+    phaseTargets,
+    "clock-off",
+    { Clock: 0 }
+  );
+  await phaseAlignmentSettle(config.rnbo?.phaseAlignment?.clockOffSettleMs);
+  const setStageWrites = await writeTransportControlPhase(
+    config,
+    runtime,
+    phaseTargets,
+    "set-stage",
+    { SetStage: source.stage }
+  );
+  await phaseAlignmentSettle(config.rnbo?.phaseAlignment?.setStageSettleMs);
+  const clockOnWrites = await writeTransportControlPhase(
+    config,
+    runtime,
+    phaseTargets,
+    "clock-on",
+    { Clock: 1 }
+  );
+  const verification = await verifyExternalTransportPhase(score, config, runtime, phaseTargets);
   return {
     applied: true,
-    reason: "source-stage-latched",
+    verified: verification.verified,
+    reason: verification.verified ? "coordinated-clock-restart" : "coordinated-clock-verification-failed",
     sourceTargetId: source.target.id,
     value: source.stage,
     beatIntoBlock: source.stage / stagesPerBeat,
     offsets,
-    writes: targetWrites.flat()
+    writes: [...clockOffWrites, ...setStageWrites, ...clockOnWrites],
+    verification
+  };
+}
+
+async function writeTransportControlPhase(config, runtime, targets, phase, controls) {
+  const targetWrites = await Promise.all(targets.map(async (target) => {
+    const writes = await writeRnboTransportControls(config, target, controls, {
+      writer: runtime.rnboParamWriter
+    });
+    return writes.map((write) => ({ ...write, targetId: target.id, phase }));
+  }));
+  return targetWrites.flat();
+}
+
+async function phaseAlignmentSettle(value) {
+  const milliseconds = Math.max(0, Math.min(2000, Number(value) || 0));
+  if (milliseconds > 0) {
+    await new Promise((resolve) => setTimeout(resolve, milliseconds));
+  }
+}
+
+async function verifyExternalTransportPhase(score, config, runtime, phaseTargets) {
+  const expected = new Set(phaseTargets.map(({ id }) => optionalString(id)).filter(Boolean));
+  const timeoutMs = Math.max(0, Math.min(5000, Number(config.rnbo?.phaseAlignment?.verifyTimeoutMs) || 0));
+  const pollIntervalMs = Math.max(10, Math.min(500,
+    Number(config.rnbo?.phaseAlignment?.verifyPollIntervalMs) || 100));
+  const deadline = Date.now() + timeoutMs;
+  let result;
+  do {
+    const directReadAvailable = phaseTargets.every((target) => rnboCurrentStageUrl(target));
+    let targets;
+    let readError = "";
+    if (directReadAvailable) {
+      try {
+        targets = await readPhaseTargetsDirect(config, runtime, phaseTargets);
+      } catch (error) {
+        targets = [];
+        readError = messageForError(error);
+      }
+    } else {
+      await runtime.rnboStageCollector?.refresh?.(phaseTargets);
+      targets = runtime.rnboStageCollector?.targets?.(phaseTargets) ?? phaseTargets;
+    }
+    const contracts = targets.map((target) => playbackTimingContractForTarget(score, config, target));
+    const witness = readError
+      ? { source: "rnbo-client", usable: false, fresh: false, reason: readError }
+      : projectedPhaseWitness(score, config, targets, contracts);
+    const complete = targets.length === expected.size && contracts.length === expected.size;
+    result = {
+      verified: complete && witness.usable === true && witness.targetCount === expected.size,
+      complete,
+      observedAt: new Date().toISOString(),
+      targetCount: targets.length,
+      expectedTargetCount: expected.size,
+      witness
+    };
+    if (result.verified || Date.now() >= deadline) break;
+    await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, deadline - Date.now())));
+  } while (Date.now() <= deadline);
+  return result;
+}
+
+async function readPhaseTargetsDirect(config, runtime, targets) {
+  const timeoutMs = Math.max(100, Math.min(5000,
+    Number(config.rnbo?.phaseAlignment?.verifyReadTimeoutMs) || 2000));
+  const fetchImpl = runtime.rnboStageFetch ?? globalThis.fetch;
+  const observations = await Promise.all(targets.map(async (target) => {
+    const requestedAt = Date.now();
+    const response = await fetchImpl(rnboCurrentStageUrl(target), {
+      signal: AbortSignal.timeout(timeoutMs)
+    });
+    if (!response.ok) throw new Error(`${target.id} current_stage HTTP ${response.status}`);
+    const body = await response.json();
+    const value = Array.isArray(body?.VALUE) ? body.VALUE[0] : body?.VALUE;
+    const currentStage = Number(value);
+    if (!Number.isFinite(currentStage)) throw new Error(`${target.id} current_stage is unavailable`);
+    const observedAt = Date.now();
+    return { target, currentStage, midpoint: requestedAt + ((observedAt - requestedAt) / 2) };
+  }));
+  const commonNow = Date.now();
+  return observations.map(({ target, currentStage, midpoint }) => ({
+    ...target,
+    currentStage,
+    stateAgeMs: Math.max(0, commonNow - midpoint),
+    fresh: true,
+    stageReadbackStatus: "fresh"
+  }));
+}
+
+function projectedPhaseWitness(score, config, targets, contracts) {
+  const movementWitness = rnboClientBeatWitness({
+    targets,
+    contracts,
+    maxSkewBeats: Number.MAX_SAFE_INTEGER,
+    requireMoving: false
+  });
+  if (!movementWitness.usable) return movementWitness;
+
+  const activeBlockId = score.structureState?.activeBlockId ?? "";
+  const tempo = Number(score.mesostructure?.[activeBlockId]?.tempo)
+    || Number(config.rnbo?.transport?.Tempo)
+    || 120;
+  const projected = targets.flatMap((target) => {
+    const contract = contracts.find((entry) => optionalString(entry.targetId) === optionalString(target.id));
+    const stagesPerBeat = Number(contract?.timing?.stagesPerBeat);
+    const patternLength = Number(contract?.timing?.patternLength);
+    if (!Number.isFinite(target.currentStage)
+      || target.fresh === false
+      || ["stale", "error"].includes(target.stageReadbackStatus)
+      || !Number.isFinite(stagesPerBeat) || stagesPerBeat <= 0
+      || !Number.isFinite(patternLength) || patternLength <= 0) {
+      return [];
+    }
+    return [{
+      targetId: target.id,
+      stage: extrapolatedStage(target, stagesPerBeat, patternLength, tempo),
+      stagesPerBeat,
+      patternLength
+    }];
+  });
+  if (projected.length !== targets.length || projected.length === 0) {
+    return { ...movementWitness, usable: false, reason: "incomplete projected RNBO phase" };
+  }
+  const source = projected[0];
+  const compatible = projected.every((entry) =>
+    entry.stagesPerBeat === source.stagesPerBeat && entry.patternLength === source.patternLength);
+  const offsets = compatible
+    ? projected.map((entry) => ({
+        targetId: entry.targetId,
+        stage: entry.stage,
+        offsetStages: circularStageOffset(entry.stage, source.stage, source.patternLength)
+      }))
+    : [];
+  const aligned = compatible && offsets.every(({ offsetStages }) => offsetStages === 0);
+  return {
+    ...movementWitness,
+    usable: aligned,
+    fresh: aligned,
+    projectedStages: projected.map(({ targetId, stage }) => ({ targetId, stage })),
+    offsets,
+    reason: aligned ? "projected RNBO addresses aligned" : "projected RNBO address skew"
   };
 }
 
@@ -3201,6 +3397,34 @@ export async function readBeatWitnessContext(score, config, runtime) {
     timingContracts,
     rnboClient: config.transport?.rnboClient ?? {}
   };
+}
+
+async function readExternalPhaseWitnessContext(score, config, runtime) {
+  const cachedTargets = runtime.sessionRuntimeCache?.rnboTargets;
+  const targets = Array.isArray(cachedTargets) && cachedTargets.length
+    ? cachedTargets.filter((target) => target.available !== false)
+    : (await readAllRnboTargets(config, runtime)).filter((target) => target.available !== false);
+  if (!targets.length || !targets.every((target) => rnboCurrentStageUrl(target))) {
+    return readBeatWitnessContext(score, config, runtime);
+  }
+
+  const timeoutMs = Math.max(0, Math.min(5000,
+    Number(config.rnbo?.phaseAlignment?.verifyTimeoutMs) || 0));
+  const deadline = Date.now() + timeoutMs;
+  do {
+    try {
+      const rnboTargets = await readPhaseTargetsDirect(config, runtime, targets);
+      return {
+        rnboTargets,
+        timingContracts: rnboTargets.map((target) => playbackTimingContractForTarget(score, config, target)),
+        rnboClient: config.transport?.rnboClient ?? {}
+      };
+    } catch (error) {
+      if (Date.now() >= deadline) break;
+      await new Promise((resolve) => setTimeout(resolve, Math.min(100, deadline - Date.now())));
+    }
+  } while (Date.now() <= deadline);
+  return readBeatWitnessContext(score, config, runtime);
 }
 
 async function playbackStartMode(score, config, runtime, requestedMode) {

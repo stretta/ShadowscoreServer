@@ -211,7 +211,7 @@ export function transportPage() {
     fields["arrangement-hold"].addEventListener("click", () => runAction(holdArrangement));
     fields["start-jack"].addEventListener("click", () => runAction(() => startPlayback("jack")));
     fields["start-timer"].addEventListener("click", () => runAction(() => startPlayback("timer")));
-    fields.reanchor.addEventListener("click", () => runAction(() => startPlayback("jack", { phaseReset: true })));
+    fields.reanchor.addEventListener("click", () => runAction(() => startPlayback("jack", { phaseReset: true, forceRestart: true })));
     fields.advance.addEventListener("click", () => runAction(() => postJson("/macrostructure/advance", {})));
     fields.reset.addEventListener("click", () => runAction(resetToA));
     fields["jack-start"].addEventListener("click", () => runAction(() => postJson("/transport/jack/start", {})));

@@ -335,6 +335,15 @@ export const defaultConfig = Object.freeze({
     forceFullClearRows: false,
     transactionStart: 1000,
     resendDebounceMs: 100,
+    discoveryResendIntervalMs: 5000,
+    discoveryStabilityCount: 2,
+    phaseAlignment: {
+      verifyTimeoutMs: 5000,
+      verifyPollIntervalMs: 100,
+      verifyReadTimeoutMs: 2000,
+      clockOffSettleMs: 250,
+      setStageSettleMs: 250
+    },
     activation: {
       timeoutMs: 1800,
       beatMarginMs: 750,

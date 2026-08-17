@@ -569,6 +569,7 @@ test("transport status page exposes host transport controls", async () => {
   assert.match(response.body, /id="start-jack"/);
   assert.match(response.body, /id="start-timer"/);
   assert.match(response.body, /id="reanchor"/);
+  assert.match(response.body, /phaseReset: true, forceRestart: true/);
   assert.match(response.body, /id="advance"/);
   assert.match(response.body, /id="reset"/);
   assert.match(response.body, /id="players-play"/);
@@ -2199,9 +2200,10 @@ test("Shadowbox transport intent starts and stops arrangement ownership without 
     rolling: true
   });
   assert.equal(started.adopted, true);
-  assert.equal(startOptions.mode, "jack");
-  assert.equal(startOptions.reset, false);
-  assert.equal(startOptions.anchorOffsetBeats, 0);
+  assert.equal(startOptions, null);
+  assert.equal(started.arrangementHeld, true);
+  assert.equal(started.arrangementSynchronized, false);
+  assert.equal(started.phaseAlignment.reason, "source-stage-unavailable");
   assert.equal(prepareCount, 0);
   assert.equal(applyCount, 0);
   assert.equal(writes.length, 0);
@@ -2229,12 +2231,14 @@ test("Shadowbox transport intent anchors arrangement to the initiating unit's RN
     server: { hostIdentity: "wren", advertisedName: "wren" },
     rnbo: {
       enabled: true,
+      phaseAlignment: { verifyTimeoutMs: 0 },
       oscQuery: { enabled: false },
       targets: [{
         id: "wren-client",
         host: "127.0.0.1",
         port: 1234,
-        address: "/rnbo/inst/2/messages/in/shadowscore"
+        address: "/rnbo/inst/2/messages/in/shadowscore",
+        currentStagePath: "/rnbo/inst/2/messages/out/current_stage"
       }]
     }
   });
@@ -2253,6 +2257,7 @@ test("Shadowbox transport intent anchors arrangement to the initiating unit's RN
           host: "heron.local",
           port: 1234,
           address: "/rnbo/inst/7/messages/in/shadowscore",
+          currentStagePath: "/rnbo/inst/7/messages/out/current_stage",
           hardwareUnitId: "heron",
           hardwareUnitName: "heron",
           available: true
@@ -2316,25 +2321,27 @@ test("Shadowbox transport intent anchors arrangement to the initiating unit's RN
   assert.equal(started.phaseAlignment.reason, "skew-exceeds-one-beat");
 });
 
-test("Shadowbox transport intent latches assigned peers to the initiating unit's current stage", async () => {
+test("Shadowbox transport intent restarts assigned peers from the initiating unit's current address", async () => {
   let startOptions = null;
   const writes = [];
   const config = mergeConfig(defaultConfig, {
     server: { hostIdentity: "wren", advertisedName: "wren" },
     rnbo: {
       enabled: true,
+      phaseAlignment: { verifyTimeoutMs: 0, clockOffSettleMs: 0, setStageSettleMs: 0 },
       oscQuery: { enabled: false },
       targets: [{
         id: "wren-client",
         host: "127.0.0.1",
         port: 1234,
-        address: "/rnbo/inst/2/messages/in/shadowscore"
+        address: "/rnbo/inst/2/messages/in/shadowscore",
+        currentStagePath: "/rnbo/inst/2/messages/out/current_stage"
       }]
     }
   });
   const currentStages = new Map([
     ["wren-client", 40],
-    ["heron-client", 39]
+    ["heron-client", 40]
   ]);
   const context = createRouteContext({
     config,
@@ -2346,6 +2353,7 @@ test("Shadowbox transport intent latches assigned peers to the initiating unit's
           host: "heron.local",
           port: 1234,
           address: "/rnbo/inst/7/messages/in/shadowscore",
+          currentStagePath: "/rnbo/inst/7/messages/out/current_stage",
           hardwareUnitId: "heron",
           hardwareUnitName: "heron",
           available: true
@@ -2353,7 +2361,19 @@ test("Shadowbox transport intent latches assigned peers to the initiating unit's
         oscTargets: () => [],
         rnboDevices: () => []
       },
-      rnboParamWriter: async (write) => { writes.push(write); },
+      rnboParamWriter: async (write) => {
+        writes.push(write);
+        if (write.path.endsWith("/SetStage")) {
+          const targetId = write.host === "127.0.0.1" ? "wren-client" : "heron-client";
+          currentStages.set(targetId, Number(write.value));
+        }
+      },
+      rnboStageFetch: async (url) => ({
+        ok: true,
+        async json() {
+          return { VALUE: [currentStages.get(url.includes("/inst/2/") ? "wren-client" : "heron-client")] };
+        }
+      }),
       rnboStageCollector: {
         async ensureObservations() {},
         targets: (targets) => targets.map((target) => ({
@@ -2400,18 +2420,115 @@ test("Shadowbox transport intent latches assigned peers to the initiating unit's
   });
 
   assert.equal(started.phaseAlignment.applied, true);
-  assert.equal(started.phaseAlignment.reason, "source-stage-latched");
+  assert.equal(started.phaseAlignment.verified, true);
+  assert.equal(started.phaseAlignment.reason, "coordinated-clock-restart");
   assert.equal(started.phaseAlignment.value, 40);
   assert.equal(startOptions.anchorOffsetBeats, 2.5);
   assert.equal(started.anchor.phaseAligned, true);
+  assert.equal(started.arrangementSynchronized, true);
   assert.deepEqual(started.phaseAlignment.offsets, [
     { targetId: "wren-client", stage: 40, offsetStages: 0 },
-    { targetId: "heron-client", stage: 39, offsetStages: -1 }
+    { targetId: "heron-client", stage: 40, offsetStages: 0 }
   ]);
   assert.deepEqual(writes.map((write) => [write.path, write.value]), [
+    ["/rnbo/inst/2/params/Clock/Clock", "Off"],
+    ["/rnbo/inst/7/params/Clock/Clock", "Off"],
     ["/rnbo/inst/2/messages/in/SetStage", 40],
-    ["/rnbo/inst/7/messages/in/SetStage", 40]
+    ["/rnbo/inst/7/messages/in/SetStage", 40],
+    ["/rnbo/inst/2/params/Clock/Clock", "On"],
+    ["/rnbo/inst/7/params/Clock/Clock", "On"]
   ]);
+  assert.deepEqual(started.phaseAlignment.writes.map((write) => write.phase), [
+    "clock-off", "clock-off", "set-stage", "set-stage", "clock-on", "clock-on"
+  ]);
+});
+
+test("Shadowbox transport intent does not phase-write when an assigned peer lacks a fresh stage", async () => {
+  let startOptions = null;
+  const writes = [];
+  const config = mergeConfig(defaultConfig, {
+    server: { hostIdentity: "wren", advertisedName: "wren" },
+    rnbo: {
+      enabled: true,
+      phaseAlignment: { verifyTimeoutMs: 0 },
+      oscQuery: { enabled: false },
+      targets: [{
+        id: "wren-client",
+        host: "127.0.0.1",
+        port: 1234,
+        address: "/rnbo/inst/2/messages/in/shadowscore"
+      }]
+    }
+  });
+  const context = createRouteContext({
+    config,
+    runtime: {
+      peerRegistry: {
+        snapshot: () => [{ id: "heron", advertisedName: "heron", status: "online" }],
+        targets: () => [{
+          id: "heron-client",
+          host: "heron.local",
+          port: 1234,
+          address: "/rnbo/inst/7/messages/in/shadowscore",
+          hardwareUnitId: "heron",
+          hardwareUnitName: "heron",
+          available: true
+        }],
+        oscTargets: () => [],
+        rnboDevices: () => []
+      },
+      rnboParamWriter: async (write) => { writes.push(write); },
+      rnboStageCollector: {
+        async ensureObservations() {},
+        targets: (targets) => targets.map((target) => ({
+          ...target,
+          currentStage: target.id === "wren-client" ? 40 : null,
+          stateAgeMs: target.id === "wren-client" ? 0 : 5000,
+          stageMovement: target.id === "wren-client" ? "moving" : "unknown",
+          stageReadbackStatus: target.id === "wren-client" ? "fresh" : "stale"
+        }))
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: Boolean(startOptions),
+          mode: startOptions ? "jack" : "stopped",
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: startOptions ? { source: "jack", usable: true, fresh: true } : { source: "none", usable: false }
+        }),
+        start: (options) => {
+          startOptions = options;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => context.runtime.macroPlayback.snapshot()
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "wren-client",
+    rnboHost: "127.0.0.1",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "heron-client",
+    rnboHost: "heron.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/7/messages/in/shadowscore"
+  });
+
+  const started = await requestJson(context, "POST", "/transport/external", {
+    source: "shadowbox",
+    unitId: "wren",
+    rolling: true
+  });
+
+  assert.equal(started.phaseAlignment.applied, false);
+  assert.equal(started.phaseAlignment.reason, "incomplete-comparable-targets");
+  assert.deepEqual(started.phaseAlignment.unavailableTargetIds, ["heron-client"]);
+  assert.equal(started.arrangementSynchronized, false);
+  assert.equal(startOptions.anchorOffsetBeats, 2.5);
+  assert.equal(writes.length, 0);
 });
 
 test("external transport intent rejects an ambiguous rolling value", async () => {
@@ -3339,6 +3456,8 @@ test("macro phase reset writes SetStage to available RNBO targets", async () => 
 
 test("macro playback start can include an immediate phase reset", async () => {
   const writes = [];
+  let currentStage = 0;
+  let startOptions = null;
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
       rnbo: {
@@ -3353,8 +3472,22 @@ test("macro playback start can include an immediate phase reset", async () => {
       }
     }),
     runtime: {
+      performanceTransport: { playersPlaying: true, arrangementRequestedMode: "run" },
       rnboParamWriter: async (write) => {
         writes.push(write);
+        if (write.path.endsWith("/SetStage")) currentStage = Number(write.value);
+        if (write.path.endsWith("/Clock/Clock") && write.value === "On") currentStage = 12;
+      },
+      rnboStageCollector: {
+        async ensureObservations() {},
+        targets: (targets) => targets.map((target) => ({
+          ...target,
+          currentStage,
+          fresh: true,
+          stateAgeMs: 0,
+          stageMovement: "moving",
+          stageReadbackStatus: "fresh"
+        }))
       },
       macroPlayback: {
         snapshot: () => ({
@@ -3364,14 +3497,18 @@ test("macro playback start can include an immediate phase reset", async () => {
           nextAdvanceAt: 1000,
           currentBlockDurationMs: 16000
         }),
-        start: () => context.runtime.macroPlayback.snapshot()
+        start: (options) => {
+          startOptions = options;
+          return context.runtime.macroPlayback.snapshot();
+        }
       }
     }
   });
 
   const started = await requestJson(context, "POST", "/macrostructure/playback/start", {
     mode: "jack",
-    phaseReset: true
+    phaseReset: true,
+    forceRestart: true
   });
 
   assert.equal(started.ok, true);
@@ -3398,6 +3535,11 @@ test("macro playback start can include an immediate phase reset", async () => {
       value: 0
     }
   ]);
+  assert.equal(started.idempotent, undefined);
+  assert.equal(started.phaseAnchor.usable, true);
+  assert.equal(started.phaseAnchor.currentStage, 12);
+  assert.equal(started.phaseAnchor.absoluteBeat, 12 / started.phaseAnchor.stagesPerBeat);
+  assert.equal(startOptions.anchorOffsetBeats, started.phaseAnchor.absoluteBeat);
 });
 
 test("macro playback start can scope clock writes to a selected RNBO target", async () => {

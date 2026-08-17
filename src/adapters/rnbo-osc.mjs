@@ -46,7 +46,19 @@ export function createRnboOscAdapter(config, runtime = {}) {
   let store;
   let discoveryTimer;
   let lastTargetSignature = "";
+  let lastTargetInventory = new Map();
+  let candidateTargetSignature = "";
+  let candidateTargetObservations = 0;
   let discoveryCheckPending = false;
+  let discoveryStatus = {
+    state: "unobserved",
+    observedAt: null,
+    acceptedAt: null,
+    lastError: "",
+    candidateObservations: 0,
+    requiredObservations: targetDiscoveryStabilityCount(config),
+    reconciledTargetIds: []
+  };
   const lastSendStatus = new Map();
   let sendLoopActive = false;
   let sendLoopPromise = Promise.resolve();
@@ -141,8 +153,12 @@ export function createRnboOscAdapter(config, runtime = {}) {
         inProgress: Boolean(activeSend),
         queued: Boolean(queuedSend),
         active: activeSend ? structuredClone(activeSend) : null,
-        queuedRequest: queuedSend ? summarizeSendRequest(queuedSend) : null
+        queuedRequest: queuedSend ? summarizeSendRequest(queuedSend) : null,
+        discovery: structuredClone(discoveryStatus)
       };
+    },
+    reconcileTargetDiscovery() {
+      return checkTargetDiscovery();
     },
     async waitForIdle() {
       while (debounceTimer || sendLoopActive || queuedSend) {
@@ -781,20 +797,64 @@ export function createRnboOscAdapter(config, runtime = {}) {
 
   async function checkTargetDiscovery() {
     if (!store || discoveryCheckPending) {
-      return;
+      return structuredClone(discoveryStatus);
     }
     discoveryCheckPending = true;
     try {
-      const liveTargets = await readLiveRnboTargets(config, runtime);
+      const liveTargets = await readLiveRnboTargets(config, runtime, { requireComplete: true });
       const signature = rnboTargetSignature(liveTargets);
-      if (signature && signature !== lastTargetSignature) {
-        lastTargetSignature = signature;
-        await resendScore(store.getScore(), "target-discovery", { immediate: true });
+      const observedAt = new Date().toISOString();
+      if (signature !== candidateTargetSignature) {
+        candidateTargetSignature = signature;
+        candidateTargetObservations = 1;
       } else {
-        lastTargetSignature = signature;
+        candidateTargetObservations += 1;
       }
+      discoveryStatus = {
+        ...discoveryStatus,
+        state: signature === lastTargetSignature ? "stable" : "observing",
+        observedAt,
+        lastError: "",
+        candidateObservations: candidateTargetObservations,
+        reconciledTargetIds: []
+      };
+      if (candidateTargetObservations < discoveryStatus.requiredObservations || signature === lastTargetSignature) {
+        return structuredClone(discoveryStatus);
+      }
+
+      const nextInventory = targetInventory(liveTargets);
+      const targetIds = targetsNeedingDiscoveryReconciliation(lastTargetInventory, nextInventory);
+      lastTargetSignature = signature;
+      lastTargetInventory = nextInventory;
+      discoveryStatus = {
+        ...discoveryStatus,
+        state: "stable",
+        acceptedAt: observedAt,
+        reconciledTargetIds: targetIds
+      };
+      if (targetIds.length > 0) {
+        await resendScore(store.getScore(), "target-discovery", {
+          immediate: true,
+          forceResend: true,
+          targetIds
+        });
+      }
+      return structuredClone(discoveryStatus);
     } catch (error) {
-      console.error(`[rnbo] target discovery resend check failed: ${messageForError(error)}`);
+      candidateTargetSignature = "";
+      candidateTargetObservations = 0;
+      discoveryStatus = {
+        ...discoveryStatus,
+        state: "unknown",
+        observedAt: new Date().toISOString(),
+        lastError: messageForError(error),
+        candidateObservations: 0,
+        reconciledTargetIds: []
+      };
+      if (config.rnbo.log !== false) {
+        console.error(`[rnbo] target discovery resend check failed: ${messageForError(error)}`);
+      }
+      return structuredClone(discoveryStatus);
     } finally {
       discoveryCheckPending = false;
     }
@@ -885,8 +945,12 @@ export async function sendScoreTransaction(socket, config, score, transactionId,
     return { target, compiled };
   }));
 
-  if (options.stagedOnly === true) {
-    return { targets: compiledTargets, partial: true, scope: "staged-only" };
+  if (options.stagedOnly === true || Array.isArray(options.targetIds)) {
+    return {
+      targets: compiledTargets,
+      partial: true,
+      scope: options.stagedOnly === true ? "staged-only" : "selected-targets"
+    };
   }
   return compiledTargets.length === 1 ? compiledTargets[0].compiled : { targets: compiledTargets };
 }
@@ -1363,10 +1427,43 @@ function scoreWithActiveBlock(score, blockId) {
   };
 }
 
-async function readLiveRnboTargets(config, runtime = {}) {
-  const localTargets = await discoverRnboTargets(config).catch(() => []);
+async function readLiveRnboTargets(config, runtime = {}, options = {}) {
+  const discover = runtime.discoverRnboTargets ?? discoverRnboTargets;
+  let localTargets;
+  try {
+    localTargets = await discover(config, {
+      fetchImpl: runtime.fetchImpl,
+      throwOnError: options.requireComplete === true
+    });
+  } catch (error) {
+    if (options.requireComplete === true) throw error;
+    localTargets = [];
+  }
   const peerTargets = runtime.peerRegistry?.targets?.() ?? [];
   return [...localTargets, ...peerTargets];
+}
+
+function targetDiscoveryStabilityCount(config) {
+  return clampInt(config.rnbo?.discoveryStabilityCount ?? 2, 1, 10);
+}
+
+function targetInventory(targets = []) {
+  return new Map(targets.flatMap((target) => {
+    const id = String(target?.id ?? target?.address ?? "").trim();
+    return id ? [[id, { target, signature: rnboTargetSignature([target]) }]] : [];
+  }));
+}
+
+function targetsNeedingDiscoveryReconciliation(previous, next) {
+  const targetIds = [];
+  for (const [targetId, entry] of next) {
+    if (entry.target?.available === false) continue;
+    const prior = previous.get(targetId);
+    if (!prior || prior.target?.available === false || prior.signature !== entry.signature) {
+      targetIds.push(targetId);
+    }
+  }
+  return targetIds.sort();
 }
 
 export function rnboTargetSignature(targets = []) {

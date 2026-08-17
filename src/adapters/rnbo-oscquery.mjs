@@ -16,6 +16,9 @@ export async function discoverRnboTargets(config, options = {}) {
     const tree = await fetchOscQueryTree(oscQuery, options.fetchImpl ?? globalThis.fetch);
     return extractRnboTargets(tree, config);
   } catch (error) {
+    if (options.throwOnError === true) {
+      throw error;
+    }
     if (rnbo.log !== false) {
       console.error(`[rnbo-oscquery] discovery failed: ${messageForError(error)}`);
     }

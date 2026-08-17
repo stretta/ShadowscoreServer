@@ -5261,6 +5261,11 @@ test("structure editor route serves server-bundled editor html", async () => {
   assert.match(response.body, /createWiperEstimator/);
   assert.match(response.body, /requestAnimationFrame/);
   assert.match(response.body, /setInterval\(\(\) => void refreshPerformanceSnapshot\(\), 250\)/);
+  assert.match(response.body, /sameOriginDiscoveryTimeoutMs = 10000/);
+  assert.match(response.body, /url === sameOrigin \? sameOriginDiscoveryTimeoutMs : discoveryTimeoutMs/);
+  assert.match(response.body, /bindEvents\(\);\s+renderAll\(\);\s+await discoverServers\(\)/);
+  assert.match(response.body, /state\.score \? "No blocks\." : "No score loaded\."/);
+  assert.match(response.body, /els\.macroPlaybackState\.textContent = "No score loaded"/);
   assert.match(response.body, /activeBlockDurationBeats/);
   assert.match(response.body, /id="block-list"/);
   assert.match(response.body, /id="players"/);

@@ -589,6 +589,8 @@
     import { createPlaybackUpdateControl } from "../shared/playback-update-control.js";
 
     const noteNames = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    const discoveryTimeoutMs = 1200;
+    const sameOriginDiscoveryTimeoutMs = 10000;
     const wiperEstimator = createWiperEstimator({ staleAfterMs: 750, correctionMs: 180, snapThresholdBeats: 0.25 });
     const state = {
       score: undefined,
@@ -667,6 +669,7 @@
 
     initScaleRoots();
     bindEvents();
+    renderAll();
     await discoverServers();
 
     function bindEvents() {
@@ -726,9 +729,11 @@
       setStatus("Scanning for local ShadowScore servers...");
       els.discover.disabled = true;
       try {
+        const sameOrigin = normalizeServerUrl(window.location.origin);
         const servers = (await Promise.all(serverCandidates().map(async (url) => {
           try {
-            return { url, session: await fetchJson(`${url}/session`, 1200) };
+            const timeoutMs = url === sameOrigin ? sameOriginDiscoveryTimeoutMs : discoveryTimeoutMs;
+            return { url, session: await fetchJson(`${url}/session`, timeoutMs) };
           } catch {
             return undefined;
           }
@@ -855,7 +860,7 @@
       if (!blocks.length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No blocks.";
+        empty.textContent = state.score ? "No blocks." : "No score loaded.";
         els.blockList.append(empty);
         return;
       }
@@ -897,6 +902,7 @@
         els.blockId.value = "";
         els.durationValue.value = "8";
         els.tempo.value = "120";
+        els.playersEmpty.textContent = state.score ? "No players in this score." : "No score loaded.";
         els.playersEmpty.hidden = false;
         updateButtons();
         return;
@@ -913,6 +919,7 @@
       els.blockSwingAmt.value = String(block.swingAmt ?? 0.5);
 
       const voices = state.session?.voices ?? Object.keys(state.score?.voices ?? {}).map((id) => ({ id, label: id }));
+      els.playersEmpty.textContent = "No players in this score.";
       els.playersEmpty.hidden = voices.length > 0;
       voices.forEach((voice) => {
         const row = document.createElement("tr");
@@ -944,7 +951,7 @@
       if (!(macro.blocks ?? []).length) {
         const empty = document.createElement("div");
         empty.className = "empty";
-        empty.textContent = "No playback chain entries.";
+        empty.textContent = state.score ? "No playback chain entries." : "No arrangement loaded.";
         els.chain.append(empty);
       }
       scheduleWiperFrame();
@@ -968,6 +975,13 @@
     }
 
     function renderMacroPlaybackStatus() {
+      if (!state.score) {
+        stopMacroPlaybackTimer();
+        els.macroPlaybackState.textContent = "No score loaded";
+        els.macroPlaybackDetail.textContent = "Connect to a server to view the arrangement";
+        els.sectionCueState.textContent = "No section loaded";
+        return;
+      }
       const playback = state.macroPlayback;
       const playersPlaying = Boolean(state.performanceControls?.players?.playing);
       const arrangementRunning = Boolean(state.performanceControls?.arrangement?.running ?? playback?.running);

@@ -25,6 +25,28 @@ test("wiper estimator eases small corrections without jumping", () => {
   assert.equal(estimator.estimate(1200).beat, 1.05);
 });
 
+test("wiper estimator ignores recurring micro-corrections while refreshing freshness", () => {
+  const estimator = createWiperEstimator({ deadbandBeats: 0.02, staleAfterMs: 750 });
+  estimator.update({ beat: 0, tempo: 60, running: true, blockId: "A" }, 0);
+  assert.equal(estimator.estimate(250).beat, 0.25);
+
+  estimator.update({ beat: 0.26, tempo: 60, running: true, blockId: "A" }, 250);
+  assert.equal(estimator.estimate(250).beat, 0.25);
+  assert.equal(estimator.estimate(750).beat, 0.75);
+  assert.equal(estimator.estimate(999).stale, false);
+  assert.equal(estimator.estimate(1000).stale, true);
+});
+
+test("wiper estimator still corrects drift outside the deadband", () => {
+  const estimator = createWiperEstimator({ deadbandBeats: 0.02, correctionMs: 400, snapThresholdBeats: 0.25, staleAfterMs: 2000 });
+  estimator.update({ beat: 0, tempo: 60, running: true, blockId: "A" }, 0);
+  estimator.update({ beat: 0.2, tempo: 60, running: true, blockId: "A" }, 250);
+
+  assert.equal(estimator.estimate(250).beat, 0.25);
+  assert.ok(estimator.estimate(450).beat < 0.45);
+  assert.ok(Math.abs(estimator.estimate(650).beat - 0.6) < 1e-9);
+});
+
 test("wiper estimator snaps large corrections and block changes", () => {
   const estimator = createWiperEstimator({ snapThresholdBeats: 0.25 });
   estimator.update({ beat: 1, tempo: 120, running: true, blockId: "A" }, 1000);

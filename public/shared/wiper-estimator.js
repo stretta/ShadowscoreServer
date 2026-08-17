@@ -1,12 +1,14 @@
 const DEFAULT_STALE_AFTER_MS = 750;
 const DEFAULT_CORRECTION_MS = 180;
 const DEFAULT_SNAP_THRESHOLD_BEATS = 0.25;
+const DEFAULT_DEADBAND_BEATS = 0;
 
 export function createWiperEstimator(options = {}) {
   const now = options.now ?? Date.now;
   const staleAfterMs = nonNegative(options.staleAfterMs, DEFAULT_STALE_AFTER_MS);
   const correctionMs = nonNegative(options.correctionMs, DEFAULT_CORRECTION_MS);
   const snapThresholdBeats = positive(options.snapThresholdBeats, DEFAULT_SNAP_THRESHOLD_BEATS);
+  const deadbandBeats = nonNegative(options.deadbandBeats, DEFAULT_DEADBAND_BEATS);
   let state;
 
   return {
@@ -27,10 +29,26 @@ export function createWiperEstimator(options = {}) {
         : Math.min(staleAfterMs, Math.max(0, receivedAt - observedAt));
       const beatAtReceipt = beat + (running ? observationAge * tempo / 60000 : 0);
       const previous = state ? estimateState(state, receivedAt, staleAfterMs) : undefined;
-      const discontinuity = !previous
-        || previous.blockId !== blockId
-        || previous.running !== running
-        || Math.abs(beatAtReceipt - previous.beat) >= snapThresholdBeats;
+      const sameStream = previous
+        && previous.blockId === blockId
+        && previous.running === running;
+      const phaseError = sameStream ? beatAtReceipt - previous.beat : Number.NaN;
+      if (sameStream && Math.abs(phaseError) <= deadbandBeats) {
+        state.receivedAtMs = receivedAt;
+        if (state.tempo !== (Number.isFinite(tempo) ? tempo : 0)) {
+          state = {
+            ...state,
+            anchorBeat: previous.beat,
+            anchorTimeMs: receivedAt,
+            correctionBeat: 0,
+            correctionEndMs: receivedAt,
+            correctionStartMs: receivedAt,
+            tempo: Number.isFinite(tempo) ? tempo : 0
+          };
+        }
+        return estimateState(state, receivedAt, staleAfterMs);
+      }
+      const discontinuity = !sameStream || Math.abs(phaseError) >= snapThresholdBeats;
       const correctionBeat = discontinuity ? 0 : previous.beat - beatAtReceipt;
 
       state = {

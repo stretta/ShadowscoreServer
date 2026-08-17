@@ -19,6 +19,7 @@ export function buildPlaybackSnapshot({
   targets = [],
   timingContracts = [],
   sendQueue = {},
+  transfers = null,
   lifecycleEvents = [],
   updates = null,
   staleAfterMs = 1000
@@ -116,6 +117,7 @@ export function buildPlaybackSnapshot({
     targets: targetSnapshots,
     timingContracts,
     sendQueue,
+    transfers,
     lifecycleEvents: lifecycleEvents.slice(-100),
     updates
   };

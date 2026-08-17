@@ -65,6 +65,7 @@ curl http://<host>.local:8790/coordinator
 curl http://<host>.local:8790/hardware/units
 curl http://<host>.local:8790/rnbo/devices
 curl http://<host>.local:8790/rnbo/targets
+curl http://<host>.local:8790/rnbo/transfers
 curl http://<host>.local:8790/osc/targets
 curl http://<host>.local:8790/playback/timing-contracts
 ```
@@ -77,6 +78,9 @@ The useful reading is:
 - `/rnbo/devices` shows RNBO graph editors, including boxes that do not yet
   have a ShadowScoreClient instance loaded.
 - `/rnbo/targets` shows the actual ShadowScore OSC targets the host can write to.
+- `/rnbo/transfers` collects each target's outgoing rows, receiver-confirmed
+  prefix, retry attempt, READY transaction, and ACTIVE transaction. Admin shows
+  the same state live; `/rnbo/transfers/events` is its server-sent event stream.
 - `/osc/targets` shows RNBO and instrument-control targets exposed to editor
   and macro tools, including filters such as `?app=poland&status=online`.
 - `/playback/timing-contracts` shows per-target stage capacity, note-row

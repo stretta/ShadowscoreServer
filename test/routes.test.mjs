@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
+import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
@@ -555,6 +556,38 @@ test("transport events stream sends initial and update snapshots", async () => {
   assert.match(streamed, /"absoluteBeat":31963\.380208333332/);
   assert.match(streamed, /"tempoAuthority":"link"/);
 
+  request.emit("close");
+});
+
+test("RNBO transfer routes expose current progress and stream updates", async () => {
+  const transferEvents = new EventEmitter();
+  let transfer = {
+    observedAt: "2026-08-17T12:00:00.000Z",
+    summary: { targetCount: 1, inProgressCount: 1, readyCount: 0, liveCount: 0, failedCount: 0 },
+    targets: { finch: { targetId: "finch", state: "sending", expectedRows: 277, sentRows: 120, confirmedRows: 0 } },
+    history: []
+  };
+  const context = createRouteContext({
+    runtime: {
+      rnboAdapter: {
+        transferEvents,
+        transferStatus: () => transfer
+      }
+    }
+  });
+
+  const current = await requestJson(context, "GET", "/rnbo/transfers");
+  assert.equal(current.targets.finch.sentRows, 120);
+
+  const request = createRequest("GET", "/rnbo/transfers/events");
+  const response = createResponse();
+  await routeRequest(request, response, context.store, context.config, context.runtime);
+  assert.equal(response.snapshot().headers["Content-Type"], "text/event-stream");
+  assert.match(response.snapshot().body, /"sentRows":120/);
+
+  transfer = { ...transfer, targets: { finch: { ...transfer.targets.finch, state: "ready", sentRows: 277, confirmedRows: 277 } } };
+  transferEvents.emit("snapshot", transfer);
+  assert.match(response.snapshot().body, /"confirmedRows":277/);
   request.emit("close");
 });
 

@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   activeNavigationForPath,
-  shadowScoreNavigation
+  shadowScoreNavigation,
+  transferNavigationPresentation
 } from "../public/shared/shadowscore-nav.js";
 
 test("grouped navigation has the settled four primary destinations", () => {
@@ -18,6 +19,18 @@ test("grouped navigation has the settled four primary destinations", () => {
     "Admin",
     "Transport"
   ]);
+});
+
+test("grouped navigation summarizes ensemble transfer progress without implying sent rows were received", () => {
+  const presentation = transferNavigationPresentation({
+    summary: { targetCount: 4, inProgressCount: 1, readyCount: 2, liveCount: 1, failedCount: 0 },
+    targets: {
+      raven: { targetId: "raven", state: "sending", expectedRows: 577, sentRows: 300, confirmedRows: 0 }
+    }
+  });
+  assert.equal(presentation.label, "Players · 3/4");
+  assert.equal(presentation.detail, "1 receiving · 2 ready · 1 live");
+  assert.equal(presentation.tone, "warn");
 });
 
 test("grouped navigation resolves current group and item for every route family", () => {

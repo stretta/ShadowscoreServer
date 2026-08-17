@@ -1,5 +1,6 @@
 import dgram from "node:dgram";
 import { createHash } from "node:crypto";
+import { EventEmitter } from "node:events";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { encodeOscMessage } from "./osc.mjs";
@@ -69,6 +70,10 @@ export function createRnboOscAdapter(config, runtime = {}) {
   const debounceWaiters = [];
   let activationOperationTail = Promise.resolve();
   const playbackLifecycleEvents = [];
+  const transferEvents = new EventEmitter();
+  const transferTargets = new Map();
+  const transferHistory = [];
+  const lastTransferProgressEmitMs = new Map();
   const mutationImpacts = [];
   const playbackUpdateState = new Map();
   const dirtyVoicesByBlock = new Map();
@@ -181,6 +186,10 @@ export function createRnboOscAdapter(config, runtime = {}) {
     },
     lifecycleEvents() {
       return structuredClone(playbackLifecycleEvents);
+    },
+    transferEvents,
+    transferStatus() {
+      return transferStatusSnapshot();
     },
     schedulePreparedActivations(options = {}) {
       const targetId = String(options.targetId ?? "").trim();
@@ -510,14 +519,22 @@ export function createRnboOscAdapter(config, runtime = {}) {
           const result = await sendScoreTransaction(socket, config, request.score, transactionId, {
             runtime,
             scoreRevision: request.score?.scoreRevision ?? request.score?.version ?? 0,
-            onLifecycleEvent: recordLifecycleEvent,
             reuseCompiledTarget: payloadReuseAllowed(request)
               ? reusableStagedTargetStatus
               : undefined,
-            ...request.options
+            ...request.options,
+            onLifecycleEvent(event) {
+              recordLifecycleEvent(event);
+              request.options?.onLifecycleEvent?.(event);
+            },
+            onTransferProgress(event) {
+              recordTransferProgress(event);
+              request.options?.onTransferProgress?.(event);
+            }
           });
           latestSendResult = result;
           recordSendStatus(result);
+          transferEvents.emit("snapshot", transferStatusSnapshot());
           if (request.reasons.length && config.rnbo.log !== false) {
             console.log(`[rnbo] resend reason=${request.reasons.join("+")}`);
           }
@@ -658,7 +675,181 @@ export function createRnboOscAdapter(config, runtime = {}) {
   function recordLifecycleEvent(event) {
     playbackLifecycleEvents.push(event);
     if (playbackLifecycleEvents.length > 200) playbackLifecycleEvents.splice(0, playbackLifecycleEvents.length - 200);
+    updateTransferFromLifecycle(event);
     if (config.rnbo.log !== false) console.log(`[rnbo-playback] ${JSON.stringify(event)}`);
+  }
+
+  function recordTransferProgress(event) {
+    const previous = transferTargets.get(event.targetId) ?? {};
+    const now = Date.now();
+    const lastEmit = lastTransferProgressEmitMs.get(event.targetId) ?? 0;
+    const emit = event.state === "awaiting-ack" || now - lastEmit >= 100;
+    if (emit) lastTransferProgressEmitMs.set(event.targetId, now);
+    updateTransferTarget(event.targetId, {
+      ...previous,
+      ...transferIdentity(event),
+      state: event.state ?? "sending",
+      attempt: Number(event.deliveryProfile?.attempt ?? 0) + 1,
+      strategy: event.delivery?.strategy ?? previous.strategy ?? "full-transaction",
+      expectedRows: event.transmittedRowCount ?? previous.expectedRows ?? 0,
+      sentRows: event.sentRowCount ?? previous.sentRows ?? 0,
+      confirmedRows: Math.max(previous.confirmedRows ?? 0, event.delivery?.resumeFromRow ?? 0),
+      updatedAt: event.observedAt ?? new Date().toISOString()
+    }, emit);
+  }
+
+  function updateTransferFromLifecycle(event) {
+    const targetId = String(event?.targetId ?? "").trim();
+    if (!targetId) return;
+    const previous = transferTargets.get(targetId) ?? {};
+    const base = {
+      ...previous,
+      ...transferIdentity(event),
+      expectedRows: event.transmittedRowCount ?? previous.expectedRows ?? 0,
+      updatedAt: event.observedAt ?? new Date().toISOString()
+    };
+    if (event.type === "prepare_started") {
+      updateTransferTarget(targetId, {
+        ...base,
+        state: "sending",
+        startedAt: event.observedAt,
+        completedAt: null,
+        attempt: Number(event.deliveryProfile?.attempt ?? 0) + 1,
+        strategy: event.delivery?.strategy ?? "full-transaction",
+        sentRows: event.delivery?.resumeFromRow ?? 0,
+        confirmedRows: event.delivery?.resumeFromRow ?? 0,
+        acknowledgement: null,
+        error: ""
+      });
+      return;
+    }
+    if (event.type === "prepare_retry") {
+      const confirmedRows = Number(event.acknowledgement?.receivedNoteCount);
+      updateTransferTarget(targetId, {
+        ...base,
+        state: "retrying",
+        attempt: Number(event.deliveryProfile?.attempt ?? 0) + 2,
+        strategy: event.nextDelivery?.strategy ?? event.delivery?.strategy ?? base.strategy,
+        confirmedRows: Number.isInteger(confirmedRows) ? confirmedRows : base.confirmedRows ?? 0,
+        acknowledgement: event.acknowledgement ?? null,
+        error: event.acknowledgement?.rejectReasonLabel ?? event.acknowledgement?.status ?? ""
+      });
+      return;
+    }
+    if (event.type === "prepare_completed") {
+      const ready = event.acknowledgement?.status === "prepared";
+      const record = {
+        ...base,
+        state: ready ? "ready" : "live",
+        sentRows: base.expectedRows,
+        confirmedRows: base.expectedRows,
+        completedAt: event.observedAt,
+        acknowledgement: event.acknowledgement ?? null,
+        durationMs: event.preparationDurationMs ?? null,
+        error: ""
+      };
+      rememberTransfer(record);
+      updateTransferTarget(targetId, record);
+      return;
+    }
+    if (event.type === "prepare_failed") {
+      const confirmedRows = Number(event.acknowledgement?.receivedNoteCount);
+      const record = {
+        ...base,
+        state: "failed",
+        confirmedRows: Number.isInteger(confirmedRows) ? confirmedRows : base.confirmedRows ?? 0,
+        completedAt: event.observedAt,
+        acknowledgement: event.acknowledgement ?? null,
+        durationMs: event.preparationDurationMs ?? null,
+        error: event.acknowledgement?.rejectReasonLabel ?? event.acknowledgement?.status ?? "rejected"
+      };
+      rememberTransfer(record);
+      updateTransferTarget(targetId, record);
+      return;
+    }
+    if (event.type === "prepare_reused") {
+      updateTransferTarget(targetId, {
+        ...base,
+        state: Number.isInteger(event.preparedTransaction) ? "ready" : "live",
+        sentRows: base.expectedRows,
+        confirmedRows: base.expectedRows,
+        completedAt: event.observedAt,
+        reused: true,
+        error: ""
+      });
+      return;
+    }
+    if (["activation_scheduled", "playback.update.armed"].includes(event.type)) {
+      updateTransferTarget(targetId, { ...base, state: "applying" });
+      return;
+    }
+    if (event.type === "activation_completed") {
+      updateTransferTarget(targetId, {
+        ...base,
+        state: "live",
+        liveTransaction: event.transactionId,
+        preparedTransaction: null,
+        activationAcknowledgement: event.acknowledgement ?? null,
+        error: ""
+      });
+      return;
+    }
+    if (event.type === "activation_missed") {
+      updateTransferTarget(targetId, {
+        ...base,
+        state: "activation-failed",
+        activationAcknowledgement: event.acknowledgement ?? null,
+        error: event.acknowledgement?.status ?? "activation missed"
+      });
+    }
+  }
+
+  function transferIdentity(event = {}) {
+    return {
+      targetId: String(event.targetId ?? ""),
+      voiceId: String(event.voiceId ?? ""),
+      transactionId: event.transactionId ?? null,
+      blockId: String(event.blockId ?? ""),
+      payloadRevision: event.payloadRevision ?? null
+    };
+  }
+
+  function updateTransferTarget(targetId, record, emit = true) {
+    transferTargets.set(targetId, record);
+    if (emit) transferEvents.emit("snapshot", transferStatusSnapshot());
+  }
+
+  function rememberTransfer(record) {
+    const key = `${record.targetId}:${record.transactionId}`;
+    const existing = transferHistory.findIndex((entry) => `${entry.targetId}:${entry.transactionId}` === key);
+    if (existing >= 0) transferHistory.splice(existing, 1);
+    transferHistory.push(structuredClone(record));
+    if (transferHistory.length > 20) transferHistory.splice(0, transferHistory.length - 20);
+  }
+
+  function transferStatusSnapshot() {
+    const targets = Object.fromEntries([...transferTargets].map(([targetId, record]) => {
+      const sendStatus = lastSendStatus.get(targetId);
+      return [targetId, {
+        ...record,
+        liveTransaction: sendStatus?.activeTransaction ?? record.liveTransaction ?? null,
+        preparedTransaction: sendStatus?.preparedTransaction ?? record.preparedTransaction ?? null
+      }];
+    }));
+    const records = Object.values(targets);
+    const activeStates = new Set(["sending", "awaiting-ack", "retrying", "applying"]);
+    return {
+      observedAt: new Date().toISOString(),
+      summary: {
+        targetCount: records.length,
+        inProgressCount: records.filter((record) => activeStates.has(record.state)).length,
+        readyCount: records.filter((record) => record.state === "ready").length,
+        liveCount: records.filter((record) => record.state === "live").length,
+        failedCount: records.filter((record) => ["failed", "activation-failed"].includes(record.state)).length
+      },
+      targets,
+      history: structuredClone(transferHistory)
+    };
   }
 
   function recordMutationImpact(impact) {
@@ -1081,6 +1272,14 @@ async function sendCompiledMessages(socket, config, target, compiled, deliveryPr
   for (let index = 0; index < messages.length; index += batchSize) {
     const batch = messages.slice(index, index + batchSize);
     await Promise.all(batch.map((message) => sendOscMessage(socket, config, target, message.values)));
+    const sentInAttempt = Math.min(index + batch.length, Math.max(0, messages.length - 1));
+    emitTransferProgress(options, compiled, target, {
+      state: "sending",
+      observedAt: new Date().toISOString(),
+      deliveryProfile,
+      delivery,
+      sentRowCount: Math.min(compiled.transmittedRowCount, resumeFromRow + sentInAttempt)
+    });
     if (delayMs > 0) {
       await delay(delayMs);
     }
@@ -1091,6 +1290,26 @@ async function sendCompiledMessages(socket, config, target, compiled, deliveryPr
       await delay(delayMs);
     }
   }
+  emitTransferProgress(options, compiled, target, {
+    state: "awaiting-ack",
+    observedAt: new Date().toISOString(),
+    deliveryProfile,
+    delivery,
+    sentRowCount: compiled.transmittedRowCount
+  });
+}
+
+function emitTransferProgress(options, compiled, target, details = {}) {
+  if (typeof options.onTransferProgress !== "function") return;
+  options.onTransferProgress({
+    transactionId: compiled?.transactionId ?? null,
+    targetId: target?.id ?? target?.address ?? "",
+    voiceId: target?.voiceId ?? "",
+    blockId: compiled?.timing?.blockId ?? "",
+    payloadRevision: `${options.scoreRevision ?? ""}:${compiled?.timing?.blockId ?? ""}`,
+    transmittedRowCount: compiled?.transmittedRowCount ?? 0,
+    ...details
+  });
 }
 
 function resumableRetryRow(target, compiled, ack) {

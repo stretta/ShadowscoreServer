@@ -89,6 +89,34 @@ export function adminPage() {
       padding: 9px;
     }
     .rnbo-send-state strong { font-size: 13px; }
+    .rnbo-transfer-monitor {
+      background: rgba(38, 51, 65, 0.46);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-control);
+      display: grid;
+      gap: 8px;
+      margin-bottom: 8px;
+      padding: 9px;
+    }
+    .rnbo-transfer-head { align-items: center; display: flex; gap: 8px; justify-content: space-between; }
+    .rnbo-transfer-head strong { font-size: 13px; }
+    .rnbo-transfer-list { display: grid; gap: 6px; }
+    .rnbo-transfer {
+      align-items: center;
+      border-top: 1px solid var(--ss-border);
+      display: grid;
+      gap: 5px 10px;
+      grid-template-columns: minmax(120px, 0.8fr) minmax(120px, 1.5fr) auto;
+      padding-top: 7px;
+    }
+    .rnbo-transfer-name { font-size: 13px; font-weight: 700; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+    .rnbo-transfer-progress { display: grid; gap: 3px; }
+    .rnbo-transfer-track { background: rgba(145, 164, 178, 0.18); border-radius: 999px; height: 8px; overflow: hidden; position: relative; }
+    .rnbo-transfer-sent, .rnbo-transfer-confirmed { bottom: 0; left: 0; position: absolute; top: 0; }
+    .rnbo-transfer-sent { background: rgba(105, 199, 223, 0.48); }
+    .rnbo-transfer-confirmed { background: var(--ss-accent-strong); }
+    .rnbo-transfer-meta { color: var(--ss-muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+    .rnbo-transfer-state { font-size: 11px; font-weight: 750; text-align: right; text-transform: uppercase; }
     .send-detail {
       color: var(--ss-muted);
       font-size: 12px;
@@ -242,6 +270,7 @@ export function adminPage() {
     </section>
     <section class="targets" id="routing">
       <h2>Discovered RNBO targets</h2>
+      <div class="rnbo-transfer-monitor" id="rnbo-transfer-monitor" aria-live="polite"></div>
       <div class="rnbo-send-state" id="rnbo-send-state"></div>
       <div class="target-list" id="targets"></div>
     </section>
@@ -330,6 +359,7 @@ export function adminPage() {
     const statusEl = document.querySelector("#status");
     const voicesEl = document.querySelector("#voices");
     const targetsEl = document.querySelector("#targets");
+    const rnboTransferMonitorEl = document.querySelector("#rnbo-transfer-monitor");
     const rnboSendStateEl = document.querySelector("#rnbo-send-state");
     const oscQueryDevicesEl = document.querySelector("#oscquery-devices");
     const oscQueryDeviceFormEl = document.querySelector("#oscquery-device-form");
@@ -386,6 +416,7 @@ export function adminPage() {
       active: null,
       queuedRequest: null
     };
+    let rnboTransfers = { summary: {}, targets: {}, history: [] };
 
     document.querySelector("#refresh").addEventListener("click", loadSession);
     document.querySelector("#reconcile-assignments").addEventListener("click", reconcileAssignments);
@@ -437,6 +468,11 @@ export function adminPage() {
     events.addEventListener("admin.restore", (event) => render(JSON.parse(event.data).score));
     events.addEventListener("admin.legacyVoiceNotes.imported", (event) => render(JSON.parse(event.data).score));
     events.onerror = () => setStatus("Event stream reconnecting...");
+    const transferEvents = new EventSource("/rnbo/transfers/events");
+    transferEvents.addEventListener("snapshot", (event) => {
+      rnboTransfers = JSON.parse(event.data);
+      renderTransferMonitor();
+    });
     window.setInterval(refreshRnboTargets, 2000);
     window.setInterval(loadOscQueryDevices, 5000);
     window.setInterval(loadOscRoles, 5000);
@@ -673,6 +709,103 @@ export function adminPage() {
         queued.textContent = "Queued: " + sendQueueDetail(rnboSendQueue.queuedRequest);
         rnboSendStateEl.append(queued);
       }
+    }
+
+    function renderTransferMonitor() {
+      rnboTransferMonitorEl.textContent = "";
+      const records = Object.values(rnboTransfers.targets ?? {}).sort((a, b) => {
+        return (a.voiceId || a.targetId).localeCompare(b.voiceId || b.targetId);
+      });
+      const summary = rnboTransfers.summary ?? {};
+      const head = document.createElement("div");
+      head.className = "rnbo-transfer-head";
+      const title = document.createElement("strong");
+      title.textContent = "Real-time player transfers";
+      const aggregate = document.createElement("span");
+      aggregate.className = summary.failedCount ? "send-detail bad" : "send-detail";
+      aggregate.textContent = records.length
+        ? (summary.readyCount ?? 0) + " ready · " + (summary.liveCount ?? 0) + " live · " + (summary.inProgressCount ?? 0) + " transferring" + (summary.failedCount ? " · " + summary.failedCount + " failed" : "")
+        : "No transfer recorded yet";
+      head.append(title, aggregate);
+      rnboTransferMonitorEl.append(head);
+      if (!records.length) return;
+
+      const list = document.createElement("div");
+      list.className = "rnbo-transfer-list";
+      for (const record of records) list.append(transferRow(record));
+      rnboTransferMonitorEl.append(list);
+    }
+
+    function transferRow(record) {
+      const row = document.createElement("div");
+      row.className = "rnbo-transfer";
+      const name = document.createElement("div");
+      name.className = "rnbo-transfer-name";
+      name.textContent = record.voiceId || record.targetId || "Player";
+      name.title = record.targetId || "";
+
+      const expected = Math.max(0, Number(record.expectedRows) || 0);
+      const sent = Math.min(expected, Math.max(0, Number(record.sentRows) || 0));
+      const confirmed = Math.min(expected, Math.max(0, Number(record.confirmedRows) || 0));
+      const progress = document.createElement("div");
+      progress.className = "rnbo-transfer-progress";
+      const track = document.createElement("div");
+      track.className = "rnbo-transfer-track";
+      const sentBar = document.createElement("span");
+      sentBar.className = "rnbo-transfer-sent";
+      sentBar.style.width = transferPercent(sent, expected) + "%";
+      const confirmedBar = document.createElement("span");
+      confirmedBar.className = "rnbo-transfer-confirmed";
+      confirmedBar.style.width = transferPercent(confirmed, expected) + "%";
+      track.append(sentBar, confirmedBar);
+      const meta = document.createElement("div");
+      meta.className = "rnbo-transfer-meta";
+      meta.textContent = transferDetail(record, sent, confirmed, expected);
+      progress.append(track, meta);
+
+      const state = document.createElement("div");
+      state.className = "rnbo-transfer-state " + transferTone(record.state);
+      state.textContent = transferStateLabel(record);
+      row.append(name, progress, state);
+      return row;
+    }
+
+    function transferPercent(value, expected) {
+      if (expected <= 0) return value > 0 ? 100 : 0;
+      return Math.round((value / expected) * 1000) / 10;
+    }
+
+    function transferDetail(record, sent, confirmed, expected) {
+      const parts = [];
+      if (["sending", "awaiting-ack", "retrying"].includes(record.state)) {
+        parts.push("sent " + sent + "/" + expected);
+        parts.push(confirmed > 0 ? "confirmed " + confirmed + "/" + expected : "awaiting receiver confirmation");
+      } else {
+        parts.push(confirmed + "/" + expected + " confirmed");
+      }
+      if (record.attempt > 1) parts.push("attempt " + record.attempt);
+      if (record.strategy === "resume-dense-prefix") parts.push("resumed");
+      if (record.liveTransaction) parts.push("live txn " + record.liveTransaction);
+      else if (record.transactionId) parts.push("txn " + record.transactionId);
+      return parts.join(" · ");
+    }
+
+    function transferStateLabel(record) {
+      if (record.state === "sending") return "Sending";
+      if (record.state === "awaiting-ack") return "Awaiting ACK";
+      if (record.state === "retrying") return ("Retry " + (record.attempt ?? "")).trim();
+      if (record.state === "ready") return "Ready";
+      if (record.state === "applying") return "Applying";
+      if (record.state === "live") return "Live";
+      if (record.state === "activation-failed") return "Activation failed";
+      if (record.state === "failed") return record.error ? "Rejected · " + record.error : "Rejected";
+      return record.state || "Idle";
+    }
+
+    function transferTone(state) {
+      if (["ready", "live"].includes(state)) return "ok";
+      if (["failed", "activation-failed"].includes(state)) return "bad";
+      return "warn";
     }
 
     function sendQueueDetail(request) {
@@ -1048,7 +1181,9 @@ export function adminPage() {
       const previousTargetInventory = rnboTargetInventory(discoveredTargets);
       discoveredTargets = body.targets ?? [];
       rnboSendQueue = body.sendQueue ?? rnboSendQueue;
+      rnboTransfers = body.transfers ?? rnboTransfers;
       renderRnboSendState();
+      renderTransferMonitor();
       renderTargets(discoveredTargets);
       if (currentScore && previousTargetInventory !== rnboTargetInventory(discoveredTargets)) {
         render(currentScore);

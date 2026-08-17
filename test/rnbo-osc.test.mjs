@@ -2247,6 +2247,8 @@ test("RNBO adapter records automatic score changes without sending and leaves ma
   });
   adapter.attach(store);
   try {
+    const transferSnapshots = [];
+    adapter.transferEvents.on("snapshot", (snapshot) => transferSnapshots.push(snapshot));
     store.events.emit("change", {
       type: "voice.notes.replaced",
       detail: { voiceId: "player-1" },
@@ -2264,6 +2266,14 @@ test("RNBO adapter records automatic score changes without sending and leaves ma
     assert.match(adapter.sendStatus()[0].payloadHash, /^[a-f0-9]{64}$/);
     assert.equal(adapter.sendStatus()[0].noteCount, 2);
     assert.ok(adapter.sendStatus()[0].preparationDurationMs >= 0);
+    const transfer = adapter.transferStatus();
+    const target = Object.values(transfer.targets)[0];
+    assert.equal(target.state, "live");
+    assert.equal(target.sentRows, 2);
+    assert.equal(target.confirmedRows, 2);
+    assert.equal(transfer.history.length, 1);
+    assert.equal(transferSnapshots.some((snapshot) => Object.values(snapshot.targets)[0]?.state === "sending"), true);
+    assert.equal(transferSnapshots.some((snapshot) => Object.values(snapshot.targets)[0]?.state === "awaiting-ack"), true);
   } finally {
     adapter.close();
   }

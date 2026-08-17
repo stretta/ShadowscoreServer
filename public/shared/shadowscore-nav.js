@@ -54,11 +54,32 @@ export function renderShadowScoreNavigation(root, options = {}) {
   const pathname = options.pathname ?? `${window.location.pathname}${window.location.hash}`;
   root.classList.add("ss-route-tabs", "ss-grouped-nav");
   root.dataset.enhanced = "true";
-  root.replaceChildren(...shadowScoreNavigation.map((group) => (
-    group.href ? directLink(group, pathname) : menuGroup(group, pathname)
-  )));
+  const transferNavigation = transferNavigationGroup();
+  root.replaceChildren(
+    ...shadowScoreNavigation.map((group) => (
+      group.href ? directLink(group, pathname) : menuGroup(group, pathname)
+    )),
+    transferNavigation.root
+  );
   bindMenuBehavior(root);
+  transferNavigation.connect();
   return root;
+}
+
+export function transferNavigationPresentation(transfers = {}) {
+  const records = Object.values(transfers.targets ?? {});
+  const summary = transfers.summary ?? {};
+  const total = Number(summary.targetCount ?? records.length);
+  const inProgress = Number(summary.inProgressCount ?? 0);
+  const failed = Number(summary.failedCount ?? 0);
+  const ready = Number(summary.readyCount ?? 0);
+  const live = Number(summary.liveCount ?? 0);
+  if (!total) return { label: "Players", tone: "", detail: "No transfer recorded yet", records };
+  if (failed) return { label: `Players · ${failed} failed`, tone: "bad", detail: `${failed} player transfer${failed === 1 ? "" : "s"} failed`, records };
+  if (inProgress) return { label: `Players · ${ready + live}/${total}`, tone: "warn", detail: `${inProgress} receiving · ${ready} ready · ${live} live`, records };
+  if (ready) return { label: `Players · ${ready} ready`, tone: "ok", detail: `${ready} ready · ${live} live`, records };
+  if (live === total) return { label: "Players · live", tone: "ok", detail: "All tracked players live", records };
+  return { label: `Players · ${total}`, tone: "", detail: `${total} players tracked`, records };
 }
 
 export function activeNavigationForPath(value) {
@@ -119,6 +140,76 @@ function menuGroup(group, pathname) {
   });
   details.append(summary, menu);
   return details;
+}
+
+function transferNavigationGroup() {
+  const root = document.createElement("details");
+  root.className = "ss-nav-group ss-transfer-nav";
+  const summary = document.createElement("summary");
+  summary.className = "ss-nav-primary ss-transfer-nav-summary";
+  summary.textContent = "Players";
+  const menu = document.createElement("div");
+  menu.className = "ss-nav-menu ss-transfer-nav-menu";
+  const aggregate = document.createElement("div");
+  aggregate.className = "ss-transfer-nav-aggregate";
+  aggregate.textContent = "Waiting for transfer status…";
+  const rows = document.createElement("div");
+  rows.className = "ss-transfer-nav-rows";
+  menu.append(aggregate, rows);
+  root.append(summary, menu);
+
+  function render(transfers) {
+    const presentation = transferNavigationPresentation(transfers);
+    summary.textContent = presentation.label;
+    summary.className = `ss-nav-primary ss-transfer-nav-summary${presentation.tone ? ` ${presentation.tone}` : ""}`;
+    aggregate.textContent = presentation.detail;
+    rows.replaceChildren(...presentation.records
+      .sort((a, b) => String(a.voiceId || a.targetId).localeCompare(String(b.voiceId || b.targetId)))
+      .map(transferNavigationRow));
+  }
+
+  function connect() {
+    if (typeof EventSource !== "function") return;
+    const events = new EventSource("/rnbo/transfers/events");
+    events.addEventListener("snapshot", (event) => render(JSON.parse(event.data)));
+    events.addEventListener("error", () => {
+      if (!rows.children.length) aggregate.textContent = "Transfer status reconnecting…";
+    });
+  }
+
+  return { root, connect };
+}
+
+function transferNavigationRow(record) {
+  const row = document.createElement("div");
+  row.className = "ss-transfer-nav-row";
+  const name = document.createElement("strong");
+  name.textContent = record.voiceId || record.targetId || "Player";
+  const detail = document.createElement("span");
+  detail.className = transferNavigationTone(record.state);
+  detail.textContent = transferNavigationDetail(record);
+  row.append(name, detail);
+  return row;
+}
+
+function transferNavigationDetail(record) {
+  const expected = Math.max(0, Number(record.expectedRows) || 0);
+  const sent = Math.min(expected, Math.max(0, Number(record.sentRows) || 0));
+  const confirmed = Math.min(expected, Math.max(0, Number(record.confirmedRows) || 0));
+  if (record.state === "sending") return `Sending ${sent}/${expected}`;
+  if (record.state === "awaiting-ack") return `Sent ${sent}/${expected} · awaiting ACK`;
+  if (record.state === "retrying") return `Resume ${confirmed}/${expected} · retry ${record.attempt ?? ""}`.trim();
+  if (record.state === "ready") return `Ready · ${confirmed}/${expected}`;
+  if (record.state === "applying") return "Applying next beat";
+  if (record.state === "live") return `Live · txn ${record.liveTransaction ?? record.transactionId ?? ""}`.trim();
+  if (["failed", "activation-failed"].includes(record.state)) return `Failed · ${record.error || record.state}`;
+  return record.state || "Tracked";
+}
+
+function transferNavigationTone(state) {
+  if (["ready", "live"].includes(state)) return "ok";
+  if (["failed", "activation-failed"].includes(state)) return "bad";
+  return "warn";
 }
 
 function bindMenuBehavior(root) {

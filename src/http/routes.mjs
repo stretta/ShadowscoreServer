@@ -103,8 +103,19 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "GET" && url.pathname === "/rnbo/targets") {
     writeJson(response, 200, {
       targets: withRnboSendStatus(await readAllRnboTargets(config, runtime), runtime),
-      sendQueue: rnboSendQueueStatus(runtime)
+      sendQueue: rnboSendQueueStatus(runtime),
+      transfers: rnboTransferStatus(runtime)
     });
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/rnbo/transfers") {
+    writeJson(response, 200, rnboTransferStatus(runtime));
+    return;
+  }
+
+  if (request.method === "GET" && url.pathname === "/rnbo/transfers/events") {
+    openRnboTransferEventStream(request, response, runtime);
     return;
   }
 
@@ -1796,6 +1807,23 @@ function openEventStream(request, response, store) {
   });
 }
 
+function openRnboTransferEventStream(request, response, runtime) {
+  response.writeHead(200, {
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "Content-Type": "text/event-stream"
+  });
+
+  writeEvent(response, "snapshot", rnboTransferStatus(runtime));
+  const events = runtime.rnboAdapter?.transferEvents;
+  const onSnapshot = (snapshot) => writeEvent(response, "snapshot", snapshot);
+  events?.on?.("snapshot", onSnapshot);
+
+  request.on("close", () => {
+    events?.off?.("snapshot", onSnapshot);
+  });
+}
+
 function openTransportEventStream(request, response, config, runtime) {
   response.writeHead(200, {
     "Cache-Control": "no-cache",
@@ -2551,6 +2579,7 @@ async function coherentPlaybackSnapshot(runtime, store, config) {
     targets,
     timingContracts,
     sendQueue: rnboSendQueueStatus(runtime),
+    transfers: rnboTransferStatus(runtime),
     lifecycleEvents: runtime.rnboAdapter?.lifecycleEvents?.() ?? [],
     updates,
     staleAfterMs: config.transport?.rnboClient?.staleAfterMs ?? 1000
@@ -3487,6 +3516,21 @@ function rnboSendQueueStatus(runtime) {
     queued: false,
     active: null,
     queuedRequest: null
+  };
+}
+
+function rnboTransferStatus(runtime) {
+  return runtime.rnboAdapter?.transferStatus?.() ?? {
+    observedAt: new Date().toISOString(),
+    summary: {
+      targetCount: 0,
+      inProgressCount: 0,
+      readyCount: 0,
+      liveCount: 0,
+      failedCount: 0
+    },
+    targets: {},
+    history: []
   };
 }
 

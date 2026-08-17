@@ -11,6 +11,7 @@ export function createPlaybackUpdateControl({
   root.classList.add("ss-playback-update");
   root.innerHTML = `
     <span class="ss-playback-update-state" data-playback-update-state>Loading playback state…</span>
+    <span class="ss-transfer-summary" data-transfer-summary hidden></span>
     <button type="button" data-playback-update-action disabled>Apply next beat</button>
     <details data-playback-update-details>
       <summary>Players</summary>
@@ -18,6 +19,7 @@ export function createPlaybackUpdateControl({
     </details>`;
 
   const stateElement = root.querySelector("[data-playback-update-state]");
+  const transferElement = root.querySelector("[data-transfer-summary]");
   const actionElement = root.querySelector("[data-playback-update-action]");
   const detailsElement = root.querySelector("[data-playback-update-details]");
   const targetsElement = root.querySelector("[data-playback-update-targets]");
@@ -75,6 +77,7 @@ export function createPlaybackUpdateControl({
 
   function render() {
     const presentation = playbackUpdatePresentation(snapshot, getBlockId());
+    const transfers = transferStatusPresentation(snapshot?.transfers);
     stateElement.textContent = actionError ? `Playback update failed · ${actionError}` : presentation.label;
     stateElement.className = actionError
       ? "ss-playback-update-state bad"
@@ -82,14 +85,25 @@ export function createPlaybackUpdateControl({
     actionElement.textContent = presentation.actionLabel;
     actionElement.disabled = busy || !presentation.actionEnabled;
     actionElement.hidden = !presentation.showAction;
-    detailsElement.hidden = presentation.targets.length === 0;
-    targetsElement.replaceChildren(...presentation.targets.map((target) => {
+    transferElement.textContent = transfers.label;
+    transferElement.className = `ss-transfer-summary${transfers.tone ? ` ${transfers.tone}` : ""}`;
+    transferElement.hidden = !transfers.label;
+    const playbackRows = presentation.targets.map((target) => {
       const row = document.createElement("div");
       row.className = `ss-playback-update-target ${target.tone}`;
       row.textContent = `${target.voiceId || target.targetId} · ${target.label}`;
       row.title = target.error || target.targetId;
       return row;
-    }));
+    });
+    const transferRows = transfers.targets.map((target) => {
+      const row = document.createElement("div");
+      row.className = `ss-playback-update-target ${target.tone}`;
+      row.textContent = `${target.voiceId || target.targetId} · ${target.label}`;
+      row.title = target.targetId;
+      return row;
+    });
+    detailsElement.hidden = playbackRows.length === 0 && transferRows.length === 0;
+    targetsElement.replaceChildren(...playbackRows, ...transferRows);
   }
 
   function schedule() {
@@ -110,6 +124,37 @@ export function createPlaybackUpdateControl({
       clearTimeout(timer);
     }
   };
+}
+
+export function transferStatusPresentation(transfers = {}) {
+  const records = Object.values(transfers?.targets ?? {}).map(transferTargetPresentation);
+  const summary = transfers?.summary ?? {};
+  const total = Number(summary.targetCount ?? records.length);
+  const inProgress = Number(summary.inProgressCount ?? records.filter((record) => record.inProgress).length);
+  const failed = Number(summary.failedCount ?? records.filter((record) => record.tone === "bad").length);
+  const ready = Number(summary.readyCount ?? records.filter((record) => record.state === "ready").length);
+  const live = Number(summary.liveCount ?? records.filter((record) => record.state === "live").length);
+  if (!total) return { label: "", tone: "", targets: records };
+  if (failed) return { label: `Players · ${failed} transfer${failed === 1 ? "" : "s"} failed`, tone: "bad", targets: records };
+  if (inProgress) return { label: `Players · ${ready + live}/${total} ready · ${inProgress} receiving`, tone: "warn", targets: records };
+  if (ready) return { label: `Players · ${ready} ready`, tone: "ok", targets: records };
+  if (live === total) return { label: "Players · all live", tone: "ok", targets: records };
+  return { label: `Players · ${total} tracked`, tone: "", targets: records };
+}
+
+function transferTargetPresentation(record = {}) {
+  const expected = Math.max(0, Number(record.expectedRows) || 0);
+  const sent = Math.min(expected, Math.max(0, Number(record.sentRows) || 0));
+  const confirmed = Math.min(expected, Math.max(0, Number(record.confirmedRows) || 0));
+  const identity = { ...record, inProgress: ["sending", "awaiting-ack", "retrying", "applying"].includes(record.state) };
+  if (record.state === "sending") return { ...identity, label: `Sending ${sent}/${expected}`, tone: "warn" };
+  if (record.state === "awaiting-ack") return { ...identity, label: `Sent ${sent}/${expected} · awaiting confirmation`, tone: "warn" };
+  if (record.state === "retrying") return { ...identity, label: `Resume ${confirmed}/${expected} · retry ${record.attempt ?? ""}`.trim(), tone: "warn" };
+  if (record.state === "ready") return { ...identity, label: `Ready · ${confirmed}/${expected} confirmed`, tone: "ok" };
+  if (record.state === "applying") return { ...identity, label: "Applying prepared transaction", tone: "warn" };
+  if (record.state === "live") return { ...identity, label: `Live · txn ${record.liveTransaction ?? record.transactionId ?? ""}`.trim(), tone: "ok" };
+  if (["failed", "activation-failed"].includes(record.state)) return { ...identity, label: `Failed · ${record.error || record.state}`, tone: "bad" };
+  return { ...identity, label: record.state || "Tracked", tone: "" };
 }
 
 export function playbackUpdatePresentation(snapshot = {}, focusedBlockId = "") {

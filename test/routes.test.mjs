@@ -2784,6 +2784,7 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
   const stages = new Map([["local", -1], ["peer", -1]]);
   const acknowledgedStages = new Map([["local", -1], ["peer", -1]]);
   const phaseAlignmentWaits = [];
+  let peerPhaseAcknowledges = true;
   const peerTarget = {
     id: "peer-client",
     host: "peer.local",
@@ -2799,7 +2800,7 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
       rnbo: {
-        phaseAlignment: { startAckTimeoutMs: 0 },
+        phaseAlignment: { startAckTimeoutMs: 10, phaseAckTimeoutMs: 10, phaseAckPollIntervalMs: 10 },
         oscQuery: { enabled: false },
         targets: [{
           id: "local-client",
@@ -2846,7 +2847,9 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
           stages.set(key, key === "local" ? 3 : 11);
         }
         if (write.path.endsWith("/clock_phase_reset")) {
-          phaseCounters.set(key, phaseCounters.get(key) + 1);
+          if (key !== "peer" || peerPhaseAcknowledges) {
+            phaseCounters.set(key, phaseCounters.get(key) + 1);
+          }
           stages.set(key, 4);
         }
       },
@@ -2927,6 +2930,18 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
   assert.deepEqual(started.phaseAnchor, started.clockStartPhaseVerification.witness);
   assert.equal(startOptions.anchorOffsetBeats, 0.25);
   assert.deepEqual([...stages.values()], [4, 4]);
+
+  await requestJson(context, "POST", "/transport/stop", {});
+  peerPhaseAcknowledges = false;
+  const failed = await request(context, "POST", "/api/v1/objects/transport", {
+    operation: "play",
+    args: { forceRestart: true, phaseReset: true }
+  });
+  assert.equal(failed.status, 503);
+  assert.match(failed.body, /clock phase reset acknowledgement failed; playback was stopped/);
+  assert.equal(running, false);
+  assert.equal(context.runtime.performanceTransport.playersPlaying, false);
+  assert.equal(context.runtime.performanceTransport.lastClockStartAcknowledgement.rollback.stopped, true);
 });
 
 test("continuing arrangements reject per-section ClockInterval changes", () => {

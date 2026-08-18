@@ -3226,6 +3226,25 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     clockPhaseAcknowledgement,
     phaseVerification: clockStartPhaseVerification
   };
+  const coordinatedPhaseRequired = body.phaseReset !== false
+    && phaseAckTargets.length > 0
+    && clockPhaseResetSupported;
+  if (coordinatedPhaseRequired && (
+    clockStartAcknowledgement.verified !== true
+    || clockPhaseAcknowledgement.verified !== true
+    || clockStartPhaseVerification.verified !== true
+  )) {
+    const rollback = await rollbackFailedClockStart(store, config, runtime, { targetId });
+    performance.lastClockStartAcknowledgement.rollback = rollback;
+    const reason = clockStartAcknowledgement.verified !== true
+      ? "quantized clock start acknowledgement failed"
+      : clockPhaseAcknowledgement.verified !== true
+        ? "clock phase reset acknowledgement failed"
+        : "direct client phase verification failed";
+    const error = new Error(`RNBO coordinated start failed: ${reason}; playback was stopped`);
+    error.statusCode = 503;
+    throw error;
+  }
   const startWitnessContext = body.phaseReset === false
     ? witnessContext
     : await readBeatWitnessContext(score, config, runtime);
@@ -4022,6 +4041,33 @@ async function stopUnifiedTransport(store, config, runtime, body = {}) {
     clockWrites,
     oscClockWrites
   };
+}
+
+async function rollbackFailedClockStart(store, config, runtime, options = {}) {
+  const score = store.getScore();
+  const targetId = optionalString(options.targetId);
+  const outcomes = await Promise.allSettled([
+    writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 0 }, { targetId }),
+    writeOscSequencerClocks(score, config, runtime, "Off"),
+    maybeStopJack(runtime)
+  ]);
+  runtime.macroPlayback?.stop?.();
+  const performance = performanceTransportFor(runtime);
+  performance.playersPlaying = false;
+  performance.playerControlOrigin = "none";
+  performance.adoptionPayloadVerified = null;
+  return {
+    stopped: true,
+    clock: settledOutcome(outcomes[0]),
+    osc: settledOutcome(outcomes[1]),
+    jack: settledOutcome(outcomes[2])
+  };
+}
+
+function settledOutcome(outcome) {
+  return outcome.status === "fulfilled"
+    ? { ok: true, value: outcome.value }
+    : { ok: false, error: messageForError(outcome.reason) };
 }
 
 async function writeOscSequencerClocks(score, config, runtime, value) {

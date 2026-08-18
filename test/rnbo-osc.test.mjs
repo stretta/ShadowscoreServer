@@ -453,7 +453,7 @@ test("staged look-ahead preparation does not retime the active block", async () 
   assert.equal(packets.every(({ packet }) => readOscAddress(packet).endsWith("/shadowscore")), true);
 });
 
-test("score transactions queue ordered UDP bursts before pacing the next batch", async () => {
+test("score transactions isolate boundaries and queue note bursts before transport writes", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
       host: "127.0.0.1",
@@ -475,7 +475,7 @@ test("score transactions queue ordered UDP bursts before pacing the next batch",
   const batchSizes = [];
   const sending = sendScoreTransaction(socket, config, createScore(), 125);
 
-  for (const expectedSize of [3, 1, 1, 1]) {
+  for (const expectedSize of [1, 2, 1, 1, 1]) {
     await new Promise((resolve) => setImmediate(resolve));
     batchSizes.push(pending.length);
     assert.equal(pending.length, expectedSize);
@@ -484,7 +484,7 @@ test("score transactions queue ordered UDP bursts before pacing the next batch",
   }
   await sending;
 
-  assert.deepEqual(batchSizes, [3, 1, 1, 1]);
+  assert.deepEqual(batchSizes, [1, 2, 1, 1, 1]);
 });
 
 test("fidelity timing contract chooses the lowest grid that meets the error target", () => {
@@ -1354,6 +1354,49 @@ test("score transaction retries with progressively safer delivery profiles", asy
     mode: "conservative-retry"
   });
   assert.deepEqual(lifecycle.at(-1).deliveryProfile, result.deliveryProfile);
+});
+
+test("score transaction serializes begin and commit around batched note rows", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      clearRowCount: 0,
+      sendBatchSize: 4,
+      sendDelayMs: 0,
+      log: false,
+      targets: [{
+        address: "/rnbo/inst/2/messages/in/shadowscore",
+        capabilities: compactReplaceCapabilities()
+      }],
+      oscQuery: { enabled: true, url: "http://127.0.0.1:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 }
+    }
+  });
+  let inFlight = 0;
+  let maximumInFlight = 0;
+  const socket = {
+    send(packet, port, host, callback) {
+      inFlight += 1;
+      maximumInFlight = Math.max(maximumInFlight, inFlight);
+      setImmediate(() => {
+        inFlight -= 1;
+        callback();
+      });
+    }
+  };
+
+  const result = await sendScoreTransaction(socket, config, createScore(), 709, {
+    fetchImpl: async () => ({
+      ok: true,
+      async json() { return { VALUE: [92, 709, 2, 32, 1] }; }
+    })
+  });
+
+  assert.equal(result.ack.ok, true);
+  assert.equal(result.ack.attempt, 0);
+  assert.equal(maximumInFlight, 2);
 });
 
 test("resumable staged targets retransmit only the missing dense suffix", async () => {

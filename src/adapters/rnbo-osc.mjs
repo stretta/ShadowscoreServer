@@ -1492,23 +1492,41 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
 async function sendCompiledMessages(socket, config, target, compiled, deliveryProfile = scoreDeliveryProfile(config, 0), delivery = {}, options = {}) {
   const { batchSize, delayMs } = deliveryProfile;
   const resumeFromRow = clampInt(delivery.resumeFromRow ?? 0, 0, compiled.transmittedRowCount);
-  const messages = resumeFromRow > 0
+  const pendingMessages = resumeFromRow > 0
     ? compiled.messages.slice(resumeFromRow + 1)
-    : compiled.messages;
-  for (let index = 0; index < messages.length; index += batchSize) {
-    const batch = messages.slice(index, index + batchSize);
+    : [...compiled.messages];
+  const begin = pendingMessages[0]?.label === "BEGIN_REPLACE"
+    ? pendingMessages.shift()
+    : null;
+  const commit = pendingMessages.at(-1)?.label === "COMMIT"
+    ? pendingMessages.pop()
+    : null;
+
+  // RNBO receives these packets on its event thread. Keep the transaction
+  // boundaries outside concurrent note batches so BEGIN is always processed
+  // before row zero and COMMIT is always processed after the last row. Rows
+  // remain batched, preserving throughput for large scores.
+  if (begin) {
+    await sendOscMessage(socket, config, target, begin.values);
+    if (delayMs > 0) await delay(delayMs);
+  }
+  for (let index = 0; index < pendingMessages.length; index += batchSize) {
+    const batch = pendingMessages.slice(index, index + batchSize);
     await Promise.all(batch.map((message) => sendOscMessage(socket, config, target, message.values)));
-    const sentInAttempt = Math.min(index + batch.length, Math.max(0, messages.length - 1));
     emitTransferProgress(options, compiled, target, {
       state: "sending",
       observedAt: new Date().toISOString(),
       deliveryProfile,
       delivery,
-      sentRowCount: Math.min(compiled.transmittedRowCount, resumeFromRow + sentInAttempt)
+      sentRowCount: Math.min(compiled.transmittedRowCount, resumeFromRow + index + batch.length)
     });
     if (delayMs > 0) {
       await delay(delayMs);
     }
+  }
+  if (commit) {
+    await sendOscMessage(socket, config, target, commit.values);
+    if (delayMs > 0) await delay(delayMs);
   }
   for (const message of scoreTransportInportMessages(config, compiled, options)) {
     await sendOscInportMessage(socket, target, message.name, message.value);

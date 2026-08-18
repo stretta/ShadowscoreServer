@@ -138,6 +138,28 @@ class JackTransportBridgeTest(unittest.TestCase):
             ],
         )
 
+    def test_tempo_request_surfaces_jack_metadata_write_failure(self):
+        client = object.__new__(bridge.JackTransportClient)
+        client._client = object()
+
+        class FakeJack:
+            @staticmethod
+            def jack_get_uuid_for_client_name(client_pointer, name):
+                return b"123"
+
+            @staticmethod
+            def jack_uuid_parse(uuid_text, authority_uuid):
+                return 0
+
+            @staticmethod
+            def jack_set_property(client_pointer, authority_uuid, key, value, value_type):
+                return 5
+
+        client._jack = FakeJack()
+
+        with self.assertRaisesRegex(RuntimeError, "jack_set_property failed with code 5"):
+            client.request_tempo("jack-transport-link", 144)
+
     def test_poller_reconnects_stale_frame_zero_snapshot(self):
         calls = []
 

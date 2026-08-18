@@ -72,6 +72,26 @@ test("editing the active block written tempo does not silently change live tempo
   policy.close();
 });
 
+test("stopped JACK snapshots do not overwrite a pending requested tempo", async () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const applied = [];
+  const policy = createTempoPolicy(store, defaultConfig, {
+    async applyTempo(tempo) { applied.push(tempo); }
+  });
+
+  policy.setLiveTempo(83);
+  await policy.flush();
+  policy.observeExternalTempo(76, { transportState: "stopped" });
+  assert.equal(policy.snapshot().live, 83);
+  assert.equal(policy.snapshot().source, "manual");
+
+  policy.observeExternalTempo(82.99995, { transportState: "rolling" });
+  assert.equal(policy.snapshot().live, 82.99995);
+  assert.equal(policy.snapshot().source, "external");
+  assert.deepEqual(applied, [83]);
+  policy.close();
+});
+
 test("tempo snapshots reuse the score received from store changes", () => {
   const store = createScoreStore(createInitialScore(defaultConfig));
   const readScore = store.getScore.bind(store);

@@ -3,6 +3,8 @@ node_modules/
 .DS_Store
 coverage/
 dist/
+__pycache__/
+*.py[cod]
 data/*.json
 !data/.gitkeep
 

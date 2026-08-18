@@ -872,7 +872,9 @@ export async function routeRequest(request, response, store, config, runtime = {
       const body = await readJson(request);
       transport.update(body);
       if (Number.isFinite(Number(body.beatsPerMinute)) && Number(body.beatsPerMinute) > 0) {
-        await observeExternalTempoAndRefreshClocks(store, config, runtime, body.beatsPerMinute);
+        await observeExternalTempoAndRefreshClocks(store, config, runtime, body.beatsPerMinute, {
+          transportState: optionalString(body.state)
+        });
       }
       writeJson(response, 200, {
         ok: true,
@@ -2375,14 +2377,14 @@ function tempoPolicyFor(store, config, runtime) {
   return runtime.tempoPolicy;
 }
 
-async function observeExternalTempoAndRefreshClocks(store, config, runtime, value) {
+async function observeExternalTempoAndRefreshClocks(store, config, runtime, value, details = {}) {
   const policy = tempoPolicyFor(store, config, runtime);
   const previousTempo = Number(policy.snapshot().live);
   const nextTempo = Number(value);
   if (Number.isFinite(previousTempo) && Number.isFinite(nextTempo) && Math.abs(previousTempo - nextTempo) < 0.001) {
     return [];
   }
-  policy.observeExternalTempo(nextTempo);
+  policy.observeExternalTempo(nextTempo, details);
   // ClockInterval is expressed in beat-relative ticks. A JACK/Link BPM update
   // changes the duration of those ticks, not the number of ticks per stage, so
   // rewriting every assigned client here is unnecessary and turns harmless

@@ -11,6 +11,7 @@ export function createTempoPolicy(store, config = {}, options = {}) {
   let source = "block";
   let pendingApply = Promise.resolve(null);
   let lastApply = null;
+  let pendingExternalTempo = null;
 
   const onChange = (event) => {
     const score = event.score ?? store.getScore();
@@ -40,7 +41,16 @@ export function createTempoPolicy(store, config = {}, options = {}) {
     setLiveTempo(value) {
       return adoptTempo(value, "manual", { apply: true, reason: "manual" });
     },
-    observeExternalTempo(value) {
+    observeExternalTempo(value, details = {}) {
+      const tempo = requiredTempo(value);
+      if (
+        pendingExternalTempo !== null
+        && details.transportState === "stopped"
+        && Math.abs(tempo - pendingExternalTempo) >= 0.001
+      ) {
+        return this.snapshot();
+      }
+      pendingExternalTempo = null;
       return adoptTempo(value, "external", { apply: false, reason: "external" });
     },
     setFollowBlockTempo(value) {
@@ -78,6 +88,7 @@ export function createTempoPolicy(store, config = {}, options = {}) {
     source = nextSource;
     if (changed || force) options.onTempoChanged?.(tempo, { source, reason });
     if (apply && (changed || force) && typeof options.applyTempo === "function") {
+      pendingExternalTempo = tempo;
       const startedAt = new Date().toISOString();
       pendingApply = Promise.resolve(options.applyTempo(tempo, { source, reason }))
         .then((result) => {
@@ -85,6 +96,7 @@ export function createTempoPolicy(store, config = {}, options = {}) {
           return result;
         })
         .catch((error) => {
+          if (pendingExternalTempo === tempo) pendingExternalTempo = null;
           lastApply = { ok: false, tempo, source, reason, startedAt, error: messageForError(error) };
           return null;
         });

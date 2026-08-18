@@ -229,7 +229,10 @@ class JackTransportClient:
             JACK_DECIMAL_TYPE.encode("utf-8"),
         )
         if result != 0:
-            raise RuntimeError(f"jack_set_property failed with code {result}")
+            raise RuntimeError(
+                f"could not request tempo from JACK authority '{authority_client_name}': "
+                f"jack_set_property failed with code {result}"
+            )
 
 
 class JackTransportPoller:

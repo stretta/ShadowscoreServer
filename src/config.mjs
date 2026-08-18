@@ -351,6 +351,9 @@ export const defaultConfig = Object.freeze({
       startAckTimeoutMs: 5000,
       startAckPollIntervalMs: 100,
       startAckReadTimeoutMs: 2000,
+      clockArmTargetPhaseBeats: 0.05,
+      clockArmImmediateWindowBeats: 0.15,
+      clockArmMaxDelayMs: 2000,
       clockOffSettleMs: 250,
       setStageSettleMs: 250
     },

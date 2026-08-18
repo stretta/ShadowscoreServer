@@ -2783,6 +2783,7 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
   const phaseCounters = new Map([["local", 0], ["peer", 0]]);
   const stages = new Map([["local", -1], ["peer", -1]]);
   const acknowledgedStages = new Map([["local", -1], ["peer", -1]]);
+  const phaseAlignmentWaits = [];
   const peerTarget = {
     id: "peer-client",
     host: "peer.local",
@@ -2814,6 +2815,14 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
       }
     }),
     runtime: {
+      jackTransport: {
+        snapshot: () => ({
+          fresh: true,
+          ageMs: 0,
+          latest: { state: "rolling", absoluteBeat: 8.75, beatsPerMinute: 120 }
+        })
+      },
+      phaseAlignmentWait: async (milliseconds) => { phaseAlignmentWaits.push(milliseconds); },
       peerRegistry: {
         snapshot: () => [],
         targets: () => peerAvailable ? [peerTarget] : [],
@@ -2906,6 +2915,8 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
     ["local-client", "peer-client"]
   );
   assert.equal(started.clockStartCorrectionWrites.length, 2);
+  assert.equal(started.clockPhaseArmWindow.delayed, true);
+  assert.deepEqual(phaseAlignmentWaits, [150]);
   assert.equal(started.clockPhaseResetWrites.length, 2);
   assert.equal(started.clockPhaseAcknowledgement.verified, true);
   assert.equal(

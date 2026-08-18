@@ -27,6 +27,7 @@ import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScor
 import { buildAuthoritativeTransportState, deriveSyncHealth, resolveTransportLocation, transportObjectDescriptor } from "../transport/authoritative-transport.mjs";
 import { createAuthoritativeTransportPublisher } from "../transport/authoritative-transport-publisher.mjs";
 import { phaseStageAtBeat } from "../transport/ensemble-sync-supervisor.mjs";
+import { planClockArmWindow } from "../transport/clock-arm-window.mjs";
 
 const REVISION_CONTROL_FIELDS = ["expectedVersion", "expectedScoreRevision", "expectedStructureRevision"];
 const OSC_SEQUENCER_APPS = new Set([
@@ -3179,7 +3180,16 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const clockPhaseAckBaselines = clockPhaseResetSupported
     ? await readClockPhaseAckBaselines(config, runtime, phaseAckTargets)
     : {};
-  const clockPhaseResetWrites = clockPhaseResetSupported && clockStartCorrectionWrites.length > 0
+  // A phase reset arms each client's freewheeling clock on its next received
+  // beat. Sending near the end of a beat can split the flock across adjacent
+  // beats even though every client acknowledges the command. Prefer the
+  // beginning of a JACK beat so all clients have almost one full beat to arm.
+  const clockPhaseArmWindow = clockPhaseResetSupported && clockStartCorrectionWrites.length > 0
+    ? await awaitClockArmWindow(config, runtime)
+    : { available: false, delayed: false, delayMs: 0, reason: "clock phase reset is not scheduled" };
+  const clockPhaseResetWrites = clockPhaseResetSupported
+    && clockStartCorrectionWrites.length > 0
+    && clockPhaseArmWindow.available
     ? await writeTransportControlsToPlaybackTargets(score, config, runtime, { clock_phase_reset: 1 }, { targetId })
     : [];
   const clockPhaseAcknowledgement = clockPhaseResetWrites.length > 0
@@ -3212,6 +3222,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     ...clockStartAcknowledgement,
     correctionWriteCount: clockStartCorrectionWrites.length,
     clockPhaseResetWriteCount: clockPhaseResetWrites.length,
+    clockPhaseArmWindow,
     clockPhaseAcknowledgement,
     phaseVerification: clockStartPhaseVerification
   };
@@ -3271,6 +3282,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     clockWrites,
     clockStartAcknowledgement,
     clockStartCorrectionWrites,
+    clockPhaseArmWindow,
     clockPhaseResetWrites,
     clockPhaseAcknowledgement,
     clockStartPhaseVerification,
@@ -3549,6 +3561,21 @@ async function phaseAlignmentSettle(value) {
   if (milliseconds > 0) {
     await new Promise((resolve) => setTimeout(resolve, milliseconds));
   }
+}
+
+async function awaitClockArmWindow(config, runtime) {
+  const alignment = config.rnbo?.phaseAlignment ?? {};
+  const plan = planClockArmWindow(jackTransportSnapshot(runtime), {
+    targetPhaseBeats: alignment.clockArmTargetPhaseBeats,
+    immediateWindowBeats: alignment.clockArmImmediateWindowBeats,
+    maxDelayMs: alignment.clockArmMaxDelayMs
+  });
+  if (plan.delayMs > 0) {
+    const wait = runtime.phaseAlignmentWait
+      ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+    await wait(plan.delayMs);
+  }
+  return plan;
 }
 
 async function readClockStartAckBaselines(config, runtime, targets) {

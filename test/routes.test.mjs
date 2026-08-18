@@ -2127,7 +2127,18 @@ test("Transport Play adopts externally moving active players without reset or pa
   let jackStartCount = 0;
   const writes = [];
   const adoptionWaits = [];
+  const cohortWaits = [];
   let movementObserved = false;
+  let peerVisible = false;
+  const peerTarget = {
+    id: "peer",
+    host: "peer.local",
+    port: 1234,
+    address: "/rnbo/inst/3/messages/in/shadowscore",
+    currentStagePath: "/rnbo/inst/3/messages/out/current_stage",
+    currentStage: 40,
+    available: true
+  };
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
       rnbo: {
@@ -2142,6 +2153,16 @@ test("Transport Play adopts externally moving active players without reset or pa
       }
     }),
     runtime: {
+      peerRegistry: {
+        snapshot: () => [],
+        targets: () => peerVisible ? [peerTarget] : [],
+        oscTargets: () => [],
+        rnboDevices: () => []
+      },
+      startupAdoptionWait: async (milliseconds) => {
+        cohortWaits.push(milliseconds);
+        peerVisible = true;
+      },
       rnboStageCollector: {
         async ensureObservations() {},
         async refresh() { movementObserved = true; },
@@ -2185,9 +2206,22 @@ test("Transport Play adopts externally moving active players without reset or pa
     rnboPort: 1234,
     rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
   });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "peer",
+    rnboHost: "peer.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/3/messages/in/shadowscore"
+  });
 
   const played = await requestJson(context, "POST", "/transport/play", {});
   assert.equal(played.adopted, true);
+  assert.deepEqual(cohortWaits, [250]);
+  assert.deepEqual(played.startupCohort, {
+    expectedTargetCount: 2,
+    observedTargetCount: 2,
+    complete: true,
+    waitedMs: 250
+  });
   assert.deepEqual(adoptionWaits, [350]);
   assert.equal(played.payloadVerified, false);
   assert.equal(startOptions.mode, "jack");
@@ -2818,7 +2852,8 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
           clockPhaseResetPath: "/rnbo/inst/2/messages/in/clock_phase_reset",
           clockPhaseAckPath: "/rnbo/inst/2/messages/out/clock_phase_ack"
         }]
-      }
+      },
+      transport: { rnboClient: { startupCohortGraceMs: 0 } }
     }),
     runtime: {
       jackTransport: {

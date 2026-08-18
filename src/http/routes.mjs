@@ -3048,6 +3048,8 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     playback.stop();
   }
   let witnessContext = await readBeatWitnessContext(score, config, runtime);
+  const startupCohort = await awaitAssignedPlaybackCohort(score, config, runtime, witnessContext);
+  witnessContext = startupCohort.context;
   let externalPlayback = observedRnboPlayback(witnessContext);
   if (!externalPlayback.running && shouldAwaitStartupAdoption(score, witnessContext, runtime)) {
     const graceMs = Math.max(0, Math.min(2000,
@@ -3085,6 +3087,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     return {
       adopted: true,
       payloadVerified: initialReadiness.allActive,
+      startupCohort: withoutContext(startupCohort),
       mode,
       rnboReadiness: initialReadiness,
       jackStart,
@@ -3297,6 +3300,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   return {
     mode,
     rnboReadiness,
+    startupCohort: withoutContext(startupCohort),
     continuingClockContract,
     jackStart,
     jackTempo,
@@ -3615,6 +3619,47 @@ function shouldAwaitStartupAdoption(score, context, runtime) {
     && target.stageReadbackStatus !== "unavailable"
     && target.stageMovement === "unknown"
   );
+}
+
+async function awaitAssignedPlaybackCohort(score, config, runtime, initialContext) {
+  const expectedTargetCount = Object.values(score.assignments ?? {})
+    .filter((assignment) => optionalString(assignment?.rnboTargetId)).length;
+  let context = initialContext;
+  let observedTargetCount = assignedTargetCount(score, context);
+  const configuredTimeout = Number(config.transport?.rnboClient?.startupCohortGraceMs);
+  const timeoutMs = Number.isFinite(configuredTimeout)
+    ? Math.max(0, Math.min(10000, configuredTimeout))
+    : 5000;
+  const configuredPoll = Number(config.transport?.rnboClient?.startupCohortPollMs);
+  const pollMs = Number.isFinite(configuredPoll)
+    ? Math.max(25, Math.min(1000, configuredPoll))
+    : 250;
+  const wait = runtime.startupAdoptionWait
+    ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+  let waitedMs = 0;
+  while (expectedTargetCount > observedTargetCount && waitedMs < timeoutMs) {
+    const interval = Math.min(pollMs, timeoutMs - waitedMs);
+    await wait(interval);
+    waitedMs += interval;
+    context = await readBeatWitnessContext(score, config, runtime);
+    observedTargetCount = assignedTargetCount(score, context);
+  }
+  return {
+    context,
+    expectedTargetCount,
+    observedTargetCount,
+    complete: expectedTargetCount === observedTargetCount,
+    waitedMs
+  };
+}
+
+function assignedTargetCount(score, context) {
+  return context.rnboTargets.filter((target) => assignedVoiceForTarget(score, target)).length;
+}
+
+function withoutContext(value) {
+  const { context, ...summary } = value;
+  return summary;
 }
 
 async function readClockStartAckBaselines(config, runtime, targets) {

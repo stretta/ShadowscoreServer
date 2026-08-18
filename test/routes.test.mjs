@@ -2169,7 +2169,7 @@ test("Transport Play adopts externally moving active players without reset or pa
         targets: (targets) => targets.map((target) => ({
           ...target,
           currentStage: 40,
-          stageMovement: movementObserved ? "moving" : "unknown",
+          stageMovement: movementObserved || target.id === "finch" ? "moving" : "unknown",
           stageReadbackStatus: "fresh"
         }))
       },

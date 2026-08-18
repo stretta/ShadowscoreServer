@@ -3614,11 +3614,13 @@ async function awaitClockArmWindow(config, runtime) {
 function shouldAwaitStartupAdoption(score, context, runtime) {
   if (typeof runtime.rnboStageCollector?.refresh !== "function") return false;
   const assigned = context.rnboTargets.filter((target) => assignedVoiceForTarget(score, target));
-  return assigned.length > 0 && assigned.every((target) =>
+  return assigned.length > 0
+    && assigned.every((target) =>
     Number.isFinite(Number(target.currentStage))
     && target.stageReadbackStatus !== "unavailable"
-    && target.stageMovement === "unknown"
-  );
+    && target.stageMovement !== "stopped"
+    )
+    && assigned.some((target) => target.stageMovement === "unknown");
 }
 
 async function awaitAssignedPlaybackCohort(score, config, runtime, initialContext) {

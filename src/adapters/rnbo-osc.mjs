@@ -31,6 +31,13 @@ const TRANSACTION_REJECT_REASONS = Object.freeze({
   6: "checksum"
 });
 
+const ACTIVATION_REJECT_REASONS = Object.freeze({
+  7: "activation-transaction",
+  8: "activation-mode",
+  9: "activation-boundary",
+  10: "activation-combination"
+});
+
 const MAX_EXACT_RNBO_TRANSACTION_ID = 16_777_215;
 
 export function createRnboOscAdapter(config, runtime = {}) {
@@ -76,6 +83,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   const lastTransferProgressEmitMs = new Map();
   const mutationImpacts = [];
   const playbackUpdateState = new Map();
+  const desiredHashCache = new Map();
   const dirtyVoicesByBlock = new Map();
   let invalidateAllPlayback = false;
   let lastObservedScore;
@@ -135,12 +143,14 @@ export function createRnboOscAdapter(config, runtime = {}) {
     metrics() {
       return structuredClone(metrics);
     },
-    async playbackUpdates(blockId = "") {
+    async playbackUpdates(blockId = "", options = {}) {
       if (!store) throw new Error("RNBO adapter is not attached to a score store");
       const canonical = store.getScore();
       const selectedBlockId = String(blockId || canonical.structureState?.activeBlockId || "").trim();
       const score = selectedBlockId ? scoreWithActiveBlock(canonical, selectedBlockId) : canonical;
-      const targets = await rnboTargetsForSend(config, score, runtime);
+      const targets = await rnboTargetsForSend(config, score, runtime, {
+        liveTargets: options.targets
+      });
       metrics.targetEnumerationCount += targets.length;
       const updates = targets.map((target) => desiredUpdateForTarget(score, selectedBlockId, target));
       const affected = updates.filter((update) => update.state !== "active");
@@ -368,8 +378,26 @@ export function createRnboOscAdapter(config, runtime = {}) {
           };
         });
 
+        const runtimeTempo = Number(runtime.getTempo?.());
+        const activationOptions = {
+          tempo: Number.isFinite(runtimeTempo) && runtimeTempo > 0 ? runtimeTempo : activeWrittenTempo(canonical),
+          fetchImpl: options.fetchImpl
+        };
+        const previouslyArmed = requests.filter((request) => {
+          const status = lastSendStatus.get(request.targetId);
+          return status?.activationAcknowledgementAt != null || status?.activationAck != null;
+        });
+        const preflight = previouslyArmed.length
+          ? await adapter.confirmPreparedActivations(previouslyArmed, activationOptions)
+          : [];
+        const reconciledTargetIds = new Set(
+          preflight
+            .filter((activation) => activation.acknowledgement?.ok === true)
+            .map((activation) => activation.targetId)
+        );
+        const requestsToArm = requests.filter((request) => !reconciledTargetIds.has(request.targetId));
         const armedAt = new Date().toISOString();
-        await Promise.all(requests.map(async (request) => {
+        await Promise.all(requestsToArm.map(async (request) => {
           await sendPreparedActivationRequest(socket, request.target, request);
           recordLifecycleEvent({
             type: "playback.update.armed",
@@ -380,17 +408,21 @@ export function createRnboOscAdapter(config, runtime = {}) {
             boundary: request.boundary
           });
         }));
-        await options.onArmed?.({
-          blockId: selectedBlockId,
-          scoreRevision,
-          activationMode,
-          requests: structuredClone(requests)
-        });
-        const runtimeTempo = Number(runtime.getTempo?.());
-        const activations = await adapter.confirmPreparedActivations(requests, {
-          tempo: Number.isFinite(runtimeTempo) && runtimeTempo > 0 ? runtimeTempo : activeWrittenTempo(canonical),
-          fetchImpl: options.fetchImpl
-        });
+        if (requestsToArm.length) {
+          await options.onArmed?.({
+            blockId: selectedBlockId,
+            scoreRevision,
+            activationMode,
+            requests: structuredClone(requestsToArm)
+          });
+        }
+        const confirmed = requestsToArm.length
+          ? await adapter.confirmPreparedActivations(requestsToArm, activationOptions)
+          : [];
+        const activations = [
+          ...preflight.filter((activation) => activation.acknowledgement?.ok === true),
+          ...confirmed
+        ];
         const finalUpdates = await adapter.playbackUpdates(selectedBlockId);
         result = {
           ...finalUpdates,
@@ -872,6 +904,12 @@ export function createRnboOscAdapter(config, runtime = {}) {
         state.state = "saved-not-active";
         state.lastImpact = structuredClone(impact);
       }
+      for (const [key, cached] of desiredHashCache.entries()) {
+        if (!impact.invalidateAll && !(impact.blockIds ?? []).includes(cached.blockId)) continue;
+        const affectedVoices = impactVoicesForBlock(impact, cached.blockId);
+        if (!impact.invalidateAll && !affectedVoices.includes(cached.voiceId)) continue;
+        desiredHashCache.delete(key);
+      }
       recordLifecycleEvent({
         type: "playback.update.desired",
         observedAt: new Date().toISOString(),
@@ -893,12 +931,19 @@ export function createRnboOscAdapter(config, runtime = {}) {
   }
 
   function desiredUpdateForTarget(score, blockId, target) {
-    metrics.compileCount += 1;
-    const compiled = compileScoreTransaction(score, config, 0, target);
     const targetId = target.id ?? target.address ?? "";
     const key = playbackUpdateKey(blockId, targetId);
     const previous = playbackUpdateState.get(key) ?? {};
-    const desiredHash = compiled.payloadHash;
+    let desiredHash = previous.desiredHash ?? desiredHashCache.get(key)?.hash ?? null;
+    if (!desiredHash) {
+      metrics.compileCount += 1;
+      desiredHash = compileScoreTransaction(score, config, 0, target).payloadHash;
+      desiredHashCache.set(key, {
+        blockId,
+        voiceId: target.voiceId ?? "",
+        hash: desiredHash
+      });
+    }
     const active = previous.activeHash === desiredHash && Number.isInteger(previous.activeTransaction);
     const prepared = !active && previous.preparedHash === desiredHash && Number.isInteger(previous.preparedTransaction);
     return {
@@ -1011,6 +1056,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
     discoveryCheckPending = true;
     try {
       const liveTargets = await readLiveRnboTargets(config, runtime, { requireComplete: true });
+      runtime.rnboStageCollector?.updateTargets?.(liveTargets);
       const signature = rnboTargetSignature(liveTargets);
       const observedAt = new Date().toISOString();
       if (signature !== candidateTargetSignature) {
@@ -1504,6 +1550,16 @@ export function validateScoreActivationAck(value, {
   if (expectedClientId !== undefined && clientId !== Number(expectedClientId)) {
     return { ...base, status: "client mismatch" };
   }
+  if (opcode === 91) {
+    const rejectReason = values[opcodeIndex + 2];
+    return {
+      ...base,
+      rejectReason,
+      rejectReasonLabel: ACTIVATION_REJECT_REASONS[rejectReason] ?? "unknown",
+      preparedTransaction: values[opcodeIndex + 3],
+      status: "activation rejected"
+    };
+  }
   if (opcode !== OPCODES.ACTIVE) {
     return { ...base, status: "awaiting activation" };
   }
@@ -1580,11 +1636,13 @@ function rnboAckUrl(config, target, ackConfig) {
   if (!path) {
     return "";
   }
-  const host = target.host ?? config.rnbo?.oscQuery?.oscHost ?? config.rnbo?.host;
+  const host = target.transportHost ?? target.host ?? config.rnbo?.oscQuery?.oscHost ?? config.rnbo?.host;
   if (!host) {
     return "";
   }
-  const baseUrl = target.oscQueryUrl ?? oscQueryBaseUrl(config, host, ackConfig.oscQueryPort);
+  const baseUrl = target.transportHost
+    ? oscQueryBaseUrl(config, host, ackConfig.oscQueryPort)
+    : target.oscQueryUrl ?? oscQueryBaseUrl(config, host, ackConfig.oscQueryPort);
   return `${baseUrl}${path}`;
 }
 
@@ -1633,7 +1691,9 @@ function operationalAckStatus(status) {
 }
 
 async function rnboTargetsForSend(config, score, runtime = {}, options = {}) {
-  const liveTargets = await readLiveRnboTargets(config, runtime);
+  const liveTargets = Array.isArray(options.liveTargets)
+    ? options.liveTargets
+    : await readLiveRnboTargets(config, runtime);
   let targets = rnboTargets(config, score, liveTargets);
   if (Array.isArray(options.voiceIds)) {
     const voiceIds = new Set(options.voiceIds);
@@ -2240,7 +2300,7 @@ async function sendOscInportMessage(socket, target, name, value) {
   }
   const packet = encodeOscMessage(`/rnbo/inst/${instanceId}/messages/in/${name}`, [value]);
   await new Promise((resolve, reject) => {
-    socket.send(packet, target.port, target.host, (error) => {
+    socket.send(packet, target.port, target.transportHost ?? target.host, (error) => {
       if (error) {
         reject(error);
       } else {
@@ -2261,7 +2321,7 @@ async function sendPreparedActivationRequest(socket, target, request) {
     boundary
   ]);
   await new Promise((resolve, reject) => {
-    socket.send(packet, target.port, target.host, (error) => error ? reject(error) : resolve());
+    socket.send(packet, target.port, target.transportHost ?? target.host, (error) => error ? reject(error) : resolve());
   });
 }
 
@@ -2274,11 +2334,19 @@ function rnboTargets(config, score, liveTargets = []) {
     return config.rnbo.targets.map((target) => ({
       id: target.id,
       host: target.host ?? config.rnbo.host,
+      transportHost: target.transportHost,
       port: target.port ?? config.rnbo.port,
       address: target.address ?? config.rnbo.address,
       instanceId: target.instanceId,
       messagePath: target.messagePath,
       ackPath: target.ackPath,
+      currentStagePath: target.currentStagePath,
+      clockPath: target.clockPath,
+      clockStartAckPath: target.clockStartAckPath,
+      clockStartAck: target.clockStartAck,
+      clockPhaseResetPath: target.clockPhaseResetPath,
+      clockPhaseAckPath: target.clockPhaseAckPath,
+      clockPhaseAck: target.clockPhaseAck,
       oscQueryUrl: target.oscQueryUrl,
       voiceId: target.voiceId,
       clientId: target.clientId,
@@ -2306,11 +2374,18 @@ function assignmentRnboTargets(config, score, liveTargets = []) {
       const configuredTarget = liveTargetForAssignment(liveTargets, assignment) ?? configuredTargetForAssignment(config, assignment);
       return {
         host: configuredTarget?.host ?? assignment.rnboHost ?? config.rnbo.host,
+        transportHost: configuredTarget?.transportHost,
         port: configuredTarget?.port ?? assignment.rnboPort ?? config.rnbo.port,
         address: configuredTarget?.address ?? assignment.rnboAddress,
         instanceId: configuredTarget?.instanceId,
         messagePath: configuredTarget?.messagePath,
         ackPath: configuredTarget?.ackPath,
+        clockPath: configuredTarget?.clockPath,
+        clockStartAckPath: configuredTarget?.clockStartAckPath,
+        clockStartAck: configuredTarget?.clockStartAck,
+        clockPhaseResetPath: configuredTarget?.clockPhaseResetPath,
+        clockPhaseAckPath: configuredTarget?.clockPhaseAckPath,
+        clockPhaseAck: configuredTarget?.clockPhaseAck,
         oscQueryUrl: configuredTarget?.oscQueryUrl,
         voiceId,
         clientId: assignment.clientId ?? configuredTarget?.clientId,

@@ -47,9 +47,15 @@ export const defaultConfig = Object.freeze({
     },
     rnboClient: {
       maxSkewBeats: 0.25,
-      pollIntervalMs: 125,
+      pollIntervalMs: 1000,
       timeoutMs: 300,
-      staleAfterMs: 750
+      staleAfterMs: 3000,
+      autoResync: {
+        enabled: true,
+        intervalMs: 1000,
+        requiredConsecutiveSlips: 3,
+        cooldownMs: 60000
+      }
     }
   },
   static: {
@@ -342,6 +348,9 @@ export const defaultConfig = Object.freeze({
       verifyTimeoutMs: 5000,
       verifyPollIntervalMs: 100,
       verifyReadTimeoutMs: 2000,
+      startAckTimeoutMs: 5000,
+      startAckPollIntervalMs: 100,
+      startAckReadTimeoutMs: 2000,
       clockOffSettleMs: 250,
       setStageSettleMs: 250
     },

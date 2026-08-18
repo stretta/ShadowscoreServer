@@ -4,7 +4,7 @@ import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
 import { createCoordinatorManager } from "./coordinator/coordinator-manager.mjs";
-import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, readBeatWitnessContext, recallOscSnapshotsForBlock, routeRequest, writeTransportControlsToPlaybackTargets } from "./http/routes.mjs";
+import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, readBeatWitnessContext, recallOscSnapshotsForBlock, routeRequest, runAutomaticSyncRecovery } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { activatePreparedBlockTransition } from "./playback/block-transition.mjs";
 import { createTempoPolicy } from "./playback/tempo-policy.mjs";
@@ -17,6 +17,7 @@ import { createScorePersistence, loadPersistedScore } from "./state/persistence.
 import { createInitialScore, createScoreStore } from "./state/score-store.mjs";
 import { createJackTransportController } from "./transport/jack-transport-control.mjs";
 import { createJackTransportState } from "./transport/jack-transport-state.mjs";
+import { createEnsembleSyncSupervisor } from "./transport/ensemble-sync-supervisor.mjs";
 
 const config = await loadConfig();
 const defaultScore = createInitialScore(config);
@@ -35,6 +36,11 @@ const rnbo = createRnboOscAdapter(config, {
 });
 const jackTransport = createJackTransportState(config);
 const rnboStageCollector = createRnboStageCollector(config);
+const autoResyncConfig = config.transport?.rnboClient?.autoResync ?? {};
+const ensembleSyncSupervisor = createEnsembleSyncSupervisor({
+  requiredConsecutiveSlips: autoResyncConfig.requiredConsecutiveSlips,
+  cooldownMs: autoResyncConfig.cooldownMs
+});
 const jackController = config.transport?.jack?.enabled
   ? createJackTransportController(config)
   : null;
@@ -46,7 +52,8 @@ const runtime = {
   manualOscQueryDevices,
   oscSnapshotRecall,
   rnboAdapter: rnbo,
-  rnboStageCollector
+  rnboStageCollector,
+  ensembleSyncSupervisor
 };
 tempoPolicy = createTempoPolicy(store, config, {
   applyTempo: (tempo) => applyLiveTempo(store, config, runtime, tempo),
@@ -60,8 +67,7 @@ const macroPlayback = createMacroPlayback(store, config, {
   beforeAdvance: ({ nextBlockId }) => rnbo.prepareBlock(nextBlockId),
   armAdvance: ({ nextBlockId }) => activatePreparedBlockTransition({
     rnbo,
-    nextBlockId,
-    resetPhase: () => writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 })
+    nextBlockId
   })
 });
 runtime.macroPlayback = macroPlayback;
@@ -77,6 +83,10 @@ const oscSnapshotAutoRecall = createOscSnapshotAutoRecall(store, {
 });
 runtime.oscSnapshotAutoRecall = oscSnapshotAutoRecall;
 rnbo.attach(store);
+const automaticSyncRecoveryInterval = autoResyncConfig.enabled === true
+  ? setInterval(() => void runAutomaticSyncRecovery(store, config, runtime), Math.max(250, Number(autoResyncConfig.intervalMs) || 1000))
+  : null;
+automaticSyncRecoveryInterval?.unref?.();
 
 const server = http.createServer((request, response) => {
   routeRequest(request, response, store, config, runtime).catch((error) => {
@@ -112,6 +122,7 @@ async function shutdown() {
   macroPlayback.close();
   rnbo.close();
   rnboStageCollector.close();
+  if (automaticSyncRecoveryInterval) clearInterval(automaticSyncRecoveryInterval);
   coordinator.close();
   server.close();
   server.closeAllConnections?.();

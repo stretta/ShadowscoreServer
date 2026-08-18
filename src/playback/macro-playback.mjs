@@ -743,7 +743,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   function startWitnessPolling() {
     clearWitnessPolling();
     if (typeof options.loadWitnessContext !== "function" || typeof timers.setInterval !== "function") return;
-    const intervalMs = Math.max(25, finiteNumber(config.transport?.rnboClient?.pollIntervalMs, 125));
+    const intervalMs = Math.max(25, finiteNumber(config.transport?.rnboClient?.pollIntervalMs, 1000));
     witnessPollTimer = timers.setInterval(async () => {
       if (witnessPollPending || !running || mode !== "jack") return;
       witnessPollPending = true;

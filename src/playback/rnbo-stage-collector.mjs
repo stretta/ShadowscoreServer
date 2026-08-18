@@ -1,7 +1,7 @@
-const DEFAULT_POLL_INTERVAL_MS = 125;
+const DEFAULT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_TIMEOUT_MS = 300;
-const DEFAULT_STALE_AFTER_MS = 750;
-const DEFAULT_MOTION_STALE_AFTER_MS = 1500;
+const DEFAULT_STALE_AFTER_MS = 3000;
+const DEFAULT_MOTION_STALE_AFTER_MS = 3000;
 
 export function createRnboStageCollector(config = {}, options = {}) {
   const settings = collectorSettings(config);
@@ -41,6 +41,10 @@ export function createRnboStageCollector(config = {}, options = {}) {
       const observedAt = now();
       return nextTargets.map((target) => withObservation(target, observations.get(target.id), observedAt, settings));
     },
+    currentTargets() {
+      const observedAt = now();
+      return targets.map((target) => withObservation(target, observations.get(target.id), observedAt, settings));
+    },
     snapshot() {
       const observedAt = now();
       return Object.fromEntries([...observations].map(([targetId, observation]) => [
@@ -56,9 +60,20 @@ export function createRnboStageCollector(config = {}, options = {}) {
 }
 
 export function rnboCurrentStageUrl(target = {}) {
-  const path = String(target.currentStagePath ?? "").trim();
+  return rnboOscQueryValueUrl(target, target.currentStagePath);
+}
+
+export function rnboOscQueryValueUrl(target = {}, valuePath) {
+  const path = String(valuePath ?? "").trim();
   if (!path) return "";
   if (/^https?:\/\//i.test(path)) return path;
+  const transportHost = String(target.transportHost ?? "").trim();
+  if (transportHost) {
+    const formattedTransportHost = transportHost.includes(":") && !transportHost.startsWith("[")
+      ? `[${transportHost}]`
+      : transportHost;
+    return `http://${formattedTransportHost}:5678${path.startsWith("/") ? path : `/${path}`}`;
+  }
   const base = String(target.oscQueryUrl ?? "").trim();
   if (base) return new URL(path, ensureTrailingSlash(base)).toString();
   const host = String(target.host ?? "").trim();

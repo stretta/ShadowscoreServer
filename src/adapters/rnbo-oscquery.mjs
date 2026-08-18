@@ -3,7 +3,7 @@ import { encodeOscMessage } from "./osc.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 
 const TRANSPORT_PARAM_CONTROLS = new Set(["Clock"]);
-const TRANSPORT_INPORT_CONTROLS = new Set(["MaxSteps", "ClockInterval", "Tempo", "SetStage", "Stage"]);
+const TRANSPORT_INPORT_CONTROLS = new Set(["MaxSteps", "ClockInterval", "Tempo", "SetStage", "Stage", "clock_phase_reset"]);
 
 export async function discoverRnboTargets(config, options = {}) {
   const rnbo = config.rnbo ?? {};
@@ -85,7 +85,7 @@ export function rnboTransportControlWrites(target, controls) {
     throw new Error(`RNBO target '${target.id ?? ""}' does not include an instance id`);
   }
 
-  const host = target.host;
+  const host = target.transportHost ?? target.host;
   const port = Number(target.oscPort ?? target.port);
   if (!host || !Number.isFinite(port)) {
     throw new Error(`RNBO target '${target.id ?? ""}' is missing host or port`);
@@ -103,7 +103,9 @@ export function rnboTransportControlWrites(target, controls) {
       host,
       port,
       path: controlName === "Clock"
-        ? `/rnbo/inst/${instanceId}/params/Clock/Clock`
+        ? (target.clockPath || `/rnbo/inst/${instanceId}/params/Clock/Clock`)
+        : controlName === "clock_phase_reset"
+          ? (target.clockPhaseResetPath || `/rnbo/inst/${instanceId}/messages/in/clock_phase_reset`)
         : `/rnbo/inst/${instanceId}/${controlRoot}/${controlName}`,
       value: controlName === "Clock" ? clockEnumValue(value) : finiteNumber(value, name)
     };
@@ -161,6 +163,8 @@ export function extractRnboTargets(tree, config) {
     const instanceId = readInstanceId(address);
     const instanceNode = findInstanceNode(tree, instanceId);
     const outports = readMessageOutports(instanceNode);
+    const clockPath = extractRnboParams(instanceNode)
+      .find((parameter) => parameter.name === "Clock")?.address;
     entries.push(withoutUndefined({
       id: instanceId ? `rnbo-inst-${instanceId}:shadowscore` : address,
       name: instanceId ? `ShadowScoreClient / shadowscore` : address,
@@ -172,6 +176,12 @@ export function extractRnboTargets(tree, config) {
       ackPath: outports.shadowscore_ack,
       currentStagePath: outports.current_stage,
       currentStage: outports.current_stage_value,
+      clockPath,
+      clockStartAckPath: outports.clock_start_ack,
+      clockStartAck: outports.clock_start_ack_value,
+      clockPhaseResetPath: normalizeAddress(instanceNode?.CONTENTS?.messages?.CONTENTS?.in?.CONTENTS?.clock_phase_reset?.FULL_PATH) || undefined,
+      clockPhaseAckPath: outports.clock_phase_ack,
+      clockPhaseAck: outports.clock_phase_ack_value,
       clientId: readClientId(node, instanceNode),
       capabilities: rnboPlaybackCapabilities(config, observedTargetCapabilities(node, instanceNode)),
       source: "rnbooscquery",
@@ -495,7 +505,11 @@ function readMessageOutports(instanceNode) {
   return {
     shadowscore_ack: normalizeAddress(contents.shadowscore_ack?.FULL_PATH),
     current_stage: normalizeAddress(contents.current_stage?.FULL_PATH),
-    current_stage_value: firstListNumber(contents.current_stage?.VALUE)
+    current_stage_value: firstListNumber(contents.current_stage?.VALUE),
+    clock_start_ack: normalizeAddress(contents.clock_start_ack?.FULL_PATH) || undefined,
+    clock_start_ack_value: numericList(contents.clock_start_ack?.VALUE),
+    clock_phase_ack: normalizeAddress(contents.clock_phase_ack?.FULL_PATH) || undefined,
+    clock_phase_ack_value: numericList(contents.clock_phase_ack?.VALUE)
   };
 }
 
@@ -559,6 +573,14 @@ function firstListNumber(value) {
     return Math.round(value[0]);
   }
   return undefined;
+}
+
+function numericList(value) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const numbers = value.map(Number);
+  return numbers.every(Number.isFinite) ? numbers : undefined;
 }
 
 function isShadowScoreMessagePath(path, node, addressPattern) {
@@ -644,6 +666,7 @@ function normalizeConfiguredTarget(target, rnbo, index) {
     id: target.id ?? (instanceId ? `rnbo-inst-${instanceId}:shadowscore` : `configured-${index + 1}`),
     name: target.name ?? (instanceId ? `ShadowScoreClient / shadowscore` : address),
     host: target.host ?? rnbo.host,
+    transportHost: target.transportHost,
     port: Number(target.port ?? rnbo.port),
     address,
     instanceId,
@@ -658,6 +681,12 @@ function normalizeConfiguredTarget(target, rnbo, index) {
     ackPath: target.ackPath,
     currentStagePath: target.currentStagePath,
     currentStage: optionalFiniteNumber(target.currentStage),
+    clockPath: stringField(target.clockPath) || undefined,
+    clockStartAckPath: stringField(target.clockStartAckPath) || undefined,
+    clockStartAck: numericList(target.clockStartAck),
+    clockPhaseResetPath: stringField(target.clockPhaseResetPath) || undefined,
+    clockPhaseAckPath: stringField(target.clockPhaseAckPath) || undefined,
+    clockPhaseAck: numericList(target.clockPhaseAck),
     voiceId: target.voiceId,
     clientId: target.clientId,
     capabilities: rnboPlaybackCapabilities({ rnbo }, target.capabilities),

@@ -162,3 +162,57 @@ test("playback snapshot exposes shared desired/prepared/active update state", ()
   const snapshot = buildPlaybackSnapshot({ updates });
   assert.deepEqual(snapshot.updates, updates);
 });
+
+test("playback snapshot projects timestamped client phase to the coherent boundary and compares across loop wrap", () => {
+  const observedAt = Date.parse("2026-08-17T21:00:05.000Z");
+  const snapshot = buildPlaybackSnapshot({
+    observedAt,
+    tempo: { live: 60 },
+    playback: {
+      running: true,
+      mode: "jack",
+      beatIntoBlock: 0.1,
+      witness: { source: "jack", usable: true, fresh: true }
+    },
+    jack: {
+      status: "fresh",
+      latest: { state: "rolling", beatsPerMinute: 60 }
+    },
+    targets: [{
+      id: "slow-client",
+      currentStage: 3,
+      stateObservedAt: observedAt - 5000
+    }],
+    timingContracts: [{
+      targetId: "slow-client",
+      assignedVoiceId: "player-1",
+      timing: { stagesPerBeat: 1, patternLength: 8 }
+    }],
+    staleAfterMs: 10_000
+  });
+
+  assert.equal(snapshot.targets["slow-client"].beatIntoBlock, 3);
+  assert.equal(snapshot.targets["slow-client"].projectedBeatIntoBlock, 0);
+  assert.equal(snapshot.targets["slow-client"].phaseProjectionMs, 5000);
+  assert.ok(Math.abs(snapshot.targets["slow-client"].phaseErrorBeats + 0.1) < 0.000001);
+});
+
+test("playback snapshot projects player execution while the arrangement is held", () => {
+  const observedAt = Date.parse("2026-08-17T21:00:01.000Z");
+  const snapshot = buildPlaybackSnapshot({
+    observedAt,
+    tempo: { live: 120 },
+    controls: { players: { playing: true }, arrangement: { running: false } },
+    playback: { running: false, mode: "stopped" },
+    targets: [{ id: "held-player", currentStage: 4, stateObservedAt: observedAt - 1000 }],
+    timingContracts: [{
+      targetId: "held-player",
+      assignedVoiceId: "player-1",
+      timing: { stagesPerBeat: 4, patternLength: 32 }
+    }],
+    staleAfterMs: 2000
+  });
+  assert.equal(snapshot.transport.rolling, false);
+  assert.equal(snapshot.targets["held-player"].beatIntoBlock, 1);
+  assert.equal(snapshot.targets["held-player"].projectedBeatIntoBlock, 3);
+});

@@ -67,6 +67,46 @@ test("derives continuing activation from the live ActivatePrepared inport", () =
   assert.equal(extractRnboTargets(currentTree, config)[0].capabilities.continuingScoreActivation, true);
 });
 
+test("discovers the live Clock, start ACK, and immediate phase-reset contract", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: { host: "192.168.68.96", port: 1234, oscQuery: { enabled: true } }
+  });
+  const tree = createOscQueryTree();
+  const instance = tree.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS;
+  instance.params = {
+    CONTENTS: {
+      Clock: rnboParam("/rnbo/inst/2/params/Clock", "On", undefined, undefined, 0)
+    }
+  };
+  instance.messages.CONTENTS.out.CONTENTS.clock_start_ack = {
+    FULL_PATH: "/rnbo/inst/2/messages/out/clock_start_ack",
+    TYPE: "ff",
+    VALUE: [3, 11]
+  };
+  instance.messages.CONTENTS.in.CONTENTS.clock_phase_reset = {
+    FULL_PATH: "/rnbo/inst/2/messages/in/clock_phase_reset"
+  };
+  instance.messages.CONTENTS.out.CONTENTS.clock_phase_ack = {
+    FULL_PATH: "/rnbo/inst/2/messages/out/clock_phase_ack",
+    TYPE: "ff",
+    VALUE: [4, 11]
+  };
+
+  const target = extractRnboTargets(tree, config)[0];
+
+  assert.equal(target.clockPath, "/rnbo/inst/2/params/Clock");
+  assert.equal(target.clockStartAckPath, "/rnbo/inst/2/messages/out/clock_start_ack");
+  assert.deepEqual(target.clockStartAck, [3, 11]);
+  assert.equal(target.clockPhaseResetPath, "/rnbo/inst/2/messages/in/clock_phase_reset");
+  assert.equal(target.clockPhaseAckPath, "/rnbo/inst/2/messages/out/clock_phase_ack");
+  assert.deepEqual(target.clockPhaseAck, [4, 11]);
+  assert.equal(rnboTransportControlWrites(target, { Clock: 0 })[0].path, "/rnbo/inst/2/params/Clock");
+  assert.equal(
+    rnboTransportControlWrites(target, { clock_phase_reset: 1 })[0].path,
+    "/rnbo/inst/2/messages/in/clock_phase_reset"
+  );
+});
+
 test("extracts ShadowScoreClient compact replacement capabilities from OSCQuery metadata", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
@@ -920,6 +960,19 @@ test("normalizes ShadowScoreClient Clock enum transport values", () => {
   }]);
   assert.deepEqual(rnboTransportControlWrites(target, { Clock: 1 })[0].value, "On");
   assert.throws(() => rnboTransportControlWrites(target, { Clock: 2 }), /Clock must be/);
+});
+
+test("RNBO transport controls prefer the observed transport host", () => {
+  const [write] = rnboTransportControlWrites({
+    id: "finch:client",
+    host: "finch.local",
+    transportHost: "192.168.68.104",
+    port: 1234,
+    instanceId: "9",
+    clockPath: "/rnbo/inst/9/params/Clock"
+  }, { Clock: 1 });
+
+  assert.equal(write.host, "192.168.68.104");
 });
 
 test("rejects unsupported RNBO transport writes", () => {

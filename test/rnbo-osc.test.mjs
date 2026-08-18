@@ -1571,6 +1571,11 @@ test("validates Finch staged activation ACKs independently from READY", () => {
     expectedClientId: 90,
     initialStage: 0
   });
+  const noLongerPrepared = validateScoreActivationAck([90, 91, 1104, 7, 1104, 0], {
+    transactionId: 1104,
+    expectedClientId: 90,
+    initialStage: null
+  });
 
   assert.equal(active.ok, true);
   assert.equal(active.status, "active");
@@ -1579,6 +1584,10 @@ test("validates Finch staged activation ACKs independently from READY", () => {
   assert.equal(stillPrepared.status, "awaiting activation");
   assert.equal(wrongStage.ok, false);
   assert.equal(wrongStage.status, "stage mismatch");
+  assert.equal(noLongerPrepared.ok, false);
+  assert.equal(noLongerPrepared.status, "activation rejected");
+  assert.equal(noLongerPrepared.rejectReasonLabel, "activation-transaction");
+  assert.equal(noLongerPrepared.preparedTransaction, 1104);
 });
 
 test("RNBO adapter resends score transactions when assignments change", () => {
@@ -1732,6 +1741,78 @@ test("RNBO adapter applies a prepared update in continue mode without requiring 
     assert.equal(result.action, "active");
     assert.equal(result.targets.finch.activeTransaction, 1201);
     assert.equal(result.activations[0].acknowledgement.activatedStage, 7);
+  } finally {
+    adapter.close();
+  }
+});
+
+test("RNBO adapter reconciles a late ACTIVE acknowledgement before retrying activation", async () => {
+  let activationRequestCount = 0;
+  let activationAcknowledgementAvailable = false;
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1250,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        instanceId: "20",
+        clientId: 90,
+        voiceId: "player-1",
+        address: "/rnbo/inst/20/messages/in/shadowscore",
+        capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true, continuingScoreActivation: true }
+      }],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 },
+      activation: { timeoutMs: 10, beatMarginMs: 0, pollIntervalMs: 1, requestTimeoutMs: 10 }
+    }
+  });
+  const score = scoreWithBlock(9);
+  const fetchImpl = async () => ({
+    ok: true,
+    async json() {
+      return {
+        VALUE: activationAcknowledgementAvailable
+          ? [90, 93, 1251, 2, 7, 1]
+          : [90, 92, 1251, 2, 32, 1]
+      };
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        if (readOscAddress(packet).endsWith("/ActivatePrepared")) activationRequestCount += 1;
+        callback();
+      },
+      close() {}
+    },
+    fetchImpl
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    const missed = await adapter.applyBlockUpdate("A", {
+      activationMode: "continue",
+      expectedScoreRevision: 9,
+      fetchImpl
+    });
+    assert.equal(missed.action, "activation-failed");
+    assert.equal(activationRequestCount, 1);
+
+    activationAcknowledgementAvailable = true;
+    const reconciled = await adapter.applyBlockUpdate("A", {
+      activationMode: "continue",
+      expectedScoreRevision: 9,
+      fetchImpl
+    });
+
+    assert.equal(reconciled.action, "active");
+    assert.equal(reconciled.targets.finch.activeTransaction, 1251);
+    assert.equal(activationRequestCount, 1);
   } finally {
     adapter.close();
   }
@@ -1986,6 +2067,38 @@ test("RNBO adapter serializes overlapping block activation operations", async ()
     assert.equal(firstResult.action, "active");
     assert.equal(secondResult.action, "already-active");
     assert.equal(addresses.filter((address) => address.endsWith("/ActivatePrepared")).length, 1);
+  } finally {
+    adapter.close();
+  }
+});
+
+test("RNBO adapter reuses desired playback hashes between observational snapshots", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        voiceId: "player-1",
+        address: "/rnbo/inst/20/messages/in/shadowscore"
+      }],
+      oscQuery: { enabled: false }
+    }
+  });
+  const score = scoreWithBlock(11);
+  const adapter = createRnboOscAdapter(config, {
+    socket: { close() {} }
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    const first = await adapter.playbackUpdates("A");
+    const second = await adapter.playbackUpdates("A");
+
+    assert.equal(first.targets.finch.desiredHash, second.targets.finch.desiredHash);
+    assert.equal(adapter.metrics().compileCount, 1);
   } finally {
     adapter.close();
   }

@@ -119,17 +119,22 @@ export function createPeerRegistry(config, options = {}) {
 
   function annotateTarget(unit, target) {
     const override = targetHostOverrides.has(targetOverrideKey(unit.id, target));
+    const observedTransportHost = isIpAddress(unit.remoteAddress) ? unit.remoteAddress : undefined;
     const effectiveTarget = override
       ? {
           ...target,
           host: unit.remoteAddress,
+          transportHost: observedTransportHost,
           advertisedHost: target.host,
           hostOverride: {
             source: "observed-remote-address",
             host: unit.remoteAddress
           }
         }
-      : target;
+      : {
+          ...target,
+          transportHost: observedTransportHost ?? target.transportHost
+        };
     const diagnostics = targetDiagnostics(unit, effectiveTarget);
     return diagnostics.length > 0 ? { ...effectiveTarget, diagnostics } : effectiveTarget;
   }
@@ -246,12 +251,19 @@ function normalizeTargets(targets, hardwareUnitId, hardwareUnitName, config) {
       localId: rawId,
       name: stringField(target.name) || address || id,
       host: stringField(target.host),
+      transportHost: stringField(target.transportHost) || undefined,
       port: nullableNumberField(target.port),
       address,
       instanceId: stringField(target.instanceId),
       messagePath: stringField(target.messagePath) || address,
       ackPath: stringField(target.ackPath) || undefined,
       currentStagePath: stringField(target.currentStagePath) || undefined,
+      clockPath: stringField(target.clockPath) || undefined,
+      clockStartAckPath: stringField(target.clockStartAckPath) || undefined,
+      clockStartAck: numericListField(target.clockStartAck),
+      clockPhaseResetPath: stringField(target.clockPhaseResetPath) || undefined,
+      clockPhaseAckPath: stringField(target.clockPhaseAckPath) || undefined,
+      clockPhaseAck: numericListField(target.clockPhaseAck),
       oscQueryUrl: stringField(target.oscQueryUrl) || undefined,
       app: stringField(target.app ?? target.instrument) || undefined,
       instance: stringField(target.instance ?? target.instanceName) || undefined,
@@ -359,6 +371,14 @@ function nullableNumberField(value) {
     throw new Error("target port must be a finite number");
   }
   return number;
+}
+
+function numericListField(value) {
+  if (!Array.isArray(value)) {
+    return undefined;
+  }
+  const numbers = value.map(Number);
+  return numbers.every(Number.isFinite) ? numbers : undefined;
 }
 
 function clampMs(value, fallback, min, max) {

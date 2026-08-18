@@ -1,0 +1,56 @@
+{
+  "name": "Seven-bird transport canary",
+  "context": {
+    "clip": { "TimeSignature": { "numerator": 4, "denominator": 4 } },
+    "scale": {},
+    "grid": { "subdivision": 4 },
+    "seed": 0
+  },
+  "players": [
+    { "id": "player-1", "label": "Finch 24", "color": "#6ee7b7" },
+    { "id": "player-2", "label": "Heron 16", "color": "#60a5fa" },
+    { "id": "player-3", "label": "Raven 14", "color": "#f59e0b" },
+    { "id": "player-4", "label": "Wren 10", "color": "#f472b6" },
+    { "id": "player-5", "label": "Finch 25", "color": "#a78bfa" },
+    { "id": "player-6", "label": "Heron 17", "color": "#fb7185" },
+    { "id": "player-7", "label": "Wren 11", "color": "#22d3ee" }
+  ],
+  "clips": [
+    { "id": "a-p1", "notes": [{ "pitch": 48, "start_time": 0, "duration": 0.5, "velocity": 92 }, { "pitch": 60, "start_time": 4, "duration": 0.5, "velocity": 84 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "a-p2", "notes": [{ "pitch": 50, "start_time": 0.5, "duration": 0.5, "velocity": 90 }, { "pitch": 62, "start_time": 4.5, "duration": 0.5, "velocity": 82 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "a-p3", "notes": [{ "pitch": 52, "start_time": 1, "duration": 0.5, "velocity": 88 }, { "pitch": 64, "start_time": 5, "duration": 0.5, "velocity": 80 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "a-p4", "notes": [{ "pitch": 53, "start_time": 1.5, "duration": 0.5, "velocity": 86 }, { "pitch": 65, "start_time": 5.5, "duration": 0.5, "velocity": 78 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "a-p5", "notes": [{ "pitch": 55, "start_time": 2, "duration": 0.5, "velocity": 84 }, { "pitch": 67, "start_time": 6, "duration": 0.5, "velocity": 76 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "a-p6", "notes": [{ "pitch": 57, "start_time": 2.5, "duration": 0.5, "velocity": 82 }, { "pitch": 69, "start_time": 6.5, "duration": 0.5, "velocity": 74 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "a-p7", "notes": [{ "pitch": 59, "start_time": 3, "duration": 0.5, "velocity": 80 }, { "pitch": 71, "start_time": 7, "duration": 0.5, "velocity": 72 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "b-p1", "notes": [{ "pitch": 60, "start_time": 0, "duration": 1, "velocity": 88 }, { "pitch": 48, "start_time": 4, "duration": 1, "velocity": 76 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "b-p2", "notes": [{ "pitch": 62, "start_time": 0.5, "duration": 1, "velocity": 86 }, { "pitch": 50, "start_time": 4.5, "duration": 1, "velocity": 74 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "b-p3", "notes": [{ "pitch": 64, "start_time": 1, "duration": 1, "velocity": 84 }, { "pitch": 52, "start_time": 5, "duration": 1, "velocity": 72 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "b-p4", "notes": [{ "pitch": 65, "start_time": 1.5, "duration": 1, "velocity": 82 }, { "pitch": 53, "start_time": 5.5, "duration": 1, "velocity": 70 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "b-p5", "notes": [{ "pitch": 67, "start_time": 2, "duration": 1, "velocity": 80 }, { "pitch": 55, "start_time": 6, "duration": 1, "velocity": 68 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "b-p6", "notes": [{ "pitch": 69, "start_time": 2.5, "duration": 1, "velocity": 78 }, { "pitch": 57, "start_time": 6.5, "duration": 1, "velocity": 66 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "b-p7", "notes": [{ "pitch": 71, "start_time": 3, "duration": 1, "velocity": 76 }, { "pitch": 59, "start_time": 7, "duration": 1, "velocity": 64 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "c-p1", "notes": [{ "pitch": 48, "start_time": 0, "duration": 2, "velocity": 72 }, { "pitch": 55, "start_time": 4, "duration": 2, "velocity": 68 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "c-p2", "notes": [{ "pitch": 50, "start_time": 0, "duration": 2, "velocity": 72 }, { "pitch": 57, "start_time": 4, "duration": 2, "velocity": 68 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "c-p3", "notes": [{ "pitch": 52, "start_time": 0, "duration": 2, "velocity": 72 }, { "pitch": 59, "start_time": 4, "duration": 2, "velocity": 68 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "c-p4", "notes": [{ "pitch": 53, "start_time": 0, "duration": 2, "velocity": 72 }, { "pitch": 60, "start_time": 4, "duration": 2, "velocity": 68 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "c-p5", "notes": [{ "pitch": 55, "start_time": 0, "duration": 2, "velocity": 72 }, { "pitch": 62, "start_time": 4, "duration": 2, "velocity": 68 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "c-p6", "notes": [{ "pitch": 57, "start_time": 0, "duration": 2, "velocity": 72 }, { "pitch": 64, "start_time": 4, "duration": 2, "velocity": 68 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "c-p7", "notes": [{ "pitch": 59, "start_time": 0, "duration": 2, "velocity": 72 }, { "pitch": 65, "start_time": 4, "duration": 2, "velocity": 68 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "d-p1", "notes": [{ "pitch": 72, "start_time": 0, "duration": 0.25, "velocity": 96 }, { "pitch": 60, "start_time": 4, "duration": 0.25, "velocity": 84 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "d-p2", "notes": [{ "pitch": 71, "start_time": 0.5, "duration": 0.25, "velocity": 94 }, { "pitch": 59, "start_time": 4.5, "duration": 0.25, "velocity": 82 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "d-p3", "notes": [{ "pitch": 69, "start_time": 1, "duration": 0.25, "velocity": 92 }, { "pitch": 57, "start_time": 5, "duration": 0.25, "velocity": 80 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "d-p4", "notes": [{ "pitch": 67, "start_time": 1.5, "duration": 0.25, "velocity": 90 }, { "pitch": 55, "start_time": 5.5, "duration": 0.25, "velocity": 78 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "d-p5", "notes": [{ "pitch": 65, "start_time": 2, "duration": 0.25, "velocity": 88 }, { "pitch": 53, "start_time": 6, "duration": 0.25, "velocity": 76 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "d-p6", "notes": [{ "pitch": 64, "start_time": 2.5, "duration": 0.25, "velocity": 86 }, { "pitch": 52, "start_time": 6.5, "duration": 0.25, "velocity": 74 }], "duration": { "bars": 2 }, "playbackType": "looped" },
+    { "id": "d-p7", "notes": [{ "pitch": 62, "start_time": 3, "duration": 0.25, "velocity": 84 }, { "pitch": 50, "start_time": 7, "duration": 0.25, "velocity": 72 }], "duration": { "bars": 2 }, "playbackType": "looped" }
+  ],
+  "blocks": [
+    { "id": "A", "tempo": 76, "duration": { "bars": 2 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "swing": 0, "swingAmt": 0.5, "players": { "player-1": "a-p1", "player-2": "a-p2", "player-3": "a-p3", "player-4": "a-p4", "player-5": "a-p5", "player-6": "a-p6", "player-7": "a-p7" } },
+    { "id": "B", "tempo": 90, "duration": { "bars": 2 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "swing": 0, "swingAmt": 0.5, "players": { "player-1": "b-p1", "player-2": "b-p2", "player-3": "b-p3", "player-4": "b-p4", "player-5": "b-p5", "player-6": "b-p6", "player-7": "b-p7" } },
+    { "id": "C", "tempo": 60, "duration": { "bars": 2 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "swing": 0, "swingAmt": 0.5, "players": { "player-1": "c-p1", "player-2": "c-p2", "player-3": "c-p3", "player-4": "c-p4", "player-5": "c-p5", "player-6": "c-p6", "player-7": "c-p7" } },
+    { "id": "D", "tempo": 100, "duration": { "bars": 2 }, "scale": { "root_note": 0, "scale_intervals": [0, 2, 4, 5, 7, 9, 11], "scale_name": "Ionian" }, "ttid": 2741, "swing": 0, "swingAmt": 0.5, "players": { "player-1": "d-p1", "player-2": "d-p2", "player-3": "d-p3", "player-4": "d-p4", "player-5": "d-p5", "player-6": "d-p6", "player-7": "d-p7" } }
+  ],
+  "macrostructure": { "blocks": ["A", "B", "C", "D"] },
+  "oscRoles": []
+}

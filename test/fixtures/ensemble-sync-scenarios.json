@@ -1,0 +1,92 @@
+{
+  "version": 1,
+  "timing": {
+    "patternLength": 1617,
+    "stagesPerBeat": 4,
+    "tempo": 76
+  },
+  "targets": ["wren-2", "wren-5", "raven-9", "finch-18", "finch-22", "heron-7", "heron-13"],
+  "scenarios": [
+    {
+      "id": "coordinated-restart-aligned",
+      "description": "A corrected restart remains within one sampling-edge stage across local and remote clients.",
+      "samples": [
+        { "atMs": 0, "stages": [83, 83, 83, 83, 83, 83, 83] },
+        { "atMs": 4000, "stages": [105, 105, 105, 105, 105, 105, 105] },
+        { "atMs": 8000, "stages": [146, 146, 147, 147, 147, 147, 147] },
+        { "atMs": 12000, "stages": [167, 167, 167, 167, 167, 167, 167] }
+      ],
+      "expected": { "status": "aligned", "phaseJudgement": "evaluate", "maxSpreadStages": 1 }
+    },
+    {
+      "id": "heron-stable-offset",
+      "description": "Both Heron clients advance at the ensemble rate while remaining 70 stages ahead.",
+      "samples": [
+        { "atMs": 0, "stages": [1334, 1334, 1334, 1334, 1334, 1404, 1404] },
+        { "atMs": 4000, "stages": [1356, 1356, 1357, 1357, 1357, 1427, 1427] },
+        { "atMs": 8000, "stages": [1377, 1377, 1378, 1378, 1378, 1448, 1448] }
+      ],
+      "expected": { "status": "stable-offset", "phaseJudgement": "evaluate", "outlierTargets": ["heron-7", "heron-13"] }
+    },
+    {
+      "id": "wren-local-start-lead",
+      "description": "Wren starts 25 stages before every remote client because the local write path completes first.",
+      "samples": [
+        { "atMs": 0, "stages": [156, 156, 131, 131, 131, 131, 131] },
+        { "atMs": 4000, "stages": [178, 178, 153, 153, 153, 153, 153] },
+        { "atMs": 8000, "stages": [199, 199, 174, 174, 174, 174, 174] }
+      ],
+      "expected": { "status": "stable-offset", "phaseJudgement": "evaluate", "outlierTargets": ["wren-2", "wren-5"] }
+    },
+    {
+      "id": "single-client-rate-drift",
+      "description": "Heron-13 accumulates phase error while the remaining clients retain one rate.",
+      "samples": [
+        { "atMs": 0, "stages": [100, 100, 100, 100, 100, 100, 100] },
+        { "atMs": 4000, "stages": [120, 120, 120, 120, 120, 120, 122] },
+        { "atMs": 8000, "stages": [140, 140, 140, 140, 140, 140, 145] }
+      ],
+      "expected": { "status": "rate-drift", "phaseJudgement": "evaluate", "outlierTargets": ["heron-13"] }
+    },
+    {
+      "id": "single-client-stopped",
+      "description": "One client stops advancing while the rest of the ensemble continues.",
+      "samples": [
+        { "atMs": 0, "stages": [100, 100, 100, 100, 100, 100, 100] },
+        { "atMs": 4000, "stages": [120, 120, 120, 120, 120, 120, 100] },
+        { "atMs": 8000, "stages": [140, 140, 140, 140, 140, 140, 100] }
+      ],
+      "expected": { "status": "stale-or-stopped", "phaseJudgement": "evaluate", "outlierTargets": ["heron-13"] }
+    },
+    {
+      "id": "tempo-change-remains-aligned",
+      "description": "Every client changes rate together after a live tempo change without creating phase skew.",
+      "samples": [
+        { "atMs": 0, "tempo": 76, "stages": [100, 100, 100, 100, 100, 100, 100] },
+        { "atMs": 4000, "tempo": 76, "stages": [120, 120, 120, 120, 120, 120, 120] },
+        { "atMs": 8000, "tempo": 100, "stages": [147, 147, 147, 147, 147, 147, 147] }
+      ],
+      "expected": { "status": "aligned", "phaseJudgement": "evaluate", "maxSpreadStages": 0 }
+    },
+    {
+      "id": "preparation-does-not-condemn-active-payload",
+      "description": "A newer payload is preparing while every client continues running the same older ACTIVE transaction.",
+      "runtime": { "sendQueueInProgress": true, "activeTransaction": 10507, "preparingTransaction": 10510 },
+      "samples": [
+        { "atMs": 0, "stages": [300, 300, 300, 300, 300, 300, 300] },
+        { "atMs": 4000, "stages": [320, 320, 320, 320, 320, 320, 320] }
+      ],
+      "expected": { "status": "preparing", "phaseJudgement": "suppress" }
+    },
+    {
+      "id": "server-restart-reconstructs-active-clients",
+      "description": "The server ledger is empty after restart, but every client reports one matching ACTIVE transaction and continues advancing.",
+      "runtime": { "serverActiveTransaction": null, "clientActiveTransaction": 10507, "sendQueueInProgress": false },
+      "samples": [
+        { "atMs": 0, "stages": [400, 400, 400, 400, 400, 400, 400] },
+        { "atMs": 4000, "stages": [420, 420, 420, 420, 420, 420, 420] }
+      ],
+      "expected": { "status": "reconstruct-active", "phaseJudgement": "evaluate", "action": "adopt-without-resend" }
+    }
+  ]
+}

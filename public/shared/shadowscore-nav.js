@@ -1,4 +1,5 @@
 import "./bipolar-range.js";
+import { mountShadowScoreTransportBar } from "./transport-bar.js";
 
 export const shadowScoreNavigation = Object.freeze([
   Object.freeze({
@@ -63,6 +64,7 @@ export function renderShadowScoreNavigation(root, options = {}) {
   );
   bindMenuBehavior(root);
   transferNavigation.connect();
+  mountShadowScoreTransportBar(root);
   return root;
 }
 

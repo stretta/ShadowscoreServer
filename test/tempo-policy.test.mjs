@@ -71,3 +71,25 @@ test("editing the active block written tempo does not silently change live tempo
   assert.equal(policy.snapshot().live, 120);
   policy.close();
 });
+
+test("tempo snapshots reuse the score received from store changes", () => {
+  const store = createScoreStore(createInitialScore(defaultConfig));
+  const readScore = store.getScore.bind(store);
+  let getScoreCalls = 0;
+  store.getScore = () => {
+    getScoreCalls += 1;
+    return readScore();
+  };
+  const policy = createTempoPolicy(store, defaultConfig);
+
+  assert.equal(getScoreCalls, 1);
+  policy.snapshot();
+  policy.snapshot();
+  policy.setLiveTempo(104);
+  assert.equal(getScoreCalls, 1);
+
+  store.replaceMesoBlock("A", { ...readScore().mesostructure.A, tempo: 88 });
+  assert.equal(policy.snapshot().written, 88);
+  assert.equal(getScoreCalls, 1);
+  policy.close();
+});

@@ -5,6 +5,7 @@ export function createTempoPolicy(store, config = {}, options = {}) {
   const initialScore = store.getScore();
   let activeBlockId = activeBlockIdFor(initialScore);
   let entryKey = entryKeyFor(initialScore);
+  let writtenTempo = writtenTempoForBlock(initialScore, activeBlockId, fallbackTempo);
   let liveTempo = activeWrittenTempo(initialScore, fallbackTempo);
   let followBlockTempo = options.followBlockTempo !== false;
   let source = "block";
@@ -15,6 +16,7 @@ export function createTempoPolicy(store, config = {}, options = {}) {
     const score = event.score ?? store.getScore();
     const nextEntryKey = entryKeyFor(score);
     activeBlockId = activeBlockIdFor(score);
+    writtenTempo = writtenTempoForBlock(score, activeBlockId, fallbackTempo);
     if (nextEntryKey === entryKey) return;
     entryKey = nextEntryKey;
     if (!followBlockTempo) return;
@@ -27,11 +29,9 @@ export function createTempoPolicy(store, config = {}, options = {}) {
 
   return {
     snapshot() {
-      const score = store.getScore();
-      activeBlockId = activeBlockIdFor(score);
       return {
         live: liveTempo,
-        written: writtenTempoForBlock(score, activeBlockId, fallbackTempo),
+        written: writtenTempo,
         followBlockTempo,
         source,
         activeBlockId
@@ -51,8 +51,9 @@ export function createTempoPolicy(store, config = {}, options = {}) {
     useBlockTempo() {
       const score = store.getScore();
       activeBlockId = activeBlockIdFor(score);
+      writtenTempo = writtenTempoForBlock(score, activeBlockId, fallbackTempo);
       return adoptTempo(
-        writtenTempoForBlock(score, activeBlockId, fallbackTempo),
+        writtenTempo,
         "block",
         { apply: true, reason: "use-block-now", force: true }
       );
@@ -90,7 +91,7 @@ export function createTempoPolicy(store, config = {}, options = {}) {
     }
     return {
       live: liveTempo,
-      written: writtenTempoForBlock(store.getScore(), activeBlockId, fallbackTempo),
+      written: writtenTempo,
       followBlockTempo,
       source,
       activeBlockId

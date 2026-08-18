@@ -6,7 +6,7 @@ import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "../src/http/routes.mjs";
+import { continuingClockContractForArrangement, distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "../src/http/routes.mjs";
 import { createOscSnapshotAutoRecall } from "../src/osc/snapshot-auto-recall.mjs";
 import { createMacroPlayback } from "../src/playback/macro-playback.mjs";
 import { createPeerRegistry } from "../src/registration/peer-registry.mjs";
@@ -419,7 +419,7 @@ test("transport routes store JACK snapshots and report freshness", async () => {
   assert.equal(stale.unusable, false);
 });
 
-test("external JACK tempo changes reassert assigned playback ClockInterval", async () => {
+test("external JACK tempo changes do not rewrite beat-relative ClockInterval", async () => {
   const writes = [];
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
@@ -445,15 +445,12 @@ test("external JACK tempo changes reassert assigned playback ClockInterval", asy
     rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
   });
 
-  await requestJson(context, "POST", "/transport/jack/snapshot", jackSnapshot({ beatsPerMinute: 122 }));
-  await requestJson(context, "POST", "/transport/jack/snapshot", jackSnapshot({ beatsPerMinute: 122 }));
+  const changed = await requestJson(context, "POST", "/transport/jack/snapshot", jackSnapshot({ beatsPerMinute: 122 }));
+  const jitter = await requestJson(context, "POST", "/transport/jack/snapshot", jackSnapshot({ beatsPerMinute: 121.99999 }));
 
-  assert.deepEqual(writes, [{
-    host: "192.168.68.96",
-    port: 9000,
-    path: "/rnbo/inst/2/messages/in/ClockInterval",
-    value: 30
-  }]);
+  assert.equal(changed.transport.tempo.live, 122);
+  assert.equal(jitter.transport.tempo.live, 122);
+  assert.deepEqual(writes, []);
 });
 
 test("transport route rejects malformed JACK snapshots", async () => {
@@ -1801,6 +1798,12 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     {
       host: "192.168.68.96",
       port: 9000,
+      path: "/rnbo/inst/2/params/Clock/Clock",
+      value: "Off"
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
       path: "/rnbo/inst/2/messages/in/SetStage",
       value: 0
     },
@@ -1812,6 +1815,7 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     }
   ]);
   assert.equal(started.clockWrites.length, 1);
+  assert.equal(started.phaseClockStopWrites.length, 1);
   assert.equal(started.phaseWrites.length, 1);
 
   const stopped = await requestJson(context, "POST", "/transport/stop", {});
@@ -2368,13 +2372,19 @@ test("Shadowbox transport intent restarts assigned peers from the initiating uni
         host: "127.0.0.1",
         port: 1234,
         address: "/rnbo/inst/2/messages/in/shadowscore",
-        currentStagePath: "/rnbo/inst/2/messages/out/current_stage"
+        currentStagePath: "/rnbo/inst/2/messages/out/current_stage",
+        clockPath: "/rnbo/inst/2/params/Clock",
+        clockStartAckPath: "/rnbo/inst/2/messages/out/clock_start_ack"
       }]
     }
   });
   const currentStages = new Map([
     ["wren-client", 40],
     ["heron-client", 40]
+  ]);
+  const clockStartCounters = new Map([
+    ["wren-client", 4],
+    ["heron-client", 8]
   ]);
   const context = createRouteContext({
     config,
@@ -2387,6 +2397,8 @@ test("Shadowbox transport intent restarts assigned peers from the initiating uni
           port: 1234,
           address: "/rnbo/inst/7/messages/in/shadowscore",
           currentStagePath: "/rnbo/inst/7/messages/out/current_stage",
+          clockPath: "/rnbo/inst/7/params/Clock",
+          clockStartAckPath: "/rnbo/inst/7/messages/out/clock_start_ack",
           hardwareUnitId: "heron",
           hardwareUnitName: "heron",
           available: true
@@ -2400,11 +2412,18 @@ test("Shadowbox transport intent restarts assigned peers from the initiating uni
           const targetId = write.host === "127.0.0.1" ? "wren-client" : "heron-client";
           currentStages.set(targetId, Number(write.value));
         }
+        if (write.path.endsWith("/Clock") && write.value === "On") {
+          const targetId = write.host === "127.0.0.1" ? "wren-client" : "heron-client";
+          clockStartCounters.set(targetId, clockStartCounters.get(targetId) + 1);
+        }
       },
       rnboStageFetch: async (url) => ({
         ok: true,
         async json() {
-          return { VALUE: [currentStages.get(url.includes("/inst/2/") ? "wren-client" : "heron-client")] };
+          const targetId = url.includes("/inst/2/") ? "wren-client" : "heron-client";
+          return url.endsWith("/clock_start_ack")
+            ? { VALUE: [clockStartCounters.get(targetId), currentStages.get(targetId)] }
+            : { VALUE: [currentStages.get(targetId)] };
         }
       }),
       rnboStageCollector: {
@@ -2459,17 +2478,26 @@ test("Shadowbox transport intent restarts assigned peers from the initiating uni
   assert.equal(startOptions.anchorOffsetBeats, 2.5);
   assert.equal(started.anchor.phaseAligned, true);
   assert.equal(started.arrangementSynchronized, true);
+  assert.equal(started.phaseAlignment.clockStartAcknowledgement.verified, true);
+  assert.deepEqual(
+    started.phaseAlignment.clockStartAcknowledgement.acknowledgements.map(({ targetId, baselineCounter, counter, stage }) =>
+      ({ targetId, baselineCounter, counter, stage })),
+    [
+      { targetId: "wren-client", baselineCounter: 4, counter: 5, stage: 40 },
+      { targetId: "heron-client", baselineCounter: 8, counter: 9, stage: 40 }
+    ]
+  );
   assert.deepEqual(started.phaseAlignment.offsets, [
     { targetId: "wren-client", stage: 40, offsetStages: 0 },
     { targetId: "heron-client", stage: 40, offsetStages: 0 }
   ]);
   assert.deepEqual(writes.map((write) => [write.path, write.value]), [
-    ["/rnbo/inst/2/params/Clock/Clock", "Off"],
-    ["/rnbo/inst/7/params/Clock/Clock", "Off"],
+    ["/rnbo/inst/2/params/Clock", "Off"],
+    ["/rnbo/inst/7/params/Clock", "Off"],
     ["/rnbo/inst/2/messages/in/SetStage", 40],
     ["/rnbo/inst/7/messages/in/SetStage", 40],
-    ["/rnbo/inst/2/params/Clock/Clock", "On"],
-    ["/rnbo/inst/7/params/Clock/Clock", "On"]
+    ["/rnbo/inst/2/params/Clock", "On"],
+    ["/rnbo/inst/7/params/Clock", "On"]
   ]);
   assert.deepEqual(started.phaseAlignment.writes.map((write) => write.phase), [
     "clock-off", "clock-off", "set-stage", "set-stage", "clock-on", "clock-on"
@@ -2727,6 +2755,7 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
 
   assert.deepEqual(sequence, [
     "ClockInterval",
+    "Clock",
     "SetStage",
     "activation_scheduled",
     "Clock",
@@ -2734,6 +2763,182 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
     "activation_completed"
   ]);
   assert.equal(started.activations[0].acknowledgement.status, "active");
+});
+
+test("transport start refreshes the clock ACK cohort after JACK starts", async () => {
+  let peerAvailable = false;
+  let running = false;
+  const clockCounters = new Map([["local", 0], ["peer", 0]]);
+  const phaseCounters = new Map([["local", 0], ["peer", 0]]);
+  const stages = new Map([["local", -1], ["peer", -1]]);
+  const acknowledgedStages = new Map([["local", -1], ["peer", -1]]);
+  const peerTarget = {
+    id: "peer-client",
+    host: "peer.local",
+    port: 1234,
+    address: "/rnbo/inst/7/messages/in/shadowscore",
+    currentStagePath: "/rnbo/inst/7/messages/out/current_stage",
+    clockPath: "/rnbo/inst/7/params/Clock",
+    clockStartAckPath: "/rnbo/inst/7/messages/out/clock_start_ack",
+    clockPhaseResetPath: "/rnbo/inst/7/messages/in/clock_phase_reset",
+    clockPhaseAckPath: "/rnbo/inst/7/messages/out/clock_phase_ack",
+    available: true
+  };
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        phaseAlignment: { startAckTimeoutMs: 0 },
+        oscQuery: { enabled: false },
+        targets: [{
+          id: "local-client",
+          host: "127.0.0.1",
+          port: 1234,
+          address: "/rnbo/inst/2/messages/in/shadowscore",
+          currentStagePath: "/rnbo/inst/2/messages/out/current_stage",
+          clockPath: "/rnbo/inst/2/params/Clock",
+          clockStartAckPath: "/rnbo/inst/2/messages/out/clock_start_ack",
+          clockPhaseResetPath: "/rnbo/inst/2/messages/in/clock_phase_reset",
+          clockPhaseAckPath: "/rnbo/inst/2/messages/out/clock_phase_ack"
+        }]
+      }
+    }),
+    runtime: {
+      peerRegistry: {
+        snapshot: () => [],
+        targets: () => peerAvailable ? [peerTarget] : [],
+        oscTargets: () => [],
+        rnboDevices: () => []
+      },
+      jackController: {
+        async start() {
+          peerAvailable = true;
+          return { ok: true, action: "start" };
+        }
+      },
+      rnboParamWriter: async (write) => {
+        const key = write.host === "127.0.0.1" ? "local" : "peer";
+        if (write.path.endsWith("/SetStage")) {
+          stages.set(key, Number(write.value));
+          acknowledgedStages.set(key, Number(write.value));
+        }
+        if (write.path.endsWith("/Clock") && write.value === "On") {
+          clockCounters.set(key, clockCounters.get(key) + 1);
+          stages.set(key, key === "local" ? 3 : 11);
+        }
+        if (write.path.endsWith("/clock_phase_reset")) {
+          phaseCounters.set(key, phaseCounters.get(key) + 1);
+        }
+      },
+      rnboAckFetch: async (url) => {
+        const key = url.includes("/inst/2/") ? "local" : "peer";
+        return {
+          ok: true,
+          async json() {
+            return { VALUE: [
+              url.endsWith("/clock_phase_ack") ? phaseCounters.get(key) : clockCounters.get(key),
+              acknowledgedStages.get(key)
+            ] };
+          }
+        };
+      },
+      rnboStageFetch: async (url) => {
+        const key = url.includes("/inst/2/") ? "local" : "peer";
+        return {
+          ok: true,
+          async json() { return { VALUE: [stages.get(key)] }; }
+        };
+      },
+      rnboStageCollector: {
+        async ensureObservations() {},
+        targets: (targets) => targets.map((target) => ({
+          ...target,
+          currentStage: 0,
+          stageMovement: "stopped",
+          stageReadbackStatus: "fresh"
+        }))
+      },
+      macroPlayback: {
+        snapshot: () => ({ running, activeBlockId: "A", macroIndex: 0 }),
+        start: () => {
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => { running = false; }
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "local-client",
+    rnboHost: "127.0.0.1",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "peer-client",
+    rnboHost: "peer.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/7/messages/in/shadowscore"
+  });
+
+  const started = await requestJson(context, "POST", "/transport/play", {
+    mode: "timer",
+    forceRestart: true,
+    phaseReset: true
+  });
+
+  assert.equal(started.clockStartAcknowledgement.verified, true);
+  assert.equal(started.clockStartAcknowledgement.targetCount, 2);
+  assert.deepEqual(
+    started.clockStartAcknowledgement.acknowledgements.map(({ targetId }) => targetId),
+    ["local-client", "peer-client"]
+  );
+  assert.equal(started.clockStartCorrectionWrites.length, 2);
+  assert.equal(started.clockPhaseResetWrites.length, 2);
+  assert.equal(started.clockPhaseAcknowledgement.verified, true);
+  assert.equal(
+    started.clockStartPhaseVerification.verified,
+    true,
+    JSON.stringify(started.clockStartPhaseVerification)
+  );
+  assert.deepEqual([...stages.values()], [0, 0]);
+});
+
+test("continuing arrangements reject per-section ClockInterval changes", () => {
+  const score = createInitialScore(defaultConfig);
+  score.assignments["player-1"] = {
+    ...score.assignments["player-1"],
+    rnboTargetId: "client-1",
+    rnboHost: "client.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/1/messages/in/shadowscore"
+  };
+  score.clips["a-player-1"].notes[0].start_time = 0.25;
+  score.clips["a-player-1"].notes[0].duration = 0.25;
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      resolution: {
+        mode: "hybrid",
+        candidateStagesPerBeat: [1, 2, 4, 8, 16],
+        defaultStagesPerBeat: 4,
+        quantizationErrorTargetBeats: 0
+      }
+    }
+  });
+  const result = continuingClockContractForArrangement(score, config, [{
+    id: "client-1",
+    host: "client.local",
+    port: 1234,
+    address: "/rnbo/inst/1/messages/in/shadowscore",
+    capabilities: {
+      continuingScoreActivation: true,
+      maxStages: 4096,
+      maxNoteRows: 819
+    }
+  }]);
+
+  assert.equal(result.applies, true);
+  assert.equal(result.stable, false);
+  assert.deepEqual([...new Set(result.variants.map(({ ticksPerStage }) => ticksPerStage))], [120, 480]);
 });
 
 test("transport play prefers atomic block activation for continuing clients", async () => {
@@ -2810,6 +3015,7 @@ test("transport play prefers atomic block activation for continuing clients", as
     "prepare:A:transport-start",
     "apply:A:now",
     "ClockInterval",
+    "Clock",
     "SetStage",
     "Clock",
     "playback_started"
@@ -3143,6 +3349,67 @@ test("playback snapshot is versioned and reports authoritative and execution pos
   assert.equal(first.lifecycleEvents[0].type, "prepare_completed");
 });
 
+test("transport object path resolves to one revisioned musician-facing authority", async () => {
+  const context = createRouteContext({
+    runtime: {
+      performanceTransport: {
+        playersPlaying: true,
+        playerControlOrigin: "shadowscore",
+        adoptionPayloadVerified: null,
+        arrangementRequestedMode: "run",
+        lastExternalIntent: null,
+        lastExternalPhaseAlignment: null
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          mode: "jack",
+          activeBlockId: "A",
+          macroIndex: 0,
+          beatIntoBlock: 2,
+          compositionBeat: 2,
+          witness: { source: "jack", usable: true, fresh: true }
+        })
+      },
+      jackTransport: {
+        snapshot: () => ({
+          source: "jack",
+          status: "fresh",
+          fresh: true,
+          ageMs: 10,
+          latest: { state: "rolling", beatsPerMinute: 120, absoluteBeat: 2 }
+        })
+      }
+    }
+  });
+
+  const resolved = await requestJson(context, "GET", "/api/v1/objects/resolve?path=shadow_score%20transport");
+  assert.equal(resolved.object.id, "transport");
+  assert.ok(resolved.object.methods.includes("re_sync"));
+
+  const first = await requestJson(context, "GET", "/api/v1/objects/transport");
+  const second = await requestJson(context, "GET", "/api/v1/objects/transport");
+  assert.equal(first.object.authority, "server");
+  assert.equal(first.object.clock_source, "jack");
+  assert.equal(first.object.position_beats, 2);
+  assert.equal(second.object.revision, first.object.revision + 1);
+  assert.equal(first.object.capabilities.can_locate, false);
+});
+
+test("transport object rejects unknown operations and advertises deferred continuous locate", async () => {
+  const context = createRouteContext();
+  const unknown = await request(context, "POST", "/api/v1/objects/transport", { operation: "launch_confetti" });
+  assert.equal(unknown.status, 400);
+  assert.match(unknown.body, /unknown transport operation/);
+
+  const locate = await request(context, "POST", "/api/v1/objects/transport", {
+    operation: "locate_fraction",
+    args: { fraction: 0.5 }
+  });
+  assert.equal(locate.status, 501);
+  assert.match(locate.body, /continuous arrangement locate is not yet available/);
+});
+
 test("playback snapshot timestamps its boundary after peer stage collection", async () => {
   let stateObservedAt = null;
   const context = createRouteContext({
@@ -3181,9 +3448,39 @@ test("playback snapshot timestamps its boundary after peer stage collection", as
 
 test("playback snapshots consume server-owned stage observations without forcing refresh", async () => {
   let ensureCalls = 0;
+  let updateTargets;
+  const timingContractReferences = [];
+  const cachedTarget = {
+    id: "cached-player",
+    voiceId: "player-1",
+    available: true,
+    currentStage: 8,
+    currentStagePath: "/rnbo/inst/1/messages/out/current_stage"
+  };
   const context = createRouteContext({
     runtime: {
+      rnboAdapter: {
+        async playbackUpdates(blockId, options) {
+          updateTargets = options.targets;
+          return { blockId, targets: {} };
+        }
+      },
+      macroPlayback: {
+        snapshot(context) {
+          timingContractReferences.push(context.timingContracts);
+          return {
+            running: false,
+            mode: "stopped",
+            activeBlockId: "A",
+            macroIndex: 0,
+            witness: { source: "none", usable: false, fresh: false }
+          };
+        }
+      },
       rnboStageCollector: {
+        currentTargets() {
+          return [cachedTarget];
+        },
         async ensureObservations() {
           ensureCalls += 1;
         },
@@ -3200,6 +3497,8 @@ test("playback snapshots consume server-owned stage observations without forcing
   await requestJson(context, "GET", "/playback/snapshot");
   await requestJson(context, "GET", "/playback/snapshot");
   assert.equal(ensureCalls, 2);
+  assert.deepEqual(updateTargets, [cachedTarget]);
+  assert.equal(timingContractReferences[0], timingContractReferences[1]);
 });
 
 test("playback updates route exposes the adapter's shared live-edit state", async () => {
@@ -3549,6 +3848,12 @@ test("macro playback start can include an immediate phase reset", async () => {
     {
       host: "192.168.68.96",
       port: 9000,
+      path: "/rnbo/inst/2/params/Clock/Clock",
+      value: "Off"
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
       path: "/rnbo/inst/2/messages/in/SetStage",
       value: 0
     },
@@ -3557,6 +3862,15 @@ test("macro playback start can include an immediate phase reset", async () => {
       port: 9000,
       path: "/rnbo/inst/2/params/Clock/Clock",
       value: "On"
+    }
+  ]);
+  assert.deepEqual(started.phaseClockStopWrites, [
+    {
+      host: "192.168.68.96",
+      port: 9000,
+      path: "/rnbo/inst/2/params/Clock/Clock",
+      targetId: "source-client",
+      value: "Off"
     }
   ]);
   assert.deepEqual(started.phaseWrites, [
@@ -3573,6 +3887,102 @@ test("macro playback start can include an immediate phase reset", async () => {
   assert.equal(started.phaseAnchor.currentStage, 12);
   assert.equal(started.phaseAnchor.absoluteBeat, 12 / started.phaseAnchor.stagesPerBeat);
   assert.equal(startOptions.anchorOffsetBeats, started.phaseAnchor.absoluteBeat);
+});
+
+test("forced Re-sync waits for delayed remote clock-off before resetting any stage", async () => {
+  const clocksOff = new Set();
+  const resetBarrierSizes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "wren-client",
+            host: "127.0.0.1",
+            port: 1234,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          },
+          {
+            id: "raven-client",
+            host: "raven.local",
+            port: 1234,
+            address: "/rnbo/inst/9/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      performanceTransport: { playersPlaying: true, arrangementRequestedMode: "run" },
+      rnboParamWriter: async (write) => {
+        if (write.path.endsWith("/Clock/Clock") && write.value === "Off") {
+          if (write.host === "raven.local") await new Promise((resolve) => setTimeout(resolve, 15));
+          clocksOff.add(write.host);
+        }
+        if (write.path.endsWith("/SetStage")) resetBarrierSizes.push(clocksOff.size);
+      },
+      macroPlayback: {
+        snapshot: () => ({ running: true, activeBlockId: "A", macroIndex: 0 }),
+        start: () => context.runtime.macroPlayback.snapshot()
+      }
+    }
+  });
+
+  const started = await requestJson(context, "POST", "/macrostructure/playback/start", {
+    mode: "timer",
+    phaseReset: true,
+    forceRestart: true
+  });
+
+  assert.equal(started.ok, true);
+  assert.equal(started.phaseClockStopWrites.length, 2);
+  assert.equal(started.phaseWrites.length, 2);
+  assert.deepEqual(resetBarrierSizes, [2, 2]);
+});
+
+test("transport object Re-sync preserves the current block stage", async () => {
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          {
+            id: "source-client",
+            host: "192.168.68.96",
+            port: 9000,
+            address: "/rnbo/inst/2/messages/in/shadowscore"
+          }
+        ]
+      }
+    }),
+    runtime: {
+      performanceTransport: { playersPlaying: true, arrangementRequestedMode: "run" },
+      rnboParamWriter: async (write) => writes.push(write),
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          mode: "jack",
+          activeBlockId: "A",
+          macroIndex: 0,
+          beatIntoBlock: 5.25,
+          compositionBeat: 5.25,
+          witness: { source: "jack", usable: true, fresh: true }
+        }),
+        start: () => context.runtime.macroPlayback.snapshot()
+      }
+    }
+  });
+
+  const response = await requestJson(context, "POST", "/api/v1/objects/transport", {
+    operation: "re_sync"
+  });
+
+  assert.equal(response.ok, true);
+  assert.equal(response.result.rnboReadiness.phaseOnly, true);
+  assert.equal(response.result.phaseStage, 84);
+  assert.deepEqual(
+    writes.filter((write) => write.path.endsWith("/SetStage")).map((write) => write.value),
+    [84]
+  );
 });
 
 test("macro playback start can scope clock writes to a selected RNBO target", async () => {
@@ -4621,6 +5031,7 @@ test("hardware session flags numeric RNBO target host mismatches", async () => {
 
   assert.equal(unit.remoteAddress, "192.168.68.92");
   assert.equal(target.host, "192.168.68.88");
+  assert.equal(target.transportHost, "192.168.68.92");
   assert.equal(target.diagnostics[0].type, "target-host-mismatch");
   assert.equal(target.diagnostics[0].advertisedHost, "192.168.68.88");
   assert.equal(target.diagnostics[0].observedHost, "192.168.68.92");
@@ -5944,6 +6355,19 @@ test("shared ShadowScore stylesheet is served as a static asset", async () => {
   assert.match(response.headers["Content-Type"], /text\/css/);
   assert.match(response.body, /--ss-bg/);
   assert.match(response.body, /ss-route-tabs/);
+});
+
+test("shared musician transport bar is served as a static asset", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/shared/transport-bar.js");
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /javascript/);
+  assert.match(response.body, /\/api\/v1\/objects\/transport/);
+  assert.match(response.body, /data-command="play"/);
+  assert.match(response.body, /data-field="position"/);
+  assert.match(response.body, /data-field="clock"/);
+  assert.match(response.body, /data-field="bbt"/);
+  assert.match(response.body, /data-field="tempo"/);
 });
 
 test("shared bipolar range renderer is served as a static asset", async () => {

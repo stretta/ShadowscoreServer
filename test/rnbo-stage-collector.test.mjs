@@ -31,9 +31,11 @@ test("RNBO stage collector polls peer OSCQuery paths concurrently and overlays o
   assert.equal(observed[0].currentStage, 863);
   assert.equal(observed[0].stateAgeMs, 0);
   assert.equal(observed[0].stageReadbackStatus, "fresh");
+  assert.equal(collector.currentTargets()[0].currentStage, 863);
 
   now = 1600;
   assert.equal(collector.targets(targets)[0].stageReadbackStatus, "stale");
+  assert.equal(collector.currentTargets()[0].stageReadbackStatus, "stale");
 });
 
 test("RNBO stage collector retains the last value and reports read failures", async () => {
@@ -170,4 +172,12 @@ test("RNBO current stage URL prefers advertised OSCQuery endpoints", () => {
     oscQueryUrl: "http://finch.local:5678",
     currentStagePath: "/rnbo/inst/9/messages/out/current_stage"
   }), "http://finch.local:5678/rnbo/inst/9/messages/out/current_stage");
+});
+
+test("RNBO current stage URL prefers the observed transport host over an advertised endpoint", () => {
+  assert.equal(rnboCurrentStageUrl({
+    transportHost: "192.168.68.104",
+    oscQueryUrl: "http://finch.local:5678",
+    currentStagePath: "/rnbo/inst/9/messages/out/current_stage"
+  }), "http://192.168.68.104:5678/rnbo/inst/9/messages/out/current_stage");
 });

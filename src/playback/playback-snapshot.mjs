@@ -29,7 +29,9 @@ export function buildPlaybackSnapshot({
   const contractByTarget = new Map(timingContracts.map((contract) => [contract.targetId, contract]));
   const jackAuthoritative = jack?.status === "fresh" && playback?.witness?.source === "jack";
   const transportRolling = timingSourceRolling(playback, jack);
+  const executionRolling = transportRolling || Boolean(controls?.players?.playing || controls?.players?.observedPlaying);
   const authoritativeBeat = jackAuthoritative ? finiteOrNull(playback.beatIntoBlock) : null;
+  const transportTempo = positiveOrNull(tempo?.live ?? jack?.latest?.beatsPerMinute ?? playback?.witness?.tempo);
   const targetSnapshots = {};
 
   for (const target of targets) {
@@ -45,6 +47,17 @@ export function buildPlaybackSnapshot({
     const stateObservedAt = timestampMs(target.stateObservedAt ?? target.observedAt ?? target.lastSeenAt)
       ?? (currentStage === null ? null : observedAtMs);
     const stateAgeMs = stateObservedAt === null ? null : Math.max(0, observedAtMs - stateObservedAt);
+    const cycleBeats = stagesPerBeat === null ? null : positiveOrNull(contract?.timing?.patternLength / stagesPerBeat);
+    const projectedBeatIntoBlock = projectBeatToBoundary({
+      beatIntoBlock,
+      stateAgeMs,
+      tempo: transportTempo,
+      rolling: executionRolling,
+      cycleBeats
+    });
+    const phaseErrorBeats = projectedBeatIntoBlock !== null && authoritativeBeat !== null
+      ? circularDifference(projectedBeatIntoBlock, authoritativeBeat, cycleBeats)
+      : null;
     const sendStatus = target.sendStatus ?? null;
     const activeTransaction = sendStatus && Object.hasOwn(sendStatus, "activeTransaction")
       ? integerOrNull(sendStatus.activeTransaction)
@@ -62,11 +75,13 @@ export function buildPlaybackSnapshot({
       currentStage,
       stagesPerBeat,
       beatIntoBlock,
-      phaseErrorBeats: beatIntoBlock !== null && authoritativeBeat !== null
-        ? beatIntoBlock - authoritativeBeat
+      projectedBeatIntoBlock,
+      phaseProjectionMs: projectedBeatIntoBlock !== null && beatIntoBlock !== null
+        ? stateAgeMs
         : null,
-      phaseErrorStages: beatIntoBlock !== null && authoritativeBeat !== null && stagesPerBeat !== null
-        ? (beatIntoBlock - authoritativeBeat) * stagesPerBeat
+      phaseErrorBeats,
+      phaseErrorStages: phaseErrorBeats !== null && stagesPerBeat !== null
+        ? phaseErrorBeats * stagesPerBeat
         : null,
       activeTransaction,
       preparedTransaction,
@@ -121,6 +136,25 @@ export function buildPlaybackSnapshot({
     lifecycleEvents: lifecycleEvents.slice(-100),
     updates
   };
+}
+
+function projectBeatToBoundary({ beatIntoBlock, stateAgeMs, tempo, rolling, cycleBeats }) {
+  if (beatIntoBlock === null) return null;
+  const elapsedBeats = rolling && stateAgeMs !== null && tempo !== null
+    ? stateAgeMs * tempo / 60000
+    : 0;
+  const projected = beatIntoBlock + elapsedBeats;
+  return cycleBeats === null ? projected : positiveModulo(projected, cycleBeats);
+}
+
+function circularDifference(value, reference, cycle) {
+  const difference = value - reference;
+  if (cycle === null || !Number.isFinite(cycle) || cycle <= 0) return difference;
+  return positiveModulo(difference + (cycle / 2), cycle) - (cycle / 2);
+}
+
+function positiveModulo(value, modulus) {
+  return ((value % modulus) + modulus) % modulus;
 }
 
 function timingSourceRolling(playback, jack) {

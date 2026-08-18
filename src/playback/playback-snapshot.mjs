@@ -63,6 +63,10 @@ export function buildPlaybackSnapshot({
       ? integerOrNull(sendStatus.activeTransaction)
       : integerOrNull(sendStatus?.ack?.transactionId ?? sendStatus?.transactionId);
     const preparedTransaction = integerOrNull(sendStatus?.preparedTransaction);
+    const activeBlockId = String(sendStatus?.activeBlockId ?? "").trim()
+      || (activeTransaction !== null && preparedTransaction === null ? String(sendStatus?.blockId ?? "").trim() : "")
+      || String(playback.activeBlockId ?? contract?.timing?.blockId ?? "").trim();
+    const preparedBlockId = preparedTransaction !== null ? String(sendStatus?.blockId ?? "").trim() : "";
 
     targetSnapshots[targetId] = withoutUndefined({
       id: targetId,
@@ -88,7 +92,9 @@ export function buildPlaybackSnapshot({
       queuedTransaction: queuedTransactionForTarget(sendQueue, targetId),
       payloadRevision: sendStatus?.payloadRevision ?? sendStatus?.scoreRevision ?? null,
       payloadHash: sendStatus?.payloadHash ?? null,
-      blockId: sendStatus?.blockId ?? contract?.timing?.blockId ?? playback.activeBlockId ?? "",
+      blockId: activeBlockId,
+      activeBlockId,
+      preparedBlockId,
       noteCount: sendStatus?.noteCount ?? contract?.noteCount ?? 0,
       transmittedRowCount: sendStatus?.transmittedRowCount ?? contract?.transmittedRowCount ?? 0,
       preparationDurationMs: sendStatus?.preparationDurationMs ?? null,

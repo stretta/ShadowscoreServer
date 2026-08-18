@@ -16,6 +16,7 @@ import { buildOscTargets } from "../osc/targets.mjs";
 import { buildOscResourceReport } from "../osc/resources.mjs";
 import { runAutomaticOscOnboarding } from "../osc/onboarding.mjs";
 import { rnboClientBeatWitness, selectBeatWitness } from "../playback/beat-witness.mjs";
+import { deriveMacroPosition, macroTimeline } from "../playback/macro-playback.mjs";
 import { rnboCurrentStageUrl, rnboOscQueryValueUrl } from "../playback/rnbo-stage-collector.mjs";
 import { buildPlaybackSnapshot, nextPlaybackSnapshotGeneration } from "../playback/playback-snapshot.mjs";
 import { createTempoPolicy } from "../playback/tempo-policy.mjs";
@@ -23,7 +24,8 @@ import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 import { distributeBlockSwing } from "../sequencer/distribution.mjs";
 import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
-import { buildAuthoritativeTransportState, deriveSyncHealth, transportObjectDescriptor } from "../transport/authoritative-transport.mjs";
+import { buildAuthoritativeTransportState, deriveSyncHealth, resolveTransportLocation, transportObjectDescriptor } from "../transport/authoritative-transport.mjs";
+import { createAuthoritativeTransportPublisher } from "../transport/authoritative-transport-publisher.mjs";
 import { phaseStageAtBeat } from "../transport/ensemble-sync-supervisor.mjs";
 
 const REVISION_CONTROL_FIELDS = ["expectedVersion", "expectedScoreRevision", "expectedStructureRevision"];
@@ -795,6 +797,7 @@ export async function routeRequest(request, response, store, config, runtime = {
     try {
       const body = await readJson(request);
       store.resetStructurePlayhead(revisionOptions(body));
+      setLocatedTransportPosition(runtime, store.getScore(), 0);
       const phaseWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 }, {
         targetId: optionalString(body.targetId)
       });
@@ -1900,26 +1903,30 @@ async function openAuthoritativeTransportEventStream(request, response, store, c
     "Content-Type": "text/event-stream"
   });
 
-  let closed = false;
-  let pending = false;
-  const publish = async () => {
-    if (closed || pending) return;
-    pending = true;
-    try {
-      writeEvent(response, "snapshot", await authoritativeTransportSnapshot(store, config, runtime));
-    } catch (error) {
-      writeEvent(response, "error", { error: messageForError(error) });
-    } finally {
-      pending = false;
-    }
-  };
-  await publish();
-  const interval = setInterval(publish, 500);
+  const publisher = authoritativeTransportPublisher(store, config, runtime);
+  try {
+    writeEvent(response, "snapshot", await publisher.current());
+  } catch (error) {
+    writeEvent(response, "error", { error: messageForError(error) });
+  }
+  const unsubscribe = publisher.subscribe({
+    snapshot: (snapshot) => writeEvent(response, "snapshot", snapshot),
+    error: (error) => writeEvent(response, "error", { error: messageForError(error) })
+  });
 
   request.on("close", () => {
-    closed = true;
-    clearInterval(interval);
+    unsubscribe();
   });
+}
+
+function authoritativeTransportPublisher(store, config, runtime) {
+  if (!runtime.authoritativeTransportPublisher) {
+    runtime.authoritativeTransportPublisher = createAuthoritativeTransportPublisher(
+      () => authoritativeTransportSnapshot(store, config, runtime),
+      { intervalMs: 500 }
+    );
+  }
+  return runtime.authoritativeTransportPublisher;
 }
 
 function writeEvent(response, eventName, payload) {
@@ -2261,6 +2268,31 @@ export async function reassertPlaybackClockIntervals(score, config, runtime) {
   return targetWrites.flat();
 }
 
+export async function reassertPlaybackPatternLengths(score, config, runtime, options = {}) {
+  const targetId = optionalString(options.targetId);
+  const targets = (await readAllRnboTargets(config, runtime)).filter((target) =>
+    target.available !== false
+    && (!targetId || optionalString(target.id) === targetId)
+  );
+  const targetWrites = await Promise.all(targets.map(async (target) => {
+    const assignedVoiceId = assignedVoiceForTarget(score, target);
+    if (!assignedVoiceId) {
+      return [];
+    }
+    const compiled = compileScoreTransaction(score, config, 0, { ...target, voiceId: assignedVoiceId });
+    const writes = await writeRnboTransportControls(config, target, {
+      MaxSteps: compiled.patternLength
+    }, {
+      writer: runtime.rnboParamWriter
+    });
+    return writes.map((write) => ({
+      ...write,
+      targetId: target.id
+    }));
+  }));
+  return targetWrites.flat();
+}
+
 function prepareRnboTransportControls(score, config, target, controls) {
   const entries = Object.entries(controls ?? {});
   const assignedVoiceId = assignedVoiceForTarget(score, target);
@@ -2367,7 +2399,10 @@ function performanceTransportFor(runtime) {
       arrangementRequestedMode: "run",
       lastExternalIntent: null,
       lastExternalPhaseAlignment: null,
-      lastClockStartAcknowledgement: null
+      lastClockStartAcknowledgement: null,
+      locatedCompositionBeat: null,
+      locatedBlockId: "",
+      locatedMacroIndex: null
     };
   }
   return runtime.performanceTransport;
@@ -2394,8 +2429,34 @@ function performanceTransportSnapshot(runtime, playback = runtime.macroPlayback?
       requestedMode: performance.arrangementRequestedMode,
       activeBlockId: playback.activeBlockId ?? "",
       macroIndex: playback.macroIndex ?? 0
+    },
+    position: {
+      compositionBeat: performance.locatedCompositionBeat,
+      activeBlockId: performance.locatedBlockId,
+      macroIndex: performance.locatedMacroIndex
     }
   };
+}
+
+function setLocatedTransportPosition(runtime, score, compositionBeat) {
+  const performance = performanceTransportFor(runtime);
+  const position = deriveMacroPosition(score, compositionBeat);
+  performance.locatedCompositionBeat = position.cycleBeat;
+  performance.locatedBlockId = position.activeBlockId;
+  performance.locatedMacroIndex = position.macroIndex;
+  return position;
+}
+
+function locatedTransportPosition(performance, score) {
+  if (performance.locatedCompositionBeat === null
+    || performance.locatedCompositionBeat === undefined
+    || !Number.isFinite(Number(performance.locatedCompositionBeat))) return null;
+  const position = deriveMacroPosition(score, Number(performance.locatedCompositionBeat));
+  if (position.activeBlockId !== score.structureState?.activeBlockId
+    || position.macroIndex !== Number(score.structureState?.macroIndex)) {
+    return null;
+  }
+  return position;
 }
 
 function performanceStateText(controls) {
@@ -2744,6 +2805,7 @@ async function executeAuthoritativeTransportOperation(store, config, runtime, bo
       return stopUnifiedTransport(store, config, runtime, args);
     case "return_to_start": {
       store.resetStructurePlayhead(revisionOptions(args));
+      setLocatedTransportPosition(runtime, store.getScore(), 0);
       const phaseWrites = await writeTransportControlsToPlaybackTargets(store.getScore(), config, runtime, { SetStage: 0 }, {
         targetId: optionalString(args.targetId)
       });
@@ -2762,11 +2824,14 @@ async function executeAuthoritativeTransportOperation(store, config, runtime, bo
       const current = Math.min(Math.max(Number(score.structureState?.macroIndex) || 0, 0), Math.max(0, blocks.length - 1));
       const delta = operation === "previous_section" ? -1 : 1;
       const index = blocks.length ? (current + delta + blocks.length) % blocks.length : 0;
-      return cueStructurePlayhead(store, config, runtime, {
+      const result = await cueStructurePlayhead(store, config, runtime, {
         activeBlockId: blocks[index] ?? score.structureState?.activeBlockId ?? "",
         macroIndex: index,
         source: operation
       }, revisionOptions(args));
+      const entry = macroTimeline(store.getScore()).entries.find((candidate) => candidate.index === index);
+      setLocatedTransportPosition(runtime, store.getScore(), entry?.startBeat ?? 0);
+      return result;
     }
     case "re_sync":
       return startUnifiedTransport(store, config, runtime, {
@@ -2779,9 +2844,10 @@ async function executeAuthoritativeTransportOperation(store, config, runtime, bo
       }, optionalString(body.client_id) || "transport-object");
     case "locate_beats":
     case "locate_fraction": {
-      const error = new Error("continuous arrangement locate is not yet available; use previous_section, next_section, or return_to_start");
-      error.statusCode = 501;
-      throw error;
+      return locateUnifiedTransport(store, config, runtime, {
+        ...args,
+        ...(operation === "locate_fraction" ? { fraction: args.fraction } : { beats: args.beats })
+      }, optionalString(body.client_id) || "transport-object");
     }
     default: {
       const error = new Error(`unknown transport operation '${operation}'`);
@@ -2789,6 +2855,63 @@ async function executeAuthoritativeTransportOperation(store, config, runtime, bo
       throw error;
     }
   }
+}
+
+async function locateUnifiedTransport(store, config, runtime, args = {}, sourceClientId = "transport-object") {
+  const score = store.getScore();
+  assertCueRevisions(score, revisionOptions(args));
+  const location = resolveTransportLocation(score, args);
+  const performance = performanceTransportFor(runtime);
+  const wasPlaying = performance.playersPlaying;
+  let stop = null;
+  if (wasPlaying) {
+    stop = await stopUnifiedTransport(store, config, runtime, args);
+  }
+
+  let playbackUpdate = null;
+  if (runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.applyBlockUpdate === "function") {
+    playbackUpdate = await runtime.rnboAdapter.applyBlockUpdate(location.activeBlockId, {
+      activationMode: "now",
+      expectedScoreRevision: score.scoreRevision ?? score.version,
+      reusePrepared: true
+    });
+    if (!["active", "no-targets"].includes(playbackUpdate.state)) {
+      const error = new Error(`locate block '${location.activeBlockId}' did not reach ACTIVE on every required client`);
+      error.code = "TRANSPORT_LOCATE_NOT_ACTIVE";
+      error.statusCode = 409;
+      throw error;
+    }
+  }
+
+  store.updateStructureState({
+    activeBlockId: location.activeBlockId,
+    macroIndex: location.macroIndex
+  }, {
+    ...revisionOptions(args),
+    sourceClientId
+  });
+  setLocatedTransportPosition(runtime, store.getScore(), location.compositionBeat);
+
+  if (wasPlaying) {
+    const restart = await startUnifiedTransport(store, config, runtime, {
+      forceRestart: true,
+      phaseReset: true,
+      locateBeatIntoBlock: location.beatIntoBlock
+    }, sourceClientId);
+    return { action: "locate", location, wasPlaying, stop, playbackUpdate, restart };
+  }
+
+  const phaseStage = await transportRestartStage(store, store.getScore(), config, runtime, {
+    locateBeatIntoBlock: location.beatIntoBlock
+  });
+  const phaseWrites = await writeTransportControlsToPlaybackTargets(
+    store.getScore(),
+    config,
+    runtime,
+    { SetStage: phaseStage },
+    { targetId: optionalString(args.targetId) }
+  );
+  return { action: "locate", location, wasPlaying, playbackUpdate, phaseStage, phaseWrites };
 }
 
 function requirePlaybackUpdateAdapter(runtime) {
@@ -2877,6 +3000,12 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     ? "run"
     : performance.arrangementRequestedMode;
   const score = store.getScore();
+  const locatedPosition = performance.playersPlaying
+    ? null
+    : locatedTransportPosition(performance, score);
+  let requestedStartOffsetBeats = Number.isFinite(Number(body.locateBeatIntoBlock))
+    ? Number(body.locateBeatIntoBlock)
+    : locatedPosition?.beatIntoBlock;
   const continuingClockContract = requestedArrangementMode === "run"
     ? await requireStableContinuingClockContract(score, config, runtime)
     : null;
@@ -2904,13 +3033,26 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     };
   }
   const targetId = optionalString(body.targetId);
+  const phaseOnly = body.phaseOnly === true && performance.playersPlaying;
+  if (phaseOnly && body.preservePosition === true) {
+    const preservedPlayback = playback.snapshot();
+    if (Number.isFinite(Number(preservedPlayback.beatIntoBlock))) {
+      requestedStartOffsetBeats = Number(preservedPlayback.beatIntoBlock);
+    }
+    // Recovery may spend several beats waiting for distributed ACKs. Freeze
+    // arrangement traversal so the active block cannot change underneath the
+    // phase transaction, then resume from the verified client witness below.
+    playback.stop();
+  }
   const witnessContext = await readBeatWitnessContext(score, config, runtime);
   const externalPlayback = observedRnboPlayback(witnessContext);
-  const phaseOnly = body.phaseOnly === true && performance.playersPlaying;
   const initialReadiness = phaseOnly
     ? { allActive: true, phaseOnly: true }
     : await rnboPlaybackReadiness(runtime, score, { waitForIdle: true });
-  if (externalPlayback.running && body.forceRestart !== true) {
+  // An explicit server-side stop or locate owns the next start. Cached stage
+  // movement can briefly survive Clock Off and must not turn that resume into
+  // adoption of an allegedly external transport.
+  if (externalPlayback.running && body.forceRestart !== true && !locatedPosition) {
     const jackStart = await maybeStartJack(runtime);
     const mode = "jack";
     if (requestedArrangementMode === "run") {
@@ -2946,7 +3088,9 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     };
   }
   if (!phaseOnly && !initialReadiness.allActive && runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.prepareBlock === "function") {
-    await runtime.rnboAdapter.prepareBlock(score.structureState?.activeBlockId, "transport-start");
+    await runtime.rnboAdapter.prepareBlock(score.structureState?.activeBlockId, "transport-start", {
+      requireReady: true
+    });
   }
   const rnboReadiness = phaseOnly ? initialReadiness : await awaitRnboPlaybackReady(runtime, score);
   const playbackUpdate = phaseOnly || initialReadiness.allActive || body.phaseReset === false || typeof runtime.rnboAdapter?.applyBlockUpdate !== "function"
@@ -2957,6 +3101,12 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     });
   const tempo = tempoPolicyFor(store, config, runtime).snapshot().live;
   const tempoApplication = await applyLiveTempo(store, config, runtime, tempo);
+  // Score preparation only fills the staged note bank. A freshly instantiated
+  // client has no live counter length yet, so initialize MaxSteps before the
+  // coordinated Clock Off -> SetStage -> Clock On phase transaction.
+  const patternLengthWrites = body.phaseReset === false
+    ? []
+    : await reassertPlaybackPatternLengths(score, config, runtime, { targetId });
   const jackTempo = tempoApplication.jack;
   const jackStart = await maybeStartJack(runtime);
   const [ttidDistribution, swingDistribution] = await Promise.all([
@@ -2966,7 +3116,10 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const snapshotRecall = await recallOscSnapshotsForBlock(store, config, runtime, score.structureState?.activeBlockId);
   const phaseStage = body.phaseReset === false
     ? null
-    : await transportRestartStage(store, score, config, runtime, body);
+    : await transportRestartStage(store, score, config, runtime, {
+        ...body,
+        locateBeatIntoBlock: requestedStartOffsetBeats
+      });
   const phaseClockStopWrites = body.phaseReset === false
     ? []
     : await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 0 }, { targetId });
@@ -2988,7 +3141,11 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     : await readClockStartAckBaselines(config, runtime, phaseAckTargets);
   const activationSchedule = body.phaseReset === false || playbackUpdate
     ? []
-    : runtime.rnboAdapter?.schedulePreparedActivations?.({ targetId, initialStage: phaseStage }) ?? [];
+    : runtime.rnboAdapter?.schedulePreparedActivations?.({
+        targetId,
+        blockId: score.structureState?.activeBlockId ?? "",
+        initialStage: phaseStage
+      }) ?? [];
   const [clockWrites, oscClockWrites] = await Promise.all([
     writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId }),
     writeOscSequencerClocks(score, config, runtime, "On")
@@ -3061,7 +3218,14 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     : await readBeatWitnessContext(score, config, runtime);
   const phaseAnchor = body.phaseReset === false
     ? null
-    : observedRnboPlayback(startWitnessContext).witness;
+    : clockStartPhaseVerification?.verified === true
+      ? clockStartPhaseVerification.witness
+      : observedRnboPlayback(startWitnessContext).witness;
+  const verifiedPhaseAnchorBeat = clockStartPhaseVerification?.verified === true
+    && phaseAnchor?.usable
+    && Number.isFinite(phaseAnchor.absoluteBeat)
+    ? phaseAnchor.absoluteBeat
+    : null;
   const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
   if (requestedArrangementMode === "run") {
     playback.start({
@@ -3069,9 +3233,13 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
       reset: Boolean(body.reset),
       sourceClientId,
       witnessContext: startWitnessContext,
-      anchorOffsetBeats: phaseAnchor?.usable && Number.isFinite(phaseAnchor.absoluteBeat)
-        ? phaseAnchor.absoluteBeat
-        : undefined
+      anchorOffsetBeats: Number.isFinite(verifiedPhaseAnchorBeat)
+        ? verifiedPhaseAnchorBeat
+        : Number.isFinite(requestedStartOffsetBeats)
+          ? requestedStartOffsetBeats
+          : phaseAnchor?.usable && Number.isFinite(phaseAnchor.absoluteBeat)
+          ? phaseAnchor.absoluteBeat
+          : undefined
     });
   } else {
     playback.stop();
@@ -3096,6 +3264,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     snapshotRecall,
     playbackUpdate,
     activations,
+    patternLengthWrites,
     phaseClockStopWrites,
     clockWrites,
     clockStartAcknowledgement,
@@ -3111,6 +3280,15 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
 }
 
 async function transportRestartStage(store, score, config, runtime, body = {}) {
+  if (body.locateBeatIntoBlock !== undefined && Number.isFinite(Number(body.locateBeatIntoBlock))) {
+    const reference = await referenceTimingContract(score, config, runtime);
+    if (!reference) return 0;
+    return phaseStageAtBeat({
+      beatIntoBlock: Math.max(0, Number(body.locateBeatIntoBlock)),
+      stagesPerBeat: reference.timing.stagesPerBeat,
+      patternLength: reference.timing.patternLength
+    });
+  }
   if (body.preservePosition !== true) return 0;
   const context = await readBeatWitnessContext(score, config, runtime);
   const playback = await macroPlaybackSnapshot(runtime, store, config, context);
@@ -3128,6 +3306,18 @@ async function transportRestartStage(store, score, config, runtime, body = {}) {
     stagesPerBeat: reference.timing.stagesPerBeat,
     patternLength: reference.timing.patternLength
   });
+}
+
+async function referenceTimingContract(score, config, runtime) {
+  const context = await readBeatWitnessContext(score, config, runtime);
+  return context.timingContracts.find((contract) =>
+    contract.assignedVoiceId
+      && Number.isFinite(Number(contract.timing?.stagesPerBeat))
+      && Number.isFinite(Number(contract.timing?.patternLength))
+  ) ?? context.timingContracts.find((contract) =>
+    Number.isFinite(Number(contract.timing?.stagesPerBeat))
+      && Number.isFinite(Number(contract.timing?.patternLength))
+  ) ?? null;
 }
 
 async function observeExternalTransportIntent(store, config, runtime, body = {}) {
@@ -3783,6 +3973,12 @@ async function stopUnifiedTransport(store, config, runtime, body = {}) {
   }
   const targetId = optionalString(body.targetId);
   const score = store.getScore();
+  const stoppingSnapshot = playback.snapshot();
+  if (stoppingSnapshot.compositionBeat !== null
+    && stoppingSnapshot.compositionBeat !== undefined
+    && Number.isFinite(Number(stoppingSnapshot.compositionBeat))) {
+    setLocatedTransportPosition(runtime, score, Number(stoppingSnapshot.compositionBeat));
+  }
   const [clockWrites, oscClockWrites] = await Promise.all([
     writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 0 }, { targetId }),
     writeOscSequencerClocks(score, config, runtime, "Off")

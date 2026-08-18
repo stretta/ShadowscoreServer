@@ -64,7 +64,7 @@ const macroPlayback = createMacroPlayback(store, config, {
   jackTransport,
   getTempo: () => runtime.tempoPolicy.snapshot().live,
   loadWitnessContext: () => readBeatWitnessContext(store.getScore(), config, runtime),
-  beforeAdvance: ({ nextBlockId }) => rnbo.prepareBlock(nextBlockId),
+  beforeAdvance: ({ nextBlockId }) => rnbo.prepareBlock(nextBlockId, "lookahead", { requireReady: true }),
   armAdvance: ({ nextBlockId }) => activatePreparedBlockTransition({
     rnbo,
     nextBlockId
@@ -122,6 +122,7 @@ async function shutdown() {
   macroPlayback.close();
   rnbo.close();
   rnboStageCollector.close();
+  runtime.authoritativeTransportPublisher?.close?.();
   if (automaticSyncRecoveryInterval) clearInterval(automaticSyncRecoveryInterval);
   coordinator.close();
   server.close();

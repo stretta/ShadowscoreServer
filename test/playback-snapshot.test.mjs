@@ -143,7 +143,9 @@ test("playback snapshot distinguishes prepared and active RNBO transactions", ()
       sendStatus: {
         transactionId: 1104,
         activeTransaction: 1103,
+        activeBlockId: "A",
         preparedTransaction: 1104,
+        blockId: "B",
         activationAcknowledgementAt: "2026-07-20T13:07:43.100Z",
         activationAck: { ok: false, status: "awaiting activation", transactionId: 1104 },
         ack: { ok: true, transactionId: 1104, status: "prepared" }
@@ -153,6 +155,9 @@ test("playback snapshot distinguishes prepared and active RNBO transactions", ()
 
   assert.equal(snapshot.targets.finch.activeTransaction, 1103);
   assert.equal(snapshot.targets.finch.preparedTransaction, 1104);
+  assert.equal(snapshot.targets.finch.blockId, "A");
+  assert.equal(snapshot.targets.finch.activeBlockId, "A");
+  assert.equal(snapshot.targets.finch.preparedBlockId, "B");
   assert.equal(snapshot.targets.finch.activationAcknowledgement.status, "awaiting activation");
   assert.equal(snapshot.targets.finch.activationAcknowledgementAt, "2026-07-20T13:07:43.100Z");
 });

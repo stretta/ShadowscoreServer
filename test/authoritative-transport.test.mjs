@@ -4,6 +4,7 @@ import {
   beatToBbt,
   buildAuthoritativeTransportState,
   deriveSyncHealth,
+  resolveTransportLocation,
   secondsAtBeat,
   transportObjectDescriptor
 } from "../src/transport/authoritative-transport.mjs";
@@ -98,6 +99,7 @@ test("sync health separates coherent client offset from inter-player slip and re
   });
   assert.equal(offset.state, "offset");
   assert.equal(offset.re_sync_recommended, true);
+  assert.equal(offset.server_offset_tolerance_beats, 0.5);
 
   const oneStageSlip = deriveSyncHealth({
     targets: {
@@ -116,6 +118,20 @@ test("transport descriptor is stable for path/object clients", () => {
   assert.ok(transportObjectDescriptor.methods.includes("re_sync"));
 });
 
+test("transport location resolves beat and fraction requests across sections", () => {
+  assert.deepEqual(resolveTransportLocation(score, { beats: 10 }), {
+    compositionBeat: 10,
+    positionFraction: 0.625,
+    macroIndex: 1,
+    activeBlockId: "B",
+    beatIntoBlock: 2,
+    durationBeats: 16
+  });
+  assert.equal(resolveTransportLocation(score, { fraction: 0.25 }).compositionBeat, 4);
+  assert.equal(resolveTransportLocation(score, { fraction: 1 }).activeBlockId, "B");
+  assert.throws(() => resolveTransportLocation(score, { fraction: 1.1 }), /fraction must be between 0 and 1/);
+});
+
 test("stopped transport follows the stored score playhead instead of a stale clock beat", () => {
   const state = buildAuthoritativeTransportState({
     score: { ...score, structureState: { activeBlockId: "B", macroIndex: 1 } },
@@ -128,4 +144,21 @@ test("stopped transport follows the stored score playhead instead of a stale clo
   assert.equal(state.active_section, "B");
   assert.equal(state.position_beats, 8);
   assert.equal(state.position_bbt, "3.1.000");
+});
+
+test("stopped transport retains an explicitly located position within the active section", () => {
+  const state = buildAuthoritativeTransportState({
+    score: { ...score, structureState: { activeBlockId: "B", macroIndex: 1 } },
+    playbackSnapshot: {
+      transport: { running: false },
+      playback: { running: false },
+      controls: {
+        players: { playing: false },
+        position: { compositionBeat: 11.5, activeBlockId: "B", macroIndex: 1 }
+      }
+    }
+  });
+  assert.equal(state.position_beats, 11.5);
+  assert.equal(state.beat_into_section, 3.5);
+  assert.equal(state.capabilities.can_locate, true);
 });

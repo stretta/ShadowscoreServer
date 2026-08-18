@@ -12,41 +12,43 @@ export function gridStepsPerBeat(subdivision) {
 }
 
 export function playbackBeatForVoice(options = {}) {
-  const playback = options.playback;
-  if (playback?.activeBlockId !== options.blockId) {
-    return undefined;
-  }
+  const executionBeat = executionBeatForVoice(options);
+  if (Number.isFinite(executionBeat)) return executionBeat;
 
+  const playback = options.playback;
+  if (playback?.activeBlockId !== options.blockId) return undefined;
   const macroBeat = playback.beatIntoBlock == null ? NaN : Number(playback.beatIntoBlock);
-  return playback.playing && Number.isFinite(macroBeat) ? macroBeat : executionBeatForVoice(options);
+  return playback.playing && Number.isFinite(macroBeat) ? macroBeat : undefined;
 }
 
 export function executionBeatForVoice(options = {}) {
-  const playback = options.playback;
-  if (playback?.activeBlockId !== options.blockId) {
-    return undefined;
-  }
+  const location = executionLocationForVoice(options);
+  return location?.blockId === options.blockId ? location.beat : undefined;
+}
 
+export function executionBlockForVoice(options = {}) {
+  return executionLocationForVoice(options)?.blockId;
+}
+
+export function executionLocationForVoice(options = {}) {
   const targetId = options.assignment?.rnboTargetId;
   const target = (options.targets || []).find((entry) => entry.id === targetId);
   const contract = (options.contracts || []).find((entry) =>
     entry.targetId === targetId || entry.assignedVoiceId === options.voiceId
   );
+  const blockId = String(target?.activeBlockId || target?.blockId || contract?.timing?.blockId || "");
+  const projectedBeat = target?.projectedBeatIntoBlock == null ? NaN : Number(target.projectedBeatIntoBlock);
   const currentStage = target?.currentStage == null ? NaN : Number(target.currentStage);
-  const stagesPerBeat = Number(contract?.timing?.stagesPerBeat);
+  const stagesPerBeat = Number(target?.stagesPerBeat ?? target?.timing?.stagesPerBeat ?? contract?.timing?.stagesPerBeat);
   if (
     targetId
+    && blockId
     && target?.online !== false
     && target?.fresh !== false
     && target?.available !== false
-    && Number.isFinite(currentStage)
-    && currentStage >= 0
-    && Number.isFinite(stagesPerBeat)
-    && stagesPerBeat > 0
-    && (!target?.blockId || target.blockId === options.blockId)
-    && (!contract?.timing?.blockId || contract.timing.blockId === options.blockId)
+    && (Number.isFinite(projectedBeat) || (Number.isFinite(currentStage) && currentStage >= 0 && Number.isFinite(stagesPerBeat) && stagesPerBeat > 0))
   ) {
-    return currentStage / stagesPerBeat;
+    return { blockId, beat: Number.isFinite(projectedBeat) ? projectedBeat : currentStage / stagesPerBeat };
   }
   return undefined;
 }

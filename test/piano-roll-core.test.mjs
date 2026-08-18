@@ -7,6 +7,7 @@ import {
   gridStepsPerBeat,
   moveNote,
   nudgeNote,
+  executionBlockForVoice,
   executionBeatForVoice,
   playbackBeatForVoice,
   projectClipOccurrences,
@@ -28,7 +29,7 @@ test("playback wiper uses the focused voice RNBO stage when macro beat is unavai
   }), 89 / 16);
 });
 
-test("playback wiper prefers the authoritative beat and exposes client execution separately", () => {
+test("playback wiper follows the audible client execution witness", () => {
   const options = {
     playback: { playing: true, activeBlockId: "F", beatIntoBlock: 6 },
     blockId: "F",
@@ -37,8 +38,46 @@ test("playback wiper prefers the authoritative beat and exposes client execution
     targets: [{ id: "rnbo-inst-5:shadowscore", currentStage: 89 }],
     contracts: [{ targetId: "rnbo-inst-5:shadowscore", assignedVoiceId: "player-1", timing: { blockId: "F", stagesPerBeat: 16 } }]
   };
-  assert.equal(playbackBeatForVoice(options), 6);
+  assert.equal(playbackBeatForVoice(options), 89 / 16);
   assert.equal(executionBeatForVoice(options), 89 / 16);
+});
+
+test("execution location follows the client block across a server section transition", () => {
+  const options = {
+    playback: { playing: true, activeBlockId: "A", beatIntoBlock: 7.75 },
+    blockId: "B",
+    voiceId: "player-1",
+    assignment: { rnboTargetId: "rnbo-inst-5:shadowscore" },
+    targets: [{ id: "rnbo-inst-5:shadowscore", online: true, fresh: true, blockId: "B", projectedBeatIntoBlock: 0.375, stagesPerBeat: 4, currentStage: 1 }],
+    contracts: [{ targetId: "rnbo-inst-5:shadowscore", assignedVoiceId: "player-1", timing: { blockId: "A", stagesPerBeat: 4 } }]
+  };
+  assert.equal(executionBlockForVoice(options), "B");
+  assert.equal(playbackBeatForVoice(options), 0.375);
+  assert.equal(playbackBeatForVoice({ ...options, blockId: "A" }), 7.75);
+});
+
+test("execution location ignores a prepared block until that client transaction is ACTIVE", () => {
+  const options = {
+    playback: { playing: true, activeBlockId: "A", beatIntoBlock: 6.5 },
+    blockId: "A",
+    voiceId: "player-1",
+    assignment: { rnboTargetId: "rnbo-inst-5:shadowscore" },
+    targets: [{
+      id: "rnbo-inst-5:shadowscore",
+      online: true,
+      fresh: true,
+      activeBlockId: "A",
+      blockId: "A",
+      preparedBlockId: "B",
+      projectedBeatIntoBlock: 6.75,
+      stagesPerBeat: 4,
+      currentStage: 27
+    }],
+    contracts: [{ targetId: "rnbo-inst-5:shadowscore", assignedVoiceId: "player-1", timing: { blockId: "B", stagesPerBeat: 4 } }]
+  };
+  assert.equal(executionBlockForVoice(options), "A");
+  assert.equal(playbackBeatForVoice(options), 6.75);
+  assert.equal(playbackBeatForVoice({ ...options, blockId: "B" }), undefined);
 });
 
 test("playback wiper exposes a fresh client execution witness while macro playback is stopped", () => {

@@ -1,4 +1,4 @@
-import { selectBeatWitness } from "./beat-witness.mjs";
+import { rnboClientBeatWitness, selectBeatWitness } from "./beat-witness.mjs";
 import { activeWrittenTempo } from "./tempo.mjs";
 
 export function createMacroPlayback(store, config = {}, options = {}) {
@@ -136,6 +136,10 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       mode = "stopped";
       clearTimer();
       clearWitnessPolling();
+      // Invalidate in-flight preparation/activation promises. Their network
+      // work may finish, but they must not repopulate transition state after a
+      // coordinated transport freeze or stop.
+      resetTransitionAttempt();
       nextAdvanceAt = null;
       currentBlockDurationMs = 0;
       pendingArrangement = null;
@@ -249,7 +253,7 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     const elapsedBeats = timerElapsedBeats + (timerBlockStartedAt === null ? 0 : Math.max(0, now() - timerBlockStartedAt) * tempo / 60000);
     const remainingBeats = Math.max(0, durationBeats - elapsedBeats);
     const lookAheadBeats = Math.max(0, Number(config.rnbo?.lookAheadBeats ?? 12));
-    const armLeadBeats = Math.min(0.999, Math.max(0, Number(config.rnbo?.activation?.armLeadBeats ?? 0.75)));
+    const armLeadBeats = nextCycleArmLeadBeats(config, durationBeats);
     const prepareDelayMs = options.prepareImmediately ? 0 : durationMsAtTempo(Math.max(0, remainingBeats - lookAheadBeats), tempo);
     const armDelayMs = durationMsAtTempo(Math.max(0, remainingBeats - armLeadBeats), tempo);
     lookAheadTimer = timers.setTimeout(() => {
@@ -479,7 +483,11 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       if (!next) return;
       if (activationArmPending) return;
       if (!transitionIsActive(current.activeBlockId, next.nextBlockId)) {
-        holdAtCurrentBlock(witness, `block '${next.nextBlockId}' was not ACTIVE at the requested boundary`);
+        holdAtCurrentBlock(
+          witness,
+          `block '${next.nextBlockId}' was not ACTIVE at the requested boundary`,
+          derived.beatIntoBlock
+        );
         return;
       }
       committed = next;
@@ -490,6 +498,9 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       return;
     }
 
+    const committedBoundaryBeat = Number.isFinite(lastActivationArm?.boundaryBeat)
+      ? lastActivationArm.boundaryBeat
+      : previousBlockEndBeat;
     try {
       commitTransition(committed);
     } catch (error) {
@@ -500,7 +511,11 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       return;
     }
     if (transactionalAdvanceEnabled()) {
-      reanchorCommittedTransition(witness, committed, previousBlockEndBeat);
+      reanchorCommittedTransition(
+        witness,
+        committed,
+        committedBoundaryBeat
+      );
     }
     runAfterBeatDerivedAdvance({
       anchorBeat: activeBlockStartBeat,
@@ -810,6 +825,15 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     const next = nextArrangementEntry(score, derived);
     if (!next) return;
     const { nextMacroIndex, nextBlockId } = next;
+    // A transactional transition may remain on the current server block after
+    // JACK crosses the nominal boundary while RNBO waits for its next pulse.
+    // Keep the confirmed READY cohort latched across that hold instead of
+    // preparing the same block again and superseding its transaction.
+    if (
+      lastLookAhead?.ok === true &&
+      lastLookAhead.activeBlockId === derived.activeBlockId &&
+      lastLookAhead.nextBlockId === nextBlockId
+    ) return;
     const boundaryCompositionBeat = derived.compositionBeat - derived.beatIntoBlock + derived.durationBeats;
     const key = `${boundaryCompositionBeat}:${derived.macroIndex}:${nextMacroIndex}:${nextBlockId}`;
     if (key === lastLookAheadKey) return;
@@ -857,9 +881,14 @@ export function createMacroPlayback(store, config = {}, options = {}) {
 
   function runArmAdvance(score, derived, witness) {
     if (typeof armAdvance !== "function" || activationArmPending) return;
-    const leadBeats = Math.min(0.999, Math.max(0, Number(config.rnbo?.activation?.armLeadBeats ?? 0.75)));
+    const leadBeats = nextCycleArmLeadBeats(config, derived.durationBeats);
     const beatsRemaining = Math.max(0, derived.durationBeats - derived.beatIntoBlock);
-    if (beatsRemaining <= 0 || beatsRemaining > leadBeats) return;
+    const rnboBoundary = config.rnbo?.activation?.followRnboWrap === false
+      ? null
+      : rnboWrapArmBoundary(lastWitnessContext, config.transport?.rnboClient, config.rnbo?.activation);
+    if (rnboBoundary?.usable === true) {
+      if (!rnboBoundary.inArmWindow) return;
+    } else if (beatsRemaining <= 0 || beatsRemaining > leadBeats) return;
     const next = nextArrangementEntry(score, derived);
     if (!next) return;
     const { nextMacroIndex, nextBlockId } = next;
@@ -884,9 +913,21 @@ export function createMacroPlayback(store, config = {}, options = {}) {
       beatsRemaining,
       boundaryBeat,
       witnessSource: witness.source,
+      boundarySource: rnboBoundary?.usable === true ? "rnbo-wrap" : "transport",
+      rnboBoundary,
       preparation: lastLookAhead.result
     })).then((result) => {
       if (generation !== transitionGeneration) return;
+      if (rnboBoundary?.usable === true) {
+        completeRnboWrappedTransition({
+          activeBlockId: derived.activeBlockId,
+          next: { nextMacroIndex, nextBlockId },
+          result,
+          rnboBoundary,
+          witness
+        });
+        return;
+      }
       activationArmPending = false;
       lastActivationArm = {
         ok: true,
@@ -914,6 +955,41 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     });
     return activationArmPromise;
   }
+
+  function completeRnboWrappedTransition({ activeBlockId, next, result, rnboBoundary, witness }) {
+    const activatedBeat = activationBeatFromResult(result, rnboBoundary, activeBlockDurationBeats);
+    try {
+      commitTransition(next);
+      anchorBeatDerivedPlayback(lastWitnessContext, activatedBeat);
+    } catch (error) {
+      running = false;
+      mode = "stopped";
+      clearBeatAnchor();
+      console.error(`[macro-playback] RNBO-wrapped advance failed: ${messageForError(error)}`);
+      return;
+    }
+    activationArmPending = false;
+    lastActivationArm = {
+      ok: true,
+      at: new Date().toISOString(),
+      activeBlockId,
+      nextBlockId: next.nextBlockId,
+      boundaryBeat: activeBlockStartBeat,
+      boundarySource: "rnbo-wrap",
+      activatedBeat,
+      result: result ?? null
+    };
+    runAfterBeatDerivedAdvance({
+      anchorBeat: activeBlockStartBeat,
+      boundaryBeat: activeBlockStartBeat,
+      absoluteBeat: witness.absoluteBeat,
+      compositionBeat,
+      beatIntoBlock,
+      witnessSource: witness.source,
+      boundarySource: "rnbo-wrap"
+    });
+  }
+
 
   function nextArrangementEntry(traversal, derived) {
     if (pendingCue) {
@@ -966,18 +1042,22 @@ export function createMacroPlayback(store, config = {}, options = {}) {
     resetTransitionAttempt();
   }
 
-  function holdAtCurrentBlock(witness, reason) {
+  function holdAtCurrentBlock(witness, reason, boundaryOvershootBeats = 0) {
     markCueMissed(reason);
     const score = traversalScore(store.getScore());
     macroStartIndex = traversalMacroIndex;
     macroStartOffsetBeats = cumulativeBeatsBeforeIndex(score, traversalMacroIndex);
-    macroStartBeat = witness.absoluteBeat;
-    activeBlockStartBeat = witness.absoluteBeat;
     activeBlockDurationBeats = macroBlockDurationBeats(score, config);
-    activeBlockEndBeat = witness.absoluteBeat + activeBlockDurationBeats;
-    compositionBeat = macroStartOffsetBeats;
-    beatIntoBlock = 0;
-    resetTransitionAttempt({ preserveCue: true });
+    const overshoot = Math.max(0, Math.min(
+      activeBlockDurationBeats,
+      finiteNumber(boundaryOvershootBeats, 0)
+    ));
+    macroStartBeat = witness.absoluteBeat - overshoot;
+    activeBlockStartBeat = witness.absoluteBeat - overshoot;
+    activeBlockEndBeat = activeBlockStartBeat + activeBlockDurationBeats;
+    compositionBeat = macroStartOffsetBeats + overshoot;
+    beatIntoBlock = overshoot;
+    resetTransitionAttempt({ preserveCue: true, preservePreparation: true });
   }
 
   function reanchorCommittedTransition(witness, committed, boundaryBeat) {
@@ -1002,11 +1082,15 @@ export function createMacroPlayback(store, config = {}, options = {}) {
   }
 
   function resetTransitionAttempt(options = {}) {
+    const preservedLookAhead = options.preservePreparation === true && lastLookAhead?.ok === true
+      ? lastLookAhead
+      : null;
+    const preservedLookAheadKey = preservedLookAhead ? lastLookAheadKey : "";
     transitionGeneration += 1;
-    lastLookAheadKey = "";
+    lastLookAheadKey = preservedLookAheadKey;
     lookAheadPending = false;
     lookAheadPromise = null;
-    lastLookAhead = null;
+    lastLookAhead = preservedLookAhead;
     lastActivationArmKey = "";
     activationArmPending = false;
     activationArmPromise = null;
@@ -1118,6 +1202,66 @@ function shouldReschedule(event) {
     event.type === "mesostructure.block.removed" ||
     (event.type === "admin.reset" && event.detail?.structure)
   );
+}
+
+export function rnboWrapArmBoundary(context = {}, rnboClient = {}, activation = {}) {
+  const witness = rnboClientBeatWitness({
+    targets: context.rnboTargets ?? [],
+    contracts: context.timingContracts ?? [],
+    maxSkewBeats: rnboClient.maxSkewBeats,
+    requireMoving: true
+  });
+  const cycleBeats = Number(witness.cycleBeats);
+  if (witness.usable !== true || !Number.isFinite(witness.absoluteBeat) || !(cycleBeats > 1)) {
+    return { usable: false, inArmWindow: false, reason: witness.reason || "RNBO phase unavailable" };
+  }
+  const phaseBeat = positiveModulo(witness.absoluteBeat, cycleBeats);
+  const armLeadBeats = Math.min(
+    Math.max(0, cycleBeats - 0.25),
+    Math.max(0, Number(activation.armLeadBeats ?? 2))
+  );
+  return {
+    usable: true,
+    inArmWindow: phaseBeat >= cycleBeats - armLeadBeats,
+    armLeadBeats,
+    phaseBeat,
+    cycleBeats,
+    currentStage: witness.currentStage,
+    stagesPerBeat: witness.stagesPerBeat,
+    skewBeats: witness.skewBeats,
+    targetCount: witness.targetCount,
+    reason: "fresh assigned RNBO phase"
+  };
+}
+
+function nextCycleArmLeadBeats(config, durationBeats) {
+  const cycleBeats = Math.max(0, Number(durationBeats) || 0);
+  const configured = Math.max(0, Number(config.rnbo?.activation?.armLeadBeats ?? 2));
+  if (!(cycleBeats > 1)) return Math.min(0.999, configured);
+  return Math.min(cycleBeats - 0.25, configured);
+}
+
+function activationBeatFromResult(result, fallback, durationBeats) {
+  const stagesPerBeat = Number(fallback?.stagesPerBeat);
+  let stages = (result?.activations ?? result?.update?.activations ?? [])
+    .map((activation) => Number(activation?.acknowledgement?.activatedStage))
+    .filter(Number.isFinite);
+  if (stages.length && stagesPerBeat > 0) {
+    const cycleStages = Math.max(1, durationBeats) * stagesPerBeat;
+    // RNBO can emit the activation ACK in the final signal vector of the old
+    // cycle even though ActivatePrepared is quantized to the following beat.
+    // Treat that single wrap-edge stage as the new section boundary, not as
+    // beat 7.75 of the newly committed section.
+    stages = stages
+      .map((stage) => {
+        const normalized = positiveModulo(stage, cycleStages);
+        return normalized >= cycleStages - 1 ? 0 : normalized;
+      })
+      .sort((left, right) => left - right);
+    const median = stages[Math.floor(stages.length / 2)];
+    return positiveModulo(median / stagesPerBeat, Math.max(1, durationBeats));
+  }
+  return 0;
 }
 
 function currentMacroPosition(score) {

@@ -32,6 +32,19 @@ test("non-slip observations clear the sustained-slip counter", () => {
   assert.equal(supervisor.observe({ state: "slipped" }).trigger, false);
 });
 
+test("coherent server-to-ensemble offset triggers the same bounded recovery", () => {
+  let now = 1000;
+  const supervisor = createEnsembleSyncSupervisor({
+    requiredConsecutiveSlips: 2,
+    cooldownMs: 0,
+    now: () => now
+  });
+
+  assert.equal(supervisor.observe({ state: "offset", max_client_skew_beats: 0.02 }).trigger, false);
+  now += 100;
+  assert.equal(supervisor.observe({ state: "offset", max_client_skew_beats: 0.03 }).trigger, true);
+});
+
 test("phase stage follows the current block beat and wraps to the pattern", () => {
   assert.equal(phaseStageAtBeat({ beatIntoBlock: 5.25, stagesPerBeat: 4, patternLength: 32 }), 21);
   assert.equal(phaseStageAtBeat({ beatIntoBlock: 8.25, stagesPerBeat: 4, patternLength: 32 }), 1);

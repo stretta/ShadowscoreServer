@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
+import { classifyEnsembleSyncScenario } from "../src/transport/ensemble-sync-supervisor.mjs";
 
 const fixture = JSON.parse(readFileSync(new URL("./fixtures/ensemble-sync-scenarios.json", import.meta.url), "utf8"));
 const allowedStatuses = new Set([
@@ -73,4 +74,16 @@ test("captured operational states specify whether phase judgment is safe", () =>
   assert.equal(restart.expected.action, "adopt-without-resend");
 });
 
-test.todo("ensemble sync estimator classifies the captured changing-condition scenarios");
+test("ensemble sync estimator classifies the captured changing-condition scenarios", () => {
+  for (const scenario of fixture.scenarios) {
+    const classified = classifyEnsembleSyncScenario(scenario, {
+      targets: fixture.targets,
+      patternLength: fixture.timing.patternLength,
+      toleranceStages: 1
+    });
+    assert.equal(classified.status, scenario.expected.status, scenario.id);
+    assert.equal(classified.phaseJudgement, scenario.expected.phaseJudgement, scenario.id);
+    assert.deepEqual(classified.outlierTargets, scenario.expected.outlierTargets ?? [], scenario.id);
+    if (scenario.expected.action) assert.equal(classified.action, scenario.expected.action, scenario.id);
+  }
+});

@@ -1746,6 +1746,157 @@ test("RNBO adapter applies a prepared update in continue mode without requiring 
   }
 });
 
+test("RNBO adapter activates the cached READY cohort without rediscovery", async () => {
+  let activationRequested = false;
+  let activationPacket;
+  let armedRequest;
+  let discoveryCount = 0;
+  const addresses = [];
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1220,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        instanceId: "20",
+        clientId: 90,
+        voiceId: "player-1",
+        address: "/rnbo/inst/20/messages/in/shadowscore",
+        capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true, continuingScoreActivation: true }
+      }],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 },
+      activation: { timeoutMs: 20, beatMarginMs: 0, pollIntervalMs: 1, requestTimeoutMs: 20 }
+    }
+  });
+  const score = scoreWithBlock(9);
+  const fetchImpl = async () => ({
+    ok: true,
+    async json() {
+      return { VALUE: activationRequested ? [90, 93, 1221, 2, 0, 1] : [90, 92, 1221, 2, 32, 1] };
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        const address = readOscAddress(packet);
+        addresses.push(address);
+        if (address.endsWith("/ActivatePrepared")) {
+          activationRequested = true;
+          activationPacket = packet;
+        }
+        callback();
+      },
+      close() {}
+    },
+    discoverRnboTargets: async () => {
+      discoveryCount += 1;
+      return [];
+    },
+    fetchImpl
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    await adapter.prepareBlock("A", "lookahead", { requireReady: true, fetchImpl });
+    await adapter.waitForIdle();
+    const discoveryCountBeforeActivation = discoveryCount;
+
+    const result = await adapter.activatePreparedBlock("A", {
+      fetchImpl,
+      boundary: "next-cycle",
+      onArmed(detail) {
+        [armedRequest] = detail.requests;
+      }
+    });
+
+    assert.equal(result.action, "active");
+    assert.equal(result.fastPath, true);
+    assert.equal(result.boundary, "next-cycle");
+    assert.equal(result.activations[0].acknowledgement.activatedStage, 0);
+    assert.equal(activationPacket.readInt32BE(activationPacket.length - 4), 2);
+    assert.equal(armedRequest.boundary, "next-cycle");
+    assert.equal(armedRequest.initialStage, 0);
+    assert.equal(armedRequest.activationTimeoutMs > config.rnbo.activation.timeoutMs, true);
+    assert.equal(discoveryCount, discoveryCountBeforeActivation);
+    assert.equal(addresses.filter((address) => address.endsWith("/ActivatePrepared")).length, 1);
+    assert.equal(adapter.lifecycleEvents().findLast((event) => event.type === "playback.update.armed").fastPath, true);
+
+    const reconciled = await adapter.activatePreparedBlock("A", { fetchImpl });
+
+    assert.equal(reconciled.action, "already-active");
+    assert.equal(reconciled.state, "active");
+    assert.deepEqual(reconciled.activations, []);
+    assert.equal(reconciled.fastPath, true);
+    assert.equal(addresses.filter((address) => address.endsWith("/ActivatePrepared")).length, 1);
+  } finally {
+    adapter.close();
+  }
+});
+
+test("RNBO adapter revalidates an unchanged READY cohort after a conservative score invalidation", async () => {
+  let activationRequested = false;
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1230,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        instanceId: "20",
+        clientId: 90,
+        voiceId: "player-1",
+        address: "/rnbo/inst/20/messages/in/shadowscore",
+        capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true, continuingScoreActivation: true }
+      }],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 },
+      activation: { timeoutMs: 20, beatMarginMs: 0, pollIntervalMs: 1, requestTimeoutMs: 20 }
+    }
+  });
+  const score = scoreWithBlock(9);
+  const events = new EventEmitter();
+  const fetchImpl = async () => ({
+    ok: true,
+    async json() {
+      return { VALUE: activationRequested ? [90, 93, 1231, 2, 0, 1] : [90, 92, 1231, 2, 32, 1] };
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        if (readOscAddress(packet).endsWith("/ActivatePrepared")) activationRequested = true;
+        callback();
+      },
+      close() {}
+    },
+    fetchImpl
+  });
+  adapter.attach({ events, getScore: () => score });
+  try {
+    await adapter.prepareBlock("A", "lookahead", { requireReady: true, fetchImpl });
+    await adapter.waitForIdle();
+    events.emit("change", { type: "clip.replaced", detail: { clipId: "main" }, score });
+
+    const result = await adapter.activatePreparedBlock("A", { fetchImpl, boundary: "next-cycle" });
+
+    assert.equal(result.state, "active");
+    assert.equal(result.fastPath, true);
+  } finally {
+    adapter.close();
+  }
+});
+
 test("RNBO adapter reconciles a late ACTIVE acknowledgement before retrying activation", async () => {
   let activationRequestCount = 0;
   let activationAcknowledgementAvailable = false;
@@ -2248,6 +2399,97 @@ test("RNBO look-ahead preparation sends to every mandatory staged target", async
     assert.equal(adapter.sendStatus().length, 2);
     assert.equal(adapter.sendStatus().every((status) => status.stagedScoreActivation), true);
     assert.equal(adapter.sendStatus().every((status) => status.blockId === "B"), true);
+  } finally {
+    adapter.close();
+  }
+});
+
+test("required look-ahead refills a previously known block that is no longer READY", async () => {
+  let expectedTransaction = 0;
+  let activationRequested = false;
+  const preparedTransactions = [];
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1700,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [{
+        id: "finch",
+        host: "finch.local",
+        port: 1234,
+        instanceId: "20",
+        clientId: 90,
+        voiceId: "player-1",
+        address: "/rnbo/inst/20/messages/in/shadowscore",
+        capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true, continuingScoreActivation: true }
+      }],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 },
+      activation: { timeoutMs: 20, beatMarginMs: 0, pollIntervalMs: 1, requestTimeoutMs: 20 }
+    }
+  });
+  const base = scoreWithBlock(17);
+  const score = {
+    ...base,
+    clips: {
+      ...base.clips,
+      second: { ...base.clips.main, notes: [{ ...base.clips.main.notes[0], pitch: 67 }] }
+    },
+    mesostructure: {
+      A: base.mesostructure.A,
+      B: { duration: { beats: 2 }, players: { "player-1": { clipId: "second" } } }
+    },
+    macrostructure: { tempo: 120, blocks: ["A", "B"] }
+  };
+  const fetchImpl = async () => ({
+    ok: true,
+    async json() {
+      return {
+        VALUE: activationRequested
+          ? [90, 93, expectedTransaction, 1, 0, 1]
+          : [90, 92, expectedTransaction, 1, 32, 1]
+      };
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        const address = readOscAddress(packet);
+        if (address.endsWith("/ActivatePrepared")) {
+          activationRequested = true;
+        }
+        callback();
+      },
+      close() {}
+    },
+    fetchImpl
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    for (const [index, blockId] of ["A", "B"].entries()) {
+      expectedTransaction = 1701 + index;
+      activationRequested = false;
+      await adapter.prepareBlock(blockId, "lookahead", { requireReady: true, fetchImpl });
+      await adapter.waitForIdle();
+      const prepared = adapter.sendStatus()[0].preparedTransaction;
+      preparedTransactions.push(prepared);
+      expectedTransaction = prepared;
+      await adapter.activatePreparedBlock(blockId, { fetchImpl });
+    }
+
+    activationRequested = false;
+    expectedTransaction = 1703;
+    await adapter.prepareBlock("A", "lookahead", { requireReady: true, fetchImpl });
+    await adapter.waitForIdle();
+
+    assert.equal(Number.isInteger(adapter.sendStatus()[0].preparedTransaction), true);
+    assert.notEqual(adapter.sendStatus()[0].preparedTransaction, preparedTransactions[0]);
+    assert.equal(adapter.sendStatus()[0].activeBlockId, "B");
+    assert.equal(adapter.sendStatus()[0].blockId, "A");
+    assert.equal((await adapter.playbackUpdates("A")).targets.finch.state, "prepared");
   } finally {
     adapter.close();
   }

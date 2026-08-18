@@ -16,7 +16,7 @@ export function createShadowScoreTransportBar(options = {}) {
       <output data-field="section" aria-label="Current section">—</output>
       <button type="button" class="ss-transport-icon" data-command="next_section" aria-label="Next section" title="Next section">›</button>
     </div>
-    <input data-field="position" class="ss-transport-position" type="range" min="0" max="1" step="0.0001" value="0" disabled aria-label="Arrangement position" title="Continuous locate will be enabled after coordinated player seek is implemented">
+    <input data-field="position" class="ss-transport-position" type="range" min="0" max="1" step="0.0001" value="0" disabled aria-label="Arrangement position" title="Drag and release to locate the ensemble">
     <output data-field="clock" class="ss-transport-clock" aria-label="Elapsed time">00:00 / 00:00</output>
     <output data-field="bbt" class="ss-transport-bbt" aria-label="Bars beats ticks">1.1.000</output>
     <label class="ss-transport-tempo"><input data-field="tempo" type="number" min="20" max="400" step="0.01" inputmode="decimal" aria-label="Tempo"><span>BPM</span></label>
@@ -34,6 +34,7 @@ export function createShadowScoreTransportBar(options = {}) {
   let tempoCommitInProgress = false;
   let tempoDrag = null;
   let suppressTempoClick = false;
+  let positionEditing = false;
 
   root.querySelectorAll("[data-command]").forEach((button) => {
     button.addEventListener("click", () => void command(button.dataset.command));
@@ -52,6 +53,20 @@ export function createShadowScoreTransportBar(options = {}) {
     if (!suppressTempoClick) return;
     event.preventDefault();
     suppressTempoClick = false;
+  });
+  fields.position.addEventListener("pointerdown", () => {
+    positionEditing = true;
+  });
+  fields.position.addEventListener("input", () => {
+    positionEditing = true;
+    renderPositionPreview(Number(fields.position.value));
+  });
+  fields.position.addEventListener("change", () => void commitPosition());
+  fields.position.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape") return;
+    positionEditing = false;
+    renderPosition(performance.now());
+    fields.position.blur();
   });
 
   function connect() {
@@ -136,6 +151,13 @@ export function createShadowScoreTransportBar(options = {}) {
     }
   }
 
+  async function commitPosition() {
+    const fraction = Math.min(1, Math.max(0, Number(fields.position.value) || 0));
+    await command("locate_fraction", { fraction });
+    positionEditing = false;
+    if (snapshot) renderPosition(performance.now());
+  }
+
   function beginTempoDrag(event) {
     if (event.button !== 0) return;
     tempoDrag = {
@@ -191,7 +213,10 @@ export function createShadowScoreTransportBar(options = {}) {
     fields.sync.parentElement.title = next.sync?.reason || "Transport sync status";
     fields.position.disabled = next.capabilities?.can_locate !== true;
     fields.error.textContent = "";
-    renderPosition(performance.now());
+    if (typeof globalThis.CustomEvent === "function") {
+      globalThis.dispatchEvent?.(new globalThis.CustomEvent("shadowscore-transport-snapshot", { detail: next }));
+    }
+    if (!positionEditing) renderPosition(performance.now());
     if (!animationFrame) animationFrame = requestAnimationFrame(animate);
   }
 
@@ -203,6 +228,7 @@ export function createShadowScoreTransportBar(options = {}) {
   }
 
   function renderPosition(now) {
+    if (positionEditing) return;
     const elapsedSeconds = snapshot.is_playing ? Math.max(0, now - snapshotReceivedAt) / 1000 : 0;
     const durationSeconds = Math.max(0, Number(snapshot.duration_seconds) || 0);
     const positionSeconds = durationSeconds > 0
@@ -212,9 +238,16 @@ export function createShadowScoreTransportBar(options = {}) {
     const positionBeats = durationBeats > 0
       ? (Math.max(0, Number(snapshot.position_beats) || 0) + elapsedSeconds * Math.max(0, Number(snapshot.tempo) || 0) / 60) % durationBeats
       : 0;
-    fields.position.value = durationSeconds > 0 ? String(positionSeconds / durationSeconds) : "0";
+    fields.position.value = durationBeats > 0 ? String(positionBeats / durationBeats) : "0";
     fields.clock.textContent = `${formatClock(positionSeconds)} / ${formatClock(durationSeconds)}`;
     fields.bbt.textContent = formatBbt(positionBeats, snapshot.time_signature_numerator);
+  }
+
+  function renderPositionPreview(fraction) {
+    if (!snapshot) return;
+    const preview = transportPositionAtFraction(snapshot, fraction);
+    fields.clock.textContent = `${formatClock(preview.seconds)} / ${formatClock(snapshot.duration_seconds)}`;
+    fields.bbt.textContent = formatBbt(preview.beats, snapshot.time_signature_numerator);
   }
 
   return { root, connect, receive, command };
@@ -253,6 +286,25 @@ export function dragTempoValue(startTempo, deltaY, options = {}) {
   const value = Math.min(maximum, Math.max(minimum,
     (Number(startTempo) || 120) - ((Number(deltaY) || 0) * sensitivity)));
   return Number(value.toFixed(2));
+}
+
+export function transportPositionAtFraction(snapshot = {}, fraction = 0) {
+  const normalized = Math.min(1, Math.max(0, Number(fraction) || 0));
+  const durationBeats = Math.max(0, Number(snapshot.duration_beats) || 0);
+  const beats = durationBeats * normalized;
+  const sections = snapshot.arrangement?.sections ?? [];
+  let seconds = 0;
+  for (const section of sections) {
+    const start = Math.max(0, Number(section.start_beat) || 0);
+    const end = Math.max(start, Number(section.end_beat) || start);
+    if (beats <= start) break;
+    const included = Math.min(beats, end) - start;
+    const tempo = Math.max(0, Number(section.tempo) || 0);
+    if (tempo > 0) seconds += included * 60 / tempo;
+    if (beats <= end) break;
+  }
+  if (!sections.length) seconds = Math.max(0, Number(snapshot.duration_seconds) || 0) * normalized;
+  return { fraction: normalized, beats, seconds };
 }
 
 function formatTempo(value) {

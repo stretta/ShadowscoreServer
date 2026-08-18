@@ -616,14 +616,14 @@ test("transport status page exposes host transport controls", async () => {
   assert.match(response.body, /renderContracts\(snapshot\.timingContracts \|\| \[\]\)/);
   assert.match(response.body, /lastPlaybackGeneration/);
   assert.match(response.body, /Disagrees on/);
-  assert.match(response.body, /\/transport\/events/);
+  assert.match(response.body, /shadowscore-transport-snapshot/);
   assert.match(response.body, /<details class="toolbar-details" id="transport-diagnostics">/);
   assert.match(response.body, /<details class="toolbar-details" id="recent-transport-events">/);
   assert.match(response.body, /Recent Transport Events/);
   assert.doesNotMatch(response.body, /<details[^>]+id="transport-diagnostics"[^>]+open/);
   assert.doesNotMatch(response.body, /<details[^>]+id="recent-transport-events"[^>]+open/);
   assert.match(response.body, /transport-events-status/);
-  assert.match(response.body, /transportEvents\.onerror = \(\) => \{\s+fields\["transport-events-status"\]\.textContent = "Disconnected"/);
+  assert.doesNotMatch(response.body, /new EventSource\("\/transport\/events"\)/);
   assert.match(response.body, /Cannot reach ShadowScore at/);
   assert.match(response.body, /\/transport\/players\/play/);
   assert.match(response.body, /\/transport\/players\/stop/);
@@ -1798,6 +1798,12 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     {
       host: "192.168.68.96",
       port: 9000,
+      path: "/rnbo/inst/2/messages/in/MaxSteps",
+      value: 256
+    },
+    {
+      host: "192.168.68.96",
+      port: 9000,
       path: "/rnbo/inst/2/params/Clock/Clock",
       value: "Off"
     },
@@ -1815,6 +1821,7 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     }
   ]);
   assert.equal(started.clockWrites.length, 1);
+  assert.equal(started.patternLengthWrites.length, 1);
   assert.equal(started.phaseClockStopWrites.length, 1);
   assert.equal(started.phaseWrites.length, 1);
 
@@ -2702,7 +2709,9 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
       rnboParamWriter: async (write) => {
         sequence.push(write.path.endsWith("/SetStage")
           ? "SetStage"
-          : write.path.endsWith("/ClockInterval") ? "ClockInterval" : "Clock");
+          : write.path.endsWith("/ClockInterval")
+            ? "ClockInterval"
+            : write.path.endsWith("/MaxSteps") ? "MaxSteps" : "Clock");
       },
       rnboAdapter: {
         enabled: true,
@@ -2711,7 +2720,7 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
         sendQueueStatus: () => ({ inProgress: false, queued: false }),
         schedulePreparedActivations(options) {
           sequence.push("activation_scheduled");
-          assert.deepEqual(options, { targetId: "", initialStage: 0 });
+          assert.deepEqual(options, { targetId: "", blockId: "A", initialStage: 0 });
           return [activationRequest];
         },
         async confirmPreparedActivations(requests, options) {
@@ -2755,6 +2764,7 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
 
   assert.deepEqual(sequence, [
     "ClockInterval",
+    "MaxSteps",
     "Clock",
     "SetStage",
     "activation_scheduled",
@@ -2768,6 +2778,7 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
 test("transport start refreshes the clock ACK cohort after JACK starts", async () => {
   let peerAvailable = false;
   let running = false;
+  let startOptions;
   const clockCounters = new Map([["local", 0], ["peer", 0]]);
   const phaseCounters = new Map([["local", 0], ["peer", 0]]);
   const stages = new Map([["local", -1], ["peer", -1]]);
@@ -2827,6 +2838,7 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
         }
         if (write.path.endsWith("/clock_phase_reset")) {
           phaseCounters.set(key, phaseCounters.get(key) + 1);
+          stages.set(key, 4);
         }
       },
       rnboAckFetch: async (url) => {
@@ -2852,14 +2864,15 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
         async ensureObservations() {},
         targets: (targets) => targets.map((target) => ({
           ...target,
-          currentStage: 0,
+          currentStage: 12,
           stageMovement: "stopped",
           stageReadbackStatus: "fresh"
         }))
       },
       macroPlayback: {
         snapshot: () => ({ running, activeBlockId: "A", macroIndex: 0 }),
-        start: () => {
+        start: (options) => {
+          startOptions = options;
           running = true;
           return context.runtime.macroPlayback.snapshot();
         },
@@ -2900,7 +2913,9 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
     true,
     JSON.stringify(started.clockStartPhaseVerification)
   );
-  assert.deepEqual([...stages.values()], [0, 0]);
+  assert.deepEqual(started.phaseAnchor, started.clockStartPhaseVerification.witness);
+  assert.equal(startOptions.anchorOffsetBeats, 0.25);
+  assert.deepEqual([...stages.values()], [4, 4]);
 });
 
 test("continuing arrangements reject per-section ClockInterval changes", () => {
@@ -2959,11 +2974,14 @@ test("transport play prefers atomic block activation for continuing clients", as
       rnboParamWriter: async (write) => {
         sequence.push(write.path.endsWith("/SetStage")
           ? "SetStage"
-          : write.path.endsWith("/ClockInterval") ? "ClockInterval" : "Clock");
+          : write.path.endsWith("/ClockInterval")
+            ? "ClockInterval"
+            : write.path.endsWith("/MaxSteps") ? "MaxSteps" : "Clock");
       },
       rnboAdapter: {
         enabled: true,
-        async prepareBlock(blockId, reason) {
+        async prepareBlock(blockId, reason, options) {
+          assert.equal(options.requireReady, true);
           sequence.push(`prepare:${blockId}:${reason}`);
         },
         async waitForIdle() {},
@@ -3015,6 +3033,7 @@ test("transport play prefers atomic block activation for continuing clients", as
     "prepare:A:transport-start",
     "apply:A:now",
     "ClockInterval",
+    "MaxSteps",
     "Clock",
     "SetStage",
     "Clock",
@@ -3393,21 +3412,78 @@ test("transport object path resolves to one revisioned musician-facing authority
   assert.equal(first.object.clock_source, "jack");
   assert.equal(first.object.position_beats, 2);
   assert.equal(second.object.revision, first.object.revision + 1);
-  assert.equal(first.object.capabilities.can_locate, false);
+  assert.equal(first.object.capabilities.can_locate, true);
 });
 
-test("transport object rejects unknown operations and advertises deferred continuous locate", async () => {
+test("transport object rejects unknown operations and locates a stopped arrangement", async () => {
   const context = createRouteContext();
   const unknown = await request(context, "POST", "/api/v1/objects/transport", { operation: "launch_confetti" });
   assert.equal(unknown.status, 400);
   assert.match(unknown.body, /unknown transport operation/);
 
-  const locate = await request(context, "POST", "/api/v1/objects/transport", {
+  const locate = await requestJson(context, "POST", "/api/v1/objects/transport", {
     operation: "locate_fraction",
     args: { fraction: 0.5 }
   });
-  assert.equal(locate.status, 501);
-  assert.match(locate.body, /continuous arrangement locate is not yet available/);
+  assert.equal(locate.result.action, "locate");
+  assert.equal(locate.result.wasPlaying, false);
+  assert.equal(locate.object.position_fraction, 0.5);
+  assert.equal(locate.object.capabilities.can_locate, true);
+});
+
+test("transport object resumes a running arrangement from the located section offset", async () => {
+  let running = true;
+  let startOptions = null;
+  let compositionBeat = 2;
+  const context = createRouteContext({
+    runtime: {
+      performanceTransport: {
+        playersPlaying: true,
+        playerControlOrigin: "shadowscore",
+        adoptionPayloadVerified: true,
+        arrangementRequestedMode: "run",
+        lastExternalIntent: null,
+        lastExternalPhaseAlignment: null,
+        lastClockStartAcknowledgement: null,
+        locatedCompositionBeat: null,
+        locatedBlockId: "",
+        locatedMacroIndex: null
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          mode: running ? "timer" : "stopped",
+          activeBlockId: context.store.getScore().structureState.activeBlockId,
+          macroIndex: context.store.getScore().structureState.macroIndex,
+          compositionBeat,
+          beatIntoBlock: startOptions?.anchorOffsetBeats ?? 2,
+          witness: { source: "timer", usable: running, fresh: running }
+        }),
+        stop: () => {
+          running = false;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        start: (options) => {
+          startOptions = options;
+          running = true;
+          compositionBeat = 18;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  const located = await requestJson(context, "POST", "/api/v1/objects/transport", {
+    operation: "locate_beats",
+    args: { beats: 18 }
+  });
+
+  assert.equal(located.result.wasPlaying, true);
+  assert.equal(located.result.location.activeBlockId, "B");
+  assert.equal(startOptions.anchorOffsetBeats, 2);
+  assert.equal(located.object.is_playing, true);
+  assert.equal(located.object.active_section, "B");
+  assert.equal(located.object.position_beats, 18);
 });
 
 test("playback snapshot timestamps its boundary after peer stage collection", async () => {
@@ -3941,6 +4017,8 @@ test("forced Re-sync waits for delayed remote clock-off before resetting any sta
 
 test("transport object Re-sync preserves the current block stage", async () => {
   const writes = [];
+  let running = true;
+  let stopCount = 0;
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
       rnbo: {
@@ -3959,15 +4037,23 @@ test("transport object Re-sync preserves the current block stage", async () => {
       rnboParamWriter: async (write) => writes.push(write),
       macroPlayback: {
         snapshot: () => ({
-          running: true,
-          mode: "jack",
+          running,
+          mode: running ? "jack" : "stopped",
           activeBlockId: "A",
           macroIndex: 0,
           beatIntoBlock: 5.25,
           compositionBeat: 5.25,
           witness: { source: "jack", usable: true, fresh: true }
         }),
-        start: () => context.runtime.macroPlayback.snapshot()
+        start: () => {
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => {
+          stopCount += 1;
+          running = false;
+          return context.runtime.macroPlayback.snapshot();
+        }
       }
     }
   });
@@ -3979,6 +4065,7 @@ test("transport object Re-sync preserves the current block stage", async () => {
   assert.equal(response.ok, true);
   assert.equal(response.result.rnboReadiness.phaseOnly, true);
   assert.equal(response.result.phaseStage, 84);
+  assert.equal(stopCount, 1);
   assert.deepEqual(
     writes.filter((write) => write.path.endsWith("/SetStage")).map((write) => write.value),
     [84]

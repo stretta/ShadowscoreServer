@@ -68,6 +68,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
     reconciledTargetIds: []
   };
   const lastSendStatus = new Map();
+  const preparedActivationTargets = new Map();
   let sendLoopActive = false;
   let sendLoopPromise = Promise.resolve();
   let queuedSend = undefined;
@@ -170,6 +171,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
     applyBlockUpdate(blockId = "", options = {}) {
       return enqueueActivationOperation(() => runBlockUpdate(blockId, options));
     },
+    activatePreparedBlock(blockId = "", options = {}) {
+      return enqueueActivationOperation(() => runPreparedBlockActivation(blockId, options));
+    },
     sendStatus() {
       return [...lastSendStatus.values()];
     },
@@ -203,11 +207,13 @@ export function createRnboOscAdapter(config, runtime = {}) {
     },
     schedulePreparedActivations(options = {}) {
       const targetId = String(options.targetId ?? "").trim();
+      const blockId = String(options.blockId ?? "").trim();
       const initialStage = clampInt(options.initialStage ?? 0, 0, 2147483647);
       const requests = [...lastSendStatus.values()]
         .filter((status) => status.stagedScoreActivation === true)
         .filter((status) => Number.isInteger(status.preparedTransaction))
         .filter((status) => !targetId || status.targetId === targetId)
+        .filter((status) => !blockId || status.blockId === blockId)
         .map((status) => ({
           targetId: status.targetId,
           transactionId: status.preparedTransaction,
@@ -234,7 +240,8 @@ export function createRnboOscAdapter(config, runtime = {}) {
           url: request.url,
           expectedTransactionId: request.transactionId
         });
-        while (Date.now() - startedAt <= activation.timeoutMs) {
+        const timeoutMs = Math.max(activation.timeoutMs, Number(request.activationTimeoutMs) || 0);
+        while (Date.now() - startedAt <= timeoutMs) {
           acknowledgement = await readScoreActivationAck(request, {
             fetchImpl,
             timeoutMs: activation.requestTimeoutMs
@@ -248,6 +255,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
           lastSendStatus.set(request.targetId, {
             ...previous,
             activeTransaction: request.transactionId,
+            activeBlockId: previous.blockId,
             preparedTransaction: null,
             activationAcknowledgementAt: completedAt,
             activationAck: acknowledgement
@@ -303,6 +311,141 @@ export function createRnboOscAdapter(config, runtime = {}) {
     }
   };
   return adapter;
+
+  async function runPreparedBlockActivation(blockId = "", options = {}) {
+    if (!store) throw new Error("RNBO adapter is not attached to a score store");
+    const canonical = store.getScore();
+    const selectedBlockId = String(blockId || canonical.structureState?.activeBlockId || "").trim();
+    const scoreRevision = canonical.scoreRevision ?? canonical.version ?? 0;
+    const boundary = options.boundary === "next-cycle" ? "next-cycle" : "next-beat";
+    const initialStage = boundary === "next-cycle" ? 0 : null;
+    const runtimeTempo = Number(runtime.getTempo?.());
+    const activationTempo = Number.isFinite(runtimeTempo) && runtimeTempo > 0
+      ? runtimeTempo
+      : activeWrittenTempo(canonical);
+    if (options.expectedScoreRevision !== undefined && Number(options.expectedScoreRevision) !== Number(scoreRevision)) {
+      const error = new Error(`stale score revision ${options.expectedScoreRevision}; current score revision is ${scoreRevision}`);
+      error.code = "STALE_SCORE_REVISION";
+      error.currentScoreRevision = scoreRevision;
+      throw error;
+    }
+
+    // Reconcile the raw cache with the current score before deciding whether
+    // the READY cohort is usable. A score event can conservatively mark a
+    // cached row saved-not-active even when recompilation proves its payload
+    // hash is unchanged. Use the cached target descriptors so this fast path
+    // does not introduce live target rediscovery at the section boundary.
+    const activationScore = scoreWithActiveBlock(canonical, selectedBlockId);
+    const blockStates = [...playbackUpdateState.values()]
+      .filter((state) => state.blockId === selectedBlockId)
+      .map((state) => {
+        if (["active", "prepared"].includes(state.state)) return state;
+        const target = preparedActivationTargets.get(state.targetId);
+        return target ? desiredUpdateForTarget(activationScore, selectedBlockId, target) : state;
+      });
+    const assignedVoiceIds = Object.keys(canonical.mesostructure?.[selectedBlockId]?.players ?? {});
+    const cachedVoiceIds = new Set(blockStates.map((state) => state.voiceId).filter(Boolean));
+    const missingVoiceIds = assignedVoiceIds.filter((voiceId) => !cachedVoiceIds.has(voiceId));
+    const invalidStates = blockStates.filter((state) => !["active", "prepared"].includes(state.state));
+    if (!blockStates.length || missingVoiceIds.length || invalidStates.length) {
+      const error = new Error(`block '${selectedBlockId}' has no cached READY target cohort`);
+      error.code = "PLAYBACK_UPDATE_NOT_READY";
+      throw error;
+    }
+    if (blockStates.every((state) => state.state === "active")) {
+      return {
+        blockId: selectedBlockId,
+        scoreRevision,
+        state: "active",
+        targets: cachedPlaybackUpdates(selectedBlockId),
+        activationMode: "continue",
+        boundary,
+        action: "already-active",
+        activations: [],
+        fastPath: true
+      };
+    }
+
+    const preparedStates = blockStates.filter((state) => state.state === "prepared");
+
+    const requests = preparedStates.map((state) => {
+      const status = lastSendStatus.get(state.targetId);
+      const target = preparedActivationTargets.get(state.targetId);
+      const matchingPreparation =
+        target &&
+        status?.stagedScoreActivation === true &&
+        status?.continuingScoreActivation === true &&
+        Number.isInteger(status?.preparedTransaction) &&
+        status.preparedTransaction === state.preparedTransaction &&
+        status.blockId === selectedBlockId &&
+        status.payloadHash === state.desiredHash &&
+        status.ack?.ok === true &&
+        status.ack?.status === "prepared";
+      if (!matchingPreparation) {
+        const error = new Error(`RNBO target '${state.targetId}' is not cached READY for block '${selectedBlockId}'`);
+        error.code = "PLAYBACK_UPDATE_NOT_READY";
+        throw error;
+      }
+      return {
+        target,
+        targetId: state.targetId,
+        transactionId: status.preparedTransaction,
+        expectedClientId: status.ack?.expectedClientId,
+        url: status.ack?.url ?? "",
+        initialStage,
+        activationMode: "continue",
+        boundary,
+        activationTimeoutMs: boundary === "next-cycle"
+          ? nextCycleActivationTimeoutMs(config, activationTempo, status.patternLength, status.stagesPerBeat)
+          : undefined
+      };
+    });
+
+    await options.authorizeActivation?.({
+      blockId: selectedBlockId,
+      scoreRevision,
+      activationMode: "continue",
+      boundary
+    });
+    const armedAt = new Date().toISOString();
+    await Promise.all(requests.map(async (request) => {
+      await sendPreparedActivationRequest(socket, request.target, request);
+      recordLifecycleEvent({
+        type: "playback.update.armed",
+        observedAt: armedAt,
+        targetId: request.targetId,
+        transactionId: request.transactionId,
+        activationMode: request.activationMode,
+        boundary: request.boundary,
+        fastPath: true
+      });
+    }));
+    await options.onArmed?.({
+      blockId: selectedBlockId,
+      scoreRevision,
+      activationMode: "continue",
+      boundary,
+      requests: structuredClone(requests.map(({ target: _target, ...request }) => request))
+    });
+
+    const activations = await adapter.confirmPreparedActivations(requests, {
+      tempo: activationTempo,
+      fetchImpl: options.fetchImpl
+    });
+    const targets = cachedPlaybackUpdates(selectedBlockId);
+    const state = aggregateUpdateState(Object.values(targets));
+    return {
+      blockId: selectedBlockId,
+      scoreRevision,
+      state,
+      targets,
+      activationMode: "continue",
+      boundary,
+      action: state === "active" ? "active" : "activation-failed",
+      activations,
+      fastPath: true
+    };
+  }
 
   async function runBlockUpdate(blockId = "", options = {}) {
     let result;
@@ -372,9 +515,19 @@ export function createRnboOscAdapter(config, runtime = {}) {
             transactionId: status.preparedTransaction,
             expectedClientId: status.ack?.expectedClientId,
             url: status.ack?.url ?? "",
-            initialStage: activationMode === "now" ? 0 : null,
+            initialStage: activationMode === "now" || options.boundary === "next-cycle" ? 0 : null,
             activationMode,
-            boundary: activationMode === "now" ? "now" : "next-beat"
+            boundary: activationMode === "now"
+              ? "now"
+              : options.boundary === "next-cycle" ? "next-cycle" : "next-beat",
+            activationTimeoutMs: options.boundary === "next-cycle"
+              ? nextCycleActivationTimeoutMs(
+                  config,
+                  Number(runtime.getTempo?.()) || activeWrittenTempo(canonical),
+                  status.patternLength,
+                  status.stagesPerBeat
+                )
+              : undefined
           };
         });
 
@@ -632,6 +785,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
       for (const targetId of lastSendStatus.keys()) {
         if (!currentTargetIds.has(targetId)) {
           lastSendStatus.delete(targetId);
+          preparedActivationTargets.delete(targetId);
         }
       }
     }
@@ -679,6 +833,10 @@ export function createRnboOscAdapter(config, runtime = {}) {
         activeTransaction: compiled?.stagedScoreActivation === true
           ? lastSendStatus.get(targetId)?.activeTransaction ?? null
           : compiled?.transactionId ?? compiled?.ack?.transactionId ?? null,
+        activeBlockId: compiled?.stagedScoreActivation === true
+          ? lastSendStatus.get(targetId)?.activeBlockId
+            ?? (Number.isInteger(lastSendStatus.get(targetId)?.activeTransaction) ? lastSendStatus.get(targetId)?.blockId : "")
+          : compiled?.blockId ?? compiled?.timing?.blockId ?? "",
         preparedTransaction: compiled?.stagedScoreActivation === true && compiled?.ack?.status === "prepared"
           ? compiled?.transactionId ?? compiled?.ack?.transactionId ?? null
           : null,
@@ -686,6 +844,20 @@ export function createRnboOscAdapter(config, runtime = {}) {
         activationAck: null,
         ack: compiled?.ack
       });
+      if (
+        target &&
+        compiled?.stagedScoreActivation === true &&
+        compiled?.continuingScoreActivation === true &&
+        compiled?.ack?.ok === true &&
+        compiled?.ack?.status === "prepared"
+      ) {
+        preparedActivationTargets.set(targetId, {
+          ...target,
+          capabilities: target.capabilities ? { ...target.capabilities } : undefined
+        });
+      } else {
+        preparedActivationTargets.delete(targetId);
+      }
       recordPlaybackUpdate(target, compiled, lastSendStatus.get(targetId));
     }
     clearPreparedDirtySelection(entries);
@@ -1024,6 +1196,14 @@ export function createRnboOscAdapter(config, runtime = {}) {
             updatedAt: new Date().toISOString()
           });
     }
+  }
+
+  function cachedPlaybackUpdates(blockId) {
+    return Object.fromEntries(
+      [...playbackUpdateState.values()]
+        .filter((state) => state.blockId === blockId)
+        .map((state) => [state.targetId, structuredClone(state)])
+    );
   }
 
   function clearPreparedDirtySelection(entries) {
@@ -1629,6 +1809,17 @@ function rnboActivationConfig(config, tempo) {
     pollIntervalMs: clampInt(activation.pollIntervalMs ?? 50, 1, 10000),
     requestTimeoutMs: clampInt(activation.requestTimeoutMs ?? 300, 1, 60000)
   };
+}
+
+function nextCycleActivationTimeoutMs(config, tempo, patternLength, stagesPerBeat) {
+  const activation = rnboActivationConfig(config, tempo);
+  const bpm = Number(tempo);
+  const stages = Number(patternLength);
+  const resolution = Number(stagesPerBeat);
+  if (!(bpm > 0) || !(stages > 0) || !(resolution > 0)) return activation.timeoutMs;
+  const cycleMs = stages / resolution * 60000 / bpm;
+  const marginMs = clampInt(config.rnbo?.activation?.beatMarginMs ?? 750, 0, 60000);
+  return Math.min(60000, Math.max(activation.timeoutMs, Math.ceil(cycleMs + marginMs)));
 }
 
 function rnboAckUrl(config, target, ackConfig) {
@@ -2314,7 +2505,7 @@ async function sendPreparedActivationRequest(socket, target, request) {
   const instanceId = readInstanceId(target.address);
   if (!instanceId) throw new Error(`RNBO target '${target.id ?? ""}' does not include an instance id`);
   const activationMode = request.activationMode === "continue" ? 1 : 0;
-  const boundary = request.boundary === "next-beat" ? 1 : 0;
+  const boundary = request.boundary === "next-cycle" ? 2 : request.boundary === "next-beat" ? 1 : 0;
   const packet = encodeOscMessage(`/rnbo/inst/${instanceId}/messages/in/ActivatePrepared`, [
     request.transactionId,
     activationMode,

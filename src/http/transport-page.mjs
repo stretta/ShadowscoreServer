@@ -221,17 +221,11 @@ export function transportPage() {
     refreshAll();
     setInterval(refreshAll, 1000);
 
-    const transportEvents = new EventSource("/transport/events");
-    transportEvents.addEventListener("snapshot", (event) => {
-      const payload = JSON.parse(event.data);
+    window.addEventListener("shadowscore-transport-snapshot", (event) => {
+      const payload = event.detail;
       fields["transport-events-status"].textContent = "Connected";
-      log("transport event " + payload.transport.status + " " + formatNumber(payload.transport.latest?.absoluteBeat, 3));
-      refreshAll();
+      log("transport object " + payload.revision + " " + payload.active_section + " " + payload.position_bbt);
     });
-    transportEvents.onerror = () => {
-      fields["transport-events-status"].textContent = "Disconnected";
-      log("transport events disconnected");
-    };
 
     async function refreshAll() {
       if (refreshPending) return;

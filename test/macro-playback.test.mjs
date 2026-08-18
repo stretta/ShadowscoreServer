@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig } from "../src/config.mjs";
-import { createMacroPlayback, deriveMacroPosition, macroBlockDurationMs } from "../src/playback/macro-playback.mjs";
+import { createMacroPlayback, deriveMacroPosition, macroBlockDurationMs, rnboWrapArmBoundary } from "../src/playback/macro-playback.mjs";
 import { createOscSnapshotAutoRecall } from "../src/osc/snapshot-auto-recall.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
 import { createJackTransportState } from "../src/transport/jack-transport-state.mjs";
@@ -566,6 +566,87 @@ test("JACK macro playback arms a prepared block once during the preceding beat",
   playback.close();
 });
 
+test("RNBO wrap boundary opens with two beats of lead for next-cycle activation", () => {
+  const contracts = [{
+    targetId: "finch",
+    assignedVoiceId: "player-1",
+    timing: { blockId: "A", stagesPerBeat: 4, patternLength: 16 }
+  }];
+  const target = { id: "finch", currentStage: 7, fresh: true, stageMovement: "moving", stageReadbackStatus: "fresh" };
+  assert.equal(rnboWrapArmBoundary({ rnboTargets: [target], timingContracts: contracts }).inArmWindow, false);
+  const boundary = rnboWrapArmBoundary({
+    rnboTargets: [{ ...target, currentStage: 8 }],
+    timingContracts: contracts
+  });
+  assert.equal(boundary.usable, true);
+  assert.equal(boundary.inArmWindow, true);
+  assert.equal(boundary.phaseBeat, 2);
+  assert.equal(boundary.cycleBeats, 4);
+  assert.equal(boundary.armLeadBeats, 2);
+  assert.equal(boundary.targetCount, 1);
+});
+
+test("JACK macro playback commits a prepared section from its RNBO wrap-edge acknowledgement", async () => {
+  const config = {
+    ...defaultConfig,
+    rnbo: {
+      ...defaultConfig.rnbo,
+      lookAheadBeats: 4,
+      activation: { ...defaultConfig.rnbo.activation, armLeadBeats: 0.75 }
+    }
+  };
+  const store = createScoreStore(createInitialScore(config));
+  store.replaceMesoBlock("A", { duration: { beats: 4 }, players: {} });
+  store.replaceMesoBlock("B", { duration: { beats: 4 }, players: {} });
+  store.updateMacrostructure({ blocks: ["A", "B"] });
+  const jackTransport = createJackTransportState(config, { now: () => 1000 });
+  const prepared = [];
+  const armed = [];
+  const playback = createMacroPlayback(store, config, {
+    jackTransport,
+    beforeAdvance: async ({ nextBlockId }) => {
+      prepared.push(nextBlockId);
+      return { prepared: nextBlockId };
+    },
+    armAdvance: async (detail) => {
+      armed.push(detail);
+      return { activations: [{ acknowledgement: { ok: true, activatedStage: 15 } }] };
+    }
+  });
+  const timingContracts = [{
+    targetId: "finch",
+    assignedVoiceId: "player-1",
+    timing: { blockId: "A", stagesPerBeat: 4, patternLength: 16 }
+  }];
+  const context = (currentStage) => ({
+    rnboTargets: [{
+      id: "finch",
+      currentStage,
+      fresh: true,
+      stageMovement: "moving",
+      stageReadbackStatus: "fresh"
+    }],
+    timingContracts
+  });
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 100 }));
+  playback.start({ mode: "jack", witnessContext: context(8) });
+  playback.snapshot(context(8));
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.deepEqual(prepared, ["B"]);
+
+  jackTransport.update(jackSnapshot({ absoluteBeat: 101 }));
+  playback.snapshot(context(13));
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(armed.length, 1);
+  assert.equal(armed[0].boundarySource, "rnbo-wrap");
+  assert.equal(store.getScore().structureState.activeBlockId, "B");
+  assert.equal(playback.snapshot(context(0)).beatIntoBlock, 0);
+  assert.equal(playback.snapshot().activationArm.last.boundarySource, "rnbo-wrap");
+  playback.close();
+});
+
 test("JACK macro playback retries a failed transition arm before the boundary", async () => {
   const config = {
     ...defaultConfig,
@@ -684,11 +765,12 @@ test("transactional JACK playback holds the current block when the next block is
   jackTransport.update(jackSnapshot({ absoluteBeat: 102.1 }));
   playback.snapshot();
   await new Promise((resolve) => setImmediate(resolve));
-  jackTransport.update(jackSnapshot({ absoluteBeat: 104 }));
+  jackTransport.update(jackSnapshot({ absoluteBeat: 104.25 }));
   playback.snapshot();
 
   assert.equal(store.getScore().structureState.activeBlockId, "A");
   assert.equal(playback.snapshot().activeBlockStartBeat, 104);
+  assert.equal(playback.snapshot().beatIntoBlock, 0.25);
   playback.close();
 });
 
@@ -733,7 +815,7 @@ test("transactional JACK hold never prepares beyond the uncommitted next block",
 
   assert.equal(store.getScore().structureState.activeBlockId, "A");
   assert.equal(prepared.includes("C"), false);
-  assert.deepEqual([...new Set(prepared)], ["B"]);
+  assert.deepEqual(prepared, ["B"]);
   playback.close();
 });
 

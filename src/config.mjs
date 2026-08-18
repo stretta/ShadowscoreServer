@@ -357,7 +357,7 @@ export const defaultConfig = Object.freeze({
     activation: {
       timeoutMs: 1800,
       beatMarginMs: 750,
-      armLeadBeats: 0.75,
+      armLeadBeats: 2,
       pollIntervalMs: 50,
       requestTimeoutMs: 300
     },

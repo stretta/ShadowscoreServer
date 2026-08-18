@@ -18,7 +18,7 @@ test("Piano Roll exposes autosave recovery and editing surfaces", async () => {
   assert.doesNotMatch(html, /id="save"/);
   assert.match(html, /Completed gestures save automatically/);
   assert.match(html, /id="revert"[^>]*disabled/);
-  assert.match(html, /id="chase"[^>]*type="checkbox"/);
+  assert.match(html, /id="chase"[^>]*type="checkbox"[^>]*checked/);
   assert.match(html, /Follow section/);
   assert.match(html, /id="scroll-chase"/);
   assert.match(html, /value="pages"/);
@@ -75,8 +75,10 @@ test("Piano Roll autosaves revision-aware clip drafts and supports right-edge re
   assert.match(js, /state\.top\+\(127-84\)\*rowHeight\(\)/);
   assert.match(js, /ui\.fold\.addEventListener\("click"/);
   assert.match(js, /ui\.chase\.addEventListener\("change"/);
+  assert.match(js, /shadowscore\.pianoRoll\.followSection/);
   assert.match(js, /ui\.block\.disabled=state\.chasing/);
   assert.match(js, /function followChase\(\)/);
+  assert.match(js, /blockId:sampleBlockId/);
   assert.match(js, /playheadScrollLeft/);
   assert.match(js, /zoomAnchorScrollLeft/);
   assert.match(js, /state\.playback\?\.activeBlockId\|\|state\.score\?\.structureState\?\.activeBlockId/);

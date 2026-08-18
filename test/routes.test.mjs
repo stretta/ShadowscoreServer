@@ -2126,6 +2126,8 @@ test("Transport Play adopts externally moving active players without reset or pa
   let applyCount = 0;
   let jackStartCount = 0;
   const writes = [];
+  const adoptionWaits = [];
+  let movementObserved = false;
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
       rnbo: {
@@ -2142,13 +2144,15 @@ test("Transport Play adopts externally moving active players without reset or pa
     runtime: {
       rnboStageCollector: {
         async ensureObservations() {},
+        async refresh() { movementObserved = true; },
         targets: (targets) => targets.map((target) => ({
           ...target,
           currentStage: 40,
-          stageMovement: "moving",
+          stageMovement: movementObserved ? "moving" : "unknown",
           stageReadbackStatus: "fresh"
         }))
       },
+      phaseAlignmentWait: async (milliseconds) => { adoptionWaits.push(milliseconds); },
       rnboAdapter: {
         enabled: true,
         async waitForIdle() {},
@@ -2184,6 +2188,7 @@ test("Transport Play adopts externally moving active players without reset or pa
 
   const played = await requestJson(context, "POST", "/transport/play", {});
   assert.equal(played.adopted, true);
+  assert.deepEqual(adoptionWaits, [350]);
   assert.equal(played.payloadVerified, false);
   assert.equal(startOptions.mode, "jack");
   assert.equal(startOptions.anchorOffsetBeats, 2.5);

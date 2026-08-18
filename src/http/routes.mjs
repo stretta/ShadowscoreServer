@@ -3047,8 +3047,18 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     // phase transaction, then resume from the verified client witness below.
     playback.stop();
   }
-  const witnessContext = await readBeatWitnessContext(score, config, runtime);
-  const externalPlayback = observedRnboPlayback(witnessContext);
+  let witnessContext = await readBeatWitnessContext(score, config, runtime);
+  let externalPlayback = observedRnboPlayback(witnessContext);
+  if (!externalPlayback.running && shouldAwaitStartupAdoption(score, witnessContext, runtime)) {
+    const graceMs = Math.max(0, Math.min(2000,
+      Number(config.transport?.rnboClient?.startupAdoptionGraceMs) || 350));
+    const wait = runtime.phaseAlignmentWait
+      ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+    await wait(graceMs);
+    await runtime.rnboStageCollector.refresh(witnessContext.rnboTargets);
+    witnessContext = await readBeatWitnessContext(score, config, runtime);
+    externalPlayback = observedRnboPlayback(witnessContext);
+  }
   const initialReadiness = phaseOnly
     ? { allActive: true, phaseOnly: true }
     : await rnboPlaybackReadiness(runtime, score, { waitForIdle: true });
@@ -3595,6 +3605,16 @@ async function awaitClockArmWindow(config, runtime) {
     await wait(plan.delayMs);
   }
   return plan;
+}
+
+function shouldAwaitStartupAdoption(score, context, runtime) {
+  if (typeof runtime.rnboStageCollector?.refresh !== "function") return false;
+  const assigned = context.rnboTargets.filter((target) => assignedVoiceForTarget(score, target));
+  return assigned.length > 0 && assigned.every((target) =>
+    Number.isFinite(Number(target.currentStage))
+    && target.stageReadbackStatus !== "unavailable"
+    && target.stageMovement === "unknown"
+  );
 }
 
 async function readClockStartAckBaselines(config, runtime, targets) {

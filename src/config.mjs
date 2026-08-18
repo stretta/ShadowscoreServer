@@ -50,6 +50,7 @@ export const defaultConfig = Object.freeze({
       pollIntervalMs: 1000,
       timeoutMs: 300,
       staleAfterMs: 3000,
+      startupAdoptionGraceMs: 350,
       autoResync: {
         enabled: true,
         intervalMs: 1000,

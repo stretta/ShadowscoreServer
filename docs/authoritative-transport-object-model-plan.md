@@ -1,5 +1,9 @@
 # Authoritative Transport Object Model Development Plan
 
+> **Historical plan:** the implemented client contract is documented in
+> [`transport-api.md`](transport-api.md). Where this plan and that reference
+> differ, the API reference and current code/tests are authoritative.
+
 ## Goal
 
 Provide one musician-facing transport truth owned by the Wren ShadowScore
@@ -21,7 +25,7 @@ health.
 ## Invariants
 
 1. Wren publishes one revisioned transport state.
-2. Commands are idempotent, carry request IDs, and return acknowledged state.
+2. Commands may carry correlation request IDs and return acknowledged state.
 3. User interfaces update from acknowledged state, never local command
    assumptions.
 4. Position is a timestamped anchor that clients may interpolate visually.
@@ -62,15 +66,19 @@ The initial stable object is `transport`. It exposes:
 - `is_playing`
 - `position_beats`
 - `position_seconds`
-- `position_bars_beats_ticks`
+- `position_fraction`
+- `position_bbt`
 - `duration_beats`
 - `duration_seconds`
 - `tempo`
-- `time_signature`
+- `time_signature_numerator`
+- `time_signature_denominator`
 - `active_section`
 - `authority`
-- `operation`
-- `sync_health`
+- `clock_source`
+- `arrangement`
+- `sync`
+- `capabilities`
 
 Methods:
 
@@ -79,6 +87,7 @@ Methods:
 - `locate_beats`
 - `locate_fraction`
 - `return_to_start`
+- `set_tempo`
 - `previous_section`
 - `next_section`
 - `re_sync`
@@ -99,16 +108,21 @@ Object operations use one envelope:
 
 ```json
 {
-  "requestId": "caller-generated-id",
-  "operation": "call",
-  "name": "play",
-  "arguments": []
+  "request_id": "caller-generated-id",
+  "client_id": "caller-id",
+  "operation": "play",
+  "args": {}
 }
 ```
 
-Observers receive an immediate snapshot followed by revisioned snapshots. A
-property filter may reduce the event payload, but every event retains object
-ID, revision, observation time, and source request ID.
+The earlier `requestId` / `operation: "call"` / `name` / `arguments` proposal
+was never the implemented HTTP contract. `locate_beats` and `locate_fraction`
+are implemented coordinated operations; see the stable API reference for their
+activation and phase behavior.
+
+Observers receive an immediate complete snapshot followed by revisioned
+complete snapshots. Each snapshot retains object ID, revision, observation
+time, and authoritative state.
 
 ## Compact Test Score
 

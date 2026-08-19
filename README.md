@@ -28,6 +28,11 @@ npm start
 
 The default HTTP server listens on `0.0.0.0:8790`.
 
+Remote transport clients should use the authoritative object contract in
+[`docs/transport-api.md`](docs/transport-api.md). It documents direct
+`operation` plus `args` calls, coordinated locate, acknowledged state, and SSE
+observation.
+
 ```sh
 curl http://127.0.0.1:8790/healthz
 curl http://127.0.0.1:8790/score
@@ -349,6 +354,10 @@ For the session-day operator flow, see
 - `GET /transport`: current JACK bridge freshness, latest BBT snapshot, tempo authority, and runtime live/written/follow policy.
 - `GET /transport/events`: SSE stream for transport updates.
 - `GET /transport/status`: host transport status and macro playback control page.
+- `GET`/`POST /api/v1/objects/transport`: canonical transport object state and
+  direct operation calls; see [`docs/transport-api.md`](docs/transport-api.md).
+- `GET /api/v1/objects/transport/events`: canonical revisioned transport object
+  SSE snapshots.
 - `POST /rnbo/targets/:targetId/transport-controls`: set playback transport RNBO controls for a target. `Clock` is written to the RNBO param path, while `Tempo`, `MaxSteps`, `ClockInterval`, `SetStage`, and `Stage` are written to message inports, for example `{ "controls": { "Tempo": 120, "MaxSteps": 64, "ClockInterval": 240 } }`. Editor transport start/stop uses this route with `{ "controls": { "Clock": 1 } }` or `{ "controls": { "Clock": 0 } }`; sending the off/on message to one target is sufficient for the linked transport. Routine score-data resends reassert `ClockInterval` and score-derived `MaxSteps`; they only send `Tempo` when `transport.tempoAuthority` is set to `"server"`. Stage/step reset or direct advancement controls should be sent only by explicit sync/direct-drive operations. The older `/rnbo/targets/:targetId/params` route remains available as a compatibility alias.
 - `GET /assignments`: current voice assignment map.
 - `POST /assignments/reconcile`: refresh assignment endpoint fields from currently registered hardware units by stable `deviceId`; this is the manual version of the safe registration reconciliation path.

@@ -6,6 +6,8 @@ Start with the current guides:
   current HTTP API, development notes, and deployment entry points.
 - [`operator-guide.md`](operator-guide.md): session-day host, peer, editor,
   transport, score, and recovery workflow.
+- [`transport-api.md`](transport-api.md): stable authoritative transport object
+  contract for Shadowbox, Max, browser, and other remote clients.
 - [`score-initialization-api.md`](score-initialization-api.md): declarative,
   dry-run-first creation of player, clip, block, macro, and OSC-role skeletons.
 - [`deployment/shadowbox-hardware.md`](deployment/shadowbox-hardware.md):

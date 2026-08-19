@@ -211,6 +211,11 @@ POST /admin/rnbo/resend
 
 ## Playback And Transport
 
+For Shadowbox, Max, browser, or other remote-control integration, use the
+stable [`Authoritative Transport API`](transport-api.md). Its canonical POST
+contract uses a direct `operation` plus `args`, including implemented
+`locate_beats` and `locate_fraction` operations.
+
 The transport status page is:
 
 ```text

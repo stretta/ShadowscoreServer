@@ -1789,6 +1789,92 @@ test("RNBO adapter applies a prepared update in continue mode without requiring 
   }
 });
 
+test("RNBO adapter activates available players while retaining offline assignments as degraded", async () => {
+  let activationRequested = false;
+  const sentHosts = [];
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      transactionStart: 1300,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      targets: [
+        {
+          id: "finch",
+          host: "finch.local",
+          port: 1234,
+          instanceId: "20",
+          clientId: 90,
+          voiceId: "player-1",
+          address: "/rnbo/inst/20/messages/in/shadowscore",
+          capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true, continuingScoreActivation: true }
+        },
+        {
+          id: "heron",
+          host: "heron.local",
+          port: 1234,
+          instanceId: "21",
+          clientId: 91,
+          voiceId: "player-2",
+          address: "/rnbo/inst/21/messages/in/shadowscore",
+          available: false,
+          unitStatus: "offline",
+          capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true, continuingScoreActivation: true }
+        }
+      ],
+      oscQuery: { enabled: true, url: "http://wren.local:5678/" },
+      ack: { enabled: true, retries: 0, settleMs: 0 },
+      activation: { timeoutMs: 20, beatMarginMs: 0, pollIntervalMs: 1, requestTimeoutMs: 20 }
+    }
+  });
+  const score = scoreWithBlock(9);
+  score.clips.second = {
+    notes: createScore().voices["player-2"].notes,
+    context: score.context,
+    duration: { beats: 2 },
+    playbackType: "looped"
+  };
+  score.mesostructure.A.players["player-2"] = { clipId: "second" };
+  const fetchImpl = async () => ({
+    ok: true,
+    async json() {
+      return { VALUE: activationRequested ? [90, 93, 1301, 2, 0, 1] : [90, 92, 1301, 2, 32, 1] };
+    }
+  });
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        sentHosts.push(host);
+        if (readOscAddress(packet).endsWith("/ActivatePrepared")) activationRequested = true;
+        callback();
+      },
+      close() {}
+    },
+    fetchImpl
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    const result = await adapter.applyBlockUpdate("A", {
+      activationMode: "continue",
+      expectedScoreRevision: 9,
+      fetchImpl
+    });
+
+    assert.equal(result.state, "active");
+    assert.equal(result.degraded, true);
+    assert.equal(result.participatingTargetCount, 1);
+    assert.equal(result.unavailableTargetCount, 1);
+    assert.equal(result.targets.finch.state, "active");
+    assert.equal(result.targets.heron.state, "unavailable");
+    assert.equal(sentHosts.includes("finch.local"), true);
+    assert.equal(sentHosts.includes("heron.local"), false);
+  } finally {
+    adapter.close();
+  }
+});
+
 test("RNBO adapter activates the cached READY cohort without rediscovery", async () => {
   let activationRequested = false;
   let activationPacket;

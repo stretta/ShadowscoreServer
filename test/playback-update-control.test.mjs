@@ -51,8 +51,8 @@ test("shared playback control reports unavailable ensemble members and upcoming 
     },
     affectedTargetCount: 2
   }), "A");
-  assert.equal(unavailable.label, "Saved · 1 player unavailable");
-  assert.equal(unavailable.actionEnabled, false);
+  assert.equal(unavailable.label, "Saved · players running previous version · 1 player unavailable");
+  assert.equal(unavailable.actionEnabled, true);
 
   const upcoming = playbackUpdatePresentation(snapshot({}), "B");
   assert.equal(upcoming.label, "Saved · B is upcoming");

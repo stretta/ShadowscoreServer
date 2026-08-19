@@ -176,19 +176,23 @@ export function playbackUpdatePresentation(snapshot = {}, focusedBlockId = "") {
   if (!targets.length) {
     return result("Saved · no assigned players", "warn", false, false);
   }
-  if (unavailableCount) {
-    return result(`Saved · ${unavailableCount} player${unavailableCount === 1 ? "" : "s"} unavailable`, "bad", true, false);
+  const unavailableSuffix = unavailableCount
+    ? ` · ${unavailableCount} player${unavailableCount === 1 ? "" : "s"} unavailable`
+    : "";
+  const participatingCount = targets.length - unavailableCount;
+  if (!participatingCount) {
+    return result(`Saved · no players available${unavailableSuffix}`, "warn", false, false);
   }
   if (updates.state === "active" || affectedCount === 0) {
-    return result("Live", "ok", false, false);
+    return result(`Live${unavailableSuffix}`, unavailableCount ? "warn" : "ok", false, false);
   }
   if (updates.state === "prepared") {
-    return result(running ? "Ready · applies on next beat" : "Ready · players can update now", "ok", true, true);
+    return result(`${running ? "Ready · applies on next beat" : "Ready · players can update now"}${unavailableSuffix}`, unavailableCount ? "warn" : "ok", true, true);
   }
   if (updates.state === "failed") {
-    return result("Saved · playback update failed", "bad", true, true);
+    return result(`Saved · playback update failed${unavailableSuffix}`, "bad", true, true);
   }
-  return result("Saved · players running previous version", "warn", true, true);
+  return result(`Saved · players running previous version${unavailableSuffix}`, "warn", true, true);
 
   function result(label, tone, showAction, actionEnabled) {
     return { label, tone, showAction, actionEnabled, actionLabel, running, blockId, scoreRevision, targets };

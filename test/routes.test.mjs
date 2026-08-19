@@ -2077,6 +2077,67 @@ test("Players Play ignores stale readiness failures for deleted playback targets
   assert.equal(played.transport.arrangement.running, true);
 });
 
+test("Players Play starts the available cohort while an assigned player is offline", async () => {
+  let running = false;
+  const writes = [];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        targets: [
+          { id: "finch", host: "finch.local", port: 1234, address: "/rnbo/inst/2/messages/in/shadowscore" },
+          { id: "heron", host: "heron.local", port: 1234, address: "/rnbo/inst/3/messages/in/shadowscore", available: false, unitStatus: "offline" }
+        ]
+      }
+    }),
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async waitForIdle() {},
+        async playbackUpdates() {
+          return {
+            targets: {
+              finch: { targetId: "finch", state: "active", activeTransaction: 1005 },
+              heron: { targetId: "heron", state: "unavailable", lastError: { status: "offline" } }
+            }
+          };
+        },
+        sendStatus: () => [],
+        sendQueueStatus: () => ({ inProgress: false, queued: false })
+      },
+      rnboParamWriter: async (write) => { writes.push(write); },
+      macroPlayback: {
+        snapshot: () => ({ running, mode: running ? "timer" : "stopped", activeBlockId: "A", macroIndex: 0 }),
+        start: () => { running = true; return context.runtime.macroPlayback.snapshot(); },
+        stop: () => { running = false; return context.runtime.macroPlayback.snapshot(); }
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "finch",
+    rnboHost: "finch.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "heron",
+    rnboHost: "heron.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/3/messages/in/shadowscore"
+  });
+
+  const played = await requestJson(context, "POST", "/transport/players/play", {
+    mode: "timer",
+    phaseReset: false
+  });
+
+  assert.equal(played.transport.players.playing, true);
+  assert.equal(played.rnboReadiness.ready, true);
+  assert.equal(played.rnboReadiness.degraded, true);
+  assert.deepEqual(played.rnboReadiness.participatingTargetIds, ["finch"]);
+  assert.deepEqual(played.rnboReadiness.unavailableTargetIds, ["heron"]);
+  assert.equal(writes.every((write) => write.host === "finch.local"), true);
+});
+
 test("Players Play ignores a failed redundant prepare when the desired payload is already active", async () => {
   let prepareCount = 0;
   let applyCount = 0;
@@ -2814,7 +2875,7 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
   assert.equal(started.activations[0].acknowledgement.status, "active");
 });
 
-test("transport start refreshes the clock ACK cohort after JACK starts", async () => {
+test("transport start freezes its participating cohort before JACK starts", async () => {
   let peerAvailable = false;
   let running = false;
   let startOptions;
@@ -2952,15 +3013,15 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
   });
 
   assert.equal(started.clockStartAcknowledgement.verified, true);
-  assert.equal(started.clockStartAcknowledgement.targetCount, 2);
+  assert.equal(started.clockStartAcknowledgement.targetCount, 1);
   assert.deepEqual(
     started.clockStartAcknowledgement.acknowledgements.map(({ targetId }) => targetId),
-    ["local-client", "peer-client"]
+    ["local-client"]
   );
-  assert.equal(started.clockStartCorrectionWrites.length, 2);
+  assert.equal(started.clockStartCorrectionWrites.length, 1);
   assert.equal(started.clockPhaseArmWindow.delayed, true);
   assert.deepEqual(phaseAlignmentWaits, [150]);
-  assert.equal(started.clockPhaseResetWrites.length, 2);
+  assert.equal(started.clockPhaseResetWrites.length, 1);
   assert.equal(started.clockPhaseAcknowledgement.verified, true);
   assert.equal(
     started.clockStartPhaseVerification.verified,
@@ -2969,7 +3030,7 @@ test("transport start refreshes the clock ACK cohort after JACK starts", async (
   );
   assert.deepEqual(started.phaseAnchor, started.clockStartPhaseVerification.witness);
   assert.equal(startOptions.anchorOffsetBeats, 0.25);
-  assert.deepEqual([...stages.values()], [4, 4]);
+  assert.deepEqual([...stages.values()], [4, -1]);
 
   await requestJson(context, "POST", "/transport/stop", {});
   peerPhaseAcknowledges = false;

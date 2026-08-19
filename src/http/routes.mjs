@@ -2221,6 +2221,34 @@ async function findRnboTarget(config, runtime, targetId) {
 
 export async function writeTransportControlsToPlaybackTargets(score, config, runtime, controls, options = {}) {
   const targetId = optionalString(options.targetId);
+  const targetIds = Array.isArray(options.targetIds)
+    ? [...new Set(options.targetIds.map(optionalString).filter(Boolean))]
+    : null;
+  if (targetIds && targetIds.length === 0) return [];
+  if (targetIds) {
+    const expected = new Set(targetIds);
+    const availableTargets = (await readAllRnboTargets(config, runtime)).filter((target) =>
+      expected.has(optionalString(target.id))
+      && target.available !== false
+    );
+    const assignedTargets = availableTargets.filter((target) => assignedVoiceForTarget(score, target));
+    const targets = assignedTargets.length > 0 ? assignedTargets : availableTargets;
+    const observed = new Set(targets.map((target) => optionalString(target.id)));
+    const missing = targetIds.filter((id) => !observed.has(id));
+    if (missing.length) {
+      const error = new Error(`RNBO participating target${missing.length === 1 ? "" : "s"} became unavailable: ${missing.join(", ")}`);
+      error.code = "RNBO_PARTICIPANT_UNAVAILABLE";
+      error.statusCode = 503;
+      throw error;
+    }
+    const targetWrites = await Promise.all(targets.map(async (target) => {
+      const writes = await writeRnboTransportControls(config, target, controls, {
+        writer: runtime.rnboParamWriter
+      });
+      return writes.map((write) => ({ ...write, targetId: target.id }));
+    }));
+    return targetWrites.flat();
+  }
   if (!targetId) {
     const availableTargets = (await readAllRnboTargets(config, runtime))
       .filter((target) => target.available !== false);
@@ -2250,8 +2278,11 @@ export async function writeTransportControlsToPlaybackTargets(score, config, run
 
 export const writeTransportParamsToPlaybackTargets = writeTransportControlsToPlaybackTargets;
 
-export async function reassertPlaybackClockIntervals(score, config, runtime) {
-  const targets = (await readAllRnboTargets(config, runtime)).filter((target) => target.available !== false);
+export async function reassertPlaybackClockIntervals(score, config, runtime, options = {}) {
+  const selected = Array.isArray(options.targetIds) ? new Set(options.targetIds.map(optionalString)) : null;
+  const targets = (await readAllRnboTargets(config, runtime)).filter((target) =>
+    target.available !== false && (!selected || selected.has(optionalString(target.id)))
+  );
   const targetWrites = await Promise.all(targets.map(async (target) => {
     const assignedVoiceId = assignedVoiceForTarget(score, target);
     if (!assignedVoiceId) {
@@ -2273,9 +2304,11 @@ export async function reassertPlaybackClockIntervals(score, config, runtime) {
 
 export async function reassertPlaybackPatternLengths(score, config, runtime, options = {}) {
   const targetId = optionalString(options.targetId);
+  const targetIds = Array.isArray(options.targetIds) ? new Set(options.targetIds.map(optionalString)) : null;
   const targets = (await readAllRnboTargets(config, runtime)).filter((target) =>
     target.available !== false
     && (!targetId || optionalString(target.id) === targetId)
+    && (!targetIds || targetIds.has(optionalString(target.id)))
   );
   const targetWrites = await Promise.all(targets.map(async (target) => {
     const assignedVoiceId = assignedVoiceForTarget(score, target);
@@ -2347,6 +2380,12 @@ function assignedVoiceForTarget(score, target) {
     }
   }
   return "";
+}
+
+function availablePlaybackTargets(score, targets) {
+  const available = (targets ?? []).filter((target) => target.available !== false);
+  const assigned = available.filter((target) => assignedVoiceForTarget(score, target));
+  return assigned.length > 0 ? assigned : available;
 }
 
 async function readHardwareUnits(config, runtime) {
@@ -3062,7 +3101,13 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     externalPlayback = observedRnboPlayback(witnessContext);
   }
   const initialReadiness = phaseOnly
-    ? { allActive: true, phaseOnly: true }
+    ? {
+        allActive: true,
+        phaseOnly: true,
+        participatingTargetIds: availablePlaybackTargets(score, witnessContext.rnboTargets)
+          .map((target) => optionalString(target.id))
+          .filter(Boolean)
+      }
     : await rnboPlaybackReadiness(runtime, score, { waitForIdle: true });
   // An explicit server-side stop or locate owns the next start. Cached stage
   // movement can briefly survive Clock Off and must not turn that resume into
@@ -3105,24 +3150,35 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   }
   if (!phaseOnly && !initialReadiness.allActive && runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.prepareBlock === "function") {
     await runtime.rnboAdapter.prepareBlock(score.structureState?.activeBlockId, "transport-start", {
-      requireReady: true
+      requireReady: true,
+      targetIds: initialReadiness.participatingTargetIds
     });
   }
   const rnboReadiness = phaseOnly ? initialReadiness : await awaitRnboPlaybackReady(runtime, score);
+  const readinessTargetIds = Array.isArray(rnboReadiness.participatingTargetIds)
+    ? rnboReadiness.participatingTargetIds
+    : availablePlaybackTargets(score, witnessContext.rnboTargets)
+        .map((target) => optionalString(target.id));
+  const participatingTargetIds = [...new Set(readinessTargetIds
+    .map(optionalString)
+    .filter((id) => id && (!targetId || id === targetId)))];
   const playbackUpdate = phaseOnly || initialReadiness.allActive || body.phaseReset === false || typeof runtime.rnboAdapter?.applyBlockUpdate !== "function"
     ? null
     : await runtime.rnboAdapter.applyBlockUpdate(score.structureState?.activeBlockId, {
       activationMode: "now",
-      expectedScoreRevision: score.scoreRevision ?? score.version
+      expectedScoreRevision: score.scoreRevision ?? score.version,
+      targetIds: participatingTargetIds
     });
   const tempo = tempoPolicyFor(store, config, runtime).snapshot().live;
-  const tempoApplication = await applyLiveTempo(store, config, runtime, tempo);
+  const tempoApplication = await applyLiveTempo(store, config, runtime, tempo, {
+    targetIds: participatingTargetIds
+  });
   // Score preparation only fills the staged note bank. A freshly instantiated
   // client has no live counter length yet, so initialize MaxSteps before the
   // coordinated Clock Off -> SetStage -> Clock On phase transaction.
   const patternLengthWrites = body.phaseReset === false
     ? []
-    : await reassertPlaybackPatternLengths(score, config, runtime, { targetId });
+    : await reassertPlaybackPatternLengths(score, config, runtime, { targetId, targetIds: participatingTargetIds });
   const jackTempo = tempoApplication.jack;
   const jackStart = await maybeStartJack(runtime);
   const [ttidDistribution, swingDistribution] = await Promise.all([
@@ -3138,10 +3194,10 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
       });
   const phaseClockStopWrites = body.phaseReset === false
     ? []
-    : await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 0 }, { targetId });
+    : await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 0 }, { targetId, targetIds: participatingTargetIds });
   const phaseWrites = body.phaseReset === false
     ? []
-    : await writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: phaseStage }, { targetId });
+    : await writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: phaseStage }, { targetId, targetIds: participatingTargetIds });
   // Read the acknowledgement cohort at the phase-write boundary. Preparation
   // can take long enough for peer registrations and exported instances to
   // change after the initial beat-witness snapshot.
@@ -3150,7 +3206,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     : (await readAllRnboTargets(config, runtime)).filter((target) =>
         target.available !== false
         && assignedVoiceForTarget(score, target)
-        && (!targetId || optionalString(target.id) === targetId)
+        && participatingTargetIds.includes(optionalString(target.id))
       );
   const clockStartAckBaselines = body.phaseReset === false
     ? {}
@@ -3163,7 +3219,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
         initialStage: phaseStage
       }) ?? [];
   const [clockWrites, oscClockWrites] = await Promise.all([
-    writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId }),
+    writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId, targetIds: participatingTargetIds }),
     writeOscSequencerClocks(score, config, runtime, "On")
   ]);
   const clockStartAcknowledgement = body.phaseReset === false
@@ -3183,7 +3239,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     || !clockStartAcknowledgement.required
     || !clockStartAcknowledgement.verified
     ? []
-    : await writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: phaseStage }, { targetId });
+    : await writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: phaseStage }, { targetId, targetIds: participatingTargetIds });
   if (clockStartCorrectionWrites.length > 0) {
     await phaseAlignmentSettle(config.rnbo?.phaseAlignment?.startCorrectionSettleMs ?? 100);
   }
@@ -3203,7 +3259,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const clockPhaseResetWrites = clockPhaseResetSupported
     && clockStartCorrectionWrites.length > 0
     && clockPhaseArmWindow.available
-    ? await writeTransportControlsToPlaybackTargets(score, config, runtime, { clock_phase_reset: 1 }, { targetId })
+    ? await writeTransportControlsToPlaybackTargets(score, config, runtime, { clock_phase_reset: 1 }, { targetId, targetIds: participatingTargetIds })
     : [];
   const clockPhaseAcknowledgement = clockPhaseResetWrites.length > 0
     ? await verifyClockPhaseAcknowledgements(config, runtime, phaseAckTargets, clockPhaseAckBaselines, phaseStage)
@@ -4050,15 +4106,27 @@ async function rnboPlaybackReadiness(runtime, score, { waitForIdle = false } = {
     if (entries.length) {
       const presentTargetIds = new Set(entries.flatMap(([targetId, update]) => [optionalString(targetId), optionalString(update?.targetId)]).filter(Boolean));
       const missing = [...assignedTargetIds].filter((targetId) => !presentTargetIds.has(targetId));
-      const failures = entries
+      const participatingEntries = entries.filter(([, update]) => update?.state !== "unavailable");
+      const unavailableTargetIds = [...new Set([
+        ...entries
+        .filter(([, update]) => update?.state === "unavailable")
+        .map(([targetId, update]) => optionalString(update?.targetId) || optionalString(targetId)),
+        ...missing
+      ])];
+      const failures = participatingEntries
         .filter(([, update]) => !["active", "prepared"].includes(update?.state))
         .map(([targetId, update]) => `${targetId} ${update?.state ?? "unknown"}`);
-      failures.push(...missing.map((targetId) => `${targetId} missing`));
       return {
         ready: failures.length === 0,
-        allActive: missing.length === 0 && entries.every(([, update]) => update?.state === "active"),
+        allActive: participatingEntries.length > 0
+          && participatingEntries.every(([, update]) => update?.state === "active"),
         source: "playback-updates",
         failures,
+        participatingTargetIds: participatingEntries
+          .map(([targetId, update]) => optionalString(update?.targetId) || optionalString(targetId)),
+        participatingTargetCount: participatingEntries.length,
+        unavailableTargetIds,
+        degraded: unavailableTargetIds.length > 0,
         queue: runtime.rnboAdapter.sendQueueStatus?.() ?? { inProgress: false, queued: false },
         updates
       };
@@ -4075,6 +4143,10 @@ async function rnboPlaybackReadiness(runtime, score, { waitForIdle = false } = {
     allActive: false,
     source: "send-status",
     failures: failed.map((status) => `${status.targetId} ${status.ack?.status ?? "failed"}`),
+    participatingTargetIds: relevantStatuses
+      .filter((status) => status.ack?.ok !== false)
+      .map((status) => optionalString(status.targetId))
+      .filter(Boolean),
     queue: runtime.rnboAdapter.sendQueueStatus?.() ?? { inProgress: false, queued: false }
   };
 }
@@ -4273,7 +4345,7 @@ async function maybeSendJackTempo(runtime, tempo, previousTempo) {
   return runtime.jackController.tempo(bpm);
 }
 
-export async function applyLiveTempo(store, config, runtime, tempo) {
+export async function applyLiveTempo(store, config, runtime, tempo, options = {}) {
   const bpm = positiveNumber(tempo, "bpm");
   const jack = await maybeSendJackTempo(runtime, bpm);
   let rnboWrites = [];
@@ -4283,10 +4355,11 @@ export async function applyLiveTempo(store, config, runtime, tempo) {
       store.getScore(),
       config,
       runtime,
-      { Tempo: bpm }
+      { Tempo: bpm },
+      { targetIds: options.targetIds }
     );
   }
-  const clockIntervalWrites = await reassertPlaybackClockIntervals(store.getScore(), config, runtime);
+  const clockIntervalWrites = await reassertPlaybackClockIntervals(store.getScore(), config, runtime, options);
   rnboWrites.push(...clockIntervalWrites);
   return { jack, rnboWrites };
 }

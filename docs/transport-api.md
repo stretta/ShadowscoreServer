@@ -111,7 +111,7 @@ server-side idempotency key. Non-2xx responses contain an `error` message.
 
 | Operation | `args` | Behavior |
 | --- | --- | --- |
-| `play` | optional revision controls | Starts assigned players and forces Arrangement Run. |
+| `play` | optional revision controls | Starts the available assigned-player cohort and forces Arrangement Run; unavailable assignments are reported as degraded voices. |
 | `stop` | optional target/revision controls | Stops assigned players while preserving the arrangement location. |
 | `return_to_start` | optional `targetId` and revision controls | Resets the form and writes player stage zero. |
 | `locate_beats` | `beats` from `0` through `duration_beats` | Coordinated locate to an absolute composition beat. |
@@ -136,8 +136,10 @@ stage without starting playback.
 
 The exact right edge (`fraction: 1` or `beats: duration_beats`) resolves to the
 last playable instant rather than wrapping to the beginning. Invalid ranges or
-an arrangement with no playable duration are rejected. A required client that
-does not reach ACTIVE causes the locate to fail instead of reporting success.
+an arrangement with no playable duration are rejected. A participating client
+that does not reach ACTIVE causes the locate to fail instead of reporting
+success. Known-unavailable assignments remain pending and do not prevent the
+available cohort from locating.
 
 ## Observe state
 

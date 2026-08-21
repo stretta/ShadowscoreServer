@@ -124,7 +124,8 @@ server-side idempotency key. Non-2xx responses contain an `error` message.
 | `set_tempo` | positive `bpm` (or `tempo`) | Changes runtime live tempo and flushes it to the configured authority. |
 | `previous_section` | optional revision controls | Cues the previous macro occurrence, wrapping at the start. |
 | `next_section` | optional revision controls | Cues the next macro occurrence, wrapping at the end. |
-| `launch_meso_block` | `block_id`; optional `macro_index` and revision controls | Activates an arranged meso block immediately while stopped, or queues it for the end of the current section while running. |
+| `launch_meso_block` | `block_id`; optional `macro_index` and revision controls | In Arrangement Run, queues an arranged meso block for the section boundary. In Hold, activates it now when players are stopped or on the next beat while player clocks continue. |
+| `set_arrangement_mode` | `mode`: `run` or `hold` | Runs automatic macro advancement or holds the current block while player playback continues. The selected mode persists across player stop/start. |
 | `re_sync` | optional target/revision controls | Restarts the coordinated phase at the preserved position. |
 
 Revision controls, where accepted, are `expectedVersion`,
@@ -135,6 +136,14 @@ appears more than once, `macro_index` selects a specific matching occurrence;
 otherwise the first occurrence is used. Blocks that are not present in the
 arrangement remain visible in `block_launcher.blocks` with `launchable: false`
 and are rejected with HTTP 409 if called directly.
+
+Clients implementing a Blocks workflow should call `set_arrangement_mode` with
+`mode: "hold"` when entering that workflow. While held, player clocks continue
+but the macrostructure does not advance; `launch_meso_block` is the only form
+movement, quantized to the next beat when players are running. A subsequent
+`play` may include `arrangement_mode: "hold"` to preserve
+that behavior after player playback has been stopped. Returning to a linear
+workflow should call `set_arrangement_mode` with `mode: "run"`.
 
 ### Coordinated locate
 

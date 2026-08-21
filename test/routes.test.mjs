@@ -3615,6 +3615,59 @@ test("transport object queues a running meso launch and reports acknowledged cue
   assert.equal(launched.object.block_launcher.quantization, "end-of-section");
 });
 
+test("transport object holds automatic advancement for a Blocks workflow", async () => {
+  let running = true;
+  let startCount = 0;
+  const context = createRouteContext({
+    runtime: {
+      performanceTransport: { playersPlaying: true, arrangementRequestedMode: "run" },
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          mode: running ? "timer" : "stopped",
+          activeBlockId: context.store.getScore().structureState.activeBlockId,
+          macroIndex: context.store.getScore().structureState.macroIndex,
+          compositionBeat: 2,
+          beatIntoBlock: 2
+        }),
+        start: () => {
+          startCount += 1;
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => {
+          running = false;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  const held = await requestJson(context, "POST", "/api/v1/objects/transport", {
+    operation: "set_arrangement_mode",
+    args: { mode: "hold" }
+  });
+  assert.equal(held.object.is_playing, true);
+  assert.equal(held.object.arrangement.requested_mode, "hold");
+  assert.equal(held.object.arrangement.running, false);
+
+  const launched = await requestJson(context, "POST", "/api/v1/objects/transport", {
+    operation: "launch_meso_block",
+    args: { block_id: "B" }
+  });
+  assert.equal(launched.object.active_section, "B");
+  assert.equal(launched.result.cue.boundary, "next-beat");
+  assert.equal(launched.object.arrangement.running, false);
+
+  const resumed = await requestJson(context, "POST", "/api/v1/objects/transport", {
+    operation: "set_arrangement_mode",
+    args: { mode: "run" }
+  });
+  assert.equal(resumed.object.arrangement.requested_mode, "run");
+  assert.equal(resumed.object.arrangement.running, true);
+  assert.equal(startCount, 1);
+});
+
 test("transport object advertises but rejects meso blocks outside the arrangement", async () => {
   const initialScore = createInitialScore(defaultConfig);
   const blockId = "unarranged-test-block";

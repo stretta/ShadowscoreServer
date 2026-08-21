@@ -124,6 +124,7 @@ test("transport descriptor is stable for path/object clients", () => {
   assert.ok(transportObjectDescriptor.properties.includes("position_bbt"));
   assert.ok(transportObjectDescriptor.methods.includes("re_sync"));
   assert.ok(transportObjectDescriptor.methods.includes("launch_meso_block"));
+  assert.ok(transportObjectDescriptor.methods.includes("set_arrangement_mode"));
 });
 
 test("block launcher reports an acknowledged queued launch", () => {

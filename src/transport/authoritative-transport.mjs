@@ -31,6 +31,7 @@ export const transportObjectDescriptor = Object.freeze({
     "previous_section",
     "next_section",
     "launch_meso_block",
+    "set_arrangement_mode",
     "re_sync"
   ])
 });
@@ -46,9 +47,10 @@ export function buildAuthoritativeTransportState({
   const playback = playbackSnapshot.playback ?? {};
   const controls = playbackSnapshot.controls ?? {};
   const playing = Boolean(controls.players?.playing ?? transport.running ?? playback.running);
+  const arrangementRunning = Boolean(controls.arrangement?.running ?? playback.running);
   const locatedBeat = locatedCompositionBeat(score, controls.position, timeline);
   const fallbackBeat = locatedBeat ?? fallbackCompositionBeat(score, playing ? playback : {}, timeline);
-  const rawBeat = playing
+  const rawBeat = arrangementRunning
     ? finiteOrNull(transport.compositionBeat ?? playback.compositionBeat) ?? fallbackBeat
     : fallbackBeat;
   const position = deriveMacroPosition(score, rawBeat);
@@ -90,7 +92,7 @@ export function buildAuthoritativeTransportState({
     beat_into_section: round(position.beatIntoBlock, 6),
     arrangement: {
       requested_mode: controls.arrangement?.requestedMode ?? "run",
-      running: Boolean(controls.arrangement?.running ?? playback.running),
+      running: arrangementRunning,
       sections: timeline.entries.map((entry) => ({
         id: entry.blockId,
         index: entry.index,

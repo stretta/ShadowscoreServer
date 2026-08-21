@@ -2838,11 +2838,21 @@ async function executeAuthoritativeTransportOperation(store, config, runtime, bo
   const operation = optionalString(body.operation);
   const args = body.args && typeof body.args === "object" && !Array.isArray(body.args) ? body.args : body;
   switch (operation) {
-    case "play":
+    case "play": {
+      const arrangementMode = optionalString(args.arrangement_mode ?? args.arrangementMode);
+      if (arrangementMode && !["run", "hold"].includes(arrangementMode)) {
+        const error = new Error("arrangement mode must be 'run' or 'hold'");
+        error.statusCode = 400;
+        throw error;
+      }
+      if (arrangementMode === "hold") {
+        holdArrangement(runtime);
+      }
       return startUnifiedTransport(store, config, runtime, {
         ...args,
-        forceArrangementRun: true
+        forceArrangementRun: arrangementMode !== "hold"
       }, optionalString(body.client_id) || "transport-object");
+    }
     case "stop":
       return stopUnifiedTransport(store, config, runtime, args);
     case "return_to_start": {
@@ -2910,6 +2920,28 @@ async function executeAuthoritativeTransportOperation(store, config, runtime, bo
         macro_index: macroIndex,
         cue: result.cue ?? result.playback?.cue ?? null
       };
+    }
+    case "set_arrangement_mode": {
+      const mode = optionalString(args.mode);
+      if (mode === "hold") {
+        return { action: operation, mode, ...holdArrangement(runtime) };
+      }
+      if (mode !== "run") {
+        const error = new Error("arrangement mode must be 'run' or 'hold'");
+        error.statusCode = 400;
+        throw error;
+      }
+      const performance = performanceTransportFor(runtime);
+      performance.arrangementRequestedMode = "run";
+      if (!performance.playersPlaying) {
+        return {
+          action: operation,
+          mode,
+          idempotent: true,
+          playback: requireMacroPlayback(runtime).stop()
+        };
+      }
+      return { action: operation, mode, ...(await runArrangement(store, config, runtime, args)) };
     }
     case "re_sync":
       return startUnifiedTransport(store, config, runtime, {

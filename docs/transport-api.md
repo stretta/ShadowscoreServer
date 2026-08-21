@@ -56,6 +56,7 @@ The response is:
     "active_section": "B",
     "macro_index": 1,
     "beat_into_section": 2,
+    "playback_session": {},
     "arrangement": {},
     "block_launcher": {},
     "sync": {},
@@ -64,6 +65,9 @@ The response is:
 }
 ```
 
+`playback_session` contains the acknowledged player-play session id, start time,
+elapsed seconds, and running state. It resets only on a stopped-to-playing
+transition, continues across block launches, and freezes on Stop.
 `arrangement.sections` describes the macro timeline. `block_launcher.blocks`
 lists every mesostructural block, its macro occurrence indices, and whether it
 can be launched without leaving the authoritative arrangement. Its active and

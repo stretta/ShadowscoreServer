@@ -18,6 +18,7 @@ export const transportObjectDescriptor = Object.freeze({
     "time_signature_numerator",
     "time_signature_denominator",
     "active_section",
+    "playback_session",
     "block_launcher",
     "sync"
   ]),
@@ -68,6 +69,7 @@ export function buildAuthoritativeTransportState({
   );
   const sync = deriveSyncHealth(playbackSnapshot);
   const blockLauncher = buildBlockLauncherState(score, playback, position.activeBlockId);
+  const playbackSession = buildPlaybackSessionState(controls.players?.session, playing);
   if (controls.players?.syncRecovery) sync.recovery = controls.players.syncRecovery;
   return {
     object_id: TRANSPORT_OBJECT_ID,
@@ -90,6 +92,7 @@ export function buildAuthoritativeTransportState({
     active_section: position.activeBlockId,
     macro_index: position.macroIndex,
     beat_into_section: round(position.beatIntoBlock, 6),
+    playback_session: playbackSession,
     arrangement: {
       requested_mode: controls.arrangement?.requestedMode ?? "run",
       running: arrangementRunning,
@@ -111,6 +114,16 @@ export function buildAuthoritativeTransportState({
       can_set_tempo: true,
       can_re_sync: true
     }
+  };
+}
+
+export function buildPlaybackSessionState(session = {}, playing = false) {
+  const elapsedSeconds = Math.max(0, Number(session?.elapsedSeconds ?? session?.elapsed_seconds) || 0);
+  return {
+    id: Math.max(0, Math.trunc(Number(session?.id) || 0)),
+    started_at: session?.startedAt ?? session?.started_at ?? null,
+    elapsed_seconds: round(elapsedSeconds, 3),
+    running: Boolean(playing)
   };
 }
 

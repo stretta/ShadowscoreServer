@@ -28,7 +28,10 @@ test("authoritative transport exposes one musician-facing state", () => {
     playbackSnapshot: {
       transport: { authority: "jack", compositionBeat: 10, running: true, tempo: 120 },
       playback: { running: true, compositionBeat: 10 },
-      controls: { players: { playing: true }, arrangement: { running: true, requestedMode: "run" } },
+      controls: {
+        players: { playing: true, session: { id: 3, startedAt: "2026-08-17T19:59:48.000Z", elapsedSeconds: 12.25 } },
+        arrangement: { running: true, requestedMode: "run" }
+      },
       targets: {
         one: { assignedVoiceId: "player-1", online: true, fresh: true, stageReadbackStatus: "fresh", phaseErrorBeats: 0.02 }
       }
@@ -47,6 +50,12 @@ test("authoritative transport exposes one musician-facing state", () => {
   assert.equal(state.position_bbt, "3.3.000");
   assert.equal(state.active_section, "B");
   assert.equal(state.beat_into_section, 2);
+  assert.deepEqual(state.playback_session, {
+    id: 3,
+    started_at: "2026-08-17T19:59:48.000Z",
+    elapsed_seconds: 12.25,
+    running: true
+  });
   assert.equal(state.sync.state, "aligned");
   assert.deepEqual(state.arrangement.sections.map(({ id, start_beat, end_beat, tempo }) => ({ id, start_beat, end_beat, tempo })), [
     { id: "A", start_beat: 0, end_beat: 8, tempo: 60 },
@@ -179,6 +188,7 @@ test("stopped transport follows the stored score playhead instead of a stale clo
   assert.equal(state.active_section, "B");
   assert.equal(state.position_beats, 8);
   assert.equal(state.position_bbt, "3.1.000");
+  assert.deepEqual(state.playback_session, { id: 0, started_at: null, elapsed_seconds: 0, running: false });
 });
 
 test("stopped transport retains an explicitly located position within the active section", () => {

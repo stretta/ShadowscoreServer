@@ -2444,10 +2444,22 @@ function performanceTransportFor(runtime) {
       lastClockStartAcknowledgement: null,
       locatedCompositionBeat: null,
       locatedBlockId: "",
-      locatedMacroIndex: null
+      locatedMacroIndex: null,
+      playbackSessionSequence: 0,
+      playbackSessionStartedAtMs: null,
+      playbackSessionElapsedMs: 0
     };
   }
-  return runtime.performanceTransport;
+  const performance = runtime.performanceTransport;
+  if (!Number.isInteger(performance.playbackSessionSequence)) performance.playbackSessionSequence = 0;
+  if (!Number.isFinite(Number(performance.playbackSessionElapsedMs))) performance.playbackSessionElapsedMs = 0;
+  if (performance.playbackSessionStartedAtMs === undefined) performance.playbackSessionStartedAtMs = null;
+  if (performance.playersPlaying && performanceSessionStartMs(performance) === null) {
+    performance.playbackSessionSequence = Math.max(1, performance.playbackSessionSequence);
+    performance.playbackSessionStartedAtMs = performanceNow(runtime);
+    performance.playbackSessionElapsedMs = 0;
+  }
+  return performance;
 }
 
 function performanceTransportSnapshot(runtime, playback = runtime.macroPlayback?.snapshot?.() ?? {}) {
@@ -2463,6 +2475,7 @@ function performanceTransportSnapshot(runtime, playback = runtime.macroPlayback?
       lastExternalIntent: performance.lastExternalIntent,
       phaseAlignment: performance.lastExternalPhaseAlignment,
       clockStartAcknowledgement: performance.lastClockStartAcknowledgement,
+      session: performancePlaybackSession(runtime, performance),
       syncRecovery: runtime.ensembleSyncSupervisor?.snapshot?.() ?? null
     },
     arrangement: {
@@ -2477,6 +2490,46 @@ function performanceTransportSnapshot(runtime, playback = runtime.macroPlayback?
       activeBlockId: performance.locatedBlockId,
       macroIndex: performance.locatedMacroIndex
     }
+  };
+}
+
+function performanceNow(runtime) {
+  const value = Number(typeof runtime.now === "function" ? runtime.now() : NaN);
+  return Number.isFinite(value) ? value : Date.now();
+}
+
+function performanceSessionStartMs(performance) {
+  const value = performance.playbackSessionStartedAtMs;
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function setPerformancePlayersPlaying(runtime, performance, playing) {
+  const nextPlaying = Boolean(playing);
+  const wasPlaying = Boolean(performance.playersPlaying);
+  const now = performanceNow(runtime);
+  if (nextPlaying && !wasPlaying) {
+    performance.playbackSessionSequence = Math.max(0, Number(performance.playbackSessionSequence) || 0) + 1;
+    performance.playbackSessionStartedAtMs = now;
+    performance.playbackSessionElapsedMs = 0;
+  } else if (!nextPlaying && wasPlaying) {
+    const startedAt = performanceSessionStartMs(performance);
+    if (startedAt !== null) performance.playbackSessionElapsedMs = Math.max(0, now - startedAt);
+  }
+  performance.playersPlaying = nextPlaying;
+}
+
+function performancePlaybackSession(runtime, performance) {
+  const startedAt = performanceSessionStartMs(performance);
+  const elapsedMs = performance.playersPlaying && startedAt !== null
+    ? Math.max(0, performanceNow(runtime) - startedAt)
+    : Math.max(0, Number(performance.playbackSessionElapsedMs) || 0);
+  return {
+    id: Math.max(0, Math.trunc(Number(performance.playbackSessionSequence) || 0)),
+    startedAt: startedAt !== null ? new Date(startedAt).toISOString() : null,
+    elapsedSeconds: elapsedMs / 1000,
+    running: Boolean(performance.playersPlaying)
   };
 }
 
@@ -3194,7 +3247,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     } else {
       playback.stop();
     }
-    performance.playersPlaying = true;
+    setPerformancePlayersPlaying(runtime, performance, true);
     performance.playerControlOrigin = "adopted";
     performance.adoptionPayloadVerified = initialReadiness.allActive;
     return {
@@ -3413,7 +3466,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   } else {
     playback.stop();
   }
-  performance.playersPlaying = true;
+  setPerformancePlayersPlaying(runtime, performance, true);
   performance.playerControlOrigin = "shadowscore";
   performance.adoptionPayloadVerified = null;
   const activations = playbackUpdate?.activations ?? (activationSchedule.length
@@ -3510,13 +3563,13 @@ async function observeExternalTransportIntent(store, config, runtime, body = {})
 
   if (!body.rolling) {
     playback.stop();
-    performance.playersPlaying = false;
+    setPerformancePlayersPlaying(runtime, performance, false);
     performance.playerControlOrigin = "none";
     performance.adoptionPayloadVerified = null;
     return { adopted: false, released: true, mode: "stopped" };
   }
 
-  performance.playersPlaying = true;
+  setPerformancePlayersPlaying(runtime, performance, true);
   performance.playerControlOrigin = source === "shadowbox" ? "shadowbox" : "external";
   performance.adoptionPayloadVerified = null;
   if (performance.arrangementRequestedMode !== "run") {
@@ -4240,7 +4293,7 @@ async function stopUnifiedTransport(store, config, runtime, body = {}) {
   ]);
   playback.stop();
   const jackStop = await maybeStopJack(runtime);
-  performance.playersPlaying = false;
+  setPerformancePlayersPlaying(runtime, performance, false);
   performance.playerControlOrigin = "none";
   performance.adoptionPayloadVerified = null;
   return {
@@ -4260,7 +4313,7 @@ async function rollbackFailedClockStart(store, config, runtime, options = {}) {
   ]);
   runtime.macroPlayback?.stop?.();
   const performance = performanceTransportFor(runtime);
-  performance.playersPlaying = false;
+  setPerformancePlayersPlaying(runtime, performance, false);
   performance.playerControlOrigin = "none";
   performance.adoptionPayloadVerified = null;
   return {

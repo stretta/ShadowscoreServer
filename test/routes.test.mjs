@@ -1988,8 +1988,10 @@ test("player and arrangement controls remain distinct and idempotent", async () 
 
 test("Players Play respects a held arrangement mode", async () => {
   let running = false;
+  let now = Date.parse("2026-08-21T17:30:00.000Z");
   const context = createRouteContext({
     runtime: {
+      now: () => now,
       macroPlayback: {
         snapshot: () => ({
           running,
@@ -2015,6 +2017,28 @@ test("Players Play respects a held arrangement mode", async () => {
   assert.equal(played.transport.players.playing, true);
   assert.equal(played.transport.arrangement.running, false);
   assert.equal(played.transport.arrangement.requestedMode, "hold");
+  assert.deepEqual(played.transport.players.session, {
+    id: 1,
+    startedAt: "2026-08-21T17:30:00.000Z",
+    elapsedSeconds: 0,
+    running: true
+  });
+
+  now += 12_500;
+  const observed = await requestJson(context, "GET", "/api/v1/objects/transport");
+  assert.equal(observed.object.playback_session.elapsed_seconds, 12.5);
+  assert.equal(observed.object.playback_session.running, true);
+
+  const stopped = await requestJson(context, "POST", "/transport/players/stop", {});
+  assert.equal(stopped.transport.players.session.elapsedSeconds, 12.5);
+  assert.equal(stopped.transport.players.session.running, false);
+  now += 5_000;
+  const frozen = await requestJson(context, "GET", "/api/v1/objects/transport");
+  assert.equal(frozen.object.playback_session.elapsed_seconds, 12.5);
+
+  const replayed = await requestJson(context, "POST", "/transport/players/play", { mode: "timer" });
+  assert.equal(replayed.transport.players.session.id, 2);
+  assert.equal(replayed.transport.players.session.elapsedSeconds, 0);
 });
 
 test("Players Play ignores stale readiness failures for deleted playback targets", async () => {

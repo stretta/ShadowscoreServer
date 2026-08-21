@@ -57,13 +57,18 @@ The response is:
     "macro_index": 1,
     "beat_into_section": 2,
     "arrangement": {},
+    "block_launcher": {},
     "sync": {},
     "capabilities": {}
   }
 }
 ```
 
-`arrangement.sections` describes the macro timeline. `sync` reports assigned,
+`arrangement.sections` describes the macro timeline. `block_launcher.blocks`
+lists every mesostructural block, its macro occurrence indices, and whether it
+can be launched without leaving the authoritative arrangement. Its active and
+requested fields distinguish the currently sounding block from a queued launch.
+`sync` reports assigned,
 online, and fresh player counts, phase error/skew, tolerances, a state and
 reason, and whether re-sync is recommended. `capabilities.can_locate` is true
 when the current arrangement has playable duration.
@@ -119,10 +124,17 @@ server-side idempotency key. Non-2xx responses contain an `error` message.
 | `set_tempo` | positive `bpm` (or `tempo`) | Changes runtime live tempo and flushes it to the configured authority. |
 | `previous_section` | optional revision controls | Cues the previous macro occurrence, wrapping at the start. |
 | `next_section` | optional revision controls | Cues the next macro occurrence, wrapping at the end. |
+| `launch_meso_block` | `block_id`; optional `macro_index` and revision controls | Activates an arranged meso block immediately while stopped, or queues it for the end of the current section while running. |
 | `re_sync` | optional target/revision controls | Restarts the coordinated phase at the preserved position. |
 
 Revision controls, where accepted, are `expectedVersion`,
 `expectedScoreRevision`, and `expectedStructureRevision` inside `args`.
+
+`launch_meso_block` is random access within the macro arrangement. If a block
+appears more than once, `macro_index` selects a specific matching occurrence;
+otherwise the first occurrence is used. Blocks that are not present in the
+arrangement remain visible in `block_launcher.blocks` with `launchable: false`
+and are rejected with HTTP 409 if called directly.
 
 ### Coordinated locate
 

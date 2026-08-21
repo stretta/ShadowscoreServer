@@ -13,7 +13,8 @@ const score = {
   context: { clip: { TimeSignature: { numerator: 4, denominator: 4 } } },
   mesostructure: {
     A: { duration: { bars: 2 }, tempo: 60 },
-    B: { duration: { bars: 2 }, tempo: 120 }
+    B: { duration: { bars: 2 }, tempo: 120 },
+    C: { duration: { bars: 1 }, tempo: 90 }
   },
   macrostructure: { blocks: ["A", "B"] },
   structureState: { activeBlockId: "A", macroIndex: 0 }
@@ -51,6 +52,12 @@ test("authoritative transport exposes one musician-facing state", () => {
     { id: "A", start_beat: 0, end_beat: 8, tempo: 60 },
     { id: "B", start_beat: 8, end_beat: 16, tempo: 120 }
   ]);
+  assert.deepEqual(state.block_launcher.blocks, [
+    { id: "A", label: "A", launchable: true, unavailable_reason: "", occurrence_indices: [0] },
+    { id: "B", label: "B", launchable: true, unavailable_reason: "", occurrence_indices: [1] },
+    { id: "C", label: "C", launchable: false, unavailable_reason: "Not present in arrangement.", occurrence_indices: [] }
+  ]);
+  assert.equal(state.capabilities.can_launch_meso_blocks, true);
 });
 
 test("transport time integrates tempo changes and formats bars, beats, and ticks", () => {
@@ -116,6 +123,33 @@ test("transport descriptor is stable for path/object clients", () => {
   assert.equal(transportObjectDescriptor.path, "shadow_score transport");
   assert.ok(transportObjectDescriptor.properties.includes("position_bbt"));
   assert.ok(transportObjectDescriptor.methods.includes("re_sync"));
+  assert.ok(transportObjectDescriptor.methods.includes("launch_meso_block"));
+});
+
+test("block launcher reports an acknowledged queued launch", () => {
+  const state = buildAuthoritativeTransportState({
+    score,
+    playbackSnapshot: {
+      playback: {
+        running: true,
+        activeBlockId: "A",
+        macroIndex: 0,
+        cue: {
+          source: "launch-meso-block",
+          blockId: "B",
+          macroIndex: 1,
+          boundary: "end-of-section",
+          state: "selected",
+          error: ""
+        }
+      },
+      controls: { players: { playing: true } }
+    }
+  });
+  assert.equal(state.block_launcher.active_block_id, "A");
+  assert.equal(state.block_launcher.requested_block_id, "B");
+  assert.equal(state.block_launcher.request_state, "selected");
+  assert.equal(state.block_launcher.quantization, "end-of-section");
 });
 
 test("transport location resolves beat and fraction requests across sections", () => {

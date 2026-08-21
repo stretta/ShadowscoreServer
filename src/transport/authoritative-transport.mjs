@@ -18,6 +18,7 @@ export const transportObjectDescriptor = Object.freeze({
     "time_signature_numerator",
     "time_signature_denominator",
     "active_section",
+    "block_launcher",
     "sync"
   ]),
   methods: Object.freeze([
@@ -29,6 +30,7 @@ export const transportObjectDescriptor = Object.freeze({
     "set_tempo",
     "previous_section",
     "next_section",
+    "launch_meso_block",
     "re_sync"
   ])
 });
@@ -63,6 +65,7 @@ export function buildAuthoritativeTransportState({
     120
   );
   const sync = deriveSyncHealth(playbackSnapshot);
+  const blockLauncher = buildBlockLauncherState(score, playback, position.activeBlockId);
   if (controls.players?.syncRecovery) sync.recovery = controls.players.syncRecovery;
   return {
     object_id: TRANSPORT_OBJECT_ID,
@@ -96,14 +99,41 @@ export function buildAuthoritativeTransportState({
         tempo: positiveNumber(score.mesostructure?.[entry.blockId]?.tempo, tempo)
       }))
     },
+    block_launcher: blockLauncher,
     sync,
     capabilities: {
       can_play: true,
       can_stop: true,
       can_locate: timeline.totalBeats > 0,
+      can_launch_meso_blocks: blockLauncher.blocks.some((block) => block.launchable),
       can_set_tempo: true,
       can_re_sync: true
     }
+  };
+}
+
+export function buildBlockLauncherState(score = {}, playback = {}, activeBlockId = "") {
+  const macroBlocks = Array.isArray(score.macrostructure?.blocks) ? score.macrostructure.blocks : [];
+  const cue = playback.cue?.source === "launch-meso-block" ? playback.cue : null;
+  return {
+    active_block_id: String(activeBlockId || score.structureState?.activeBlockId || ""),
+    requested_block_id: String(cue?.blockId ?? ""),
+    request_state: String(cue?.state ?? ""),
+    quantization: String(cue?.boundary ?? ""),
+    error: String(cue?.error ?? ""),
+    blocks: Object.keys(score.mesostructure ?? {}).map((id) => {
+      const occurrenceIndices = [];
+      for (let index = 0; index < macroBlocks.length; index += 1) {
+        if (macroBlocks[index] === id) occurrenceIndices.push(index);
+      }
+      return {
+        id,
+        label: id,
+        launchable: occurrenceIndices.length > 0,
+        unavailable_reason: occurrenceIndices.length ? "" : "Not present in arrangement.",
+        occurrence_indices: occurrenceIndices
+      };
+    })
   };
 }
 

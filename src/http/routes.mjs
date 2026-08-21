@@ -2875,6 +2875,42 @@ async function executeAuthoritativeTransportOperation(store, config, runtime, bo
       setLocatedTransportPosition(runtime, store.getScore(), entry?.startBeat ?? 0);
       return result;
     }
+    case "launch_meso_block": {
+      const score = store.getScore();
+      const blockId = optionalString(args.block_id ?? args.blockId);
+      if (!blockId || !score.mesostructure?.[blockId]) {
+        const error = new Error(`unknown mesostructural block '${blockId}'`);
+        error.statusCode = 400;
+        throw error;
+      }
+      const blocks = score.macrostructure?.blocks ?? [];
+      const requestedIndex = Number(args.macro_index ?? args.macroIndex);
+      const macroIndex = Number.isInteger(requestedIndex) && blocks[requestedIndex] === blockId
+        ? requestedIndex
+        : blocks.indexOf(blockId);
+      if (macroIndex < 0) {
+        const error = new Error(`mesostructural block '${blockId}' is not present in the arrangement`);
+        error.code = "MESO_BLOCK_NOT_IN_ARRANGEMENT";
+        error.statusCode = 409;
+        throw error;
+      }
+      const playback = await macroPlaybackSnapshot(runtime, store, config);
+      const result = await cueStructurePlayhead(store, config, runtime, {
+        activeBlockId: blockId,
+        macroIndex,
+        source: "launch-meso-block"
+      }, revisionOptions(args));
+      if (!playback.running) {
+        const entry = macroTimeline(store.getScore()).entries.find((candidate) => candidate.index === macroIndex);
+        setLocatedTransportPosition(runtime, store.getScore(), entry?.startBeat ?? 0);
+      }
+      return {
+        action: operation,
+        block_id: blockId,
+        macro_index: macroIndex,
+        cue: result.cue ?? result.playback?.cue ?? null
+      };
+    }
     case "re_sync":
       return startUnifiedTransport(store, config, runtime, {
         ...args,

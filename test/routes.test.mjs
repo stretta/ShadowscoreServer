@@ -3558,6 +3558,82 @@ test("transport object rejects unknown operations and locates a stopped arrangem
   assert.equal(locate.object.capabilities.can_locate, true);
 });
 
+test("transport object launches an arranged meso block immediately while stopped", async () => {
+  const context = createRouteContext();
+  const launched = await requestJson(context, "POST", "/api/v1/objects/transport", {
+    operation: "launch_meso_block",
+    args: { block_id: "B" }
+  });
+
+  assert.equal(launched.result.action, "launch_meso_block");
+  assert.equal(launched.result.block_id, "B");
+  assert.equal(launched.result.macro_index, 1);
+  assert.equal(launched.result.cue.state, "active");
+  assert.equal(launched.object.active_section, "B");
+  assert.equal(launched.object.block_launcher.active_block_id, "B");
+});
+
+test("transport object queues a running meso launch and reports acknowledged cue state", async () => {
+  let cue = null;
+  const context = createRouteContext({
+    runtime: {
+      performanceTransport: { playersPlaying: true, arrangementRequestedMode: "run" },
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          mode: "timer",
+          activeBlockId: "A",
+          macroIndex: 0,
+          compositionBeat: 2,
+          beatIntoBlock: 2,
+          cue
+        }),
+        cue: (request) => {
+          cue = {
+            source: request.source,
+            blockId: request.blockId,
+            macroIndex: request.macroIndex,
+            boundary: "end-of-section",
+            state: "selected",
+            error: ""
+          };
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  const launched = await requestJson(context, "POST", "/api/v1/objects/transport", {
+    operation: "launch_meso_block",
+    args: { block_id: "B" }
+  });
+
+  assert.equal(launched.result.cue.state, "selected");
+  assert.equal(launched.object.active_section, "A");
+  assert.equal(launched.object.block_launcher.requested_block_id, "B");
+  assert.equal(launched.object.block_launcher.request_state, "selected");
+  assert.equal(launched.object.block_launcher.quantization, "end-of-section");
+});
+
+test("transport object advertises but rejects meso blocks outside the arrangement", async () => {
+  const initialScore = createInitialScore(defaultConfig);
+  const blockId = "unarranged-test-block";
+  initialScore.mesostructure[blockId] = structuredClone(initialScore.mesostructure.A);
+  const context = createRouteContext({ initialScore });
+
+  const snapshot = await requestJson(context, "GET", "/api/v1/objects/transport");
+  const block = snapshot.object.block_launcher.blocks.find((candidate) => candidate.id === blockId);
+  assert.equal(block.launchable, false);
+  assert.match(block.unavailable_reason, /Not present/);
+
+  const launched = await request(context, "POST", "/api/v1/objects/transport", {
+    operation: "launch_meso_block",
+    args: { block_id: blockId }
+  });
+  assert.equal(launched.status, 409);
+  assert.match(launched.body, /not present in the arrangement/);
+});
+
 test("transport object resumes a running arrangement from the located section offset", async () => {
   let running = true;
   let startOptions = null;

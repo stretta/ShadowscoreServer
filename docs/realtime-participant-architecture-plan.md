@@ -71,6 +71,18 @@ proved exact source parity, the focused state and complete RNBO adapter suites,
 bounded lifecycle publication, stable repeated-read hash caching, stopped
 transport, aligned synchronization, and receiver-confirmed READY transfers.
 
+Implementation update, 2026-08-25: the third Phase 5 extraction is implemented
+and deployed to `wren`. Serialized playback operations now use a
+transport-neutral queue, and prepared-cohort policy now classifies
+participating, unavailable, missing, invalid, READY, and already-active
+participants independently of RNBO. RNBO still owns target resolution,
+preparation matching, activation requests and acknowledgements, retry timing,
+lifecycle derivation, clock control, and all transport behavior. Deployment
+verification proved exact source parity, the focused queue, cohort-policy,
+state, and complete RNBO adapter suites, stable
+repeated-read compilation, bounded lifecycle publication, stopped transport,
+aligned synchronization, and receiver-confirmed READY transfers.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer

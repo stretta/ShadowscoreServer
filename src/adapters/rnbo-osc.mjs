@@ -6,10 +6,16 @@ import { dirname, resolve } from "node:path";
 import { encodeOscMessage } from "./osc.mjs";
 import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
+import {
+  activationActionForState,
+  evaluatePreparedPlaybackCohort,
+  playbackActivationPolicy
+} from "../playback/playback-cohort-policy.mjs";
 import { createPlaybackLifecycleHistory } from "../playback/playback-lifecycle-history.mjs";
 import { createPlaybackPreparationState } from "../playback/playback-preparation-state.mjs";
 import { aggregatePlaybackUpdateState, createPlaybackUpdateState, summarizePlaybackUpdates } from "../playback/playback-update-state.mjs";
 import { impactAffectsRnbo, impactVoicesForBlock, scoreMutationImpact } from "../playback/score-mutation-impact.mjs";
+import { createSerializedOperationQueue } from "../playback/serialized-operation-queue.mjs";
 import { activeWrittenTempo } from "../playback/tempo.mjs";
 import { quantizePitchToTtid } from "../harmonic/scale.mjs";
 
@@ -79,7 +85,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   let activeSend = undefined;
   let debounceTimer = undefined;
   const debounceWaiters = [];
-  let activationOperationTail = Promise.resolve();
+  const activationOperations = createSerializedOperationQueue();
   const playbackLifecycleHistory = createPlaybackLifecycleHistory();
   const transferEvents = new EventEmitter();
   const transferTargets = new Map();
@@ -120,8 +126,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
       }
       const score = scoreWithActiveBlock(store.getScore(), blockId);
       const updates = await adapter.playbackUpdates(blockId);
-      const availableUpdates = Object.values(updates.targets)
-        .filter((update) => update.state !== "unavailable");
+      const availableUpdates = playbackActivationPolicy(Object.values(updates.targets)).participating;
       const unreadyVoiceIds = options.requireReady === true
         ? availableUpdates
             .filter((update) => !["prepared", "active"].includes(update.state))
@@ -176,10 +181,10 @@ export function createRnboOscAdapter(config, runtime = {}) {
       };
     },
     applyBlockUpdate(blockId = "", options = {}) {
-      return enqueueActivationOperation(() => runBlockUpdate(blockId, options));
+      return activationOperations.run(() => runBlockUpdate(blockId, options));
     },
     activatePreparedBlock(blockId = "", options = {}) {
-      return enqueueActivationOperation(() => runPreparedBlockActivation(blockId, options));
+      return activationOperations.run(() => runPreparedBlockActivation(blockId, options));
     },
     sendStatus() {
       return [...lastSendStatus.values()];
@@ -351,18 +356,12 @@ export function createRnboOscAdapter(config, runtime = {}) {
         const target = preparedActivationTargets.get(state.targetId);
         return target ? desiredUpdateForTarget(activationScore, selectedBlockId, target) : state;
       });
-    const unavailableVoiceIds = new Set(
-      playbackUpdateState.availabilityValues()
-        .filter(({ available }) => available === false)
-        .map(({ voiceId }) => voiceId)
-        .filter(Boolean)
-    );
-    const assignedVoiceIds = Object.keys(canonical.mesostructure?.[selectedBlockId]?.players ?? {})
-      .filter((voiceId) => !unavailableVoiceIds.has(voiceId));
-    const cachedVoiceIds = new Set(blockStates.map((state) => state.voiceId).filter(Boolean));
-    const missingVoiceIds = assignedVoiceIds.filter((voiceId) => !cachedVoiceIds.has(voiceId));
-    const invalidStates = blockStates.filter((state) => !["active", "prepared"].includes(state.state));
-    if (!assignedVoiceIds.length) {
+    const cohort = evaluatePreparedPlaybackCohort({
+      assignedVoiceIds: Object.keys(canonical.mesostructure?.[selectedBlockId]?.players ?? {}),
+      states: blockStates,
+      availability: playbackUpdateState.availabilityValues()
+    });
+    if (cohort.decision === "no-targets") {
       return {
         blockId: selectedBlockId,
         scoreRevision,
@@ -373,16 +372,16 @@ export function createRnboOscAdapter(config, runtime = {}) {
         action: "no-targets",
         activations: [],
         fastPath: true,
-        degraded: unavailableVoiceIds.size > 0,
-        unavailableTargetCount: unavailableVoiceIds.size
+        degraded: cohort.degraded,
+        unavailableTargetCount: cohort.unavailableTargetCount
       };
     }
-    if (!blockStates.length || missingVoiceIds.length || invalidStates.length) {
+    if (cohort.decision === "not-ready") {
       const error = new Error(`block '${selectedBlockId}' has no cached READY target cohort`);
       error.code = "PLAYBACK_UPDATE_NOT_READY";
       throw error;
     }
-    if (blockStates.every((state) => state.state === "active")) {
+    if (cohort.decision === "already-active") {
       return {
         blockId: selectedBlockId,
         scoreRevision,
@@ -396,7 +395,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
       };
     }
 
-    const preparedStates = blockStates.filter((state) => state.state === "prepared");
+    const preparedStates = cohort.preparedStates;
 
     const requests = preparedStates.map((state) => {
       const status = lastSendStatus.get(state.targetId);
@@ -471,7 +470,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
       targets,
       activationMode: "continue",
       boundary,
-      action: state === "active" ? "active" : "activation-failed",
+      action: activationActionForState(state),
       activations,
       fastPath: true
     };
@@ -495,9 +494,10 @@ export function createRnboOscAdapter(config, runtime = {}) {
       let updates = options.reusePrepared === true
         ? await adapter.playbackUpdates(selectedBlockId, { targetIds: options.targetIds })
         : null;
-      const reusable = updates && Object.values(updates.targets)
-        .filter((update) => update.state !== "unavailable")
-        .every((update) => ["prepared", "active"].includes(update.state));
+      let activationPolicy = updates
+        ? playbackActivationPolicy(Object.values(updates.targets))
+        : null;
+      const reusable = activationPolicy?.reusable === true;
       if (!reusable) {
         await adapter.prepareBlock(selectedBlockId, activationMode === "now" ? "update-now" : "apply-next-beat", {
           fetchImpl: options.fetchImpl ?? runtime.fetchImpl,
@@ -507,8 +507,8 @@ export function createRnboOscAdapter(config, runtime = {}) {
         await adapter.waitForIdle();
         updates = await adapter.playbackUpdates(selectedBlockId, { targetIds: options.targetIds });
       }
-      const pending = Object.values(updates.targets)
-        .filter((update) => !["active", "unavailable"].includes(update.state));
+      activationPolicy = playbackActivationPolicy(Object.values(updates.targets));
+      const pending = activationPolicy.pending;
       if (!pending.length) {
         result = { ...updates, activationMode, action: "already-active", activations: [] };
       } else {
@@ -614,7 +614,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
         result = {
           ...finalUpdates,
           activationMode,
-          action: finalUpdates.state === "active" ? "active" : "activation-failed",
+          action: activationActionForState(finalUpdates.state),
           activations
         };
       }
@@ -643,21 +643,6 @@ export function createRnboOscAdapter(config, runtime = {}) {
       throw updateError;
     }
     return { ...result, restoredPreparation };
-  }
-
-  function enqueueActivationOperation(operation) {
-    const previous = activationOperationTail.catch(() => undefined);
-    let release;
-    activationOperationTail = new Promise((resolve) => {
-      release = resolve;
-    });
-    return previous.then(async () => {
-      try {
-        return await operation();
-      } finally {
-        release();
-      }
-    });
   }
 
   function nextTransactionId() {

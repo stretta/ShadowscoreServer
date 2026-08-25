@@ -86,6 +86,18 @@ signal. The same session also showed an automatic sync-recovery attempt starting
 while an operator Stop was in flight; preventing that overlap is the next
 cohort-control hardening task.
 
+That overlap is now guarded by an operator-Stop epoch. A Stop marks itself in
+progress before its first asynchronous clock write, so a new automatic recovery
+cannot begin mid-command. Recovery that was already running rechecks the epoch
+before Clock On, immediately after Clock On, and before publishing playback; a
+superseded recovery rolls back instead of restoring transport after Stop.
+
+Wren acceptance after deployment completed a seven-client verified start in
+4.693 seconds with zero skew, followed by Stop in 0.801 seconds. Playback and
+JACK were stopped, all seven payloads remained ACTIVE, and the automatic
+recovery supervisor retained `lastAttemptAt: null`, confirming it did not begin
+work during the operator Stop.
+
 ### Slice 4: client-side transactional start
 
 Extend the RNBO client with an operation-identified start arm, shared musical

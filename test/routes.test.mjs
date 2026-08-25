@@ -11,7 +11,8 @@ import {
   distributeTtidForBlock,
   missingPhaseCohortTargetIds,
   recallOscSnapshotsForBlock,
-  routeRequest
+  routeRequest,
+  runAutomaticSyncRecovery
 } from "../src/http/routes.mjs";
 import { createOscSnapshotAutoRecall } from "../src/osc/snapshot-auto-recall.mjs";
 import { buildOscTargets } from "../src/osc/targets.mjs";
@@ -19,6 +20,7 @@ import { createMacroPlayback } from "../src/playback/macro-playback.mjs";
 import { createPeerRegistry } from "../src/registration/peer-registry.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
 import { createJackTransportState } from "../src/transport/jack-transport-state.mjs";
+import { createEnsembleSyncSupervisor } from "../src/transport/ensemble-sync-supervisor.mjs";
 
 test("assignment routes expose, replace, and clear voice assignments", async () => {
   const context = createRouteContext();
@@ -1911,6 +1913,99 @@ test("transport facade play and stop wrap macro playback with aggregate status",
     value: "Off"
   });
   assert.deepEqual(jackCalls, [["tempo", 120], ["start"], ["stop"]]);
+});
+
+test("operator Stop prevents automatic sync recovery from starting mid-command", async () => {
+  let releaseClockWrite;
+  let markClockWriteStarted;
+  const clockWriteStarted = new Promise((resolve) => { markClockWriteStarted = resolve; });
+  const holdClockWrite = new Promise((resolve) => { releaseClockWrite = resolve; });
+  const supervisor = createEnsembleSyncSupervisor({
+    requiredConsecutiveSlips: 1,
+    cooldownMs: 0
+  });
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        oscQuery: { enabled: false },
+        targets: [{
+          id: "source-client",
+          host: "192.168.68.96",
+          port: 9000,
+          address: "/rnbo/inst/2/messages/in/shadowscore"
+        }]
+      },
+      transport: {
+        rnboClient: {
+          autoResync: { enabled: true, requiredConsecutiveSlips: 1, cooldownMs: 0 }
+        }
+      }
+    }),
+    runtime: {
+      ensembleSyncSupervisor: supervisor,
+      performanceTransport: { playersPlaying: true },
+      rnboParamWriter: async (write) => {
+        if (write.path.endsWith("/Clock") && write.value === "Off") {
+          markClockWriteStarted();
+          await holdClockWrite;
+        }
+      },
+      macroPlayback: {
+        snapshot: () => ({ running: true, activeBlockId: "A", macroIndex: 0 }),
+        stop: () => ({ running: false, activeBlockId: "A", macroIndex: 0 })
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "source-client",
+    rnboHost: "192.168.68.96",
+    rnboPort: 9000,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+
+  const stopRequest = request(context, "POST", "/api/v1/objects/transport", {
+    operation: "stop",
+    args: {}
+  });
+  await clockWriteStarted;
+  assert.equal(context.runtime.transportStopInProgress, 1);
+
+  const recovery = await runAutomaticSyncRecovery(context.store, context.config, context.runtime);
+  assert.equal(recovery.inProgress, false);
+  assert.equal(recovery.lastAttemptAt, null);
+
+  releaseClockWrite();
+  const stopped = await stopRequest;
+  assert.equal(stopped.status, 200);
+  assert.equal(context.runtime.transportStopInProgress, 0);
+  assert.equal(context.runtime.transportStopEpoch, 1);
+});
+
+test("automatic sync recovery refuses a Stop epoch that has been superseded", async () => {
+  const context = createRouteContext({
+    runtime: {
+      transportStopEpoch: 2,
+      macroPlayback: {
+        snapshot: () => ({ running: false, activeBlockId: "A", macroIndex: 0 }),
+        stop: () => ({ running: false, activeBlockId: "A", macroIndex: 0 })
+      }
+    }
+  });
+
+  const response = await request(context, "POST", "/api/v1/objects/transport", {
+    operation: "play",
+    args: {
+      automaticSyncRecovery: true,
+      expectedStopEpoch: 1,
+      forceRestart: true,
+      phaseReset: true,
+      phaseOnly: true
+    }
+  });
+
+  assert.equal(response.status, 409);
+  assert.match(response.body, /automatic sync recovery was superseded by operator Stop/);
+  assert.equal(context.runtime.performanceTransport.playersPlaying, false);
 });
 
 test("player and arrangement controls remain distinct and idempotent", async () => {

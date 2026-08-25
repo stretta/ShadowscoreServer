@@ -2919,13 +2919,20 @@ export async function runAutomaticSyncRecovery(store, config, runtime) {
   const supervisor = runtime.ensembleSyncSupervisor;
   if (settings.enabled !== true || !supervisor) return null;
   const performance = performanceTransportFor(runtime);
-  if (!performance.playersPlaying) {
+  if (!performance.playersPlaying || transportStopIsInProgress(runtime)) {
     supervisor.reset();
     return supervisor.snapshot();
   }
   if (runtime.automaticSyncRecoveryPromise) return runtime.automaticSyncRecoveryPromise;
+  const expectedStopEpoch = transportStopEpoch(runtime);
   runtime.automaticSyncRecoveryPromise = (async () => {
     const playbackSnapshot = await coherentPlaybackSnapshot(runtime, store, config);
+    if (!performance.playersPlaying
+      || transportStopIsInProgress(runtime)
+      || transportStopEpoch(runtime) !== expectedStopEpoch) {
+      supervisor.reset();
+      return supervisor.snapshot();
+    }
     const health = deriveSyncHealth(playbackSnapshot);
     const decision = supervisor.observe(health);
     if (!decision.trigger || !supervisor.begin()) return decision;
@@ -2934,15 +2941,23 @@ export async function runAutomaticSyncRecovery(store, config, runtime) {
         forceRestart: true,
         phaseReset: true,
         preservePosition: true,
-        phaseOnly: true
+        phaseOnly: true,
+        automaticSyncRecovery: true,
+        expectedStopEpoch
       }, "automatic-sync-recovery");
       supervisor.finish({
         ok: result.clockPhaseAcknowledgement?.verified === true
           && result.clockStartPhaseVerification?.verified === true
       });
     } catch (error) {
-      supervisor.finish({ ok: false, error: messageForError(error) });
-      console.error(`[transport] automatic sync recovery failed: ${messageForError(error)}`);
+      const superseded = error?.code === "AUTOMATIC_SYNC_RECOVERY_SUPERSEDED";
+      supervisor.finish({
+        ok: superseded,
+        error: superseded ? "" : messageForError(error)
+      });
+      if (!superseded) {
+        console.error(`[transport] automatic sync recovery failed: ${messageForError(error)}`);
+      }
     }
     return supervisor.snapshot();
   })().finally(() => {
@@ -3263,6 +3278,7 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
   const continuingClockContract = requestedArrangementMode === "run"
     ? await requireStableContinuingClockContract(score, config, runtime)
     : null;
+  assertAutomaticSyncRecoveryCurrent(runtime, body);
   if (body.forceArrangementRun) performance.arrangementRequestedMode = "run";
   if (performance.playersPlaying && body.forceRestart !== true) {
     if (requestedArrangementMode === "run" && !playback.snapshot().running) {
@@ -3414,6 +3430,7 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
       preferCachedTargets: true
     })
   ]);
+  await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
   updateTransportTransition(runtime, transitionId, "synchronizing");
   const phaseStage = body.phaseReset === false
     ? null
@@ -3465,10 +3482,12 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
         blockId: score.structureState?.activeBlockId ?? "",
         initialStage: phaseStage
       }) ?? [];
+  await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
   const [clockWrites, oscClockWrites] = await Promise.all([
     writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId, targetIds: participatingTargetIds }),
     writeOscSequencerClocks(score, config, runtime, "On")
   ]);
+  await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
   updateTransportTransition(runtime, transitionId, "verifying");
   const clockStartAcknowledgement = body.phaseReset === false
     ? { required: false, verified: true, expectedStage: null, targetCount: 0, acknowledgements: [] }
@@ -3578,6 +3597,7 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
     ? phaseAnchor.absoluteBeat
     : null;
   const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
+  await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
   if (requestedArrangementMode === "run") {
     playback.start({
       mode,
@@ -4409,6 +4429,16 @@ async function rnboPlaybackReadiness(runtime, score, { waitForIdle = false } = {
 }
 
 async function stopUnifiedTransport(store, config, runtime, body = {}) {
+  runtime.transportStopEpoch = transportStopEpoch(runtime) + 1;
+  runtime.transportStopInProgress = transportStopInProgressCount(runtime) + 1;
+  try {
+    return await runUnifiedTransportStop(store, config, runtime, body);
+  } finally {
+    runtime.transportStopInProgress = Math.max(0, transportStopInProgressCount(runtime) - 1);
+  }
+}
+
+async function runUnifiedTransportStop(store, config, runtime, body = {}) {
   const playback = requireMacroPlayback(runtime);
   const performance = performanceTransportFor(runtime);
   if (!performance.playersPlaying) {
@@ -4437,6 +4467,38 @@ async function stopUnifiedTransport(store, config, runtime, body = {}) {
     clockWrites,
     oscClockWrites
   };
+}
+
+function transportStopEpoch(runtime) {
+  return Math.max(0, Number(runtime.transportStopEpoch) || 0);
+}
+
+function transportStopInProgressCount(runtime) {
+  return Math.max(0, Math.trunc(Number(runtime.transportStopInProgress) || 0));
+}
+
+function transportStopIsInProgress(runtime) {
+  return transportStopInProgressCount(runtime) > 0;
+}
+
+function assertAutomaticSyncRecoveryCurrent(runtime, body = {}) {
+  if (body.automaticSyncRecovery !== true) return;
+  const expectedStopEpoch = Math.max(0, Number(body.expectedStopEpoch) || 0);
+  if (!transportStopIsInProgress(runtime)
+    && transportStopEpoch(runtime) === expectedStopEpoch) return;
+  const error = new Error("automatic sync recovery was superseded by operator Stop");
+  error.code = "AUTOMATIC_SYNC_RECOVERY_SUPERSEDED";
+  error.statusCode = 409;
+  throw error;
+}
+
+async function ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body = {}, options = {}) {
+  try {
+    assertAutomaticSyncRecoveryCurrent(runtime, body);
+  } catch (error) {
+    error.rollback = await rollbackFailedClockStart(store, config, runtime, options);
+    throw error;
+  }
 }
 
 async function rollbackFailedClockStart(store, config, runtime, options = {}) {

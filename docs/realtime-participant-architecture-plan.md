@@ -60,6 +60,17 @@ Deployment verification proved source parity, the complete RNBO adapter suite,
 matching desired/prepared hashes and adapter transaction IDs, stable repeated-
 read hash caching, stopped transport, and receiver-confirmed READY transfers.
 
+Implementation update, 2026-08-25: the second Phase 5 extraction is implemented
+and deployed to `wren`. Mutation-impact history, dirty and missing voice
+selection, selective desired-hash cache invalidation, full invalidation
+clearing, and bounded lifecycle-event storage now live in transport-neutral
+state components. The RNBO adapter still owns lifecycle derivation and logging,
+operation serialization, participating-cohort and failure policy, delivery and
+activation, clock control, and all transport behavior. Deployment verification
+proved exact source parity, the focused state and complete RNBO adapter suites,
+bounded lifecycle publication, stable repeated-read hash caching, stopped
+transport, aligned synchronization, and receiver-confirmed READY transfers.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer

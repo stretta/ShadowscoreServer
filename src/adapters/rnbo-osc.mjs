@@ -6,6 +6,8 @@ import { dirname, resolve } from "node:path";
 import { encodeOscMessage } from "./osc.mjs";
 import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
+import { createPlaybackLifecycleHistory } from "../playback/playback-lifecycle-history.mjs";
+import { createPlaybackPreparationState } from "../playback/playback-preparation-state.mjs";
 import { aggregatePlaybackUpdateState, createPlaybackUpdateState, summarizePlaybackUpdates } from "../playback/playback-update-state.mjs";
 import { impactAffectsRnbo, impactVoicesForBlock, scoreMutationImpact } from "../playback/score-mutation-impact.mjs";
 import { activeWrittenTempo } from "../playback/tempo.mjs";
@@ -78,16 +80,13 @@ export function createRnboOscAdapter(config, runtime = {}) {
   let debounceTimer = undefined;
   const debounceWaiters = [];
   let activationOperationTail = Promise.resolve();
-  const playbackLifecycleEvents = [];
+  const playbackLifecycleHistory = createPlaybackLifecycleHistory();
   const transferEvents = new EventEmitter();
   const transferTargets = new Map();
   const transferHistory = [];
   const lastTransferProgressEmitMs = new Map();
-  const mutationImpacts = [];
   const playbackUpdateState = createPlaybackUpdateState();
-  const desiredHashCache = new Map();
-  const dirtyVoicesByBlock = new Map();
-  let invalidateAllPlayback = false;
+  const playbackPreparationState = createPlaybackPreparationState();
   let lastObservedScore;
   const metrics = {
     mutationCount: 0,
@@ -149,7 +148,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
       });
     },
     mutationImpacts() {
-      return structuredClone(mutationImpacts);
+      return playbackPreparationState.impacts();
     },
     metrics() {
       return structuredClone(metrics);
@@ -170,9 +169,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
         blockId: selectedBlockId,
         scoreRevision: canonical.scoreRevision ?? canonical.version ?? 0,
         ...summarizePlaybackUpdates(updates),
-        invalidateAll: invalidateAllPlayback,
+        invalidateAll: playbackPreparationState.invalidatesAll(),
         targets: Object.fromEntries(updates.map((update) => [update.targetId, update])),
-        latestImpact: mutationImpacts.at(-1) ?? null,
+        latestImpact: playbackPreparationState.latestImpact(),
         metrics: structuredClone(metrics)
       };
     },
@@ -207,7 +206,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
       return adapter.sendQueueStatus();
     },
     lifecycleEvents() {
-      return structuredClone(playbackLifecycleEvents);
+      return playbackLifecycleHistory.snapshot();
     },
     transferEvents,
     transferStatus() {
@@ -913,8 +912,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   }
 
   function recordLifecycleEvent(event) {
-    playbackLifecycleEvents.push(event);
-    if (playbackLifecycleEvents.length > 200) playbackLifecycleEvents.splice(0, playbackLifecycleEvents.length - 200);
+    playbackLifecycleHistory.record(event);
     updateTransferFromLifecycle(event);
     if (config.rnbo.log !== false) console.log(`[rnbo-playback] ${JSON.stringify(event)}`);
   }
@@ -1094,26 +1092,14 @@ export function createRnboOscAdapter(config, runtime = {}) {
 
   function recordMutationImpact(impact) {
     metrics.mutationCount += 1;
-    mutationImpacts.push(impact);
-    if (mutationImpacts.length > 100) mutationImpacts.splice(0, mutationImpacts.length - 100);
-    if (impact.invalidateAll) invalidateAllPlayback = true;
-    if (impactAffectsRnbo(impact)) {
-      for (const blockId of impact.blockIds) {
-        const dirty = dirtyVoicesByBlock.get(blockId) ?? new Set();
-        for (const voiceId of impactVoicesForBlock(impact, blockId)) dirty.add(voiceId);
-        dirtyVoicesByBlock.set(blockId, dirty);
-      }
+    const affectsPlayback = impactAffectsRnbo(impact);
+    playbackPreparationState.recordImpact(impact, { affectsPlayback });
+    if (affectsPlayback) {
       playbackUpdateState.markDesired(impact, (state) => {
         if (!impact.invalidateAll && !(impact.blockIds ?? []).includes(state.blockId)) return false;
         const affectedVoices = impactVoicesForBlock(impact, state.blockId);
         return impact.invalidateAll || affectedVoices.includes(state.voiceId);
       });
-      for (const [key, cached] of desiredHashCache.entries()) {
-        if (!impact.invalidateAll && !(impact.blockIds ?? []).includes(cached.blockId)) continue;
-        const affectedVoices = impactVoicesForBlock(impact, cached.blockId);
-        if (!impact.invalidateAll && !affectedVoices.includes(cached.voiceId)) continue;
-        desiredHashCache.delete(key);
-      }
       recordLifecycleEvent({
         type: "playback.update.desired",
         observedAt: new Date().toISOString(),
@@ -1127,26 +1113,21 @@ export function createRnboOscAdapter(config, runtime = {}) {
 
   function dirtyVoiceSelection(score, blockId) {
     const assigned = Object.keys(score.mesostructure?.[blockId]?.players ?? {});
-    if (invalidateAllPlayback) return assigned;
-    const dirty = dirtyVoicesByBlock.get(blockId);
-    const missing = assigned.filter((voiceId) => !playbackUpdateState.hasVoice(blockId, voiceId));
-    if (!dirty) return missing;
-    return [...new Set([...dirty, ...missing])];
+    return playbackPreparationState.selectVoices(
+      blockId,
+      assigned,
+      (voiceId) => playbackUpdateState.hasVoice(blockId, voiceId)
+    );
   }
 
   function desiredUpdateForTarget(score, blockId, target) {
     const targetId = target.id ?? target.address ?? "";
-    const key = playbackUpdateKey(blockId, targetId);
     const previous = playbackUpdateState.get(blockId, targetId) ?? {};
-    let desiredHash = previous.desiredHash ?? desiredHashCache.get(key)?.hash ?? null;
+    let desiredHash = previous.desiredHash ?? playbackPreparationState.desiredHash(blockId, targetId);
     if (!desiredHash) {
       metrics.compileCount += 1;
       desiredHash = compileScoreTransaction(score, config, 0, target).payloadHash;
-      desiredHashCache.set(key, {
-        blockId,
-        voiceId: target.voiceId ?? "",
-        hash: desiredHash
-      });
+      playbackPreparationState.cacheDesiredHash(blockId, targetId, target.voiceId ?? "", desiredHash);
     }
     const active = previous.activeHash === desiredHash && Number.isInteger(previous.activeTransaction);
     const prepared = !active && previous.preparedHash === desiredHash && Number.isInteger(previous.preparedTransaction);
@@ -1201,14 +1182,11 @@ export function createRnboOscAdapter(config, runtime = {}) {
   }
 
   function clearPreparedDirtySelection(entries) {
-    for (const { target, compiled } of entries) {
-      if (compiled?.ack?.ok !== true) continue;
-      const blockId = compiled?.blockId ?? compiled?.timing?.blockId ?? "";
-      const voiceId = target?.voiceId ?? compiled?.voiceId ?? "";
-      dirtyVoicesByBlock.get(blockId)?.delete(voiceId);
-      if (dirtyVoicesByBlock.get(blockId)?.size === 0) dirtyVoicesByBlock.delete(blockId);
-    }
-    if (dirtyVoicesByBlock.size === 0) invalidateAllPlayback = false;
+    playbackPreparationState.clearPrepared(entries.map(({ target, compiled }) => ({
+      ok: compiled?.ack?.ok === true,
+      blockId: compiled?.blockId ?? compiled?.timing?.blockId ?? "",
+      voiceId: target?.voiceId ?? compiled?.voiceId ?? ""
+    })));
   }
 
   function startTargetDiscoveryMonitor() {
@@ -2657,10 +2635,6 @@ function mergeOptionalSelection(previous, next) {
   if (!Array.isArray(previous)) return Array.isArray(next) ? [...new Set(next)] : undefined;
   if (!Array.isArray(next)) return [...new Set(previous)];
   return [...new Set([...previous, ...next])];
-}
-
-function playbackUpdateKey(blockId, targetId) {
-  return `${blockId}\u001f${targetId}`;
 }
 
 function isPlainObject(value) {

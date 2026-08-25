@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Trigger Sequencers</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <script type="module" src="/shared/shadowscore-nav.js"></script>
+  <style>
+    body { margin: 0; min-height: 100vh; }
+    main { display: grid; gap: 12px; margin: 0 auto; padding: 18px 0 36px; width: min(1500px, calc(100vw - 28px)); }
+    .top, .actions, .lane-head, .lane-meta { align-items: center; display: flex; gap: 10px; justify-content: space-between; }
+    h1 { font-size: 20px; margin: 0; }
+    .subtitle, .status, .detail, .empty { color: var(--ss-muted); font-size: 12px; font-weight: 750; }
+    .subtitle { margin: 4px 0 0; }
+    .surface-note { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); color: var(--ss-muted); font-size: 12px; padding: 10px 12px; }
+    .lanes { display: grid; gap: 10px; }
+    .lane { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); display: grid; gap: 10px; overflow: hidden; padding: 12px; }
+    .lane-title { display: grid; gap: 3px; min-width: 180px; }
+    .lane-title strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .lane-meta { justify-content: flex-end; }
+    .length-control { align-items: center; display: flex; gap: 6px; }
+    .steps-wrap { overflow-x: auto; padding-bottom: 2px; }
+    .steps { display: grid; gap: 6px; grid-template-columns: repeat(16, minmax(42px, 1fr)); min-width: 800px; }
+    .step { align-items: center; background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); cursor: pointer; display: grid; gap: 7px; justify-items: center; min-height: 58px; padding: 6px 3px; }
+    .step-number { color: var(--ss-muted); font-size: 9px; font-weight: 900; letter-spacing: .06em; }
+    .step input { appearance: none; background: var(--ss-bg); border: 2px solid var(--ss-border-strong); border-radius: 4px; height: 25px; margin: 0; width: 25px; }
+    .step input:checked { background: var(--ss-accent); border-color: var(--ss-accent); box-shadow: inset 0 0 0 5px var(--ss-surface); }
+    .step.unused { opacity: .3; }
+    .step.playing { border-color: var(--ss-accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--ss-accent) 35%, transparent); }
+    .empty { background: var(--ss-panel); border: 1px dashed var(--ss-border); border-radius: var(--ss-radius-ui); padding: 24px; }
+    @media (max-width: 700px) { .top, .lane-head { align-items: flex-start; flex-direction: column; } .lane-meta { justify-content: flex-start; } }
+  </style>
+</head>
+<body>
+  <header class="ss-top-strip"><div class="top"><div><h1>Trigger Sequencers</h1><p class="subtitle">Stacked independent lanes discovered from the RNBO step16 abstraction</p></div><div class="actions"><button id="refresh" type="button">Refresh</button><span id="status" class="status" role="status">Loading...</span></div></div></header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore navigation" data-shadow-nav><a href="/piano-roll">ShadowScore</a><a href="/structure-editor">Arrange</a><a href="/editors" aria-current="page">OSC</a><a href="/">Setup</a></nav>
+  <main>
+    <div class="surface-note"><strong>Aggregate surface:</strong> every lane belongs to its named export. Step and length edits affect only that destination.</div>
+    <section id="lanes" class="lanes" aria-live="polite"></section>
+  </main>
+  <script type="module" src="/tools/osc-trigger-sequencers/osc-trigger-sequencers.js"></script>
+</body>
+</html>

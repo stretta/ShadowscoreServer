@@ -33,6 +33,8 @@ export const shadowScoreNavigation = Object.freeze([
       Object.freeze({ label: "Soft Piano", href: "/editors/softpiano" }),
       Object.freeze({ label: "SingleHalfKrell", href: "/editors/singlehalfkrell" }),
       Object.freeze({ label: "Block Attributes", href: "/editors/ttid" }),
+      Object.freeze({ label: "Aggregate Mixer", href: "/tools/osc-mixer" }),
+      Object.freeze({ label: "Trigger Sequencers", href: "/tools/osc-trigger-sequencers" }),
       Object.freeze({ label: "OSC Volume", href: "/tools/osc-volume" }),
       Object.freeze({ label: "OSC Macros", href: "/tools/osc-macros" })
     ])

@@ -8,6 +8,7 @@ import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
 import { continuingClockContractForArrangement, distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "../src/http/routes.mjs";
 import { createOscSnapshotAutoRecall } from "../src/osc/snapshot-auto-recall.mjs";
+import { buildOscTargets } from "../src/osc/targets.mjs";
 import { createMacroPlayback } from "../src/playback/macro-playback.mjs";
 import { createPeerRegistry } from "../src/registration/peer-registry.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
@@ -6643,6 +6644,42 @@ test("OSC volume tool route serves target selection and trim controls", async ()
   assert.match(response.body, /<a href="\/editors" aria-current="page">OSC<\/a>/);
 });
 
+test("aggregate OSC mixer serves standardized independent channel strips", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/tools/osc-mixer");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /Aggregate Mixer/);
+  assert.match(response.body, /Independent controls/);
+  assert.match(response.body, /osc-mixer\.js/);
+
+  const script = await request(context, "GET", "/tools/osc-mixer/osc-mixer.js");
+  assert.equal(script.status, 200);
+  assert.match(script.body, /OutputVolume/);
+  assert.match(script.body, /HPFFreq/);
+  assert.match(script.body, /\/osc\/targets\?status=online/);
+  assert.match(script.body, /\/osc\/send/);
+});
+
+test("aggregate trigger surface discovers the step16 abstraction", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/tools/osc-trigger-sequencers");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /Trigger Sequencers/);
+  assert.match(response.body, /Stacked independent lanes/);
+  assert.match(response.body, /osc-trigger-sequencers\.js/);
+
+  const script = await request(context, "GET", "/tools/osc-trigger-sequencers/osc-trigger-sequencers.js");
+  assert.equal(script.status, 200);
+  assert.match(script.body, /capability=trigger-sequencer-edit/);
+  assert.match(script.body, /meta\?\.editor/);
+  assert.match(script.body, /current_stage/);
+  assert.match(script.body, /\/osc\/send/);
+});
+
 test("OSC macro tool route serves builder and validation controls", async () => {
   const context = createRouteContext();
   const response = await request(context, "GET", "/tools/osc-macros");
@@ -6793,6 +6830,8 @@ test("shared grouped navigation defines and reaches every hosted user-facing pag
     "/editors/singlehalfkrell",
     "/editors/ttid",
     "/tools/osc-volume",
+    "/tools/osc-mixer",
+    "/tools/osc-trigger-sequencers",
     "/tools/osc-macros",
     "/",
     "/admin",
@@ -6839,6 +6878,23 @@ test("OSC target route normalizes, filters, and reports stale targets", async ()
   assert.equal(response.targets[0].sendable, false);
   assert.equal(response.targets[0].capabilities.includes("poland-edit"), true);
   assert.equal(response.targets[0].diagnostics[0].type, "target-host-mismatch");
+});
+
+test("OSC target capability follows the step16 editor abstraction across app names", () => {
+  const targets = buildOscTargets([{
+    id: "rnbo-inst-9:hybrid",
+    hardwareUnitId: "wren",
+    app: "hybrid",
+    host: "127.0.0.1",
+    port: 1234,
+    parameters: [
+      { name: "RhythmMask", address: "/rnbo/inst/9/params/RhythmMask", meta: { editor: "step16" } }
+    ]
+  }], { capability: "trigger-sequencer-edit" });
+
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].app, "hybrid");
+  assert.equal(targets[0].capabilities.includes("trigger-sequencer-edit"), true);
 });
 
 test("manual OSCQuery device routes manage endpoints and expose their editor targets", async () => {

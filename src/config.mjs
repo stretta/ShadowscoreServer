@@ -171,6 +171,16 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/tools/osc-volume"]
       },
+      oscMixer: {
+        root: "public/tools/osc-mixer",
+        index: "index.html",
+        routes: ["/tools/osc-mixer"]
+      },
+      oscTriggerSequencers: {
+        root: "public/tools/osc-trigger-sequencers",
+        index: "index.html",
+        routes: ["/tools/osc-trigger-sequencers"]
+      },
       oscMacros: {
         root: "public/tools/osc-macros",
         index: "index.html",

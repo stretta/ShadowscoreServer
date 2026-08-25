@@ -169,6 +169,9 @@ function oscCapabilities(target, app) {
   if (Array.isArray(target.parameters) && target.parameters.some((parameter) => stringField(parameter?.meta?.editor).toLowerCase() === "ttid")) {
     values.add("ttid-edit");
   }
+  if (Array.isArray(target.parameters) && target.parameters.some(isTriggerSequencerParameter)) {
+    values.add("trigger-sequencer-edit");
+  }
   const configured = target.oscCapabilities ?? target.controlCapabilities ?? target.metadata?.oscCapabilities;
   if (Array.isArray(configured)) {
     for (const capability of configured) {
@@ -191,6 +194,10 @@ function oscCapabilities(target, app) {
     values.add("block-attributes-edit");
   }
   return Array.from(values).sort();
+}
+
+function isTriggerSequencerParameter(parameter) {
+  return cleanToken(parameter?.meta?.editor) === "step16";
 }
 
 function supportsSwingParameters(parameters, app) {

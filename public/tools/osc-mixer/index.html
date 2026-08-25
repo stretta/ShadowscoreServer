@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Aggregate Mixer</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <script type="module" src="/shared/shadowscore-nav.js"></script>
+  <style>
+    body { margin: 0; min-height: 100vh; }
+    main { display: grid; gap: 14px; margin: 0 auto; padding: 18px 0 36px; width: min(1400px, calc(100vw - 28px)); }
+    .top, .actions { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+    h1 { font-size: 20px; margin: 0; }
+    .subtitle, .status, .detail, .empty { color: var(--ss-muted); font-size: 12px; font-weight: 750; }
+    .subtitle { margin: 4px 0 0; }
+    .surface-note { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); color: var(--ss-muted); font-size: 12px; padding: 10px 12px; }
+    .mixer { align-items: stretch; display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+    .channel { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); display: grid; gap: 14px; min-width: 0; padding: 12px; }
+    .channel-head { border-bottom: 1px solid var(--ss-border); display: grid; gap: 3px; padding-bottom: 10px; }
+    .channel-head strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .control { background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); display: grid; gap: 8px; padding: 10px; }
+    .control-head { align-items: baseline; display: flex; gap: 8px; justify-content: space-between; }
+    .control-name { font-size: 11px; font-weight: 850; letter-spacing: .04em; text-transform: uppercase; }
+    .control output { color: var(--ss-accent); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; font-weight: 850; }
+    .control input { width: 100%; }
+    .empty { background: var(--ss-panel); border: 1px dashed var(--ss-border); border-radius: var(--ss-radius-ui); padding: 24px; }
+    @media (max-width: 700px) { .top { align-items: flex-start; flex-direction: column; } }
+  </style>
+</head>
+<body>
+  <header class="ss-top-strip"><div class="top"><div><h1>Aggregate Mixer</h1><p class="subtitle">Independent output controls from multiple RNBO exports</p></div><div class="actions"><button id="refresh" type="button">Refresh</button><span id="status" class="status" role="status">Loading...</span></div></div></header>
+  <nav class="ss-route-tabs" aria-label="ShadowScore navigation" data-shadow-nav><a href="/piano-roll">ShadowScore</a><a href="/structure-editor">Arrange</a><a href="/editors" aria-current="page">OSC</a><a href="/">Setup</a></nav>
+  <main>
+    <div class="surface-note"><strong>Independent controls:</strong> every channel belongs to its named export. Moving a control sends only to that destination; this page does not create a macro.</div>
+    <section id="mixer" class="mixer" aria-live="polite"></section>
+  </main>
+  <script type="module" src="/tools/osc-mixer/osc-mixer.js"></script>
+</body>
+</html>

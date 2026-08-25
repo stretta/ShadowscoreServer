@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { encodeOscMessage } from "./osc.mjs";
 import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
+import { aggregatePlaybackUpdateState, createPlaybackUpdateState, summarizePlaybackUpdates } from "../playback/playback-update-state.mjs";
 import { impactAffectsRnbo, impactVoicesForBlock, scoreMutationImpact } from "../playback/score-mutation-impact.mjs";
 import { activeWrittenTempo } from "../playback/tempo.mjs";
 import { quantizePitchToTtid } from "../harmonic/scale.mjs";
@@ -83,8 +84,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   const transferHistory = [];
   const lastTransferProgressEmitMs = new Map();
   const mutationImpacts = [];
-  const playbackUpdateState = new Map();
-  const playbackTargetAvailability = new Map();
+  const playbackUpdateState = createPlaybackUpdateState();
   const desiredHashCache = new Map();
   const dirtyVoicesByBlock = new Map();
   let invalidateAllPlayback = false;
@@ -165,26 +165,11 @@ export function createRnboOscAdapter(config, runtime = {}) {
       });
       metrics.targetEnumerationCount += targets.length;
       const updates = targets.map((target) => desiredUpdateForTarget(score, selectedBlockId, target));
-      for (const update of updates) {
-        playbackTargetAvailability.set(update.targetId, {
-          available: update.state !== "unavailable",
-          voiceId: update.voiceId
-        });
-      }
-      const participating = updates.filter((update) => update.state !== "unavailable");
-      const unavailable = updates.filter((update) => update.state === "unavailable");
-      const affected = participating.filter((update) => update.state !== "active");
+      for (const update of updates) playbackUpdateState.observeAvailability(update);
       return {
         blockId: selectedBlockId,
         scoreRevision: canonical.scoreRevision ?? canonical.version ?? 0,
-        state: aggregateUpdateState(updates),
-        affectedTargetCount: affected.length,
-        preparedTargetCount: updates.filter((update) => update.state === "prepared").length,
-        activeTargetCount: updates.filter((update) => update.state === "active").length,
-        participatingTargetCount: participating.length,
-        unavailableTargetCount: unavailable.length,
-        unavailableTargetIds: unavailable.map((update) => update.targetId),
-        degraded: unavailable.length > 0,
+        ...summarizePlaybackUpdates(updates),
         invalidateAll: invalidateAllPlayback,
         targets: Object.fromEntries(updates.map((update) => [update.targetId, update])),
         latestImpact: mutationImpacts.at(-1) ?? null,
@@ -359,16 +344,16 @@ export function createRnboOscAdapter(config, runtime = {}) {
     // hash is unchanged. Use the cached target descriptors so this fast path
     // does not introduce live target rediscovery at the section boundary.
     const activationScore = scoreWithActiveBlock(canonical, selectedBlockId);
-    const blockStates = [...playbackUpdateState.values()]
+    const blockStates = playbackUpdateState.values()
       .filter((state) => state.blockId === selectedBlockId)
-      .filter((state) => playbackTargetAvailability.get(state.targetId)?.available !== false)
+      .filter((state) => playbackUpdateState.availability(state.targetId)?.available !== false)
       .map((state) => {
         if (["active", "prepared"].includes(state.state)) return state;
         const target = preparedActivationTargets.get(state.targetId);
         return target ? desiredUpdateForTarget(activationScore, selectedBlockId, target) : state;
       });
     const unavailableVoiceIds = new Set(
-      [...playbackTargetAvailability.values()]
+      playbackUpdateState.availabilityValues()
         .filter(({ available }) => available === false)
         .map(({ voiceId }) => voiceId)
         .filter(Boolean)
@@ -479,7 +464,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
       fetchImpl: options.fetchImpl
     });
     const targets = cachedPlaybackUpdates(selectedBlockId);
-    const state = aggregateUpdateState(Object.values(targets));
+    const state = aggregatePlaybackUpdateState(Object.values(targets));
     return {
       blockId: selectedBlockId,
       scoreRevision,
@@ -1118,15 +1103,11 @@ export function createRnboOscAdapter(config, runtime = {}) {
         for (const voiceId of impactVoicesForBlock(impact, blockId)) dirty.add(voiceId);
         dirtyVoicesByBlock.set(blockId, dirty);
       }
-      for (const state of playbackUpdateState.values()) {
-        if (!impact.invalidateAll && !(impact.blockIds ?? []).includes(state.blockId)) continue;
+      playbackUpdateState.markDesired(impact, (state) => {
+        if (!impact.invalidateAll && !(impact.blockIds ?? []).includes(state.blockId)) return false;
         const affectedVoices = impactVoicesForBlock(impact, state.blockId);
-        if (!impact.invalidateAll && !affectedVoices.includes(state.voiceId)) continue;
-        state.desiredScoreRevision = impact.scoreRevision;
-        state.desiredHash = null;
-        state.state = "saved-not-active";
-        state.lastImpact = structuredClone(impact);
-      }
+        return impact.invalidateAll || affectedVoices.includes(state.voiceId);
+      });
       for (const [key, cached] of desiredHashCache.entries()) {
         if (!impact.invalidateAll && !(impact.blockIds ?? []).includes(cached.blockId)) continue;
         const affectedVoices = impactVoicesForBlock(impact, cached.blockId);
@@ -1148,7 +1129,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
     const assigned = Object.keys(score.mesostructure?.[blockId]?.players ?? {});
     if (invalidateAllPlayback) return assigned;
     const dirty = dirtyVoicesByBlock.get(blockId);
-    const missing = assigned.filter((voiceId) => ![...playbackUpdateState.values()].some((state) => state.blockId === blockId && state.voiceId === voiceId));
+    const missing = assigned.filter((voiceId) => !playbackUpdateState.hasVoice(blockId, voiceId));
     if (!dirty) return missing;
     return [...new Set([...dirty, ...missing])];
   }
@@ -1156,7 +1137,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   function desiredUpdateForTarget(score, blockId, target) {
     const targetId = target.id ?? target.address ?? "";
     const key = playbackUpdateKey(blockId, targetId);
-    const previous = playbackUpdateState.get(key) ?? {};
+    const previous = playbackUpdateState.get(blockId, targetId) ?? {};
     let desiredHash = previous.desiredHash ?? desiredHashCache.get(key)?.hash ?? null;
     if (!desiredHash) {
       metrics.compileCount += 1;
@@ -1192,73 +1173,31 @@ export function createRnboOscAdapter(config, runtime = {}) {
     const blockId = compiled?.blockId ?? compiled?.timing?.blockId ?? "";
     const targetId = target?.id ?? target?.address ?? compiled?.targetId ?? "";
     if (!blockId || !targetId) return;
-    const key = playbackUpdateKey(blockId, targetId);
-    const previous = playbackUpdateState.get(key) ?? {};
+    const previous = playbackUpdateState.get(blockId, targetId) ?? {};
     const prepared = compiled?.stagedScoreActivation === true && compiled?.ack?.status === "prepared";
     const active = compiled?.stagedScoreActivation !== true && compiled?.ack?.ok === true;
-    if (prepared) {
-      for (const [otherKey, otherState] of playbackUpdateState.entries()) {
-        if (otherKey === key || otherState.targetId !== targetId || !Number.isInteger(otherState.preparedTransaction)) continue;
-        playbackUpdateState.set(otherKey, {
-          ...otherState,
-          preparedTransaction: null,
-          preparedHash: null,
-          state: Number.isInteger(otherState.activeTransaction) ? "active" : "saved-not-active",
-          updatedAt: new Date().toISOString()
-        });
-      }
-    }
-    playbackUpdateState.set(key, {
-      ...previous,
+    playbackUpdateState.recordDelivery({
       blockId,
       targetId,
       voiceId: target?.voiceId ?? compiled?.voiceId ?? "",
       desiredScoreRevision: compiled?.scoreRevision ?? previous.desiredScoreRevision ?? null,
       desiredHash: compiled?.payloadHash ?? previous.desiredHash ?? null,
-      preparedTransaction: prepared ? status?.preparedTransaction ?? compiled?.transactionId ?? null : previous.preparedTransaction ?? null,
-      preparedHash: prepared ? compiled?.payloadHash ?? null : previous.preparedHash ?? null,
-      activeTransaction: active ? status?.activeTransaction ?? compiled?.transactionId ?? null : previous.activeTransaction ?? null,
-      activeHash: active ? compiled?.payloadHash ?? null : previous.activeHash ?? null,
-      state: active ? "active" : prepared ? "prepared" : compiled?.ack?.ok === false ? "failed" : previous.state ?? "saved-not-active",
-      lastError: compiled?.ack?.ok === false ? compiled.ack : null,
-      updatedAt: new Date().toISOString()
+      adapterTransactionId: prepared
+        ? status?.preparedTransaction ?? compiled?.transactionId ?? null
+        : active ? status?.activeTransaction ?? compiled?.transactionId ?? null : null,
+      prepared,
+      active,
+      failed: compiled?.ack?.ok === false,
+      error: compiled?.ack
     });
   }
 
   function promotePlaybackUpdate(targetId, transactionId, acknowledgement) {
-    for (const [key, state] of playbackUpdateState.entries()) {
-      if (state.targetId !== targetId) continue;
-      const promoted = state.preparedTransaction === transactionId;
-      playbackUpdateState.set(key, promoted
-        ? {
-            ...state,
-            activeTransaction: transactionId,
-            activeHash: state.preparedHash,
-            preparedTransaction: null,
-            preparedHash: null,
-            state: "active",
-            lastError: null,
-            activationAcknowledgement: acknowledgement,
-            updatedAt: new Date().toISOString()
-          }
-        : {
-            ...state,
-            activeTransaction: null,
-            activeHash: null,
-            preparedTransaction: null,
-            preparedHash: null,
-            state: "saved-not-active",
-            updatedAt: new Date().toISOString()
-          });
-    }
+    playbackUpdateState.promote(targetId, transactionId, acknowledgement);
   }
 
   function cachedPlaybackUpdates(blockId) {
-    return Object.fromEntries(
-      [...playbackUpdateState.values()]
-        .filter((state) => state.blockId === blockId)
-        .map((state) => [state.targetId, structuredClone(state)])
-    );
+    return playbackUpdateState.cached(blockId);
   }
 
   function clearPreparedDirtySelection(entries) {
@@ -2722,15 +2661,6 @@ function mergeOptionalSelection(previous, next) {
 
 function playbackUpdateKey(blockId, targetId) {
   return `${blockId}\u001f${targetId}`;
-}
-
-function aggregateUpdateState(updates) {
-  const participating = updates.filter((update) => update.state !== "unavailable");
-  if (!participating.length) return "no-targets";
-  if (participating.every((update) => update.state === "active")) return "active";
-  if (participating.some((update) => update.state === "failed")) return "failed";
-  if (participating.every((update) => ["active", "prepared"].includes(update.state))) return "prepared";
-  return "saved-not-active";
 }
 
 function isPlainObject(value) {

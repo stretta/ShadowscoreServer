@@ -47,6 +47,19 @@ Deployment verification proved source parity, focused remote tests, exact live
 RNBO assignment resolution, software add/replacement/offline lifecycle events,
 stopped transport, and receiver-confirmed READY transfers.
 
+Implementation update, 2026-08-25: the first Phase 5 extraction is implemented
+and deployed to `wren`. Playback update records, availability observations,
+aggregate cohort state, desired invalidation, one-slot preparation invalidation,
+cached reads, and adapter-transaction promotion now live in a transport-neutral
+state store.
+The RNBO adapter translates its existing compiled payloads and acknowledgements
+into that store while retaining its public methods and response fields. OSC
+delivery, retry, activation, lifecycle history, operation serialization, cohort
+selection, clock control, and transport behavior remain in the RNBO adapter.
+Deployment verification proved source parity, the complete RNBO adapter suite,
+matching desired/prepared hashes and adapter transaction IDs, stable repeated-
+read hash caching, stopped transport, and receiver-confirmed READY transfers.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer

@@ -114,6 +114,33 @@ but five runs are evidence of current health rather than proof that the
 intermittent case is gone. Preserve the verification barrier and use larger
 samples to isolate that tail before changing the start contract.
 
+Verification diagnostics now retain every polling attempt, per-client read
+latency and error, projected stages, offsets, ACK attempt history, and granular
+coordinated-start step timings. One failed read still invalidates that entire
+attempt, every expected target remains mandatory, and retry and timeout policy
+is unchanged. The beat-arm wait is now presented as `synchronizing` rather than
+`verifying`, matching what the server is actually doing during that inherent
+wait.
+
+Twenty additional seven-client starts passed 20/20 with zero final skew. In a
+ten-run direct-read sample, normal final verification took 45-81 milliseconds.
+One run initially observed Heron instance 13 and Finch instance 22 one stage
+ahead; all seven aligned on the next 100-millisecond poll without a corrective
+write. Raven was aligned in both attempts. In the ACK sample, all phase ACKs
+passed on their first read and four of five clock-start ACK sets did likewise;
+one local Wren instance needed one retry.
+
+The final granular sample passed 5/5. Seven-client correction and phase-reset
+write fan-outs each cost roughly 120-160 milliseconds, ACK and final direct
+reads were generally 45-116 milliseconds, and the deliberate beat-arm window
+varied from 0 to 558 milliseconds. Configuration remained near 1 second. The
+first start after a server restart also paid a one-time 952-millisecond
+discovery plus 620-millisecond preparation cost, while subsequent discovery and
+preparation totaled 213-470 milliseconds. These measurements move the next
+safe performance investigation toward unchanged configuration writes and the
+pre-verification synchronization fan-outs. They do not support weakening ACK,
+phase, or direct-read barriers.
+
 ### Slice 4: client-side transactional start
 
 Extend the RNBO client with an operation-identified start arm, shared musical

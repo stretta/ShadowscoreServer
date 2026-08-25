@@ -131,12 +131,16 @@ async function timedOperation(baseUrl, fetchImpl, now, timeoutMs, operation, run
     participating_target_ids: result.rnboReadiness?.participatingTargetIds ?? [],
     clock_start_verified: result.clockStartAcknowledgement?.verified ?? null,
     clock_start_ack_count: result.clockStartAcknowledgement?.acknowledgements?.filter(({ acknowledged }) => acknowledged).length ?? 0,
+    clock_start_acknowledgement: result.clockStartAcknowledgement ?? null,
     arm_window: result.clockPhaseArmWindow ?? null,
     phase_ack_verified: result.clockPhaseAcknowledgement?.verified ?? null,
     phase_ack_count: result.clockPhaseAcknowledgement?.acknowledgements?.filter(({ acknowledged }) => acknowledged).length ?? 0,
+    phase_acknowledgement: result.clockPhaseAcknowledgement ?? null,
     phase_verified: result.clockStartPhaseVerification?.verified ?? null,
     phase_skew_beats: finiteOrNull(result.clockStartPhaseVerification?.witness?.skewBeats),
-    projected_stages: result.clockStartPhaseVerification?.witness?.projectedStages ?? []
+    projected_stages: result.clockStartPhaseVerification?.witness?.projectedStages ?? [],
+    phase_verification: result.clockStartPhaseVerification ?? null,
+    coordinated_start_timings: result.coordinatedStartTimings ?? null
   };
 }
 

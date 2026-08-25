@@ -3489,15 +3489,24 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
   ]);
   await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
   updateTransportTransition(runtime, transitionId, "verifying");
+  const coordinatedStartTimings = {};
+  const timeCoordinatedStartStep = async (name, operation) => {
+    const startedAt = Date.now();
+    try {
+      return await operation();
+    } finally {
+      coordinatedStartTimings[name] = Math.max(0, Date.now() - startedAt);
+    }
+  };
   const clockStartAcknowledgement = body.phaseReset === false
     ? { required: false, verified: true, expectedStage: null, targetCount: 0, acknowledgements: [] }
-    : await verifyClockStartAcknowledgements(
+    : await timeCoordinatedStartStep("clockStartAcknowledgementMs", () => verifyClockStartAcknowledgements(
         config,
         runtime,
         phaseAckTargets,
         clockStartAckBaselines,
         phaseStage
-      );
+      ));
   // Clock On is only quantized locally by each RNBO client. The ACK cohort is
   // therefore a barrier, not proof that every client caught the same beat.
   // Once every client has actually started, one concurrent SetStage write
@@ -3506,32 +3515,37 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
     || !clockStartAcknowledgement.required
     || !clockStartAcknowledgement.verified
     ? []
-    : await writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: phaseStage }, { targetId, targetIds: participatingTargetIds });
+    : await timeCoordinatedStartStep("clockStartCorrectionWritesMs", () =>
+        writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: phaseStage }, { targetId, targetIds: participatingTargetIds }));
   if (clockStartCorrectionWrites.length > 0) {
-    await phaseAlignmentSettle(config.rnbo?.phaseAlignment?.startCorrectionSettleMs ?? 100);
+    await timeCoordinatedStartStep("clockStartCorrectionSettleMs", () =>
+      phaseAlignmentSettle(config.rnbo?.phaseAlignment?.startCorrectionSettleMs ?? 100));
   }
   const clockPhaseResetSupported = phaseAckTargets.length > 0 && phaseAckTargets.every((target) =>
     target.clockPhaseResetPath && rnboOscQueryValueUrl(target, target.clockPhaseAckPath)
   );
   const clockPhaseAckBaselines = clockPhaseResetSupported
-    ? await readClockPhaseAckBaselines(config, runtime, phaseAckTargets)
+    ? await timeCoordinatedStartStep("clockPhaseAckBaselinesMs", () =>
+        readClockPhaseAckBaselines(config, runtime, phaseAckTargets))
     : {};
   // A phase reset arms each client's freewheeling clock on its next received
   // beat. Sending near the end of a beat can split the flock across adjacent
   // beats even though every client acknowledges the command. Prefer the
   // beginning of a JACK beat so all clients have almost one full beat to arm.
-  const clockPhaseArmWindow = clockPhaseResetSupported && clockStartCorrectionWrites.length > 0
-    ? await awaitClockArmWindow(config, runtime)
-    : { available: false, delayed: false, delayMs: 0, reason: "clock phase reset is not scheduled" };
   updateTransportTransition(runtime, transitionId, "synchronizing");
+  const clockPhaseArmWindow = clockPhaseResetSupported && clockStartCorrectionWrites.length > 0
+    ? await timeCoordinatedStartStep("clockPhaseArmWindowMs", () => awaitClockArmWindow(config, runtime))
+    : { available: false, delayed: false, delayMs: 0, reason: "clock phase reset is not scheduled" };
   const clockPhaseResetWrites = clockPhaseResetSupported
     && clockStartCorrectionWrites.length > 0
     && clockPhaseArmWindow.available
-    ? await writeTransportControlsToPlaybackTargets(score, config, runtime, { clock_phase_reset: 1 }, { targetId, targetIds: participatingTargetIds })
+    ? await timeCoordinatedStartStep("clockPhaseResetWritesMs", () =>
+        writeTransportControlsToPlaybackTargets(score, config, runtime, { clock_phase_reset: 1 }, { targetId, targetIds: participatingTargetIds }))
     : [];
   updateTransportTransition(runtime, transitionId, "verifying");
   const clockPhaseAcknowledgement = clockPhaseResetWrites.length > 0
-    ? await verifyClockPhaseAcknowledgements(config, runtime, phaseAckTargets, clockPhaseAckBaselines, phaseStage)
+    ? await timeCoordinatedStartStep("clockPhaseAcknowledgementMs", () =>
+        verifyClockPhaseAcknowledgements(config, runtime, phaseAckTargets, clockPhaseAckBaselines, phaseStage))
     : {
         required: phaseAckTargets.length > 0,
         supported: false,
@@ -3541,7 +3555,8 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
         acknowledgements: []
       };
   const clockStartPhaseVerification = clockPhaseAcknowledgement.verified
-    ? await verifyExternalTransportPhase(score, config, runtime, phaseAckTargets)
+    ? await timeCoordinatedStartStep("directPhaseVerificationMs", () =>
+        verifyExternalTransportPhase(score, config, runtime, phaseAckTargets))
     : {
         verified: false,
         complete: false,
@@ -3562,7 +3577,8 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
     clockPhaseResetWriteCount: clockPhaseResetWrites.length,
     clockPhaseArmWindow,
     clockPhaseAcknowledgement,
-    phaseVerification: clockStartPhaseVerification
+    phaseVerification: clockStartPhaseVerification,
+    coordinatedStartTimings
   };
   const coordinatedPhaseRequired = body.phaseReset !== false
     && phaseAckTargets.length > 0
@@ -3645,6 +3661,7 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
     clockPhaseResetWrites,
     clockPhaseAcknowledgement,
     clockStartPhaseVerification,
+    coordinatedStartTimings,
     oscClockWrites,
     phaseWrites,
     phaseAnchor,
@@ -4021,9 +4038,12 @@ async function verifyClockStartAcknowledgements(config, runtime, targets, baseli
     Number(config.rnbo?.phaseAlignment?.startAckTimeoutMs) || 5000));
   const pollIntervalMs = Math.max(10, Math.min(250,
     Number(config.rnbo?.phaseAlignment?.startAckPollIntervalMs) || 100));
+  const startedAt = Date.now();
   const deadline = Date.now() + timeoutMs;
+  const attempts = [];
   let acknowledgements = [];
   do {
+    const attemptStartedAt = Date.now();
     acknowledgements = await Promise.all(supported.map(async (target) => {
       const baseline = baselines?.[target.id];
       const observed = await readClockStartAck(config, runtime, target);
@@ -4037,11 +4057,19 @@ async function verifyClockStartAcknowledgements(config, runtime, targets, baseli
         baselineCounter: baseline?.counter ?? null,
         counter: observed.counter ?? null,
         stage: observed.stage ?? null,
+        elapsedMs: observed.elapsedMs ?? null,
         acknowledged: counterAdvanced && stageMatched,
         error: observed.error ?? ""
       };
     }));
-    if (acknowledgements.every(({ acknowledged }) => acknowledged) || Date.now() >= deadline) break;
+    const verified = acknowledgements.every(({ acknowledged }) => acknowledged);
+    attempts.push({
+      attempt: attempts.length + 1,
+      elapsedMs: Math.max(0, Date.now() - attemptStartedAt),
+      verified,
+      acknowledgements: structuredClone(acknowledgements)
+    });
+    if (verified || Date.now() >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, deadline - Date.now())));
   } while (Date.now() <= deadline);
   return {
@@ -4050,7 +4078,10 @@ async function verifyClockStartAcknowledgements(config, runtime, targets, baseli
       && acknowledgements.every(({ acknowledged }) => acknowledged),
     expectedStage,
     targetCount: supported.length,
-    acknowledgements
+    acknowledgements,
+    elapsedMs: Math.max(0, Date.now() - startedAt),
+    attemptCount: attempts.length,
+    attempts
   };
 }
 
@@ -4074,9 +4105,12 @@ async function verifyClockPhaseAcknowledgements(config, runtime, targets, baseli
     Number(config.rnbo?.phaseAlignment?.phaseAckPollIntervalMs)
       || Number(config.rnbo?.phaseAlignment?.startAckPollIntervalMs)
       || 100));
+  const startedAt = Date.now();
   const deadline = Date.now() + timeoutMs;
+  const attempts = [];
   let acknowledgements = [];
   do {
+    const attemptStartedAt = Date.now();
     acknowledgements = await Promise.all(supported.map(async (target) => {
       const baseline = baselines?.[target.id];
       const observed = await readClockPhaseAck(config, runtime, target);
@@ -4090,11 +4124,19 @@ async function verifyClockPhaseAcknowledgements(config, runtime, targets, baseli
         baselineCounter: baseline?.counter ?? null,
         counter: observed.counter ?? null,
         stage: observed.stage ?? null,
+        elapsedMs: observed.elapsedMs ?? null,
         acknowledged: counterAdvanced && stageMatched,
         error: observed.error ?? ""
       };
     }));
-    if (acknowledgements.every(({ acknowledged }) => acknowledged) || Date.now() >= deadline) break;
+    const verified = acknowledgements.every(({ acknowledged }) => acknowledged);
+    attempts.push({
+      attempt: attempts.length + 1,
+      elapsedMs: Math.max(0, Date.now() - attemptStartedAt),
+      verified,
+      acknowledgements: structuredClone(acknowledgements)
+    });
+    if (verified || Date.now() >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, deadline - Date.now())));
   } while (Date.now() <= deadline);
   return {
@@ -4104,7 +4146,10 @@ async function verifyClockPhaseAcknowledgements(config, runtime, targets, baseli
       && acknowledgements.every(({ acknowledged }) => acknowledged),
     expectedStage,
     targetCount: supported.length,
-    acknowledgements
+    acknowledgements,
+    elapsedMs: Math.max(0, Date.now() - startedAt),
+    attemptCount: attempts.length,
+    attempts
   };
 }
 
@@ -4114,6 +4159,7 @@ async function readClockStartAck(config, runtime, target) {
   const timeoutMs = Math.max(100, Math.min(2000,
     Number(config.rnbo?.phaseAlignment?.startAckReadTimeoutMs) || 2000));
   const fetchImpl = runtime.rnboAckFetch ?? runtime.rnboStageFetch ?? globalThis.fetch;
+  const startedAt = Date.now();
   try {
     const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -4123,10 +4169,11 @@ async function readClockStartAck(config, runtime, target) {
     const stage = Number(value[1]);
     return {
       counter: Number.isFinite(counter) ? counter : undefined,
-      stage: Number.isFinite(stage) ? stage : undefined
+      stage: Number.isFinite(stage) ? stage : undefined,
+      elapsedMs: Math.max(0, Date.now() - startedAt)
     };
   } catch (error) {
-    return { error: messageForError(error) };
+    return { error: messageForError(error), elapsedMs: Math.max(0, Date.now() - startedAt) };
   }
 }
 
@@ -4136,6 +4183,7 @@ async function readClockPhaseAck(config, runtime, target) {
   const timeoutMs = Math.max(100, Math.min(2000,
     Number(config.rnbo?.phaseAlignment?.startAckReadTimeoutMs) || 2000));
   const fetchImpl = runtime.rnboAckFetch ?? runtime.rnboStageFetch ?? globalThis.fetch;
+  const startedAt = Date.now();
   try {
     const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
@@ -4145,10 +4193,11 @@ async function readClockPhaseAck(config, runtime, target) {
     const stage = Number(value[1]);
     return {
       counter: Number.isFinite(counter) ? counter : undefined,
-      stage: Number.isFinite(stage) ? stage : undefined
+      stage: Number.isFinite(stage) ? stage : undefined,
+      elapsedMs: Math.max(0, Date.now() - startedAt)
     };
   } catch (error) {
-    return { error: messageForError(error) };
+    return { error: messageForError(error), elapsedMs: Math.max(0, Date.now() - startedAt) };
   }
 }
 
@@ -4158,18 +4207,22 @@ async function verifyExternalTransportPhase(score, config, runtime, phaseTargets
   const pollIntervalMs = Math.max(10, Math.min(500,
     Number(config.rnbo?.phaseAlignment?.verifyPollIntervalMs) || 100));
   const deadline = Date.now() + timeoutMs;
+  const startedAt = Date.now();
+  const attempts = [];
   let result;
   do {
+    const attemptStartedAt = Date.now();
     const directReadAvailable = phaseTargets.every((target) => rnboCurrentStageUrl(target));
     let targets;
     let readError = "";
+    let reads = [];
+    let readElapsedMs = null;
     if (directReadAvailable) {
-      try {
-        targets = await readPhaseTargetsDirect(config, runtime, phaseTargets);
-      } catch (error) {
-        targets = [];
-        readError = messageForError(error);
-      }
+      const directRead = await readPhaseTargetsDirectWithTelemetry(config, runtime, phaseTargets);
+      targets = directRead.targets;
+      reads = directRead.reads;
+      readElapsedMs = directRead.elapsedMs;
+      readError = directRead.error;
     } else {
       await runtime.rnboStageCollector?.refresh?.(phaseTargets);
       targets = runtime.rnboStageCollector?.targets?.(phaseTargets) ?? phaseTargets;
@@ -4187,31 +4240,80 @@ async function verifyExternalTransportPhase(score, config, runtime, phaseTargets
       expectedTargetCount: expected.size,
       witness
     };
+    attempts.push({
+      attempt: attempts.length + 1,
+      elapsedMs: Math.max(0, Date.now() - attemptStartedAt),
+      readElapsedMs,
+      reads,
+      complete,
+      verified: result.verified,
+      reason: witness.reason ?? "",
+      projectedStages: witness.projectedStages ?? [],
+      offsets: witness.offsets ?? []
+    });
     if (result.verified || Date.now() >= deadline) break;
     await new Promise((resolve) => setTimeout(resolve, Math.min(pollIntervalMs, deadline - Date.now())));
   } while (Date.now() <= deadline);
-  return result;
+  return {
+    ...result,
+    elapsedMs: Math.max(0, Date.now() - startedAt),
+    attemptCount: attempts.length,
+    attempts
+  };
 }
 
 async function readPhaseTargetsDirect(config, runtime, targets) {
+  const result = await readPhaseTargetsDirectWithTelemetry(config, runtime, targets);
+  if (result.error) throw new Error(result.error);
+  return result.targets;
+}
+
+async function readPhaseTargetsDirectWithTelemetry(config, runtime, targets) {
   const timeoutMs = Math.max(100, Math.min(5000,
     Number(config.rnbo?.phaseAlignment?.verifyReadTimeoutMs) || 2000));
   const fetchImpl = runtime.rnboStageFetch ?? globalThis.fetch;
+  const startedAt = Date.now();
   const observations = await Promise.all(targets.map(async (target) => {
     const requestedAt = Date.now();
-    const response = await fetchImpl(rnboCurrentStageUrl(target), {
-      signal: AbortSignal.timeout(timeoutMs)
-    });
-    if (!response.ok) throw new Error(`${target.id} current_stage HTTP ${response.status}`);
-    const body = await response.json();
-    const value = Array.isArray(body?.VALUE) ? body.VALUE[0] : body?.VALUE;
-    const currentStage = Number(value);
-    if (!Number.isFinite(currentStage)) throw new Error(`${target.id} current_stage is unavailable`);
-    const observedAt = Date.now();
-    return { target, currentStage, midpoint: requestedAt + ((observedAt - requestedAt) / 2) };
+    try {
+      const response = await fetchImpl(rnboCurrentStageUrl(target), {
+        signal: AbortSignal.timeout(timeoutMs)
+      });
+      if (!response.ok) throw new Error(`current_stage HTTP ${response.status}`);
+      const body = await response.json();
+      const value = Array.isArray(body?.VALUE) ? body.VALUE[0] : body?.VALUE;
+      const currentStage = Number(value);
+      if (!Number.isFinite(currentStage)) throw new Error("current_stage is unavailable");
+      const observedAt = Date.now();
+      return {
+        target,
+        currentStage,
+        midpoint: requestedAt + ((observedAt - requestedAt) / 2),
+        read: {
+          targetId: optionalString(target.id),
+          ok: true,
+          elapsedMs: Math.max(0, observedAt - requestedAt),
+          currentStage,
+          error: ""
+        }
+      };
+    } catch (error) {
+      return {
+        target,
+        read: {
+          targetId: optionalString(target.id),
+          ok: false,
+          elapsedMs: Math.max(0, Date.now() - requestedAt),
+          currentStage: null,
+          error: messageForError(error)
+        }
+      };
+    }
   }));
   const commonNow = Date.now();
-  return observations.map(({ target, currentStage, midpoint }) => ({
+  const reads = observations.map(({ read }) => read);
+  const failures = reads.filter(({ ok }) => !ok);
+  const projectedTargets = failures.length ? [] : observations.map(({ target, currentStage, midpoint }) => ({
     ...target,
     currentStage,
     stateAgeMs: Math.max(0, commonNow - midpoint),
@@ -4221,6 +4323,12 @@ async function readPhaseTargetsDirect(config, runtime, targets) {
     stageMovement: "moving",
     stageReadbackStatus: "fresh"
   }));
+  return {
+    targets: projectedTargets,
+    reads,
+    elapsedMs: Math.max(0, commonNow - startedAt),
+    error: failures.map(({ targetId, error }) => `${targetId}: ${error}`).join("; ")
+  };
 }
 
 function projectedPhaseWitness(score, config, targets, contracts) {

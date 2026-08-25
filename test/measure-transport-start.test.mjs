@@ -31,10 +31,16 @@ test("transport measurement always stops and summarizes verified starts", async 
           ]
         },
         rnboReadiness: { participatingTargetIds: Array.from({ length: 7 }, (_, index) => `client-${index}`) },
-        clockStartAcknowledgement: { verified: true, acknowledgements: Array.from({ length: 7 }, () => ({ acknowledged: true })) },
-        clockPhaseAcknowledgement: { verified: true, acknowledgements: Array.from({ length: 7 }, () => ({ acknowledged: true })) },
-        clockStartPhaseVerification: { verified: true, witness: { skewBeats: 0, projectedStages: [] } },
-        clockPhaseArmWindow: { delayMs: 125 }
+        clockStartAcknowledgement: { verified: true, attemptCount: 1, acknowledgements: Array.from({ length: 7 }, () => ({ acknowledged: true })) },
+        clockPhaseAcknowledgement: { verified: true, attemptCount: 1, acknowledgements: Array.from({ length: 7 }, () => ({ acknowledged: true })) },
+        clockStartPhaseVerification: {
+          verified: true,
+          attemptCount: 1,
+          attempts: [{ attempt: 1, reads: [{ targetId: "client-0", ok: true, elapsedMs: 12 }] }],
+          witness: { skewBeats: 0, projectedStages: [] }
+        },
+        clockPhaseArmWindow: { delayMs: 125 },
+        coordinatedStartTimings: { clockPhaseArmWindowMs: 125 }
       } : {}
     });
   };
@@ -56,6 +62,11 @@ test("transport measurement always stops and summarizes verified starts", async 
   assert.deepEqual(result.summary.verification_elapsed_ms, { min: 800, median: 800, max: 800 });
   assert.deepEqual(result.summary.arm_delay_ms, { min: 125, median: 125, max: 125 });
   assert.deepEqual(result.summary.stop_elapsed_ms, { min: 800, median: 800, max: 800 });
+  assert.equal(result.runs[0].play.phase_verification.attemptCount, 1);
+  assert.equal(result.runs[0].play.phase_verification.attempts[0].reads[0].targetId, "client-0");
+  assert.equal(result.runs[0].play.clock_start_acknowledgement.attemptCount, 1);
+  assert.equal(result.runs[0].play.phase_acknowledgement.attemptCount, 1);
+  assert.deepEqual(result.runs[0].play.coordinated_start_timings, { clockPhaseArmWindowMs: 125 });
 });
 
 test("transport measurement attempts Stop after a failed Play", async () => {

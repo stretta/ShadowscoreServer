@@ -3082,6 +3082,7 @@ test("transport start freezes its participating cohort before JACK starts", asyn
   const phaseCounters = new Map([["local", 0], ["peer", 0]]);
   const stages = new Map([["local", -1], ["peer", -1]]);
   const acknowledgedStages = new Map([["local", -1], ["peer", -1]]);
+  let directStageReadCount = 0;
   const phaseAlignmentWaits = [];
   let peerPhaseAcknowledges = true;
   const peerTarget = {
@@ -3167,6 +3168,10 @@ test("transport start freezes its participating cohort before JACK starts", asyn
       },
       rnboStageFetch: async (url) => {
         const key = url.includes("/inst/2/") ? "local" : "peer";
+        directStageReadCount += 1;
+        if (directStageReadCount === 1) {
+          return { ok: false, status: 503, async json() { return {}; } };
+        }
         return {
           ok: true,
           async json() { return { VALUE: [stages.get(key)] }; }
@@ -3212,6 +3217,8 @@ test("transport start freezes its participating cohort before JACK starts", asyn
   });
 
   assert.equal(started.clockStartAcknowledgement.verified, true);
+  assert.equal(started.clockStartAcknowledgement.attemptCount, 1);
+  assert.equal(started.clockStartAcknowledgement.attempts[0].verified, true);
   assert.equal(started.clockStartAcknowledgement.targetCount, 1);
   assert.deepEqual(
     started.clockStartAcknowledgement.acknowledgements.map(({ targetId }) => targetId),
@@ -3222,11 +3229,32 @@ test("transport start freezes its participating cohort before JACK starts", asyn
   assert.deepEqual(phaseAlignmentWaits, [150]);
   assert.equal(started.clockPhaseResetWrites.length, 1);
   assert.equal(started.clockPhaseAcknowledgement.verified, true);
+  assert.equal(started.clockPhaseAcknowledgement.attemptCount, 1);
+  assert.equal(started.clockPhaseAcknowledgement.attempts[0].verified, true);
   assert.equal(
     started.clockStartPhaseVerification.verified,
     true,
     JSON.stringify(started.clockStartPhaseVerification)
   );
+  assert.equal(started.clockStartPhaseVerification.attemptCount, 2);
+  assert.equal(started.clockStartPhaseVerification.attempts[0].verified, false);
+  assert.match(started.clockStartPhaseVerification.attempts[0].reads[0].error, /HTTP 503/);
+  assert.equal(started.clockStartPhaseVerification.attempts[1].verified, true);
+  assert.deepEqual(
+    started.clockStartPhaseVerification.attempts[1].reads.map(({ targetId, ok }) => ({ targetId, ok })),
+    [{ targetId: "local-client", ok: true }]
+  );
+  assert.deepEqual(Object.keys(started.coordinatedStartTimings), [
+    "clockStartAcknowledgementMs",
+    "clockStartCorrectionWritesMs",
+    "clockStartCorrectionSettleMs",
+    "clockPhaseAckBaselinesMs",
+    "clockPhaseArmWindowMs",
+    "clockPhaseResetWritesMs",
+    "clockPhaseAcknowledgementMs",
+    "directPhaseVerificationMs"
+  ]);
+  assert.equal(Object.values(started.coordinatedStartTimings).every((value) => value >= 0), true);
   assert.deepEqual(started.phaseAnchor, started.clockStartPhaseVerification.witness);
   assert.equal(startOptions.anchorOffsetBeats, 0.25);
   assert.deepEqual([...stages.values()], [4, -1]);

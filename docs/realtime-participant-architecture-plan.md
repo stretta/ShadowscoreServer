@@ -24,6 +24,18 @@ idempotent subscription requests, deterministic shutdown, and `/session`
 discovery. `/collab` remains on its version-1 wire contract and RNBO playback
 orchestration remains unchanged.
 
+Implementation update, 2026-08-25: Phase 3 is implemented and deployed to
+`wren`. `/collab`
+now shares the maintained, bounded, heartbeat-aware WebSocket connection layer
+used by `/realtime`, while its version-1 JSON protocol and score-domain command
+hub remain separate. Connection ordering and message shapes are preserved;
+fragmented messages are now accepted, duplicate stable client IDs are replaced
+deterministically, and malformed or oversized input is closed explicitly.
+Deployment verification proved exact source parity, focused remote tests, the
+version-1 startup sequence plus a fragmented application ping, all four
+version-2 topic snapshots, stopped transport, and receiver-confirmed READY
+transfers.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer
@@ -36,7 +48,7 @@ ShadowscoreServer already contains most of the required domain semantics, but
 they are divided across boundaries that make a second playback transport likely
 to duplicate important behavior:
 
-- `src/collaboration/websocket.mjs` combines a hand-built WebSocket transport,
+- At audit time, `src/collaboration/websocket.mjs` combined a hand-built WebSocket transport,
   connection tracking, presence, score subscriptions, and every collaboration
   command in one module.
 - `src/http/routes.mjs` implements separate SSE paths for score events, RNBO
@@ -118,7 +130,7 @@ entire command surface.
 
 ### 2. WebSocket implementation
 
-The current WebSocket implementation is intentionally small and dependency-
+At audit time, the WebSocket implementation was intentionally small and dependency-
 free, but it is not an appropriate foundation for a playback control plane:
 
 - fragmented frames are rejected;

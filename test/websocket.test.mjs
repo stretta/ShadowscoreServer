@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createCollaborationHub, parseFrame } from "../src/collaboration/websocket.mjs";
+import { createCollaborationHub } from "../src/collaboration/websocket.mjs";
 import { defaultConfig } from "../src/config.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
 
@@ -279,15 +279,6 @@ test("collaboration broadcasts presence updates", () => {
   assert.equal(clientB.messages[0].clients.length, 1);
 });
 
-test("websocket parser decodes masked client text frames", () => {
-  const frame = maskedTextFrame(JSON.stringify({ type: "ping" }));
-  const parsed = parseFrame(frame);
-
-  assert.equal(parsed.bytes, frame.length);
-  assert.equal(parsed.opcode, 0x1);
-  assert.deepEqual(JSON.parse(parsed.payload.toString("utf8")), { type: "ping" });
-});
-
 function createContext() {
   const store = createScoreStore(createInitialScore(defaultConfig));
   return {
@@ -306,15 +297,4 @@ function createClient(id) {
     },
     close() {}
   };
-}
-
-function maskedTextFrame(text) {
-  const payload = Buffer.from(text);
-  const mask = Buffer.from([1, 2, 3, 4]);
-  const header = Buffer.from([0x81, 0x80 | payload.length]);
-  const masked = Buffer.alloc(payload.length);
-  for (let index = 0; index < payload.length; index += 1) {
-    masked[index] = payload[index] ^ mask[index % 4];
-  }
-  return Buffer.concat([header, mask, masked]);
 }

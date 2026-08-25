@@ -1,8 +1,10 @@
 # Realtime WebSocket API
 
 ShadowscoreServer exposes a standards-based, read-only realtime gateway at
-`/realtime`. It is independent of the legacy collaboration endpoint at
-`/collab` and does not yet accept score, transport, or playback commands.
+`/realtime`. It shares standards-based WebSocket connection infrastructure with
+the version-1 collaboration endpoint at `/collab`, but their application
+protocols, identities, message shapes, and delivery policies remain separate.
+`/realtime` does not yet accept score, transport, or playback commands.
 
 ## Discovery
 

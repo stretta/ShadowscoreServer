@@ -461,9 +461,13 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 
 ## WebSocket Collaboration
 
-Connect WebSocket clients to `/collab`. The server sends a `welcome`, `snapshot`,
-and `presence.list` message on connect. Score mutations are broadcast as
-`score.changed` messages with the same event shape used by `/events`.
+Connect WebSocket clients to `/collab`. This version-1 collaboration protocol
+uses the server's shared standards-based WebSocket connection layer while
+remaining distinct from the read-only `/realtime` version-2 protocol. The
+server sends `welcome`, `snapshot`, and `presence.list`, in that order, on
+connect. Score mutations are broadcast as `score.changed` messages with the
+same event shape used by `/events`. Fragmented text messages are supported;
+binary, malformed, and oversized messages are rejected.
 
 Client command messages are JSON objects:
 
@@ -499,6 +503,10 @@ Client command messages are JSON objects:
 Successful write commands receive an `ack` with the updated score. Stale guarded
 writes receive an `error`, so two clients editing the same voice can avoid
 silently overwriting one another.
+
+Connections use bounded outgoing queues and server heartbeats. If two
+connections claim the same `clientId` query parameter, the newer connection
+replaces the older one deterministically.
 
 ## Development
 

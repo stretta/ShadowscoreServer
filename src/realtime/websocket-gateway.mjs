@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
-import { WebSocket, WebSocketServer } from "ws";
-import { markWebSocketUpgradeHandled } from "./upgrade-routing.mjs";
+import { attachWebSocketEndpoint } from "./websocket-endpoint.mjs";
+
+export { createOutboundQueue } from "./websocket-endpoint.mjs";
 
 export const REALTIME_PROTOCOL = "shadowscore.realtime.v2";
 
@@ -13,56 +14,23 @@ export function attachRealtimeGateway(server, broker, options = {}) {
   const helloTimeoutMs = Math.max(250, Number(options.helloTimeoutMs) || 5_000);
   const sessions = new Map();
   const sessionsByClientId = new Map();
-  const wss = new WebSocketServer({
-    noServer: true,
-    maxPayload: Math.max(1024, Number(options.maxPayloadBytes) || 256 * 1024),
-    maxBufferedChunks: Math.max(8, Number(options.maxBufferedChunks) || 64),
-    maxFragments: Math.max(8, Number(options.maxFragments) || 64),
-    perMessageDeflate: false,
-    handleProtocols(protocols) {
-      return protocols.has(REALTIME_PROTOCOL) ? REALTIME_PROTOCOL : false;
-    }
+  const endpoint = attachWebSocketEndpoint(server, {
+    ...options,
+    path,
+    protocol: REALTIME_PROTOCOL,
+    requireProtocol: true,
+    messageMode: "raw",
+    heartbeatIntervalMs,
+    heartbeatTimeoutMs,
+    onConnection: addSession
   });
-
-  const onUpgrade = (request, socket, head) => {
-    const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
-    if (url.pathname !== path) return;
-    markWebSocketUpgradeHandled(request);
-    const protocols = String(request.headers["sec-websocket-protocol"] ?? "")
-      .split(",")
-      .map((value) => value.trim());
-    if (!protocols.includes(REALTIME_PROTOCOL)) {
-      socket.write(`HTTP/1.1 426 Upgrade Required\r\nSec-WebSocket-Protocol: ${REALTIME_PROTOCOL}\r\nConnection: close\r\n\r\n`);
-      socket.destroy();
-      return;
-    }
-    wss.handleUpgrade(request, socket, head, (websocket) => {
-      wss.emit("connection", websocket, request);
-    });
-  };
-  server.on("upgrade", onUpgrade);
-  wss.on("connection", (websocket) => addSession(websocket));
-
-  const heartbeatTimer = timers.setInterval(() => {
-    const timestamp = now();
-    for (const session of sessions.values()) {
-      if (timestamp - session.lastPongAt > heartbeatTimeoutMs) {
-        session.websocket.terminate();
-      } else if (session.websocket.readyState === WebSocket.OPEN) {
-        session.websocket.ping();
-      }
-    }
-  }, heartbeatIntervalMs);
-  heartbeatTimer?.unref?.();
 
   return {
     close() {
-      timers.clearInterval(heartbeatTimer);
-      server.off("upgrade", onUpgrade);
       for (const session of sessions.values()) closeSession(session, 1001, "server shutdown");
       sessions.clear();
       sessionsByClientId.clear();
-      wss.close();
+      endpoint.close();
     },
     getSessionCount() {
       return sessions.size;
@@ -71,20 +39,18 @@ export function attachRealtimeGateway(server, broker, options = {}) {
     protocol: REALTIME_PROTOCOL
   };
 
-  function addSession(websocket) {
-    const connectionId = crypto.randomUUID();
+  function addSession(connection) {
+    const connectionId = connection.id;
     const session = {
       connectionId,
       clientId: null,
       role: null,
-      websocket,
-      outbound: createOutboundQueue(websocket, options),
+      connection,
+      outbound: connection.outbound,
       subscriptions: new Map(),
       requestCache: new Map(),
-      lastPongAt: now(),
       initialized: false,
-      closed: false,
-      messageTail: Promise.resolve()
+      closed: false
     };
     sessions.set(connectionId, session);
     session.helloTimer = timers.setTimeout(() => {
@@ -92,15 +58,8 @@ export function attachRealtimeGateway(server, broker, options = {}) {
     }, helloTimeoutMs);
     session.helloTimer?.unref?.();
 
-    websocket.on("pong", () => { session.lastPongAt = now(); });
-    websocket.on("message", (data, isBinary) => {
-      session.lastPongAt = now();
-      session.messageTail = session.messageTail
-        .then(() => handleMessage(session, data, isBinary))
-        .catch((error) => sendError(session, null, error));
-    });
-    websocket.on("close", () => removeSession(session));
-    websocket.on("error", () => removeSession(session));
+    connection.onMessage = (data, isBinary) => handleMessage(session, data, isBinary);
+    connection.onClose = () => removeSession(session);
 
     send(session, {
       type: "hello.required",
@@ -316,77 +275,7 @@ export function attachRealtimeGateway(server, broker, options = {}) {
   function closeSession(session, code, reason) {
     if (session.closed) return;
     removeSession(session);
-    if (session.websocket.readyState === WebSocket.OPEN || session.websocket.readyState === WebSocket.CONNECTING) {
-      session.websocket.close(code, reason);
-    }
-  }
-}
-
-export function createOutboundQueue(websocket, options = {}) {
-  const maxBytes = Math.max(1024, Number(options.maxOutboundBytes) || 1024 * 1024);
-  const maxMessages = Math.max(4, Number(options.maxOutboundMessages) || 64);
-  const queue = [];
-  let queueBytes = 0;
-  let inFlightBytes = 0;
-  let sending = false;
-  let closed = false;
-
-  return {
-    enqueue(serialized, itemOptions = {}) {
-      if (closed || websocket.readyState !== WebSocket.OPEN) return false;
-      const bytes = Buffer.byteLength(serialized);
-      const replaceKey = itemOptions.replaceKey;
-      if (replaceKey) {
-        const existing = queue.findIndex((item) => item.replaceKey === replaceKey);
-        if (existing >= 0) {
-          queueBytes -= queue[existing].bytes;
-          queue.splice(existing, 1);
-        }
-      }
-      while ((queue.length >= maxMessages || totalBytes() + bytes > maxBytes) && dropOldestReplaceable()) {}
-      if (queue.length >= maxMessages || totalBytes() + bytes > maxBytes) {
-        closed = true;
-        websocket.close(1009, "outbound queue exceeded");
-        return false;
-      }
-      queue.push({ serialized, bytes, replaceKey, critical: itemOptions.critical === true });
-      queueBytes += bytes;
-      pump();
-      return true;
-    },
-    snapshot() {
-      return { messages: queue.length, bytes: queueBytes, inFlightBytes, sending, closed };
-    }
-  };
-
-  function totalBytes() {
-    return queueBytes + inFlightBytes + Math.max(0, Number(websocket.bufferedAmount) || 0);
-  }
-
-  function dropOldestReplaceable() {
-    const index = queue.findIndex((item) => item.replaceKey && !item.critical);
-    if (index < 0) return false;
-    queueBytes -= queue[index].bytes;
-    queue.splice(index, 1);
-    return true;
-  }
-
-  function pump() {
-    if (sending || !queue.length || closed) return;
-    const item = queue.shift();
-    queueBytes -= item.bytes;
-    inFlightBytes = item.bytes;
-    sending = true;
-    websocket.send(item.serialized, (error) => {
-      sending = false;
-      inFlightBytes = 0;
-      if (error) {
-        closed = true;
-        websocket.close(1011, "outbound send failed");
-        return;
-      }
-      pump();
-    });
+    session.connection.close(code, reason);
   }
 }
 

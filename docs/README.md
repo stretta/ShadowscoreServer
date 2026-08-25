@@ -35,6 +35,10 @@ Start with the current guides:
 
 Design and implementation notes:
 
+- [`realtime-participant-architecture-plan.md`](realtime-participant-architecture-plan.md):
+  current audit and staged migration plan for shared realtime publication,
+  transport-neutral playback participants, RNBO adapter extraction, and future
+  software playback clients.
 - [`mesostructural-ttid-scale-plan.md`](mesostructural-ttid-scale-plan.md):
   block-owned TTID, non-destructive Matrix Edit folding, explicit focused-note
   quantization, the retained whole-score scale-transform API, OSC snapshot

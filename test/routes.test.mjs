@@ -547,6 +547,7 @@ test("transport events stream sends initial and update snapshots", async () => {
   assert.match(response.snapshot().body, /event: snapshot/);
   assert.match(response.snapshot().body, /"status":"unusable"/);
   assert.match(response.snapshot().body, /"tempoAuthority":"link"/);
+  assert.equal(context.runtime.jackTransport.events.listenerCount("snapshot"), 1);
 
   context.runtime.jackTransport.update(jackSnapshot());
   const streamed = response.snapshot().body;
@@ -555,6 +556,7 @@ test("transport events stream sends initial and update snapshots", async () => {
   assert.match(streamed, /"tempoAuthority":"link"/);
 
   request.emit("close");
+  assert.equal(context.runtime.jackTransport.events.listenerCount("snapshot"), 0);
 });
 
 test("RNBO transfer routes expose current progress and stream updates", async () => {
@@ -582,11 +584,50 @@ test("RNBO transfer routes expose current progress and stream updates", async ()
   await routeRequest(request, response, context.store, context.config, context.runtime);
   assert.equal(response.snapshot().headers["Content-Type"], "text/event-stream");
   assert.match(response.snapshot().body, /"sentRows":120/);
+  assert.equal(transferEvents.listenerCount("snapshot"), 1);
 
   transfer = { ...transfer, targets: { finch: { ...transfer.targets.finch, state: "ready", sentRows: 277, confirmedRows: 277 } } };
   transferEvents.emit("snapshot", transfer);
   assert.match(response.snapshot().body, /"confirmedRows":277/);
   request.emit("close");
+  assert.equal(transferEvents.listenerCount("snapshot"), 0);
+});
+
+test("score events preserve event names and share one upstream listener", async () => {
+  const context = createRouteContext();
+  const firstRequest = createRequest("GET", "/events");
+  const secondRequest = createRequest("GET", "/events");
+  const firstResponse = createResponse();
+  const secondResponse = createResponse();
+
+  await routeRequest(firstRequest, firstResponse, context.store, context.config, context.runtime);
+  await routeRequest(secondRequest, secondResponse, context.store, context.config, context.runtime);
+  assert.match(firstResponse.snapshot().body, /event: snapshot/);
+  assert.equal(context.store.events.listenerCount("change"), 1);
+
+  context.store.updateContext({ title: "Shared publisher" });
+  assert.match(firstResponse.snapshot().body, /event: context\.updated/);
+  assert.match(secondResponse.snapshot().body, /event: context\.updated/);
+
+  firstRequest.emit("close");
+  assert.equal(context.store.events.listenerCount("change"), 1);
+  secondRequest.emit("close");
+  assert.equal(context.store.events.listenerCount("change"), 0);
+});
+
+test("authoritative transport events retain snapshot framing and release polling when idle", async () => {
+  const context = createRouteContext();
+  const request = createRequest("GET", "/api/v1/objects/transport/events");
+  const response = createResponse();
+
+  await routeRequest(request, response, context.store, context.config, context.runtime);
+  assert.equal(response.snapshot().headers["Content-Type"], "text/event-stream");
+  assert.match(response.snapshot().body, /^event: snapshot\ndata: /);
+  assert.match(response.snapshot().body, /"object_id":"transport"/);
+  assert.equal(context.runtime.authoritativeTransportPublisher.subscriberCount(), 1);
+
+  request.emit("close");
+  assert.equal(context.runtime.authoritativeTransportPublisher.subscriberCount(), 0);
 });
 
 test("transport status page exposes host transport controls", async () => {

@@ -13,6 +13,7 @@ import { createOscSnapshotAutoRecall } from "./osc/snapshot-auto-recall.mjs";
 import { createManualOscQueryDeviceRegistry } from "./oscquery/manual-device-registry.mjs";
 import { createOscSnapshotRecallService } from "./osc/snapshot-recall.mjs";
 import { createPeerRegistry } from "./registration/peer-registry.mjs";
+import { closeRuntimePublishers } from "./realtime/runtime-publishers.mjs";
 import { createScorePersistence, loadPersistedScore } from "./state/persistence.mjs";
 import { createInitialScore, createScoreStore } from "./state/score-store.mjs";
 import { createJackTransportController } from "./transport/jack-transport-control.mjs";
@@ -122,7 +123,7 @@ async function shutdown() {
   macroPlayback.close();
   rnbo.close();
   rnboStageCollector.close();
-  runtime.authoritativeTransportPublisher?.close?.();
+  closeRuntimePublishers(runtime);
   if (automaticSyncRecoveryInterval) clearInterval(automaticSyncRecoveryInterval);
   coordinator.close();
   server.close();

@@ -21,6 +21,8 @@ import { rnboCurrentStageUrl, rnboOscQueryValueUrl } from "../playback/rnbo-stag
 import { buildPlaybackSnapshot, nextPlaybackSnapshotGeneration } from "../playback/playback-snapshot.mjs";
 import { createTempoPolicy } from "../playback/tempo-policy.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
+import { createEventPublisher, createLoadedPublisher } from "../realtime/publisher.mjs";
+import { runtimePublisher } from "../realtime/runtime-publishers.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 import { distributeBlockSwing } from "../sequencer/distribution.mjs";
 import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
@@ -121,7 +123,7 @@ export async function routeRequest(request, response, store, config, runtime = {
   }
 
   if (request.method === "GET" && url.pathname === "/rnbo/transfers/events") {
-    openRnboTransferEventStream(request, response, runtime);
+    await openRnboTransferEventStream(request, response, runtime);
     return;
   }
 
@@ -672,7 +674,7 @@ export async function routeRequest(request, response, store, config, runtime = {
 
   if (request.method === "GET" && url.pathname === "/transport/events") {
     tempoPolicyFor(store, config, runtime);
-    openTransportEventStream(request, response, config, runtime);
+    await openTransportEventStream(request, response, config, runtime);
     return;
   }
 
@@ -1065,7 +1067,7 @@ export async function routeRequest(request, response, store, config, runtime = {
   }
 
   if (request.method === "GET" && url.pathname === "/playback/snapshot") {
-    writeJson(response, 200, await coherentPlaybackSnapshot(runtime, store, config));
+    writeJson(response, 200, await playbackSnapshotPublisher(runtime, store, config).current());
     return;
   }
 
@@ -1125,7 +1127,7 @@ export async function routeRequest(request, response, store, config, runtime = {
   }
 
   if (request.method === "GET" && url.pathname === "/events") {
-    openEventStream(request, response, store);
+    await openEventStream(request, response, store, runtime);
     return;
   }
 
@@ -1837,67 +1839,43 @@ export async function readJson(request) {
   return body ? JSON.parse(body) : {};
 }
 
-function openEventStream(request, response, store) {
+async function openEventStream(request, response, store, runtime) {
   response.writeHead(200, {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
     "Content-Type": "text/event-stream"
   });
 
-  writeEvent(response, "snapshot", {
-    type: "snapshot",
-    score: store.getScore()
-  });
-
-  const onChange = (event) => writeEvent(response, event.type, event);
-  store.events.on("change", onChange);
-
-  request.on("close", () => {
-    store.events.off("change", onChange);
-  });
+  const publisher = scorePublisher(store, runtime);
+  writeEvent(response, "snapshot", await publisher.current());
+  const unsubscribe = publisher.subscribe(({ event, payload }) => writeEvent(response, event, payload));
+  request.on("close", unsubscribe);
 }
 
-function openRnboTransferEventStream(request, response, runtime) {
+async function openRnboTransferEventStream(request, response, runtime) {
   response.writeHead(200, {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
     "Content-Type": "text/event-stream"
   });
 
-  writeEvent(response, "snapshot", rnboTransferStatus(runtime));
-  const events = runtime.rnboAdapter?.transferEvents;
-  const onSnapshot = (snapshot) => writeEvent(response, "snapshot", snapshot);
-  events?.on?.("snapshot", onSnapshot);
-
-  request.on("close", () => {
-    events?.off?.("snapshot", onSnapshot);
-  });
+  const publisher = rnboTransferPublisher(runtime);
+  writeEvent(response, "snapshot", await publisher.current());
+  const unsubscribe = publisher.subscribe(({ event, payload }) => writeEvent(response, event, payload));
+  request.on("close", unsubscribe);
 }
 
-function openTransportEventStream(request, response, config, runtime) {
+async function openTransportEventStream(request, response, config, runtime) {
   response.writeHead(200, {
     "Cache-Control": "no-cache",
     "Connection": "keep-alive",
     "Content-Type": "text/event-stream"
   });
 
-  writeEvent(response, "snapshot", {
-    type: "snapshot",
-    transport: transportSnapshot(config, runtime)
-  });
-
-  const onSnapshot = (event) => writeEvent(response, event.type, {
-    ...event,
-    transport: {
-      ...(event.transport ?? {}),
-      tempoAuthority: config.transport?.tempoAuthority === "server" ? "server" : "link"
-    }
-  });
-  runtime.jackTransport?.events?.on?.("snapshot", onSnapshot);
-
-  request.on("close", () => {
-    runtime.jackTransport?.events?.off?.("snapshot", onSnapshot);
-  });
+  const publisher = legacyTransportPublisher(config, runtime);
+  writeEvent(response, "snapshot", await publisher.current());
+  const unsubscribe = publisher.subscribe(({ event, payload }) => writeEvent(response, event, payload));
+  request.on("close", unsubscribe);
 }
 
 async function openAuthoritativeTransportEventStream(request, response, store, config, runtime) {
@@ -1924,13 +1902,56 @@ async function openAuthoritativeTransportEventStream(request, response, store, c
 }
 
 function authoritativeTransportPublisher(store, config, runtime) {
-  if (!runtime.authoritativeTransportPublisher) {
-    runtime.authoritativeTransportPublisher = createAuthoritativeTransportPublisher(
+  const publisher = runtimePublisher(runtime, "transport.authoritative", () =>
+    createAuthoritativeTransportPublisher(
       () => authoritativeTransportSnapshot(store, config, runtime),
       { intervalMs: 500 }
-    );
-  }
-  return runtime.authoritativeTransportPublisher;
+    )
+  );
+  runtime.authoritativeTransportPublisher = publisher;
+  return publisher;
+}
+
+function scorePublisher(store, runtime) {
+  return runtimePublisher(runtime, "score", () => createEventPublisher({
+    loadSnapshot: () => ({ type: "snapshot", score: store.getScore() }),
+    events: store.events,
+    sourceEvent: "change",
+    mapEvent: (event) => ({ event: event.type, payload: event })
+  }));
+}
+
+function rnboTransferPublisher(runtime) {
+  return runtimePublisher(runtime, "transfers", () => createEventPublisher({
+    loadSnapshot: () => rnboTransferStatus(runtime),
+    events: runtime.rnboAdapter?.transferEvents,
+    sourceEvent: "snapshot"
+  }));
+}
+
+function legacyTransportPublisher(config, runtime) {
+  return runtimePublisher(runtime, "transport.legacy", () => createEventPublisher({
+    loadSnapshot: () => ({ type: "snapshot", transport: transportSnapshot(config, runtime) }),
+    events: runtime.jackTransport?.events,
+    sourceEvent: "snapshot",
+    mapEvent: (event) => ({
+      event: event.type,
+      payload: {
+        ...event,
+        transport: {
+          ...(event.transport ?? {}),
+          tempoAuthority: config.transport?.tempoAuthority === "server" ? "server" : "link"
+        }
+      }
+    })
+  }));
+}
+
+function playbackSnapshotPublisher(runtime, store, config) {
+  return runtimePublisher(runtime, "playback", () => createLoadedPublisher(
+    () => coherentPlaybackSnapshot(runtime, store, config),
+    { refreshOnCurrent: true }
+  ));
 }
 
 function writeEvent(response, eventName, payload) {

@@ -458,6 +458,8 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /structure-editor`: meso/macro structure editor.
 - `GET /events`: server-sent event stream of score changes.
 - `GET /collab`: WebSocket collaboration endpoint for realtime JSON commands.
+- `GET /realtime`: versioned read-only WebSocket topics for score, transport,
+  playback, transfers, and normalized participant inventory.
 
 ## WebSocket Collaboration
 

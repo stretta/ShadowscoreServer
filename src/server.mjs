@@ -4,9 +4,10 @@ import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
 import { createCoordinatorManager } from "./coordinator/coordinator-manager.mjs";
-import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, readBeatWitnessContext, realtimeTopicDefinitions, recallOscSnapshotsForBlock, routeRequest, runAutomaticSyncRecovery } from "./http/routes.mjs";
+import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, readBeatWitnessContext, readParticipantRnboTargets, realtimeTopicDefinitions, recallOscSnapshotsForBlock, routeRequest, runAutomaticSyncRecovery } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { activatePreparedBlockTransition } from "./playback/block-transition.mjs";
+import { createParticipantRegistry } from "./playback/participant-registry.mjs";
 import { createTempoPolicy } from "./playback/tempo-policy.mjs";
 import { createRnboStageCollector } from "./playback/rnbo-stage-collector.mjs";
 import { createOscSnapshotAutoRecall } from "./osc/snapshot-auto-recall.mjs";
@@ -59,6 +60,10 @@ const runtime = {
   rnboStageCollector,
   ensembleSyncSupervisor
 };
+runtime.participantRegistry = createParticipantRegistry({
+  getAssignments: () => store.getScore().assignments,
+  loadRnboTargets: () => readParticipantRnboTargets(config, runtime)
+});
 tempoPolicy = createTempoPolicy(store, config, {
   applyTempo: (tempo) => applyLiveTempo(store, config, runtime, tempo),
   onTempoChanged: () => runtime.macroPlayback?.tempoChanged?.()
@@ -99,7 +104,9 @@ const server = http.createServer((request, response) => {
   });
 });
 const realtimeTopics = createRealtimeTopicBroker(realtimeTopicDefinitions(store, config, runtime));
-const realtime = attachRealtimeGateway(server, realtimeTopics);
+const realtime = attachRealtimeGateway(server, realtimeTopics, {
+  participantRegistry: runtime.participantRegistry
+});
 const collaboration = attachWebSocketCollaboration(server, store, config);
 const detachUnknownWebSocketFallback = attachUnknownWebSocketFallback(server);
 
@@ -128,6 +135,7 @@ async function shutdown() {
   collaboration.close();
   realtime.close();
   realtimeTopics.close();
+  runtime.participantRegistry.close();
   detachUnknownWebSocketFallback();
   oscSnapshotAutoRecall.close();
   macroPlayback.close();

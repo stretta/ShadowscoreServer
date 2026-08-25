@@ -77,9 +77,22 @@ complete state wins. Request results and errors are never silently replaced.
 | `transport` | Canonical musician-facing transport object | Shared 500 ms publisher |
 | `playback` | Coherent arrangement and participant execution snapshot | Shared 250 ms publisher |
 | `playback.transfers` | RNBO transfer progress and receiver acknowledgement | Transfer lifecycle events |
+| `participants` | Normalized RNBO targets, connected software sessions, and assignment resolutions | Registry lifecycle events and bounded RNBO refresh |
 
 The gateway uses the same publishers as the existing HTTP and SSE routes. It
 does not independently poll JACK, RNBO, or the score store.
+
+The `participants` topic is inventory and liveness, not playback authority. An
+observer session appears as a connected software participant but receives no
+prepare, activation, transport-write, or acknowledgement capability. Hardware
+units remain available through their existing APIs and are projected into this
+topic only through their RNBO targets.
+
+Each participant descriptor includes `participant_id`, `stable_device_id`,
+`kind`, `adapter`, `status`, `available`, `capabilities`, transport-specific
+`endpoint` metadata, `last_seen_at`, and `expires_at`. Assignment resolutions
+report exact, stable-device, ambiguous, missing, locked-missing, offline, or
+unassigned state without rewriting the score assignment.
 
 ## Subscription Requests
 

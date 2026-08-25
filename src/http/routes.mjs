@@ -1826,8 +1826,18 @@ export function realtimeTopicDefinitions(store, config, runtime) {
     score: { publisher: scorePublisher(store, runtime), version: 1, roles: ["observer"] },
     transport: { publisher: authoritativeTransportPublisher(store, config, runtime), version: 1, roles: ["observer"] },
     playback: { publisher: playbackSnapshotPublisher(runtime, store, config), version: 1, roles: ["observer"] },
-    "playback.transfers": { publisher: rnboTransferPublisher(runtime), version: 1, roles: ["observer"] }
+    "playback.transfers": { publisher: rnboTransferPublisher(runtime), version: 1, roles: ["observer"] },
+    participants: { publisher: runtime.participantRegistry, version: 1, roles: ["observer"] }
   };
+}
+
+export async function readParticipantRnboTargets(config, runtime) {
+  const targets = await readAllRnboTargets(config, runtime);
+  const units = new Map((runtime.peerRegistry?.snapshot?.() ?? []).map((unit) => [unit.id, unit]));
+  return targets.map((target) => {
+    const unit = units.get(target.hardwareUnitId);
+    return unit ? { ...target, lastSeenAt: unit.lastSeenAt, expiresAt: unit.expiresAt } : target;
+  });
 }
 
 export function writeJson(response, status, payload) {

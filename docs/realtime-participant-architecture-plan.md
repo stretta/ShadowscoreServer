@@ -36,6 +36,17 @@ version-1 startup sequence plus a fragmented application ping, all four
 version-2 topic snapshots, stopped transport, and receiver-confirmed READY
 transfers.
 
+Implementation update, 2026-08-25: Phase 4 is implemented and deployed to
+`wren`. A normalized participant registry now projects RNBO targets and
+connected realtime software sessions without changing the hardware registry,
+score assignment documents,
+or playback delivery. It retains offline identities, records lifecycle events,
+handles connection and RNBO endpoint replacement, resolves current exact and
+stable assignment fields, and exposes a read-only `participants` topic.
+Deployment verification proved source parity, focused remote tests, exact live
+RNBO assignment resolution, software add/replacement/offline lifecycle events,
+stopped transport, and receiver-confirmed READY transfers.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer

@@ -5,6 +5,7 @@ import test from "node:test";
 import { WebSocket } from "ws";
 import { attachWebSocketCollaboration } from "../src/collaboration/websocket.mjs";
 import { defaultConfig } from "../src/config.mjs";
+import { createParticipantRegistry } from "../src/playback/participant-registry.mjs";
 import { createEventPublisher, createLoadedPublisher } from "../src/realtime/publisher.mjs";
 import { createRealtimeTopicBroker } from "../src/realtime/topic-broker.mjs";
 import { attachUnknownWebSocketFallback } from "../src/realtime/upgrade-routing.mjs";
@@ -124,6 +125,68 @@ test("realtime gateway replaces duplicate stable client identities", async (t) =
   assert.equal(context.gateway.getSessionCount(), 1);
 });
 
+test("realtime gateway projects software sessions into participant snapshots and lifecycle events", async (t) => {
+  const participantRegistry = createParticipantRegistry();
+  const context = await createGatewayServer({ participantRegistry });
+  t.after(() => {
+    context.close();
+    participantRegistry.close();
+  });
+  const watcher = connect(context.url("/realtime"), REALTIME_PROTOCOL);
+  const watcherInbox = createInbox(watcher);
+  t.after(() => watcher.close());
+  await onceOpen(watcher);
+  await watcherInbox.next((message) => message.type === "hello.required");
+  watcher.send(JSON.stringify({
+    protocol: REALTIME_PROTOCOL,
+    type: "hello",
+    client_id: "watcher",
+    topics: ["participants"]
+  }));
+  await watcherInbox.next((message) => message.type === "welcome");
+  const initial = await watcherInbox.next((message) => message.type === "snapshot" && message.topic === "participants");
+  assert.equal(initial.payload.value.participants.some((entry) => entry.participant_id === "realtime:watcher"), true);
+
+  const first = connect(context.url("/realtime"), REALTIME_PROTOCOL);
+  const firstInbox = createInbox(first);
+  t.after(() => first.close());
+  await onceOpen(first);
+  await firstInbox.next((message) => message.type === "hello.required");
+  first.send(JSON.stringify({ protocol: REALTIME_PROTOCOL, type: "hello", client_id: "laptop", topics: [] }));
+  await firstInbox.next((message) => message.type === "welcome");
+  const added = await watcherInbox.next((message) =>
+    message.type === "event" && message.payload.value.event?.type === "participant.added"
+      && message.payload.value.event.participant_id === "realtime:laptop"
+  );
+  assert.equal(added.payload.value.participants.find((entry) => entry.participant_id === "realtime:laptop").available, true);
+
+  const second = connect(context.url("/realtime"), REALTIME_PROTOCOL);
+  const secondInbox = createInbox(second);
+  t.after(() => second.close());
+  await onceOpen(second);
+  await secondInbox.next((message) => message.type === "hello.required");
+  const firstClosed = onceClose(first);
+  second.send(JSON.stringify({ protocol: REALTIME_PROTOCOL, type: "hello", client_id: "laptop", topics: [] }));
+  await secondInbox.next((message) => message.type === "welcome");
+  assert.equal((await firstClosed).code, 4001);
+  const replaced = await watcherInbox.next((message) =>
+    message.type === "event" && message.payload.value.event?.type === "participant.endpoint_replaced"
+  );
+  assert.equal(replaced.payload.value.event.participant_id, "realtime:laptop");
+
+  second.close();
+  const offline = await watcherInbox.next((message) =>
+    message.type === "event" && message.payload.value.event?.type === "participant.offline"
+      && message.payload.value.event.participant_id === "realtime:laptop"
+  );
+  assert.equal(offline.payload.value.participants.find((entry) => entry.participant_id === "realtime:laptop").available, false);
+  const watcherClosed = onceClose(watcher);
+  watcher.close();
+  await watcherClosed;
+  await waitUntil(() => participantRegistry.subscriberCount() === 0);
+  assert.equal(participantRegistry.subscriberCount(), 0);
+});
+
 test("realtime and collaboration WebSockets coexist and unknown upgrades retain 404", async (t) => {
   const context = await createGatewayServer({ collaboration: true });
   t.after(() => context.close());
@@ -213,10 +276,14 @@ async function createGatewayServer(options = {}) {
     mapEvent: (payload) => ({ event: "changed", payload })
   });
   const transportPublisher = createLoadedPublisher(() => ({ rolling: false }), { intervalMs: 500 });
-  const broker = createRealtimeTopicBroker({
+  const definitions = {
     score: { publisher: scorePublisher, roles: ["observer"] },
     transport: { publisher: transportPublisher, roles: ["observer"] }
-  });
+  };
+  if (options.participantRegistry) {
+    definitions.participants = { publisher: options.participantRegistry, roles: ["observer"] };
+  }
+  const broker = createRealtimeTopicBroker(definitions);
   const server = http.createServer((_request, response) => {
     response.writeHead(404);
     response.end();
@@ -296,6 +363,14 @@ function onceOpen(websocket) {
 
 function onceClose(websocket) {
   return new Promise((resolve) => websocket.once("close", (code, reason) => resolve({ code, reason: reason.toString() })));
+}
+
+async function waitUntil(predicate, timeoutMs = 500) {
+  const deadline = Date.now() + timeoutMs;
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error("timed out waiting for condition");
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 function unexpectedStatus(websocket) {

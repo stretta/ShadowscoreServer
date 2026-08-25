@@ -108,13 +108,22 @@ export function attachRealtimeGateway(server, broker, options = {}) {
     session.clientId = requestedClientId || `client-${crypto.randomUUID()}`;
     session.role = "observer";
     const previous = sessionsByClientId.get(session.clientId);
+    const requestedTopics = normalizeTopics(message.topics ?? []);
+    const acceptedTopics = validateTopics(requestedTopics, session.role);
+    const capabilities = ["topics:read"];
+    options.participantRegistry?.connectRealtimeSession?.({
+      clientId: session.clientId,
+      connectionId: session.connectionId,
+      protocol: REALTIME_PROTOCOL,
+      role: session.role,
+      capabilities,
+      topics: acceptedTopics
+    });
     if (previous && previous !== session) closeSession(previous, 4001, "replaced by newer connection");
     sessionsByClientId.set(session.clientId, session);
     session.initialized = true;
     timers.clearTimeout(session.helloTimer);
 
-    const requestedTopics = normalizeTopics(message.topics ?? []);
-    const acceptedTopics = validateTopics(requestedTopics, session.role);
     send(session, {
       type: "welcome",
       request_id: optionalRequestId(message.request_id),
@@ -123,7 +132,7 @@ export function attachRealtimeGateway(server, broker, options = {}) {
         session_id: session.connectionId,
         client_id: session.clientId,
         role: session.role,
-        capabilities: ["topics:read"],
+        capabilities,
         heartbeat_interval_ms: heartbeatIntervalMs,
         heartbeat_timeout_ms: heartbeatTimeoutMs,
         topics: acceptedTopics
@@ -270,6 +279,7 @@ export function attachRealtimeGateway(server, broker, options = {}) {
     for (const topic of [...session.subscriptions.keys()]) unsubscribeTopic(session, topic);
     sessions.delete(session.connectionId);
     if (sessionsByClientId.get(session.clientId) === session) sessionsByClientId.delete(session.clientId);
+    if (session.initialized) options.participantRegistry?.disconnectRealtimeSession?.(session.connectionId);
   }
 
   function closeSession(session, code, reason) {

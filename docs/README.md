@@ -39,6 +39,8 @@ Design and implementation notes:
   current audit and staged migration plan for shared realtime publication,
   transport-neutral playback participants, RNBO adapter extraction, and future
   software playback clients.
+- [`realtime-api.md`](realtime-api.md): versioned read-only WebSocket discovery,
+  handshake, topics, limits, liveness, and subscription contract.
 - [`mesostructural-ttid-scale-plan.md`](mesostructural-ttid-scale-plan.md):
   block-owned TTID, non-destructive Matrix Edit folding, explicit focused-note
   quantization, the retained whole-score scale-transform API, OSC snapshot

@@ -1821,6 +1821,15 @@ export async function routeRequest(request, response, store, config, runtime = {
   writeJson(response, 404, { ok: false, error: "not found" });
 }
 
+export function realtimeTopicDefinitions(store, config, runtime) {
+  return {
+    score: { publisher: scorePublisher(store, runtime), version: 1, roles: ["observer"] },
+    transport: { publisher: authoritativeTransportPublisher(store, config, runtime), version: 1, roles: ["observer"] },
+    playback: { publisher: playbackSnapshotPublisher(runtime, store, config), version: 1, roles: ["observer"] },
+    "playback.transfers": { publisher: rnboTransferPublisher(runtime), version: 1, roles: ["observer"] }
+  };
+}
+
 export function writeJson(response, status, payload) {
   response.writeHead(status, { "Content-Type": "application/json" });
   response.end(JSON.stringify(payload));
@@ -1950,7 +1959,7 @@ function legacyTransportPublisher(config, runtime) {
 function playbackSnapshotPublisher(runtime, store, config) {
   return runtimePublisher(runtime, "playback", () => createLoadedPublisher(
     () => coherentPlaybackSnapshot(runtime, store, config),
-    { refreshOnCurrent: true }
+    { refreshOnCurrent: true, intervalMs: 250 }
   ));
 }
 

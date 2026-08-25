@@ -15,6 +15,15 @@ coverage proves event framing, upstream-listener sharing, timer cleanup, and
 fresh-read coalescing. This slice did not change collaboration WebSocket framing,
 RNBO delivery, assignment, preparation, activation, or transport writes.
 
+Implementation update, 2026-08-25: Phase 2 is implemented as a separately
+versioned, read-only `/realtime` gateway using the maintained `ws` library and
+the `shadowscore.realtime.v2` WebSocket subprotocol. It exposes the shared
+`score`, `transport`, `playback`, and `playback.transfers` topics with bounded
+messages and queues, heartbeat eviction, stable-client replacement, correlated
+idempotent subscription requests, deterministic shutdown, and `/session`
+discovery. `/collab` remains on its version-1 wire contract and RNBO playback
+orchestration remains unchanged.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer

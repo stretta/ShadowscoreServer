@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { markWebSocketUpgradeHandled } from "../realtime/upgrade-routing.mjs";
 
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const PROTOCOL_VERSION = "shadowscore.collab.v1";
@@ -9,11 +10,8 @@ export function attachWebSocketCollaboration(server, store, config, options = {}
 
   server.on("upgrade", (request, socket) => {
     const url = new URL(request.url ?? "/", `http://${request.headers.host ?? "127.0.0.1"}`);
-    if (url.pathname !== path) {
-      socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
-      socket.destroy();
-      return;
-    }
+    if (url.pathname !== path) return;
+    markWebSocketUpgradeHandled(request);
 
     try {
       const key = validateWebSocketRequest(request);

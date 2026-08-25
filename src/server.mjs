@@ -4,7 +4,7 @@ import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
 import { createCoordinatorManager } from "./coordinator/coordinator-manager.mjs";
-import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, readBeatWitnessContext, recallOscSnapshotsForBlock, routeRequest, runAutomaticSyncRecovery } from "./http/routes.mjs";
+import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, readBeatWitnessContext, realtimeTopicDefinitions, recallOscSnapshotsForBlock, routeRequest, runAutomaticSyncRecovery } from "./http/routes.mjs";
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { activatePreparedBlockTransition } from "./playback/block-transition.mjs";
 import { createTempoPolicy } from "./playback/tempo-policy.mjs";
@@ -14,6 +14,9 @@ import { createManualOscQueryDeviceRegistry } from "./oscquery/manual-device-reg
 import { createOscSnapshotRecallService } from "./osc/snapshot-recall.mjs";
 import { createPeerRegistry } from "./registration/peer-registry.mjs";
 import { closeRuntimePublishers } from "./realtime/runtime-publishers.mjs";
+import { createRealtimeTopicBroker } from "./realtime/topic-broker.mjs";
+import { attachUnknownWebSocketFallback } from "./realtime/upgrade-routing.mjs";
+import { attachRealtimeGateway } from "./realtime/websocket-gateway.mjs";
 import { createScorePersistence, loadPersistedScore } from "./state/persistence.mjs";
 import { createInitialScore, createScoreStore } from "./state/score-store.mjs";
 import { createJackTransportController } from "./transport/jack-transport-control.mjs";
@@ -95,11 +98,15 @@ const server = http.createServer((request, response) => {
     response.end(JSON.stringify({ ok: false, error: error.message }));
   });
 });
+const realtimeTopics = createRealtimeTopicBroker(realtimeTopicDefinitions(store, config, runtime));
+const realtime = attachRealtimeGateway(server, realtimeTopics);
 const collaboration = attachWebSocketCollaboration(server, store, config);
+const detachUnknownWebSocketFallback = attachUnknownWebSocketFallback(server);
 
 server.listen(config.http.port, config.http.host, () => {
   console.log(`[http] ShadowscoreServer listening on http://${config.http.host}:${config.http.port}`);
   console.log("[collab] websocket endpoint available at /collab");
+  console.log(`[realtime] websocket endpoint available at ${realtime.path} (${realtime.protocol})`);
   console.log("[hardware] registration endpoint available at /hardware/register");
   console.log(`[score] ensemble=${config.ensemble.id} voices=${config.ensemble.voices.join(",")}`);
   if (config.rnbo.enabled) {
@@ -119,6 +126,9 @@ async function shutdown() {
   if (shutdownPending) return;
   shutdownPending = true;
   collaboration.close();
+  realtime.close();
+  realtimeTopics.close();
+  detachUnknownWebSocketFallback();
   oscSnapshotAutoRecall.close();
   macroPlayback.close();
   rnbo.close();

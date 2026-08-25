@@ -1,3 +1,5 @@
+import { REALTIME_PROTOCOL } from "./realtime/websocket-gateway.mjs";
+
 export function createSessionSnapshot(score, config, request, runtime = {}) {
   const baseUrl = publicBaseUrl(config, request);
   const assignments = score.assignments ?? {};
@@ -32,7 +34,14 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       structure: `${baseUrl}/structure`,
       score: `${baseUrl}/score`,
       events: `${baseUrl}/events`,
-      collab: websocketUrl(baseUrl, "/collab")
+      collab: websocketUrl(baseUrl, "/collab"),
+      realtime: websocketUrl(baseUrl, "/realtime")
+    },
+    realtime: {
+      protocol: REALTIME_PROTOCOL,
+      readOnly: true,
+      roles: ["observer"],
+      topics: ["score", "transport", "playback", "playback.transfers"]
     },
     voices: Object.keys(score.voices).map((voiceId) => ({
       id: voiceId,

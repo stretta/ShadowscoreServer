@@ -76,9 +76,9 @@ const macroPlayback = createMacroPlayback(store, config, {
   jackTransport,
   getTempo: () => runtime.tempoPolicy.snapshot().live,
   loadWitnessContext: () => readBeatWitnessContext(store.getScore(), config, runtime),
-  beforeAdvance: ({ nextBlockId }) => rnbo.prepareBlock(nextBlockId, "lookahead", { requireReady: true }),
+  beforeAdvance: ({ nextBlockId }) => playbackCoordinator.prepareBlock(nextBlockId, "lookahead", { requireReady: true }),
   armAdvance: ({ nextBlockId }) => activatePreparedBlockTransition({
-    rnbo,
+    coordinator: playbackCoordinator,
     nextBlockId
   })
 });

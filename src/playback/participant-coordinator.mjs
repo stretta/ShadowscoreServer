@@ -12,6 +12,9 @@ export function createPlaybackParticipantCoordinator(options = {}) {
         enabled: adapter?.enabled === true,
         capabilities: {
           playbackUpdates: typeof adapter?.playbackUpdates === "function",
+          prepareBlock: typeof adapter?.prepareBlock === "function",
+          applyBlockUpdate: typeof adapter?.applyBlockUpdate === "function",
+          activatePreparedBlock: typeof adapter?.activatePreparedBlock === "function",
           lifecycleEvents: typeof adapter?.lifecycleEvents === "function",
           deliveryStatus: typeof adapter?.transferStatus === "function",
           operationQueueStatus: typeof adapter?.sendQueueStatus === "function"
@@ -20,6 +23,30 @@ export function createPlaybackParticipantCoordinator(options = {}) {
     },
     async playbackUpdates(blockId = "", readOptions = {}) {
       return requireMethod("playbackUpdates")(blockId, readOptions);
+    },
+    async prepareBlock(blockId, reason = "lookahead", operationOptions = {}) {
+      return requireMethod("prepareBlock")(blockId, reason, operationOptions);
+    },
+    async applyBlockUpdate(blockId = "", operationOptions = {}) {
+      return requireMethod("applyBlockUpdate")(blockId, operationOptions);
+    },
+    async activatePreparedBlock(blockId = "", operationOptions = {}) {
+      const activate = optionalMethod("activatePreparedBlock");
+      return activate
+        ? activate(blockId, operationOptions)
+        : requireMethod("applyBlockUpdate")(blockId, {
+            activationMode: "continue",
+            boundary: "next-cycle",
+            reusePrepared: true,
+            ...operationOptions
+          });
+    },
+    schedulePreparedActivations(operationOptions = {}) {
+      return optionalMethod("schedulePreparedActivations")?.(operationOptions) ?? [];
+    },
+    async confirmPreparedActivations(requests = [], operationOptions = {}) {
+      const confirm = optionalMethod("confirmPreparedActivations");
+      return confirm ? confirm(requests, operationOptions) : [];
     },
     lifecycleEvents() {
       return adapter?.lifecycleEvents?.() ?? [];
@@ -44,6 +71,12 @@ export function createPlaybackParticipantCoordinator(options = {}) {
       throw new Error(`playback participant coordinator cannot ${name}`);
     }
     return adapter[name].bind(adapter);
+  }
+
+  function optionalMethod(name) {
+    return adapter?.enabled === true && typeof adapter?.[name] === "function"
+      ? adapter[name].bind(adapter)
+      : null;
   }
 }
 

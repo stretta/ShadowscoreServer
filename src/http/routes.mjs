@@ -1089,8 +1089,8 @@ export async function routeRequest(request, response, store, config, runtime = {
       const blockId = optionalString(body.blockId) || playback.activeBlockId || store.getScore().structureState?.activeBlockId || "";
       assertApplyNextBeatSafe(playback, store.getScore(), config, blockId);
       const restoreBlockId = nextMacroBlockId(store.getScore(), blockId);
-      const adapter = requirePlaybackUpdateAdapter(runtime);
-      writeJson(response, 200, await adapter.applyBlockUpdate(blockId, {
+      const operations = requirePlaybackOperationService(runtime);
+      writeJson(response, 200, await operations.applyBlockUpdate(blockId, {
         activationMode: "continue",
         expectedScoreRevision: optionalInteger(body.expectedScoreRevision, "expectedScoreRevision"),
         restoreBlockId,
@@ -1110,8 +1110,8 @@ export async function routeRequest(request, response, store, config, runtime = {
       const body = await readJson(request);
       const playback = await macroPlaybackSnapshot(runtime, store, config);
       if (playback.running) throw new Error("transport is running; use Apply next beat");
-      const adapter = requirePlaybackUpdateAdapter(runtime);
-      writeJson(response, 200, await adapter.applyBlockUpdate(body.blockId, {
+      const operations = requirePlaybackOperationService(runtime);
+      writeJson(response, 200, await operations.applyBlockUpdate(body.blockId, {
         activationMode: "now",
         expectedScoreRevision: optionalInteger(body.expectedScoreRevision, "expectedScoreRevision")
       }));
@@ -1214,9 +1214,9 @@ export async function routeRequest(request, response, store, config, runtime = {
     }
 
     try {
-      const adapter = runtime.rnboAdapter;
-      if (adapter?.enabled && typeof adapter.applyBlockUpdate === "function") {
-        await adapter.applyBlockUpdate(score.structureState?.activeBlockId, {
+      const operations = playbackOperationService(runtime);
+      if (operations?.enabled && typeof operations.applyBlockUpdate === "function") {
+        await operations.applyBlockUpdate(score.structureState?.activeBlockId, {
           activationMode: "now",
           expectedScoreRevision: score.scoreRevision ?? score.version
         });
@@ -2794,8 +2794,9 @@ async function cueStructurePlayhead(store, config, runtime, request, revisions =
   const controls = performanceTransportSnapshot(runtime, playback);
   const activationMode = controls.players.playing ? "continue" : "now";
   let update = null;
-  if (runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.applyBlockUpdate === "function") {
-    update = await runtime.rnboAdapter.applyBlockUpdate(blockId, {
+  const playbackOperations = playbackOperationService(runtime);
+  if (playbackOperations?.enabled && typeof playbackOperations.applyBlockUpdate === "function") {
+    update = await playbackOperations.applyBlockUpdate(blockId, {
       activationMode,
       expectedScoreRevision: score.scoreRevision ?? score.version,
       reusePrepared: true
@@ -3082,8 +3083,9 @@ async function locateUnifiedTransport(store, config, runtime, args = {}, sourceC
   }
 
   let playbackUpdate = null;
-  if (runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.applyBlockUpdate === "function") {
-    playbackUpdate = await runtime.rnboAdapter.applyBlockUpdate(location.activeBlockId, {
+  const playbackOperations = playbackOperationService(runtime);
+  if (playbackOperations?.enabled && typeof playbackOperations.applyBlockUpdate === "function") {
+    playbackUpdate = await playbackOperations.applyBlockUpdate(location.activeBlockId, {
       activationMode: "now",
       expectedScoreRevision: score.scoreRevision ?? score.version,
       reusePrepared: true
@@ -3127,12 +3129,12 @@ async function locateUnifiedTransport(store, config, runtime, args = {}, sourceC
   return { action: "locate", location, wasPlaying, playbackUpdate, phaseStage, phaseWrites };
 }
 
-function requirePlaybackUpdateAdapter(runtime) {
-  const adapter = runtime.rnboAdapter;
-  if (!adapter?.enabled || typeof adapter.playbackUpdates !== "function") {
-    throw new Error("RNBO playback update service is not available");
+function requirePlaybackOperationService(runtime) {
+  const operations = playbackOperationService(runtime);
+  if (!operations?.enabled || typeof operations.applyBlockUpdate !== "function") {
+    throw new Error("playback operation service is not available");
   }
-  return adapter;
+  return operations;
 }
 
 function requirePlaybackUpdateReader(runtime) {
@@ -3216,6 +3218,7 @@ async function transportFacadeStatus(store, config, runtime) {
 
 async function startUnifiedTransport(store, config, runtime, body = {}, sourceClientId = "transport") {
   const playback = requireMacroPlayback(runtime);
+  const playbackOperations = playbackOperationService(runtime);
   const performance = performanceTransportFor(runtime);
   const requestedArrangementMode = body.forceArrangementRun
     ? "run"
@@ -3327,8 +3330,8 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
       phaseWrites: []
     };
   }
-  if (!phaseOnly && !initialReadiness.allActive && runtime.rnboAdapter?.enabled && typeof runtime.rnboAdapter.prepareBlock === "function") {
-    await runtime.rnboAdapter.prepareBlock(score.structureState?.activeBlockId, "transport-start", {
+  if (!phaseOnly && !initialReadiness.allActive && playbackOperations?.enabled && typeof playbackOperations.prepareBlock === "function") {
+    await playbackOperations.prepareBlock(score.structureState?.activeBlockId, "transport-start", {
       requireReady: true,
       targetIds: initialReadiness.participatingTargetIds
     });
@@ -3341,9 +3344,9 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const participatingTargetIds = [...new Set(readinessTargetIds
     .map(optionalString)
     .filter((id) => id && (!targetId || id === targetId)))];
-  const playbackUpdate = phaseOnly || initialReadiness.allActive || body.phaseReset === false || typeof runtime.rnboAdapter?.applyBlockUpdate !== "function"
+  const playbackUpdate = phaseOnly || initialReadiness.allActive || body.phaseReset === false || typeof playbackOperations?.applyBlockUpdate !== "function"
     ? null
-    : await runtime.rnboAdapter.applyBlockUpdate(score.structureState?.activeBlockId, {
+    : await playbackOperations.applyBlockUpdate(score.structureState?.activeBlockId, {
       activationMode: "now",
       expectedScoreRevision: score.scoreRevision ?? score.version,
       targetIds: participatingTargetIds
@@ -3392,7 +3395,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     : await readClockStartAckBaselines(config, runtime, phaseAckTargets);
   const activationSchedule = body.phaseReset === false || playbackUpdate
     ? []
-    : runtime.rnboAdapter?.schedulePreparedActivations?.({
+    : playbackOperations?.schedulePreparedActivations?.({
         targetId,
         blockId: score.structureState?.activeBlockId ?? "",
         initialStage: phaseStage
@@ -3528,7 +3531,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   performance.playerControlOrigin = "shadowscore";
   performance.adoptionPayloadVerified = null;
   const activations = playbackUpdate?.activations ?? (activationSchedule.length
-    ? await runtime.rnboAdapter.confirmPreparedActivations(activationSchedule, {
+    ? await playbackOperations.confirmPreparedActivations(activationSchedule, {
       tempo
     })
     : []);
@@ -4664,6 +4667,10 @@ function withPlaybackDeliveryStatus(targets, runtime) {
 }
 
 function playbackReadService(runtime) {
+  return runtime.playbackCoordinator ?? runtime.rnboAdapter;
+}
+
+function playbackOperationService(runtime) {
   return runtime.playbackCoordinator ?? runtime.rnboAdapter;
 }
 

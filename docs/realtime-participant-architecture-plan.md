@@ -97,6 +97,21 @@ transaction and queue state, stable repeated-read compilation, bounded
 lifecycle publication, stopped transport, aligned synchronization, and
 receiver-confirmed READY transfers.
 
+Implementation update, 2026-08-25: the second Phase 6 facade slice is
+implemented and deployed to `wren`. The playback participant coordinator now
+delegates block preparation, update application, cached prepared activation,
+prepared-activation scheduling, and activation confirmation. Macro look-ahead
+and transitions, live-edit update actions, new-score activation, held section
+cues, locate, and transport-start orchestration now call the coordinator. The
+RNBO adapter remains the only production delivery implementation and still
+owns target resolution, OSC encoding and writes, retries, acknowledgement
+validation, transaction promotion, clock and phase controls, raw resend, and
+RNBO diagnostics. Deployment verification proved exact source parity, the
+focused coordinator, macro, transition, route, and complete RNBO adapter suites,
+identical coordinator and RNBO prepared transactions, stable repeated-read
+compilation, an idle operation queue, stopped transport, aligned
+synchronization, and receiver-confirmed READY transfers.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer

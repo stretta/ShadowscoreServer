@@ -1,8 +1,9 @@
-export async function activatePreparedBlockTransition({ rnbo, nextBlockId }) {
-  if (!rnbo?.applyBlockUpdate) throw new Error("RNBO block activation is unavailable");
-  const update = rnbo.activatePreparedBlock
-    ? await rnbo.activatePreparedBlock(nextBlockId, { boundary: "next-cycle" })
-    : await rnbo.applyBlockUpdate(nextBlockId, {
+export async function activatePreparedBlockTransition({ coordinator, rnbo, nextBlockId }) {
+  const playback = coordinator ?? rnbo;
+  if (!playback?.applyBlockUpdate) throw new Error("playback block activation is unavailable");
+  const update = playback.activatePreparedBlock
+    ? await playback.activatePreparedBlock(nextBlockId, { boundary: "next-cycle" })
+    : await playback.applyBlockUpdate(nextBlockId, {
         activationMode: "continue",
         boundary: "next-cycle",
         reusePrepared: true

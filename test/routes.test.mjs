@@ -1646,7 +1646,7 @@ test("held Cue Section activates required note clients before committing the pla
   context = createRouteContext({
     runtime: {
       performanceTransport: { playersPlaying: false, arrangementRequestedMode: "hold" },
-      rnboAdapter: {
+      playbackCoordinator: {
         enabled: true,
         async applyBlockUpdate(blockId, options) {
           sequence.push(`apply:${blockId}:${options.activationMode}`);
@@ -3973,7 +3973,7 @@ test("playback update actions choose continue while running and now while stoppe
     }
   };
   const running = createRouteContext({
-    runtime: { rnboAdapter: adapter, macroPlayback: { snapshot: () => ({ running: true, activeBlockId: "A" }) } }
+    runtime: { playbackCoordinator: adapter, macroPlayback: { snapshot: () => ({ running: true, activeBlockId: "A" }) } }
   });
   const applied = await requestJson(running, "POST", "/playback/updates/apply-next-beat", {
     blockId: "A",
@@ -3982,7 +3982,7 @@ test("playback update actions choose continue while running and now while stoppe
   assert.equal(applied.activationMode, "continue");
 
   const stopped = createRouteContext({
-    runtime: { rnboAdapter: adapter, macroPlayback: { snapshot: () => ({ running: false, activeBlockId: "A" }) } }
+    runtime: { playbackCoordinator: adapter, macroPlayback: { snapshot: () => ({ running: false, activeBlockId: "A" }) } }
   });
   const updated = await requestJson(stopped, "POST", "/playback/updates/update-now", {
     blockId: "A",
@@ -4653,7 +4653,7 @@ test("admin new score route immediately activates the empty replacement on RNBO 
   const calls = [];
   const context = createRouteContext({
     runtime: {
-      rnboAdapter: {
+      playbackCoordinator: {
         enabled: true,
         async applyBlockUpdate(blockId, options) {
           calls.push({ blockId, options });

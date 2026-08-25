@@ -6,7 +6,7 @@ test("section transition activates the prepared table without interrupting trans
   const sequence = [];
   const result = await activatePreparedBlockTransition({
     nextBlockId: "B",
-    rnbo: {
+    coordinator: {
       async applyBlockUpdate(blockId, options) {
         sequence.push(`active:${blockId}:${options.activationMode}:${options.boundary}:${options.reusePrepared}`);
         return { state: "active", activations: [{ targetId: "finch", transactionId: 1201 }] };
@@ -24,7 +24,7 @@ test("section transition prefers the cached READY fast path", async () => {
   const sequence = [];
   const result = await activatePreparedBlockTransition({
     nextBlockId: "B",
-    rnbo: {
+    coordinator: {
       async activatePreparedBlock(blockId, options) {
         sequence.push(`fast:${blockId}:${options.boundary}`);
         return { state: "active", fastPath: true, activations: [{ targetId: "finch", transactionId: 1202 }] };
@@ -44,7 +44,7 @@ test("section transition never commits when activation is incomplete", async () 
   await assert.rejects(
     activatePreparedBlockTransition({
       nextBlockId: "B",
-      rnbo: { async applyBlockUpdate() { return { state: "saved-not-active" }; } }
+      coordinator: { async applyBlockUpdate() { return { state: "saved-not-active" }; } }
     }),
     /did not reach ACTIVE/
   );

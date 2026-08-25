@@ -244,6 +244,7 @@ function controlTargetForInstance(instanceId, node, name, config) {
     return undefined;
   }
   const app = inferControlApp(name, parameters, inputPorts) || "rnbo-instance";
+  const exportName = rnboExportName(name, instance);
   const rnbo = config.rnbo ?? {};
   const oscQuery = rnbo.oscQuery ?? {};
   const oscCapabilities = controlCapabilities(app, parameters, inputPorts);
@@ -262,6 +263,7 @@ function controlTargetForInstance(instanceId, node, name, config) {
     address: `/rnbo/inst/${instance}`,
     baseAddress: `/rnbo/inst/${instance}`,
     instanceId: instance,
+    exportName,
     app,
     instance,
     oscCapabilities,
@@ -270,6 +272,14 @@ function controlTargetForInstance(instanceId, node, name, config) {
     source: "rnbooscquery",
     available: true
   });
+}
+
+function rnboExportName(name, instance) {
+  const text = stringField(name);
+  for (const suffix of [`-${instance}`, `_${instance}`, ` ${instance}`]) {
+    if (text.endsWith(suffix)) return text.slice(0, -suffix.length);
+  }
+  return text;
 }
 
 function extractRnboParams(instanceNode) {

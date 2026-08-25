@@ -284,7 +284,9 @@ export function createOscSnapshotEditorClient(options) {
     score = nextScore;
     assignments = assignmentStatus.assignments ?? {};
     resolutions = assignmentStatus.resolutions ?? {};
-    targets = targetStatus.targets ?? [];
+    targets = (targetStatus.targets ?? []).filter((target) =>
+      typeof options.filterTarget !== "function" || options.filterTarget(target)
+    );
     playback = playbackStatus;
     renderContext();
     await hydrateEditingContext({ readLiveWhenUnspecified: true });

@@ -539,6 +539,7 @@ test("control target discovery publishes previously unknown named RNBO apps", ()
 
   assert.equal(targets.length, 1);
   assert.equal(targets[0].app, "granular-clouds");
+  assert.equal(targets[0].exportName, "Granular Clouds");
   assert.equal(targets[0].oscCapabilities.includes("granular-clouds-edit"), true);
 });
 

@@ -117,7 +117,8 @@
     <div id="status" class="status" role="status">Loading editors...</div>
     <section id="editors" class="grid" aria-live="polite"></section>
   </main>
-  <script>
+  <script type="module">
+    import { genericOscEditorGroups } from "/shared/generic-osc-editor.js?v=20260825-generic1";
     const editorsEl = document.querySelector("#editors");
     const statusEl = document.querySelector("#status");
 
@@ -130,12 +131,14 @@
     async function refreshEditors() {
       const manifest = await fetchJson("/editors/manifest");
       const editors = Array.isArray(manifest.editors) ? manifest.editors : [];
+      const allTargets = await fetchJson("/osc/targets?status=online");
       const targetCounts = new Map(await Promise.all(editors.map(async (editor) => {
         const targets = await fetchJson(`/osc/targets${queryFor(editor.targetFilter)}`);
         return [editor.id, (targets.targets || []).filter((target) => target.status === "online").length];
       })));
-      renderEditors(editors, targetCounts);
-      statusEl.textContent = `${editors.length} generator${editors.length === 1 ? "" : "s"} registered`;
+      const genericGroups = genericOscEditorGroups(allTargets.targets || [], editors.map((editor) => editor.targetFilter?.app).filter(Boolean));
+      renderEditors(editors, targetCounts, genericGroups);
+      statusEl.textContent = `${editors.length} specialized · ${genericGroups.length} generic`;
     }
 
     async function fetchJson(url) {
@@ -146,9 +149,10 @@
       return response.json();
     }
 
-    function renderEditors(editors, targetCounts) {
-      editorsEl.className = editors.length ? "grid" : "";
-      if (!editors.length) {
+    function renderEditors(editors, targetCounts, genericGroups = []) {
+      const availableEditors = editors.length + genericGroups.length;
+      editorsEl.className = availableEditors ? "grid" : "";
+      if (!availableEditors) {
         editorsEl.innerHTML = `<div class="empty">No OSC generators are registered.</div>`;
         return;
       }
@@ -158,6 +162,13 @@
           <span class="card-path">${escapeHtml(editor.route)}</span>
           <span class="meta">${escapeHtml(filterText(editor.targetFilter))}</span>
           <span class="target-count">${targetCounts.get(editor.id) ?? 0} online</span>
+        </a>
+      `).join("") + genericGroups.map((group) => `
+        <a class="card" href="${escapeAttribute(group.route)}">
+          <span class="card-title">${escapeHtml(group.label)}</span>
+          <span class="card-path">Generic OSC editor</span>
+          <span class="meta">Generated from live RNBO parameter metadata</span>
+          <span class="target-count">${group.targets.length} online</span>
         </a>
       `).join("") + `
         <a class="card" href="/tools/osc-volume">

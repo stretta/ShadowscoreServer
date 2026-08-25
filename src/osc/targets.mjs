@@ -35,6 +35,7 @@ function normalizeOscTarget(target, index) {
     unitId,
     deviceId: stringField(target.deviceId) || unitId,
     label: stringField(target.label ?? target.name) || `${titleCase(app)} ${instance}`,
+    exportName: stringField(target.exportName) || undefined,
     app,
     instance,
     kind: stringField(target.kind) || "rnbo",

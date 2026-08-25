@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Generic RNBO Editor</title>
+  <link rel="stylesheet" href="/shared/shadowscore-style.css">
+  <script type="module" src="/shared/shadowscore-nav.js"></script>
+  <style>
+    body { margin: 0; min-height: 100vh; background: linear-gradient(180deg, rgba(110,231,183,.08), transparent 220px), var(--ss-bg); }
+    main { margin: 0 auto; padding: 18px 0 48px; width: min(1040px, calc(100vw - 32px)); }
+    header, .actions, .target-card, .control-head, .range-row, .boolean-row { align-items: center; display: flex; }
+    header { gap: 16px; justify-content: space-between; }
+    h1 { font-size: 18px; margin: 0; }
+    .subtitle, .status, .target-detail, output, .signature { color: var(--ss-muted); font-size: 12px; font-weight: 700; }
+    .subtitle { margin: 4px 0 0; }
+    .signature { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .actions { flex-wrap: wrap; gap: 10px; justify-content: flex-end; }
+    .status { max-width: 420px; overflow: hidden; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+    .targets { display: flex; gap: 8px; margin: 18px 0 12px; overflow-x: auto; }
+    .target-card { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); cursor: pointer; flex: 0 0 210px; gap: 9px; padding: 10px; }
+    .target-copy { min-width: 0; }
+    .target-name, .target-detail { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .target-name { color: var(--ss-text); font-weight: 800; }
+    .panel { background: var(--ss-panel); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-ui); margin-top: 10px; padding: 14px; }
+    .panel h2 { color: var(--ss-accent-secondary); font-size: 11px; letter-spacing: .09em; margin: 0 0 12px; text-transform: uppercase; }
+    .controls { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+    .control { background: var(--ss-surface); border: 1px solid var(--ss-border); border-radius: var(--ss-radius-control); padding: 10px; }
+    .control-head { gap: 8px; justify-content: space-between; margin-bottom: 9px; }
+    .control label { color: var(--ss-text); font-size: 12px; font-weight: 800; }
+    .control input[type="range"], .control select, .control input[type="text"] { accent-color: var(--ss-accent-secondary); margin: 0; width: 100%; }
+    .range-row { gap: 8px; }
+    .range-row input[type="range"] { flex: 1; min-width: 0; }
+    .range-row input[type="number"], .control > input[type="number"] { box-sizing: border-box; width: 86px; }
+    .boolean-row { gap: 9px; }
+    .boolean-row input { accent-color: var(--ss-accent-secondary); height: 18px; width: 18px; }
+    output { font-variant-numeric: tabular-nums; }
+    .empty, .error { background: var(--ss-panel); border: 1px dashed var(--ss-border-strong); border-radius: var(--ss-radius-ui); color: var(--ss-muted); margin-top: 18px; padding: 14px; }
+    .error { border-color: var(--ss-warn); color: var(--ss-warn); }
+    @media (max-width: 680px) { header { align-items: flex-start; flex-direction: column; } .actions { justify-content: flex-start; } .status { max-width: none; text-align: left; white-space: normal; } }
+  </style>
+</head>
+<body>
+  <nav class="ss-route-tabs" aria-label="ShadowScore navigation" data-shadow-nav>
+    <a href="/piano-roll">ShadowScore</a><a href="/structure-editor">Arrange</a>
+    <a href="/editors" aria-current="page">OSC</a><a href="/">Setup</a>
+  </nav>
+  <main>
+    <header>
+      <div><h1 id="title">Generic RNBO Editor</h1><p class="subtitle">Live controls generated from OSCQuery parameter metadata · <span id="signature" class="signature"></span></p></div>
+      <div class="actions"><label for="read-source">Instance focus</label><select id="read-source" aria-label="Instance focus"></select><button id="get-data" type="button">Read Instance</button><button id="refresh" type="button">Refresh</button><span id="status" class="status" role="status"></span></div>
+    </header>
+    <div id="panels"></div>
+    <div id="snapshot-mount"></div>
+    <section class="ss-osc-live-target-panel"><div class="ss-osc-live-target-head"><h2>Live And Save Destinations</h2><span>Only compatible instances with the same export name and parameter signature are shown.</span></div><div id="targets" class="targets" aria-label="Generic RNBO targets"></div></section>
+  </main>
+  <script type="module">
+    import { genericControlModel, genericOscEditorGroups, parameterGroup, parameterKey, targetParameterSignature } from "/shared/generic-osc-editor.js?v=20260825-generic1";
+    import { createOscEditorSnapshot, createOscSnapshotEditorClient, mountOscSnapshotPanel, oscEditorParamValue, readOscQueryParameterValues } from "/shared/osc-snapshot-editor.js?v=20260825-generic1";
+    import "/shared/bipolar-range.js?v=20260825-generic1";
+
+    const query = new URLSearchParams(location.search);
+    const app = cleanToken(query.get("app"));
+    let signature = String(query.get("signature") || "");
+    const titleEl = document.querySelector("#title");
+    const signatureEl = document.querySelector("#signature");
+    const targetsEl = document.querySelector("#targets");
+    const panelsEl = document.querySelector("#panels");
+    const statusEl = document.querySelector("#status");
+    const refreshButton = document.querySelector("#refresh");
+    const readSourceSelect = document.querySelector("#read-source");
+    const getDataButton = document.querySelector("#get-data");
+    let targets = [];
+    let params = new Map();
+    let paramsTargetId = "";
+    let snapshotClient;
+    const pending = new Map();
+
+    refreshButton.addEventListener("click", () => refresh().catch(reportError));
+    getDataButton.addEventListener("click", () => getData().catch(reportError));
+
+    initialize().catch(reportError);
+
+    async function initialize() {
+      if (!app) throw new Error("Choose a generic RNBO export from the OSC editor overview");
+      await refresh();
+      const snapshotElements = mountOscSnapshotPanel(document.querySelector("#snapshot-mount"), { sourceSelect: readSourceSelect });
+      snapshotClient = createOscSnapshotEditorClient({
+        app,
+        roleLabel: titleEl.textContent,
+        elements: snapshotElements,
+        serializeState: serializeSnapshotState,
+        displayState: displaySavedState,
+        onFocusChange: getData,
+        liveTargetRoot: targetsEl,
+        filterTarget: compatibleTarget,
+        setStatus
+      });
+      await snapshotClient.init();
+    }
+
+    async function refresh() {
+      refreshButton.disabled = true;
+      try {
+        const body = await fetchJson(`/osc/targets?app=${encodeURIComponent(app)}&status=online`);
+        const discovered = body.targets || [];
+        if (!signature && discovered[0]) signature = targetParameterSignature(discovered[0]);
+        targets = discovered.filter(compatibleTarget);
+        const group = genericOscEditorGroups(targets, [])[0];
+        titleEl.textContent = `${group?.label || humanize(app)} Editor`;
+        document.title = titleEl.textContent;
+        signatureEl.textContent = signature || "no compatible signature";
+        renderReadSources();
+        syncParamsToReadSource();
+        renderTargets();
+        renderPanels();
+        setStatus(targets.length ? `${targets.length} compatible target${targets.length === 1 ? "" : "s"} online` : `No compatible ${humanize(app)} targets`);
+      } finally {
+        refreshButton.disabled = false;
+      }
+    }
+
+    function compatibleTarget(target) {
+      return target?.app === app && targetParameterSignature(target) === signature;
+    }
+
+    function paramsForTarget(target, previous = new Map()) {
+      const next = new Map();
+      for (const param of target?.parameters || []) {
+        const key = parameterKey(param);
+        if (key && !next.has(key)) next.set(key, { ...param, key });
+      }
+      for (const [key, old] of previous) if (next.has(key)) next.get(key).value = old.value;
+      return next;
+    }
+
+    function syncParamsToReadSource({ preserve = true } = {}) {
+      const target = readSourceTarget();
+      const previous = preserve && target?.id === paramsTargetId ? params : new Map();
+      params = paramsForTarget(target, previous);
+      paramsTargetId = target?.id || "";
+    }
+
+    function renderTargets() {
+      const selected = new Set([...targetsEl.querySelectorAll("[data-target]:checked")].map((input) => input.dataset.target));
+      const focusedId = readSourceSelect.value || targets[0]?.id || "";
+      const preserveSelection = targets.some((target) => selected.has(target.id));
+      targetsEl.replaceChildren(...targets.map((target) => {
+        const card = document.createElement("label");
+        card.className = "target-card";
+        card.innerHTML = `<input type="checkbox" data-target="${escapeHtml(target.id)}"><span class="target-copy"><span class="target-name">${escapeHtml(target.label || target.id)}</span><span class="target-detail">${escapeHtml(target.unitId || target.baseAddress || "")}</span></span>`;
+        card.querySelector("input").checked = preserveSelection ? selected.has(target.id) : target.id === focusedId;
+        return card;
+      }));
+    }
+
+    function renderReadSources() {
+      const previous = readSourceSelect.value;
+      readSourceSelect.replaceChildren(...targets.map((target) => {
+        const option = document.createElement("option"); option.value = target.id; option.textContent = target.label || target.id; return option;
+      }));
+      readSourceSelect.value = targets.some((target) => target.id === previous) ? previous : (targets[0]?.id || "");
+      readSourceSelect.disabled = targets.length === 0;
+      getDataButton.disabled = targets.length === 0;
+    }
+
+    async function getData() {
+      const target = readSourceTarget();
+      if (!target) return setStatus("Choose an instance to get data from");
+      syncParamsToReadSource({ preserve: false });
+      renderPanels();
+      getDataButton.disabled = true;
+      setStatus(`Getting data from ${target.label || target.id}...`);
+      try {
+        const values = await readOscQueryParameterValues(target);
+        for (const [key, value] of values) if (params.has(key)) params.get(key).value = value;
+        renderPanels();
+        setStatus(`Got ${values.size} parameter${values.size === 1 ? "" : "s"} from ${target.label || target.id}`);
+      } finally {
+        getDataButton.disabled = targets.length === 0;
+      }
+    }
+
+    function renderPanels() {
+      const groups = new Map();
+      for (const param of [...params.values()].sort(byIndex)) {
+        const group = parameterGroup(param);
+        if (!groups.has(group)) groups.set(group, []);
+        groups.get(group).push(param);
+      }
+      panelsEl.replaceChildren(...[...groups].map(([title, entries]) => renderGroup(title, entries)));
+      if (!groups.size) {
+        const empty = document.createElement("div"); empty.className = targets.length ? "empty" : "error";
+        empty.textContent = targets.length ? "This export reports no editable parameters." : "No compatible online export was found. Return to the OSC overview and refresh discovery.";
+        panelsEl.append(empty);
+      }
+    }
+
+    function renderGroup(titleText, entries) {
+      const section = document.createElement("section"); section.className = "panel";
+      const title = document.createElement("h2"); title.textContent = titleText;
+      const controls = document.createElement("div"); controls.className = "controls";
+      controls.replaceChildren(...entries.map(renderControl));
+      section.replaceChildren(title, controls); return section;
+    }
+
+    function renderControl(param) {
+      const model = genericControlModel(param);
+      if (model.kind === "enum") return renderChoice(model);
+      if (model.kind === "boolean") return renderBoolean(model);
+      if (model.kind === "range") return renderRange(model);
+      return renderField(model);
+    }
+
+    function controlShell(model) {
+      const wrap = document.createElement("div"); wrap.className = "control";
+      const head = document.createElement("div"); head.className = "control-head";
+      const label = document.createElement("label"); label.htmlFor = `param-${cssSafe(model.key)}`; label.textContent = model.label;
+      const output = document.createElement("output"); output.textContent = format(model.param.value, model.unit, model.precision);
+      head.replaceChildren(label, output); wrap.append(head); return { wrap, label, output };
+    }
+
+    function renderRange(model) {
+      const { wrap, label, output } = controlShell(model);
+      const row = document.createElement("div"); row.className = "range-row";
+      const slider = document.createElement("input"); slider.id = label.htmlFor; slider.type = "range"; slider.min = model.min; slider.max = model.max; slider.step = model.step; slider.value = clamp(finite(model.param.value, model.min), model.min, model.max);
+      const number = document.createElement("input"); number.type = "number"; number.min = model.min; number.max = model.max; number.step = model.step; number.value = slider.value; number.setAttribute("aria-label", `${model.label} numeric value`);
+      const update = (value) => { const next = clamp(finite(value, model.min), model.min, model.max); model.param.value = next; slider.value = next; number.value = next; output.textContent = format(next, model.unit, model.precision); return next; };
+      slider.addEventListener("input", () => scheduleSend(model.key, update(slider.value)));
+      bindRangeCommit(slider, () => flushSend(model.key, update(slider.value)));
+      number.addEventListener("change", () => { const next = update(number.value); sendParam(model.key, next).catch(reportError); snapshotClient?.commitEdit(); });
+      row.replaceChildren(slider, number); wrap.append(row); return wrap;
+    }
+
+    function renderChoice(model) {
+      const { wrap, label, output } = controlShell(model);
+      const select = document.createElement("select"); select.id = label.htmlFor;
+      for (const value of model.choices) { const option = document.createElement("option"); option.value = String(value); option.textContent = humanize(value); option.selected = String(value) === String(model.param.value); select.append(option); }
+      select.addEventListener("change", () => { model.param.value = select.value; output.textContent = format(select.value, model.unit); sendParam(model.key, select.value).catch(reportError); snapshotClient?.commitEdit(); });
+      wrap.append(select); return wrap;
+    }
+
+    function renderBoolean(model) {
+      const { wrap, label, output } = controlShell(model);
+      const row = document.createElement("div"); row.className = "boolean-row";
+      const input = document.createElement("input"); input.id = label.htmlFor; input.type = "checkbox"; input.checked = model.value === 1;
+      const state = document.createElement("span"); state.textContent = humanize(model.choices[input.checked ? 1 : 0]);
+      input.addEventListener("change", () => { const value = model.choices[input.checked ? 1 : 0]; model.param.value = value; state.textContent = humanize(value); output.textContent = format(value, model.unit); sendParam(model.key, value).catch(reportError); snapshotClient?.commitEdit(); });
+      row.replaceChildren(input, state); wrap.append(row); return wrap;
+    }
+
+    function renderField(model) {
+      const { wrap, label, output } = controlShell(model);
+      const input = document.createElement("input"); input.id = label.htmlFor; input.type = model.kind === "number" ? "number" : "text"; input.value = model.param.value ?? ""; if (model.step) input.step = model.step;
+      input.addEventListener("change", () => { const value = model.kind === "number" ? finite(input.value, 0) : input.value; model.param.value = value; output.textContent = format(value, model.unit, model.precision); sendParam(model.key, value).catch(reportError); snapshotClient?.commitEdit(); });
+      wrap.append(input); return wrap;
+    }
+
+    function scheduleSend(key, value) { if (pending.has(key)) clearTimeout(pending.get(key)); pending.set(key, setTimeout(() => { pending.delete(key); sendParam(key, value).catch(reportError); }, 90)); }
+    function flushSend(key, value) { if (pending.has(key)) clearTimeout(pending.get(key)); pending.delete(key); sendParam(key, value).catch(reportError); }
+
+    async function sendParam(key, value) {
+      const selected = [...targetsEl.querySelectorAll("[data-target]:checked")].map((input) => input.dataset.target).filter(Boolean);
+      if (!selected.length) return setStatus("No targets selected");
+      if (params.has(key)) params.get(key).value = value;
+      const results = await Promise.all(selected.map(async (targetId) => {
+        try {
+          const target = targets.find((entry) => entry.id === targetId);
+          const targetParam = target?.parameters?.find((entry) => parameterKey(entry) === key);
+          if (!targetParam?.address) return false;
+          const body = await fetchJson("/osc/send", { method: "POST", body: JSON.stringify({ targets: [targetId], address: targetParam.address, args: [value] }) });
+          return body.ok !== false;
+        } catch {
+          return false;
+        }
+      }));
+      const sent = results.filter(Boolean).length;
+      setStatus(sent === selected.length ? `Sent ${params.get(key)?.displayName || key} to ${sent}/${selected.length}` : `Failed ${params.get(key)?.displayName || key} (${sent}/${selected.length})`);
+    }
+
+    function bindRangeCommit(input, flushLive) {
+      let gesture = null;
+      input.addEventListener("pointerdown", () => { gesture = snapshotClient?.beginGesture() ?? null; });
+      input.addEventListener("pointerup", () => { const completed = gesture; if (completed) snapshotClient?.commitGesture(completed); queueMicrotask(() => { if (gesture === completed) gesture = null; }); });
+      input.addEventListener("pointercancel", () => { if (gesture) snapshotClient?.cancelGesture(gesture); gesture = null; });
+      input.addEventListener("change", () => { flushLive(); if (gesture) snapshotClient?.commitGesture(gesture); else snapshotClient?.commitEdit(); gesture = null; });
+    }
+
+    function serializeSnapshotState() { return createOscEditorSnapshot({ app, paramEntries: Array.from(params, ([name, param]) => ({ name, value: param.value, values: param.values })) }); }
+    function displaySavedState(snapshot) { for (const [name, value] of Object.entries(snapshot.params ?? {})) if (params.has(name)) params.get(name).value = oscEditorParamValue(params.get(name), value); renderPanels(); }
+    function readSourceTarget() { return targets.find((entry) => entry.id === readSourceSelect.value); }
+    function byIndex(left, right) { return (left.index ?? 9999) - (right.index ?? 9999) || parameterKey(left).localeCompare(parameterKey(right)); }
+    function format(value, unit, precision) { const number = Number(value); const text = Number.isFinite(number) ? (precision === undefined ? (Number.isInteger(number) ? String(number) : String(Math.round(number * 10000) / 10000)) : number.toFixed(precision)) : String(value ?? ""); return `${text}${unit ? ` ${unit}` : ""}`; }
+    function finite(value, fallback) { const number = Number(value); return Number.isFinite(number) ? number : fallback; }
+    function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+    function humanize(value) { return String(value ?? "").replace(/[-_]+/g, " ").replace(/([a-z0-9])([A-Z])/g, "$1 $2").replace(/\b\w/g, (letter) => letter.toUpperCase()); }
+    function cleanToken(value) { return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, ""); }
+    function cssSafe(value) { return String(value).replace(/[^a-zA-Z0-9_-]/g, "-"); }
+    function setStatus(message) { statusEl.textContent = message; }
+    function reportError(error) { refreshButton.disabled = false; setStatus(error?.message || "Generic RNBO editor failed"); }
+    function escapeHtml(value) { return String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])); }
+    async function fetchJson(url, options = {}) { const response = await fetch(url, { cache: "no-store", ...options, headers: { "Content-Type": "application/json", ...(options.headers || {}) } }); const body = await response.json().catch(() => ({})); if (!response.ok || body.ok === false) throw new Error(body.error || `${url}: ${response.status} ${response.statusText}`); return body; }
+  </script>
+</body>
+</html>

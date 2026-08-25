@@ -27,6 +27,7 @@ test("installer config registry stays aligned with default applications and edit
   assert.deepEqual(config.static.apps.drumboxEditor.routes, ["/editors/drumbox"]);
   assert.deepEqual(config.static.apps.listVelSequencerEditor.routes, ["/editors/listvelsequencer"]);
   assert.deepEqual(config.static.apps.softPianoEditor.routes, ["/editors/softpiano"]);
+  assert.deepEqual(config.static.apps.genericEditor.routes, ["/editors/generic"]);
 });
 
 test("installer updates preserve local settings and custom registry entries", () => {

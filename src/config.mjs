@@ -96,6 +96,11 @@ export const defaultConfig = Object.freeze({
         index: "index.html",
         routes: ["/editors"]
       },
+      genericEditor: {
+        root: "public/editors/generic",
+        index: "index.html",
+        routes: ["/editors/generic"]
+      },
       polandEditor: {
         root: "public/editors/poland",
         index: "index.html",

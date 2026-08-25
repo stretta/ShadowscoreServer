@@ -5955,12 +5955,31 @@ test("editor index route serves registered editor browser", async () => {
   assert.match(response.body, /OSC Generators/);
   assert.match(response.body, /\/editors\/manifest/);
   assert.match(response.body, /\/osc\/targets/);
+  assert.match(response.body, /genericOscEditorGroups/);
+  assert.match(response.body, /Generic OSC editor/);
   assert.match(response.body, /filterText/);
   assert.match(response.body, /href="\/tools\/osc-volume"/);
   assert.match(response.body, /href="\/tools\/osc-macros"/);
   const editorNav = response.body.match(/<nav class="ss-route-tabs"[^>]*>([\s\S]*?)<\/nav>/)?.[1] ?? "";
   assert.doesNotMatch(editorNav, /\/tools\/osc-volume/);
   assert.doesNotMatch(editorNav, /\/tools\/osc-macros/);
+});
+
+test("generic RNBO editor route constructs controls from compatible live metadata", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "GET", "/editors/generic?app=fmtwoop&signature=v1-example");
+
+  assert.equal(response.status, 200);
+  assert.match(response.headers["Content-Type"], /text\/html/);
+  assert.match(response.body, /Generic RNBO Editor/);
+  assert.match(response.body, /genericControlModel/);
+  assert.match(response.body, /targetParameterSignature/);
+  assert.match(response.body, /filterTarget: compatibleTarget/);
+  assert.match(response.body, /readOscQueryParameterValues/);
+  assert.match(response.body, /createOscSnapshotEditorClient/);
+  assert.match(response.body, /serializeSnapshotState/);
+  assert.match(response.body, /Live And Save Destinations/);
+  assert.doesNotMatch(response.body, /inputPorts\.map/);
 });
 
 test("event list route serves server-bundled editor html", async () => {

@@ -296,6 +296,7 @@ function normalizeOscTargets(targets, hardwareUnitId, hardwareUnitName) {
       localId: rawId,
       name: stringField(target.name) || address || id,
       label: stringField(target.label) || stringField(target.name) || id,
+      exportName: stringField(target.exportName) || undefined,
       host: stringField(target.host),
       port: nullableNumberField(target.port),
       address,

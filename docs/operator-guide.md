@@ -164,9 +164,13 @@ fields such as probability, deviation, and release velocity. Arrange owns block
 duration and player-to-clip assignment and remains served at
 `/structure-editor`.
 
-Use `/editors` and its twelve bundled instrument editors, including
-SingleHalfKrell and the Block Attributes editor, plus
+Use `/editors` and its twelve bundled specialized instrument editors, including
+SingleHalfKrell and the Block Attributes editor, plus automatically generated
+parameter editors for live RNBO exports that have no app-specific editor, and
 `/tools/osc-volume` and `/tools/osc-macros`, for instrument-control surfaces.
+Generated editors group compatible instances by export name and parameter
+signature, derive safe controls from live OSCQuery metadata, and intentionally
+do not expose arbitrary message inports or outports.
 Persistent control gestures send to the checked live instances and save their
 complete canonical block state at the gesture's commit boundary. There is no
 separate Write/Reload draft workflow. **Recall Now** remains the explicit

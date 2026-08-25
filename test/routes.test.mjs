@@ -1859,7 +1859,7 @@ test("transport facade play and stop wrap macro playback with aggregate status",
   assert.equal(started.transport.sync.label, "Timer");
   assert.deepEqual(started.transport.clients, { assigned: 1, online: 1, ready: true });
   assert.equal(startOptions.sourceClientId, "transport");
-  assert.deepEqual(writes, [
+  assert.deepEqual([...writes.slice(0, 2)].sort((left, right) => left.path.localeCompare(right.path)), [
     {
       host: "192.168.68.96",
       port: 9000,
@@ -1871,7 +1871,9 @@ test("transport facade play and stop wrap macro playback with aggregate status",
       port: 9000,
       path: "/rnbo/inst/2/messages/in/MaxSteps",
       value: 256
-    },
+    }
+  ]);
+  assert.deepEqual(writes.slice(2), [
     {
       host: "192.168.68.96",
       port: 9000,
@@ -2962,9 +2964,11 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
   });
   const started = await requestJson(context, "POST", "/transport/play", { mode: "timer" });
 
-  assert.deepEqual(sequence, [
+  assert.deepEqual([...sequence.slice(0, 2)].sort(), [
     "ClockInterval",
-    "MaxSteps",
+    "MaxSteps"
+  ]);
+  assert.deepEqual(sequence.slice(2), [
     "Clock",
     "SetStage",
     "activation_scheduled",
@@ -3256,11 +3260,15 @@ test("transport play prefers atomic block activation for continuing clients", as
   });
   const started = await requestJson(context, "POST", "/transport/play", { mode: "timer" });
 
-  assert.deepEqual(sequence, [
+  assert.deepEqual(sequence.slice(0, 2), [
     "prepare:A:transport-start",
-    "apply:A:now",
+    "apply:A:now"
+  ]);
+  assert.deepEqual([...sequence.slice(2, 4)].sort(), [
     "ClockInterval",
-    "MaxSteps",
+    "MaxSteps"
+  ]);
+  assert.deepEqual(sequence.slice(4), [
     "Clock",
     "SetStage",
     "Clock",

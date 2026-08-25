@@ -2336,7 +2336,9 @@ export const writeTransportParamsToPlaybackTargets = writeTransportControlsToPla
 
 export async function reassertPlaybackClockIntervals(score, config, runtime, options = {}) {
   const selected = Array.isArray(options.targetIds) ? new Set(options.targetIds.map(optionalString)) : null;
-  const targets = (await readAllRnboTargets(config, runtime)).filter((target) =>
+  const targets = (await readAllRnboTargets(config, runtime, {
+    preferCached: Boolean(options.preferCachedTargets)
+  })).filter((target) =>
     target.available !== false && (!selected || selected.has(optionalString(target.id)))
   );
   const targetWrites = await Promise.all(targets.map(async (target) => {
@@ -2361,7 +2363,9 @@ export async function reassertPlaybackClockIntervals(score, config, runtime, opt
 export async function reassertPlaybackPatternLengths(score, config, runtime, options = {}) {
   const targetId = optionalString(options.targetId);
   const targetIds = Array.isArray(options.targetIds) ? new Set(options.targetIds.map(optionalString)) : null;
-  const targets = (await readAllRnboTargets(config, runtime)).filter((target) =>
+  const targets = (await readAllRnboTargets(config, runtime, {
+    preferCached: Boolean(options.preferCachedTargets)
+  })).filter((target) =>
     target.available !== false
     && (!targetId || optionalString(target.id) === targetId)
     && (!targetIds || targetIds.has(optionalString(target.id)))
@@ -3381,22 +3385,35 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
     });
   updateTransportTransition(runtime, transitionId, "configuring");
   const tempo = tempoPolicyFor(store, config, runtime).snapshot().live;
-  const tempoApplication = await applyLiveTempo(store, config, runtime, tempo, {
-    targetIds: participatingTargetIds
-  });
+  const [tempoApplication, patternLengthWrites] = await Promise.all([
+    applyLiveTempo(store, config, runtime, tempo, {
+      targetIds: participatingTargetIds,
+      preferCachedTargets: true
+    }),
+    body.phaseReset === false
+      ? []
+      : reassertPlaybackPatternLengths(score, config, runtime, {
+          targetId,
+          targetIds: participatingTargetIds,
+          preferCachedTargets: true
+        })
+  ]);
   // Score preparation only fills the staged note bank. A freshly instantiated
   // client has no live counter length yet, so initialize MaxSteps before the
   // coordinated Clock Off -> SetStage -> Clock On phase transaction.
-  const patternLengthWrites = body.phaseReset === false
-    ? []
-    : await reassertPlaybackPatternLengths(score, config, runtime, { targetId, targetIds: participatingTargetIds });
   const jackTempo = tempoApplication.jack;
   const jackStart = await maybeStartJack(runtime);
-  const [ttidDistribution, swingDistribution] = await Promise.all([
-    distributeTtidForBlock(score, config, runtime, score.structureState?.activeBlockId),
-    distributeSwingForBlock(score, config, runtime, score.structureState?.activeBlockId)
+  const [ttidDistribution, swingDistribution, snapshotRecall] = await Promise.all([
+    distributeTtidForBlock(score, config, runtime, score.structureState?.activeBlockId, {
+      preferCachedTargets: true
+    }),
+    distributeSwingForBlock(score, config, runtime, score.structureState?.activeBlockId, {
+      preferCachedTargets: true
+    }),
+    recallOscSnapshotsForBlock(store, config, runtime, score.structureState?.activeBlockId, {
+      preferCachedTargets: true
+    })
   ]);
-  const snapshotRecall = await recallOscSnapshotsForBlock(store, config, runtime, score.structureState?.activeBlockId);
   updateTransportTransition(runtime, transitionId, "synchronizing");
   const phaseStage = body.phaseReset === false
     ? null

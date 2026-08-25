@@ -66,6 +66,26 @@ contract proves they are already live.
 Clock Off, SetStage, Clock On, ACK baselines, running correction, beat-window
 phase reset, phase ACK, and direct verification remain ordered.
 
+The first measured seven-client restart start spent 1.822 seconds in
+configuration while the safe beat-arm wait was only 97 milliseconds. The first
+optimization therefore reuses the startup discovery snapshot for configuration
+and runs independent timing/pattern and TTID/swing/snapshot setup concurrently.
+The phase-boundary cohort reread and every synchronization barrier remain live
+and ordered.
+
+Seven-client Wren acceptance reduced the matched restart start from 6.651 to
+5.135 seconds (22.8%) and a clean warm start from 4.145 to 3.192 seconds
+(23.0%). Both successful optimized runs retained seven start ACKs, seven phase
+ACKs, direct phase verification, and zero measured skew.
+
+One intervening warm start correctly failed closed after Raven remained one
+stage (0.25 beat) behind through the direct-verification timeout. The rollback
+left all clocks and JACK stopped. This was not averaged away: repeated-start
+testing must continue to treat occasional client arm misses as a reliability
+signal. The same session also showed an automatic sync-recovery attempt starting
+while an operator Stop was in flight; preventing that overlap is the next
+cohort-control hardening task.
+
 ### Slice 4: client-side transactional start
 
 Extend the RNBO client with an operation-identified start arm, shared musical

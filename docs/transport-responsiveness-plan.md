@@ -98,6 +98,22 @@ JACK were stopped, all seven payloads remained ACTIVE, and the automatic
 recovery supervisor retained `lastAttemptAt: null`, confirming it did not begin
 work during the operator Stop.
 
+A repeatable acceptance harness is now available as `npm run
+measure:transport -- --runs 5`. It refuses to interrupt existing playback,
+captures the authoritative transition and direct-verification evidence for each
+Play, and guarantees a Stop attempt plus stopped-state check between runs.
+
+The first five-run, seven-client sample passed 5/5. Every run had seven clock
+ACKs, seven phase ACKs, direct phase verification, zero phase skew, and no
+automatic recovery attempt; Raven matched the other targets on every run. Play
+latency was 3.234/3.329/4.982 seconds minimum/median/maximum. Configuration was
+stable at 0.972/1.009/1.069 seconds. The slow tail was instead phase
+verification: four runs took 0.698-0.885 seconds there, while the 4.982-second
+run spent 2.407 seconds verifying. The prior Raven miss was not reproduced,
+but five runs are evidence of current health rather than proof that the
+intermittent case is gone. Preserve the verification barrier and use larger
+samples to isolate that tail before changing the start contract.
+
 ### Slice 4: client-side transactional start
 
 Extend the RNBO client with an operation-identified start arm, shared musical

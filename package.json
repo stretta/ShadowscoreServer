@@ -9,6 +9,7 @@
     "agent": "node src/registration-agent.mjs",
     "configure-peer": "node bin/configure-peer.mjs",
     "deploy:pi": "tools/deploy_pi.sh",
+    "measure:transport": "node tools/measure-transport-start.mjs",
     "smoke:hardware": "node bin/hardware-smoke.mjs",
     "test": "node --test"
   },

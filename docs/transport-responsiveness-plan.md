@@ -141,6 +141,19 @@ safe performance investigation toward unchanged configuration writes and the
 pre-verification synchronization fan-outs. They do not support weakening ACK,
 phase, or direct-read barriers.
 
+An attempted ACTIVE-only timing-write optimization was rejected during live
+acceptance. The experiment skipped `MaxSteps` and `ClockInterval` only when
+every participating target reported an exact receiver-confirmed ACTIVE hash,
+since those values are included in the hashed payload. On the second repeated
+start, both Heron instances remained exactly one stage ahead of the other five
+clients for all 32 direct-read attempts across the five-second timeout. The
+server failed closed and stopped playback as designed. The experimental change
+was immediately removed and never committed. Restoring the full timing writes
+then passed 5/5 starts with every target at zero offset. Treat those writes as
+part of the effective synchronization and settling sequence until the RNBO
+client exposes a stronger transactional timing-activation contract; ACTIVE hash
+equality alone is not sufficient grounds to omit them.
+
 ### Slice 4: client-side transactional start
 
 Extend the RNBO client with an operation-identified start arm, shared musical

@@ -127,6 +127,21 @@ tests, live observer separation, live playback add/offline lifecycle events,
 stopped transport, aligned synchronization, and receiver-confirmed READY RNBO
 transfers.
 
+Implementation update, 2026-08-25: the second Phase 7 slice is implemented and
+deployed to `wren`. A transport-neutral realtime playback adapter now registers
+with the participant coordinator, delivers versioned multi-voice
+`playback.prepare` commands, and accepts correlated `playback.ready` requests
+only when participant connection, operation ID, block, score revision, and
+payload hash match the pending preparation exactly. Capability declaration and
+server grants remain separate; missing capability, mismatched READY, timeout,
+disconnect, connection replacement, and shutdown have explicit outcomes.
+Normal transport, look-ahead, cue, and activation orchestration do not yet call
+this adapter, so software clients cannot enter a production playback cohort
+before activation and ACTIVE proof exist. Deployment verification proved exact
+source parity, the complete local suite, focused remote tests, live capability
+discovery and unsolicited-READY rejection, hardware smoke, stopped transport,
+aligned synchronization, and receiver-confirmed READY RNBO transfers.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer
@@ -752,6 +767,55 @@ silently treated as the current protocol.
 This boundary deliberately does not add prepare, READY, activate, ACTIVE, or
 execution-witness messages. Those messages require their own coordinator-backed
 delivery and exact operation-ID characterization before they can be granted.
+
+#### Phase 7b prepare and READY boundary
+
+The second Phase 7 slice adds a transport-neutral realtime participant adapter
+behind the playback coordinator. The coordinator owns a server-generated or
+caller-supplied `operation_id` and can explicitly prepare assigned, connected
+software participants. This method is not yet called by normal transport,
+look-ahead, cue, or activation orchestration; software participants remain
+outside the production playback cohort until activation and ACTIVE proof can
+preserve the existing fail-closed policy.
+
+For each selected participant, the adapter sends one non-coalescible
+`playback.prepare` command. One participant may own multiple voices; the
+payload therefore contains `voice_ids` and a versioned desired-state document
+with shared block attributes plus one clip document per voice:
+
+```json
+{
+  "protocol": "shadowscore.realtime.v2",
+  "type": "playback.prepare",
+  "payload": {
+    "score_contract_version": 1,
+    "operation_id": "prepare-1",
+    "participant_id": "realtime:ableton-laptop",
+    "block_id": "A",
+    "voice_ids": ["player-1"],
+    "score_revision": 45339,
+    "payload_hash": "sha256-of-desired-document",
+    "reason": "lookahead",
+    "desired": {
+      "schema": "shadowscore.playback-score.v1"
+    }
+  }
+}
+```
+
+After staging the complete desired document, the client sends a correlated
+`playback.ready` request containing the exact `operation_id`, `block_id`,
+`score_revision`, and `payload_hash`. The server accepts READY only from the
+same participant connection that received the pending command. A mismatched
+READY returns an error but leaves the exact request pending for correction;
+disconnect, connection replacement, timeout, and shutdown reject it. A newer
+connection invalidates pending and prepared truth from the older endpoint.
+
+`/session` advertises `playback.ready`, and the playback role grants
+`playback:ready`. Client-declared `score:prepare` remains independently required
+before the adapter will send a desired-state document. Activation, ACTIVE,
+execution witness, reconnect reconciliation, and production-cohort enrollment
+remain later boundaries.
 
 ### Phase 8: Optional consumer migration and retirement
 

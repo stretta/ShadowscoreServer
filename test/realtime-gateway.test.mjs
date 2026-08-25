@@ -6,6 +6,8 @@ import { WebSocket } from "ws";
 import { attachWebSocketCollaboration } from "../src/collaboration/websocket.mjs";
 import { defaultConfig } from "../src/config.mjs";
 import { createParticipantRegistry } from "../src/playback/participant-registry.mjs";
+import { createPlaybackParticipantCoordinator } from "../src/playback/participant-coordinator.mjs";
+import { createRealtimePlaybackParticipantAdapter } from "../src/playback/realtime-participant-adapter.mjs";
 import { createEventPublisher, createLoadedPublisher } from "../src/realtime/publisher.mjs";
 import { createRealtimeTopicBroker } from "../src/realtime/topic-broker.mjs";
 import { attachUnknownWebSocketFallback } from "../src/realtime/upgrade-routing.mjs";
@@ -272,6 +274,89 @@ test("realtime gateway requires a valid versioned declaration for playback parti
   const unsupported = await inbox.next((message) => message.type === "error" && message.request_id === "playback-hello-2");
   assert.equal(unsupported.payload.code, "participant_protocol_unsupported");
   assert.equal(participantRegistry.snapshot().participants.length, 0);
+});
+
+test("realtime coordinator delivers prepare and accepts only an exact READY acknowledgement", async (t) => {
+  const score = createInitialScore(defaultConfig);
+  score.assignments["player-1"] = { clientId: "laptop", deviceId: "ableton-laptop", locked: false };
+  const participantRegistry = createParticipantRegistry({ getAssignments: () => score.assignments });
+  const playbackParticipantAdapter = createRealtimePlaybackParticipantAdapter({
+    getScore: () => score,
+    getParticipantRegistry: () => participantRegistry,
+    prepareTimeoutMs: 1_000
+  });
+  const coordinator = createPlaybackParticipantCoordinator({
+    adapter: { enabled: true },
+    participantAdapters: [playbackParticipantAdapter]
+  });
+  const context = await createGatewayServer({ participantRegistry, playbackParticipantAdapter });
+  t.after(() => {
+    context.close();
+    playbackParticipantAdapter.close();
+    participantRegistry.close();
+  });
+  const client = connect(context.url("/realtime"), REALTIME_PROTOCOL);
+  t.after(() => client.close());
+  const inbox = createInbox(client);
+  await onceOpen(client);
+  await inbox.next((message) => message.type === "hello.required");
+  client.send(JSON.stringify({
+    protocol: REALTIME_PROTOCOL,
+    type: "hello",
+    client_id: "laptop",
+    role: "playback",
+    topics: [],
+    participant: {
+      protocol_version: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
+      stable_device_id: "ableton-laptop",
+      capabilities: ["score:prepare"]
+    }
+  }));
+  const welcome = await inbox.next((message) => message.type === "welcome");
+  assert.deepEqual(welcome.payload.capabilities, ["topics:read", "participant:register", "playback:ready"]);
+
+  const preparation = coordinator.prepareParticipants("A", "integration-test", { operationId: "prepare-1" });
+  const command = await inbox.next((message) => message.type === "playback.prepare");
+  assert.equal(command.payload.operation_id, "prepare-1");
+  assert.equal(command.payload.participant_id, "realtime:laptop");
+  assert.deepEqual(command.payload.voice_ids, ["player-1"]);
+  assert.equal(command.payload.desired.schema, "shadowscore.playback-score.v1");
+  assert.equal(command.payload.desired.block_id, "A");
+  assert.deepEqual(command.payload.desired.voice_ids, ["player-1"]);
+  assert.equal(command.payload.desired.voices[0].clip.clip_id, "a-player-1");
+
+  client.send(JSON.stringify({
+    type: "playback.ready",
+    request_id: "ready-wrong",
+    payload: {
+      operation_id: command.payload.operation_id,
+      block_id: command.payload.block_id,
+      score_revision: command.payload.score_revision,
+      payload_hash: "wrong"
+    }
+  }));
+  const mismatch = await inbox.next((message) => message.type === "error" && message.request_id === "ready-wrong");
+  assert.equal(mismatch.payload.code, "PLAYBACK_READY_MISMATCH");
+  assert.equal(playbackParticipantAdapter.snapshot().pending.length, 1);
+
+  client.send(JSON.stringify({
+    type: "playback.ready",
+    request_id: "ready-correct",
+    payload: {
+      operation_id: command.payload.operation_id,
+      block_id: command.payload.block_id,
+      score_revision: command.payload.score_revision,
+      payload_hash: command.payload.payload_hash
+    }
+  }));
+  const ready = await inbox.next((message) => message.type === "result" && message.request_id === "ready-correct");
+  assert.equal(ready.payload.status, "ready");
+  assert.equal(ready.payload.operation_id, "prepare-1");
+  const result = await preparation;
+  assert.equal(result.operationId, "prepare-1");
+  assert.equal(result.results[0].acknowledgements[0].status, "ready");
+  assert.equal(playbackParticipantAdapter.snapshot().pending.length, 0);
+  assert.equal(playbackParticipantAdapter.snapshot().prepared[0].operationId, "prepare-1");
 });
 
 test("realtime and collaboration WebSockets coexist and unknown upgrades retain 404", async (t) => {

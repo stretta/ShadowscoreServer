@@ -68,7 +68,7 @@ test("participant registry replaces realtime endpoints without an old disconnect
   assert.deepEqual(registry.snapshot().participants[0].capabilities, {
     protocol_version: 1,
     declared: ["score:prepare"],
-    granted: ["topics:read", "participant:register"]
+    granted: ["topics:read", "participant:register", "playback:ready"]
   });
   assert.equal(registry.snapshot().participants[0].available, true);
   assert.equal(events.at(-1).event, "participant.endpoint_replaced");
@@ -134,7 +134,7 @@ function session(clientId, connectionId) {
     connectionId,
     protocol: "shadowscore.realtime.v2",
     role: "playback",
-    capabilities: ["topics:read", "participant:register"],
+    capabilities: ["topics:read", "participant:register", "playback:ready"],
     declaredCapabilities: ["score:prepare"],
     participantProtocolVersion: 1,
     stableDeviceId: "ableton-laptop",

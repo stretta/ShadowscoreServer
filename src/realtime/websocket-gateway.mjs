@@ -8,7 +8,7 @@ export const PLAYBACK_PARTICIPANT_PROTOCOL_VERSION = 1;
 
 const ROLE_CAPABILITIES = Object.freeze({
   observer: Object.freeze(["topics:read"]),
-  playback: Object.freeze(["topics:read", "participant:register"])
+  playback: Object.freeze(["topics:read", "participant:register", "playback:ready"])
 });
 
 export function attachRealtimeGateway(server, broker, options = {}) {
@@ -56,6 +56,8 @@ export function attachRealtimeGateway(server, broker, options = {}) {
       subscriptions: new Map(),
       requestCache: new Map(),
       participantRegistered: false,
+      participantAdapterConnected: false,
+      participantId: null,
       initialized: false,
       closed: false
     };
@@ -77,7 +79,7 @@ export function attachRealtimeGateway(server, broker, options = {}) {
         available_topics: broker.topics("observer"),
         available_roles: Object.entries(ROLE_CAPABILITIES).map(([role, capabilities]) => ({
           role,
-          capabilities: [...capabilities],
+          capabilities: capabilitiesForRole(role),
           participant_protocol_version: role === "playback" ? PLAYBACK_PARTICIPANT_PROTOCOL_VERSION : null
         }))
       }
@@ -123,7 +125,7 @@ export function attachRealtimeGateway(server, broker, options = {}) {
     const previous = sessionsByClientId.get(session.clientId);
     const requestedTopics = normalizeTopics(message.topics ?? []);
     const acceptedTopics = validateTopics(requestedTopics, session.role);
-    const capabilities = [...ROLE_CAPABILITIES[session.role]];
+    const capabilities = capabilitiesForRole(session.role);
     const participant = session.role === "playback"
       ? normalizePlaybackParticipant(message.participant, session.clientId)
       : null;
@@ -142,6 +144,24 @@ export function attachRealtimeGateway(server, broker, options = {}) {
         ...participant
       }) ?? null;
       session.participantRegistered = Boolean(registeredParticipant);
+      session.participantId = registeredParticipant?.participant_id ?? null;
+      if (registeredParticipant && options.playbackParticipantAdapter) {
+        try {
+          options.playbackParticipantAdapter.connectSession({
+            participantId: registeredParticipant.participant_id,
+            connectionId: session.connectionId,
+            clientId: session.clientId,
+            declaredCapabilities: participant.declaredCapabilities,
+            send: (fields) => send(session, fields, { critical: true })
+          });
+          session.participantAdapterConnected = true;
+        } catch (error) {
+          options.participantRegistry.disconnectRealtimeSession(session.connectionId);
+          session.participantRegistered = false;
+          session.participantId = null;
+          throw error;
+        }
+      }
     }
     if (previous && previous !== session) closeSession(previous, 4001, "replaced by newer connection");
     sessionsByClientId.set(session.clientId, session);
@@ -203,6 +223,16 @@ export function attachRealtimeGateway(server, broker, options = {}) {
         }
         case "ping":
           payload = { pong: true };
+          break;
+        case "playback.ready":
+          if (session.role !== "playback" || !session.participantAdapterConnected) {
+            throw protocolError("playback_role_required", "playback.ready requires a registered playback participant");
+          }
+          payload = await options.playbackParticipantAdapter.acceptReady({
+            participantId: session.participantId,
+            connectionId: session.connectionId,
+            payload: message.payload
+          });
           break;
         default:
           throw protocolError("read_only_gateway", `message type '${message.type}' is not available on the read-only gateway`);
@@ -309,6 +339,7 @@ export function attachRealtimeGateway(server, broker, options = {}) {
     for (const topic of [...session.subscriptions.keys()]) unsubscribeTopic(session, topic);
     sessions.delete(session.connectionId);
     if (sessionsByClientId.get(session.clientId) === session) sessionsByClientId.delete(session.clientId);
+    if (session.participantAdapterConnected) options.playbackParticipantAdapter?.disconnectSession?.(session.connectionId);
     if (session.participantRegistered) options.participantRegistry?.disconnectRealtimeSession?.(session.connectionId);
   }
 
@@ -316,6 +347,12 @@ export function attachRealtimeGateway(server, broker, options = {}) {
     if (session.closed) return;
     removeSession(session);
     session.connection.close(code, reason);
+  }
+
+  function capabilitiesForRole(role) {
+    return ROLE_CAPABILITIES[role].filter((capability) =>
+      capability !== "playback:ready" || Boolean(options.playbackParticipantAdapter)
+    );
   }
 }
 

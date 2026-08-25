@@ -46,6 +46,7 @@ test("playback participant coordinator exposes transport-neutral read capabiliti
     capabilities: {
       playbackUpdates: true,
       prepareBlock: true,
+      prepareParticipants: false,
       applyBlockUpdate: true,
       activatePreparedBlock: true,
       lifecycleEvents: true,
@@ -127,4 +128,37 @@ test("playback participant coordinator falls back to prepared apply activation",
       authorize: true
     }
   });
+});
+
+test("playback participant coordinator assigns one operation id across participant adapters", async () => {
+  const calls = [];
+  const coordinator = createPlaybackParticipantCoordinator({
+    adapter: { enabled: true },
+    participantAdapters: [{
+      enabled: true,
+      async prepareBlock(blockId, reason, options) {
+        calls.push({ blockId, reason, options });
+        return { participating: true, operationId: options.operationId };
+      }
+    }]
+  });
+
+  assert.equal(coordinator.descriptor().capabilities.prepareParticipants, true);
+  const result = await coordinator.prepareParticipants("B", "lookahead", {
+    operationId: "operation-7",
+    participantIds: ["realtime:laptop"]
+  });
+  assert.deepEqual(result, {
+    operationId: "operation-7",
+    blockId: "B",
+    results: [{ participating: true, operationId: "operation-7" }]
+  });
+  assert.deepEqual(calls, [{
+    blockId: "B",
+    reason: "lookahead",
+    options: {
+      operationId: "operation-7",
+      participantIds: ["realtime:laptop"]
+    }
+  }]);
 });

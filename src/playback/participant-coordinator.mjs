@@ -1,5 +1,8 @@
+import crypto from "node:crypto";
+
 export function createPlaybackParticipantCoordinator(options = {}) {
   const adapter = options.adapter ?? null;
+  const participantAdapters = (options.participantAdapters ?? []).filter((entry) => entry?.enabled === true);
   const adapterId = String(options.adapterId ?? "playback").trim() || "playback";
 
   return {
@@ -13,6 +16,7 @@ export function createPlaybackParticipantCoordinator(options = {}) {
         capabilities: {
           playbackUpdates: typeof adapter?.playbackUpdates === "function",
           prepareBlock: typeof adapter?.prepareBlock === "function",
+          prepareParticipants: participantAdapters.some((entry) => typeof entry.prepareBlock === "function"),
           applyBlockUpdate: typeof adapter?.applyBlockUpdate === "function",
           activatePreparedBlock: typeof adapter?.activatePreparedBlock === "function",
           lifecycleEvents: typeof adapter?.lifecycleEvents === "function",
@@ -26,6 +30,16 @@ export function createPlaybackParticipantCoordinator(options = {}) {
     },
     async prepareBlock(blockId, reason = "lookahead", operationOptions = {}) {
       return requireMethod("prepareBlock")(blockId, reason, operationOptions);
+    },
+    async prepareParticipants(blockId, reason = "prepare", operationOptions = {}) {
+      const adapters = participantAdapters.filter((entry) => typeof entry.prepareBlock === "function");
+      if (!adapters.length) throw new Error("playback participant coordinator cannot prepareParticipants");
+      const operationId = String(operationOptions.operationId ?? operationOptions.operation_id ?? crypto.randomUUID());
+      const results = await Promise.all(adapters.map((entry) => entry.prepareBlock(blockId, reason, {
+        ...operationOptions,
+        operationId
+      })));
+      return { operationId, blockId, results };
     },
     async applyBlockUpdate(blockId = "", operationOptions = {}) {
       return requireMethod("applyBlockUpdate")(blockId, operationOptions);

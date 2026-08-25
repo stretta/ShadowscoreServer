@@ -9,6 +9,7 @@ import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { activatePreparedBlockTransition } from "./playback/block-transition.mjs";
 import { createParticipantRegistry } from "./playback/participant-registry.mjs";
 import { createPlaybackParticipantCoordinator } from "./playback/participant-coordinator.mjs";
+import { createRealtimePlaybackParticipantAdapter } from "./playback/realtime-participant-adapter.mjs";
 import { createTempoPolicy } from "./playback/tempo-policy.mjs";
 import { createRnboStageCollector } from "./playback/rnbo-stage-collector.mjs";
 import { createOscSnapshotAutoRecall } from "./osc/snapshot-auto-recall.mjs";
@@ -42,7 +43,6 @@ const rnbo = createRnboOscAdapter(config, {
 });
 const jackTransport = createJackTransportState(config);
 const rnboStageCollector = createRnboStageCollector(config);
-const playbackCoordinator = createPlaybackParticipantCoordinator({ adapter: rnbo, adapterId: "rnbo" });
 const autoResyncConfig = config.transport?.rnboClient?.autoResync ?? {};
 const ensembleSyncSupervisor = createEnsembleSyncSupervisor({
   requiredConsecutiveSlips: autoResyncConfig.requiredConsecutiveSlips,
@@ -59,7 +59,6 @@ const runtime = {
   manualOscQueryDevices,
   oscSnapshotRecall,
   rnboAdapter: rnbo,
-  playbackCoordinator,
   rnboStageCollector,
   ensembleSyncSupervisor
 };
@@ -67,6 +66,17 @@ runtime.participantRegistry = createParticipantRegistry({
   getAssignments: () => store.getScore().assignments,
   loadRnboTargets: () => readParticipantRnboTargets(config, runtime)
 });
+const realtimePlaybackParticipantAdapter = createRealtimePlaybackParticipantAdapter({
+  getScore: () => store.getScore(),
+  getParticipantRegistry: () => runtime.participantRegistry
+});
+const playbackCoordinator = createPlaybackParticipantCoordinator({
+  adapter: rnbo,
+  adapterId: "rnbo",
+  participantAdapters: [realtimePlaybackParticipantAdapter]
+});
+runtime.realtimePlaybackParticipantAdapter = realtimePlaybackParticipantAdapter;
+runtime.playbackCoordinator = playbackCoordinator;
 tempoPolicy = createTempoPolicy(store, config, {
   applyTempo: (tempo) => applyLiveTempo(store, config, runtime, tempo),
   onTempoChanged: () => runtime.macroPlayback?.tempoChanged?.()
@@ -108,7 +118,8 @@ const server = http.createServer((request, response) => {
 });
 const realtimeTopics = createRealtimeTopicBroker(realtimeTopicDefinitions(store, config, runtime));
 const realtime = attachRealtimeGateway(server, realtimeTopics, {
-  participantRegistry: runtime.participantRegistry
+  participantRegistry: runtime.participantRegistry,
+  playbackParticipantAdapter: runtime.realtimePlaybackParticipantAdapter
 });
 const collaboration = attachWebSocketCollaboration(server, store, config);
 const detachUnknownWebSocketFallback = attachUnknownWebSocketFallback(server);
@@ -139,6 +150,7 @@ async function shutdown() {
   realtime.close();
   realtimeTopics.close();
   runtime.participantRegistry.close();
+  runtime.realtimePlaybackParticipantAdapter.close();
   detachUnknownWebSocketFallback();
   oscSnapshotAutoRecall.close();
   macroPlayback.close();

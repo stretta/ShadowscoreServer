@@ -8,6 +8,7 @@ import { applyLiveTempo, distributeSwingForBlock, distributeTtidForBlock, readBe
 import { createMacroPlayback } from "./playback/macro-playback.mjs";
 import { activatePreparedBlockTransition } from "./playback/block-transition.mjs";
 import { createParticipantRegistry } from "./playback/participant-registry.mjs";
+import { createPlaybackParticipantCoordinator } from "./playback/participant-coordinator.mjs";
 import { createTempoPolicy } from "./playback/tempo-policy.mjs";
 import { createRnboStageCollector } from "./playback/rnbo-stage-collector.mjs";
 import { createOscSnapshotAutoRecall } from "./osc/snapshot-auto-recall.mjs";
@@ -41,6 +42,7 @@ const rnbo = createRnboOscAdapter(config, {
 });
 const jackTransport = createJackTransportState(config);
 const rnboStageCollector = createRnboStageCollector(config);
+const playbackCoordinator = createPlaybackParticipantCoordinator({ adapter: rnbo, adapterId: "rnbo" });
 const autoResyncConfig = config.transport?.rnboClient?.autoResync ?? {};
 const ensembleSyncSupervisor = createEnsembleSyncSupervisor({
   requiredConsecutiveSlips: autoResyncConfig.requiredConsecutiveSlips,
@@ -57,6 +59,7 @@ const runtime = {
   manualOscQueryDevices,
   oscSnapshotRecall,
   rnboAdapter: rnbo,
+  playbackCoordinator,
   rnboStageCollector,
   ensembleSyncSupervisor
 };

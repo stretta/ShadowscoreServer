@@ -3902,10 +3902,10 @@ test("playback snapshots consume server-owned stage observations without forcing
   assert.equal(timingContractReferences[0], timingContractReferences[1]);
 });
 
-test("playback updates route exposes the adapter's shared live-edit state", async () => {
+test("playback updates route reads shared live-edit state through the participant coordinator", async () => {
   const context = createRouteContext({
     runtime: {
-      rnboAdapter: {
+      playbackCoordinator: {
         enabled: true,
         async playbackUpdates(blockId) {
           return {
@@ -3924,6 +3924,42 @@ test("playback updates route exposes the adapter's shared live-edit state", asyn
   assert.equal(updates.blockId, "A");
   assert.equal(updates.state, "saved-not-active");
   assert.equal(updates.targets.finch.state, "saved-not-active");
+});
+
+test("playback snapshot reads coordinator lifecycle, delivery, queue, and update state", async () => {
+  const context = createRouteContext({
+    runtime: {
+      playbackCoordinator: {
+        enabled: true,
+        async playbackUpdates(blockId) {
+          return { blockId, state: "prepared", targets: {} };
+        },
+        lifecycleEvents() {
+          return [{ type: "prepare_completed", targetId: "finch" }];
+        },
+        participantDeliveryStatus() {
+          return [];
+        },
+        operationQueueStatus() {
+          return { inProgress: false, queued: true, active: null, queuedRequest: { blockId: "B" } };
+        },
+        deliveryStatus() {
+          return {
+            observedAt: "2026-08-25T18:30:00.000Z",
+            summary: { targetCount: 1, inProgressCount: 0, readyCount: 1, liveCount: 0, failedCount: 0 },
+            targets: {},
+            history: []
+          };
+        }
+      }
+    }
+  });
+
+  const snapshot = await requestJson(context, "GET", "/playback/snapshot");
+  assert.equal(snapshot.updates.state, "prepared");
+  assert.equal(snapshot.lifecycleEvents[0].type, "prepare_completed");
+  assert.equal(snapshot.transfers.summary.readyCount, 1);
+  assert.equal(snapshot.sendQueue.queued, true);
 });
 
 test("playback update actions choose continue while running and now while stopped", async () => {

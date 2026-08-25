@@ -1073,8 +1073,8 @@ export async function routeRequest(request, response, store, config, runtime = {
 
   if (request.method === "GET" && url.pathname === "/playback/updates") {
     try {
-      const adapter = requirePlaybackUpdateAdapter(runtime);
-      writeJson(response, 200, await adapter.playbackUpdates(optionalString(url.searchParams.get("blockId"))));
+      const reader = requirePlaybackUpdateReader(runtime);
+      writeJson(response, 200, await reader.playbackUpdates(optionalString(url.searchParams.get("blockId"))));
     } catch (error) {
       writeError(response, error, 503);
     }
@@ -1826,7 +1826,7 @@ export function realtimeTopicDefinitions(store, config, runtime) {
     score: { publisher: scorePublisher(store, runtime), version: 1, roles: ["observer"] },
     transport: { publisher: authoritativeTransportPublisher(store, config, runtime), version: 1, roles: ["observer"] },
     playback: { publisher: playbackSnapshotPublisher(runtime, store, config), version: 1, roles: ["observer"] },
-    "playback.transfers": { publisher: rnboTransferPublisher(runtime), version: 1, roles: ["observer"] },
+    "playback.transfers": { publisher: playbackTransferPublisher(runtime), version: 1, roles: ["observer"] },
     participants: { publisher: runtime.participantRegistry, version: 1, roles: ["observer"] }
   };
 }
@@ -1941,9 +1941,17 @@ function scorePublisher(store, runtime) {
 }
 
 function rnboTransferPublisher(runtime) {
-  return runtimePublisher(runtime, "transfers", () => createEventPublisher({
+  return runtimePublisher(runtime, "rnbo.transfers", () => createEventPublisher({
     loadSnapshot: () => rnboTransferStatus(runtime),
     events: runtime.rnboAdapter?.transferEvents,
+    sourceEvent: "snapshot"
+  }));
+}
+
+function playbackTransferPublisher(runtime) {
+  return runtimePublisher(runtime, "playback.transfers", () => createEventPublisher({
+    loadSnapshot: () => playbackDeliveryStatus(runtime),
+    events: runtime.playbackCoordinator?.deliveryEvents ?? runtime.rnboAdapter?.transferEvents,
     sourceEvent: "snapshot"
   }));
 }
@@ -2849,14 +2857,15 @@ async function coherentPlaybackSnapshot(runtime, store, config) {
   // Capture the coherent boundary after any first-observation refresh. Normal
   // requests use the collector's cached, timestamped periodic observations.
   const observedAt = Date.now();
-  targets = withRnboSendStatus(targets, runtime);
+  targets = withPlaybackDeliveryStatus(targets, runtime);
   const timingContracts = cachedPlaybackTimingContracts(score, config, runtime, targets);
   const playback = await macroPlaybackSnapshot(runtime, store, config, {
     rnboTargets: targets,
     timingContracts
   });
-  const updates = typeof runtime.rnboAdapter?.playbackUpdates === "function"
-    ? await runtime.rnboAdapter.playbackUpdates(
+  const playbackReader = playbackReadService(runtime);
+  const updates = typeof playbackReader?.playbackUpdates === "function"
+    ? await playbackReader.playbackUpdates(
         playback.activeBlockId ?? score.structureState?.activeBlockId ?? "",
         { targets }
       )
@@ -2871,9 +2880,9 @@ async function coherentPlaybackSnapshot(runtime, store, config) {
     jack: transportSnapshot(config, runtime),
     targets,
     timingContracts,
-    sendQueue: rnboSendQueueStatus(runtime),
-    transfers: rnboTransferStatus(runtime),
-    lifecycleEvents: runtime.rnboAdapter?.lifecycleEvents?.() ?? [],
+    sendQueue: playbackOperationQueueStatus(runtime),
+    transfers: playbackDeliveryStatus(runtime),
+    lifecycleEvents: playbackLifecycleEvents(runtime),
     updates,
     staleAfterMs: config.transport?.rnboClient?.staleAfterMs ?? 1000
   });
@@ -3124,6 +3133,14 @@ function requirePlaybackUpdateAdapter(runtime) {
     throw new Error("RNBO playback update service is not available");
   }
   return adapter;
+}
+
+function requirePlaybackUpdateReader(runtime) {
+  const reader = playbackReadService(runtime);
+  if (!reader?.enabled || typeof reader.playbackUpdates !== "function") {
+    throw new Error("playback update service is not available");
+  }
+  return reader;
 }
 
 function automaticOscSnapshotRecallStatus(runtime) {
@@ -4239,7 +4256,7 @@ function externalTransportAnchor(body, unitId, context = {}) {
 
 async function awaitRnboPlaybackReady(runtime, score) {
   const readiness = await rnboPlaybackReadiness(runtime, score, { waitForIdle: true });
-  if (!runtime.rnboAdapter?.enabled) return readiness;
+  if (!playbackReadService(runtime)?.enabled) return readiness;
   if (!readiness.ready) {
     throw new Error(`RNBO playback is not ready: ${readiness.failures.join(", ")}`);
   }
@@ -4247,11 +4264,12 @@ async function awaitRnboPlaybackReady(runtime, score) {
 }
 
 async function rnboPlaybackReadiness(runtime, score, { waitForIdle = false } = {}) {
-  if (!runtime.rnboAdapter?.enabled) {
+  const playbackReader = playbackReadService(runtime);
+  if (!playbackReader?.enabled) {
     return { ready: true, allActive: false, source: "disabled", failures: [], queue: null };
   }
-  if (waitForIdle && typeof runtime.rnboAdapter.waitForIdle === "function") {
-    await runtime.rnboAdapter.waitForIdle();
+  if (waitForIdle && typeof playbackReader.waitForIdle === "function") {
+    await playbackReader.waitForIdle();
   }
   const assignedTargetKeys = new Set(Object.values(score.assignments ?? {})
     .flatMap((assignment) => [assignment?.rnboTargetId, assignment?.rnboAddress])
@@ -4260,8 +4278,8 @@ async function rnboPlaybackReadiness(runtime, score, { waitForIdle = false } = {
   const assignedTargetIds = new Set(Object.values(score.assignments ?? {})
     .map((assignment) => optionalString(assignment?.rnboTargetId))
     .filter(Boolean));
-  if (typeof runtime.rnboAdapter.playbackUpdates === "function") {
-    const updates = await runtime.rnboAdapter.playbackUpdates(score.structureState?.activeBlockId ?? "");
+  if (typeof playbackReader.playbackUpdates === "function") {
+    const updates = await playbackReader.playbackUpdates(score.structureState?.activeBlockId ?? "");
     const entries = Object.entries(updates?.targets ?? {})
       .filter(([targetId, update]) => assignedTargetKeys.size === 0 || assignedTargetKeys.has(optionalString(targetId))
         || assignedTargetKeys.has(optionalString(update?.targetId)));
@@ -4289,12 +4307,12 @@ async function rnboPlaybackReadiness(runtime, score, { waitForIdle = false } = {
         participatingTargetCount: participatingEntries.length,
         unavailableTargetIds,
         degraded: unavailableTargetIds.length > 0,
-        queue: runtime.rnboAdapter.sendQueueStatus?.() ?? { inProgress: false, queued: false },
+        queue: playbackOperationQueueStatus(runtime),
         updates
       };
     }
   }
-  const statuses = runtime.rnboAdapter.sendStatus?.() ?? [];
+  const statuses = playbackParticipantDeliveryStatus(runtime);
   const relevantStatuses = assignedTargetKeys.size === 0
     ? statuses
     : statuses.filter((status) => assignedTargetKeys.has(optionalString(status.targetId))
@@ -4309,7 +4327,7 @@ async function rnboPlaybackReadiness(runtime, score, { waitForIdle = false } = {
       .filter((status) => status.ack?.ok !== false)
       .map((status) => optionalString(status.targetId))
       .filter(Boolean),
-    queue: runtime.rnboAdapter.sendQueueStatus?.() ?? { inProgress: false, queued: false }
+    queue: playbackOperationQueueStatus(runtime)
   };
 }
 
@@ -4633,6 +4651,42 @@ function withRnboSendStatus(targets, runtime) {
     const sendStatus = byTargetId.get(target.id);
     return sendStatus ? { ...target, sendStatus } : target;
   });
+}
+
+function withPlaybackDeliveryStatus(targets, runtime) {
+  const statuses = playbackParticipantDeliveryStatus(runtime);
+  if (!statuses.length) return targets;
+  const byTargetId = new Map(statuses.map((status) => [status.targetId, status]));
+  return targets.map((target) => {
+    const sendStatus = byTargetId.get(target.id);
+    return sendStatus ? { ...target, sendStatus } : target;
+  });
+}
+
+function playbackReadService(runtime) {
+  return runtime.playbackCoordinator ?? runtime.rnboAdapter;
+}
+
+function playbackLifecycleEvents(runtime) {
+  return runtime.playbackCoordinator?.lifecycleEvents?.()
+    ?? runtime.rnboAdapter?.lifecycleEvents?.()
+    ?? [];
+}
+
+function playbackParticipantDeliveryStatus(runtime) {
+  return runtime.playbackCoordinator?.participantDeliveryStatus?.()
+    ?? runtime.rnboAdapter?.sendStatus?.()
+    ?? [];
+}
+
+function playbackOperationQueueStatus(runtime) {
+  return runtime.playbackCoordinator?.operationQueueStatus?.()
+    ?? rnboSendQueueStatus(runtime);
+}
+
+function playbackDeliveryStatus(runtime) {
+  return runtime.playbackCoordinator?.deliveryStatus?.()
+    ?? rnboTransferStatus(runtime);
 }
 
 function rnboSendQueueStatus(runtime) {

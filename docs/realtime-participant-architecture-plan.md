@@ -83,6 +83,20 @@ state, and complete RNBO adapter suites, stable
 repeated-read compilation, bounded lifecycle publication, stopped transport,
 aligned synchronization, and receiver-confirmed READY transfers.
 
+Implementation update, 2026-08-25: the first Phase 6 facade slice is
+implemented and deployed to `wren`. A transport-neutral playback participant
+coordinator now wraps the RNBO adapter and owns read access to playback updates,
+lifecycle history, delivery status and events, operation-queue status, and
+readiness inspection. Playback snapshots, the read-only update route, and
+generic realtime transfer publication now consume the coordinator. RNBO
+diagnostics, score preparation, block activation, macro transitions, transport
+controls, and all delivery writes remain directly RNBO-owned. Deployment
+verification proved exact source parity, the focused coordinator, snapshot,
+route, and complete RNBO adapter suites, identical coordinator and RNBO
+transaction and queue state, stable repeated-read compilation, bounded
+lifecycle publication, stopped transport, aligned synchronization, and
+receiver-confirmed READY transfers.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer

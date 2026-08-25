@@ -28,6 +28,21 @@ test("unrelated server changes safely rebase a dirty clip", () => {
   assert.equal(entry.draft.notes[0].pitch, 61);
 });
 
+test("repeated playhead-only score changes keep a dirty clip retryable", () => {
+  const store = createClipDraftStore();
+  const entry = store.open("a", clip(60), 1);
+  entry.draft.notes[0].pitch = 61;
+  store.markDirty("a");
+
+  store.reconcile({ version: 2, clips: { a: clip(60) } });
+  store.reconcile({ version: 3, clips: { a: clip(60) } });
+
+  assert.equal(entry.baseVersion, 3);
+  assert.equal(entry.dirty, true);
+  assert.equal(entry.stale, false);
+  assert.equal(entry.draft.notes[0].pitch, 61);
+});
+
 test("same-clip server changes mark a dirty draft stale", () => {
   const store = createClipDraftStore();
   const entry = store.open("a", clip(60), 1);

@@ -78,6 +78,11 @@ test("Piano Roll autosaves revision-aware clip drafts and supports right-edge re
   assert.match(js, /shadowscore\.pianoRoll\.followSection/);
   assert.match(js, /ui\.block\.disabled=state\.chasing/);
   assert.match(js, /function followChase\(\)/);
+  assert.match(js, /state\.drag\|\|state\.saving\|\|activeDraftEntry\(\)\?\.dirty/);
+  assert.match(js, /function isScoreVersionConflict/);
+  assert.match(js, /rebaseDraftAfterScoreChange/);
+  assert.match(js, /fetch\("\/score",\{cache:"no-store"\}\)/);
+  assert.match(js, /retrying automatically/);
   assert.match(js, /blockId:sampleBlockId/);
   assert.match(js, /playheadScrollLeft/);
   assert.match(js, /zoomAnchorScrollLeft/);

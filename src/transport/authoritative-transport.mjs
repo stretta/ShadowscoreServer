@@ -18,6 +18,8 @@ export const transportObjectDescriptor = Object.freeze({
     "time_signature_numerator",
     "time_signature_denominator",
     "active_section",
+    "state",
+    "transition",
     "playback_session",
     "block_launcher",
     "sync"
@@ -68,6 +70,8 @@ export function buildAuthoritativeTransportState({
     120
   );
   const sync = deriveSyncHealth(playbackSnapshot);
+  const transition = controls.players?.transition ?? { active: null, last: null };
+  const state = transition.active?.state ?? (playing ? "playing" : "stopped");
   const blockLauncher = buildBlockLauncherState(score, playback, position.activeBlockId);
   const playbackSession = buildPlaybackSessionState(controls.players?.session, playing);
   if (controls.players?.syncRecovery) sync.recovery = controls.players.syncRecovery;
@@ -90,6 +94,8 @@ export function buildAuthoritativeTransportState({
     time_signature_numerator: numerator,
     time_signature_denominator: denominator,
     active_section: position.activeBlockId,
+    state,
+    transition,
     macro_index: position.macroIndex,
     beat_into_section: round(position.beatIntoBlock, 6),
     playback_session: playbackSession,

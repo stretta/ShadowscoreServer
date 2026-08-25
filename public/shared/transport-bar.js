@@ -28,6 +28,7 @@ export function createShadowScoreTransportBar(options = {}) {
   let snapshot = null;
   let snapshotReceivedAt = 0;
   let commandPending = false;
+  let pendingOperation = "";
   let animationFrame = 0;
   let tempoCommitTimer = 0;
   let pendingTempo = null;
@@ -96,7 +97,9 @@ export function createShadowScoreTransportBar(options = {}) {
   async function command(operation, args = {}) {
     if (commandPending) return;
     commandPending = true;
+    pendingOperation = operation;
     root.dataset.pending = "true";
+    renderActivity();
     fields.error.textContent = "";
     try {
       const response = await fetch(OBJECT_URL, {
@@ -116,7 +119,9 @@ export function createShadowScoreTransportBar(options = {}) {
       fields.error.textContent = error.message;
     } finally {
       commandPending = false;
+      pendingOperation = "";
       root.dataset.pending = "false";
+      renderActivity();
     }
   }
 
@@ -208,9 +213,7 @@ export function createShadowScoreTransportBar(options = {}) {
     root.dataset.playing = String(Boolean(next.is_playing));
     fields.section.textContent = next.active_section || "—";
     if (document.activeElement !== fields.tempo) fields.tempo.value = formatTempo(next.tempo);
-    fields.sync.textContent = syncLabel(next.sync);
-    fields.sync.parentElement.dataset.tone = next.sync?.state ?? "uncertain";
-    fields.sync.parentElement.title = next.sync?.reason || "Transport sync status";
+    renderActivity();
     fields.position.disabled = next.capabilities?.can_locate !== true;
     fields.error.textContent = "";
     if (typeof globalThis.CustomEvent === "function") {
@@ -225,6 +228,17 @@ export function createShadowScoreTransportBar(options = {}) {
     if (!snapshot) return;
     renderPosition(now);
     if (snapshot.is_playing) animationFrame = requestAnimationFrame(animate);
+  }
+
+  function renderActivity() {
+    const presentation = transportPresentation(snapshot, pendingOperation);
+    root.dataset.transportState = presentation.state;
+    fields.sync.textContent = presentation.syncLabel;
+    fields.sync.parentElement.dataset.tone = presentation.tone;
+    fields.sync.parentElement.title = presentation.title;
+    const play = root.querySelector('[data-command="play"]');
+    play.title = presentation.playTitle;
+    play.setAttribute("aria-label", presentation.playTitle);
   }
 
   function renderPosition(now) {
@@ -305,6 +319,35 @@ export function transportPositionAtFraction(snapshot = {}, fraction = 0) {
   }
   if (!sections.length) seconds = Math.max(0, Number(snapshot.duration_seconds) || 0) * normalized;
   return { fraction: normalized, beats, seconds };
+}
+
+export function transportPresentation(snapshot = {}, pendingOperation = "") {
+  const serverTransition = snapshot?.transition?.active ?? null;
+  const localState = pendingOperation === "play"
+    ? { state: "starting", label: "Preparing players" }
+    : pendingOperation === "re_sync"
+      ? { state: "synchronizing", label: "Synchronizing players" }
+      : null;
+  const transition = serverTransition ?? localState;
+  if (transition) {
+    const state = ["starting", "synchronizing", "verifying"].includes(transition.state)
+      ? transition.state
+      : "starting";
+    return {
+      state,
+      syncLabel: state === "starting" ? "STARTING" : state === "verifying" ? "VERIFYING" : "SYNCING",
+      tone: "preparing",
+      title: `${transition.label || "Preparing playback"}…`,
+      playTitle: "Playback is getting ready"
+    };
+  }
+  return {
+    state: snapshot?.is_playing ? "playing" : "stopped",
+    syncLabel: syncLabel(snapshot?.sync),
+    tone: snapshot?.sync?.state ?? "uncertain",
+    title: snapshot?.sync?.reason || "Transport sync status",
+    playTitle: snapshot?.is_playing ? "Playing" : "Play"
+  };
 }
 
 function formatTempo(value) {

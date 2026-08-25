@@ -21,8 +21,14 @@ test("serialized operation queue runs one operation at a time in request order",
   await new Promise((resolve) => setImmediate(resolve));
   assert.deepEqual(events, ["first:start"]);
   assert.deepEqual(queue.status(), { active: true, queued: 1 });
+  let idle = false;
+  const idlePromise = queue.waitForIdle().then(() => { idle = true; });
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(idle, false);
   releaseFirst();
   assert.deepEqual(await Promise.all([first, second]), [1, 2]);
+  await idlePromise;
+  assert.equal(idle, true);
   assert.deepEqual(events, ["first:start", "first:end", "second:start"]);
   assert.deepEqual(queue.status(), { active: false, queued: 0 });
 });

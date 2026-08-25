@@ -6,7 +6,13 @@ import { EventEmitter } from "node:events";
 import { Readable } from "node:stream";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { continuingClockContractForArrangement, distributeTtidForBlock, recallOscSnapshotsForBlock, routeRequest } from "../src/http/routes.mjs";
+import {
+  continuingClockContractForArrangement,
+  distributeTtidForBlock,
+  missingPhaseCohortTargetIds,
+  recallOscSnapshotsForBlock,
+  routeRequest
+} from "../src/http/routes.mjs";
 import { createOscSnapshotAutoRecall } from "../src/osc/snapshot-auto-recall.mjs";
 import { buildOscTargets } from "../src/osc/targets.mjs";
 import { createMacroPlayback } from "../src/playback/macro-playback.mjs";
@@ -28,6 +34,17 @@ test("assignment routes expose, replace, and clear voice assignments", async () 
 
   const cleared = await requestJson(context, "DELETE", "/voices/player-1/assignment");
   assert.equal(cleared.assignments["player-1"].assignee, "");
+});
+
+test("phase acknowledgement cohort cannot silently shrink after selection", () => {
+  assert.deepEqual(missingPhaseCohortTargetIds(
+    ["finch", "heron", "finch"],
+    [{ id: "finch" }]
+  ), ["heron"]);
+  assert.deepEqual(missingPhaseCohortTargetIds(
+    ["finch", "heron"],
+    [{ id: "heron" }, { id: "finch" }]
+  ), []);
 });
 
 test("coordinator routes expose discovery and change the local selection", async () => {
@@ -2898,7 +2915,12 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
         sendQueueStatus: () => ({ inProgress: false, queued: false }),
         schedulePreparedActivations(options) {
           sequence.push("activation_scheduled");
-          assert.deepEqual(options, { targetId: "", blockId: "A", initialStage: 0 });
+          assert.deepEqual(options, {
+            targetId: "",
+            targetIds: ["finch-client"],
+            blockId: "A",
+            initialStage: 0
+          });
           return [activationRequest];
         },
         async confirmPreparedActivations(requests, options) {

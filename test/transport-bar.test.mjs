@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { dragTempoValue, formatBbt, formatClock, transportPositionAtFraction } from "../public/shared/transport-bar.js";
+import {
+  dragTempoValue,
+  formatBbt,
+  formatClock,
+  transportPositionAtFraction,
+  transportPresentation
+} from "../public/shared/transport-bar.js";
 
 test("transport bar formats musician time readouts", () => {
   assert.equal(formatClock(0), "00:00");
@@ -33,4 +39,22 @@ test("transport slider previews beat position and tempo-integrated time", () => 
     beats: 12,
     seconds: 10
   });
+});
+
+test("transport bar distinguishes accepted Play from verified playback", () => {
+  assert.deepEqual(transportPresentation({ is_playing: false, sync: { state: "aligned" } }, "play"), {
+    state: "starting",
+    syncLabel: "STARTING",
+    tone: "preparing",
+    title: "Preparing players…",
+    playTitle: "Playback is getting ready"
+  });
+  assert.equal(transportPresentation({
+    is_playing: false,
+    transition: { active: { state: "verifying", label: "Checking sync" } }
+  }).syncLabel, "VERIFYING");
+  assert.equal(transportPresentation({
+    is_playing: true,
+    sync: { state: "aligned", reason: "Players agree." }
+  }).state, "playing");
 });

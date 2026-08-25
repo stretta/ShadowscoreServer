@@ -43,6 +43,7 @@ test("authoritative transport exposes one musician-facing state", () => {
   assert.equal(state.authority, "server");
   assert.equal(state.clock_source, "jack");
   assert.equal(state.is_playing, true);
+  assert.equal(state.state, "playing");
   assert.equal(state.position_beats, 10);
   assert.equal(state.position_seconds, 9);
   assert.equal(state.duration_beats, 16);
@@ -67,6 +68,26 @@ test("authoritative transport exposes one musician-facing state", () => {
     { id: "C", label: "C", launchable: false, unavailable_reason: "Not present in arrangement.", occurrence_indices: [] }
   ]);
   assert.equal(state.capabilities.can_launch_meso_blocks, true);
+});
+
+test("authoritative transport publishes accepted start without claiming playback", () => {
+  const transition = {
+    active: { id: 8, state: "synchronizing", phase: "synchronizing", label: "Synchronizing players", elapsed_ms: 420 },
+    last: null
+  };
+  const state = buildAuthoritativeTransportState({
+    score,
+    playbackSnapshot: {
+      controls: {
+        players: { playing: false, transition },
+        arrangement: { running: false, requestedMode: "run" }
+      }
+    }
+  });
+
+  assert.equal(state.is_playing, false);
+  assert.equal(state.state, "synchronizing");
+  assert.deepEqual(state.transition, transition);
 });
 
 test("transport time integrates tempo changes and formats bars, beats, and ticks", () => {

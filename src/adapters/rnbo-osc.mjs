@@ -190,11 +190,13 @@ export function createRnboOscAdapter(config, runtime = {}) {
       return [...lastSendStatus.values()];
     },
     sendQueueStatus() {
+      const activation = activationOperations.status();
       return {
-        inProgress: Boolean(activeSend),
-        queued: Boolean(queuedSend),
+        inProgress: Boolean(activeSend) || activation.active,
+        queued: Boolean(queuedSend) || activation.queued > 0,
         active: activeSend ? structuredClone(activeSend) : null,
         queuedRequest: queuedSend ? summarizeSendRequest(queuedSend) : null,
+        activation,
         discovery: structuredClone(discoveryStatus)
       };
     },
@@ -202,12 +204,8 @@ export function createRnboOscAdapter(config, runtime = {}) {
       return checkTargetDiscovery();
     },
     async waitForIdle() {
-      while (debounceTimer || sendLoopActive || queuedSend) {
-        if (debounceTimer) {
-          await delay(Math.max(5, resendDebounceMs(config) + 1));
-        }
-        await sendLoopPromise;
-      }
+      await activationOperations.waitForIdle();
+      await waitForSendQueueIdle();
       return adapter.sendQueueStatus();
     },
     lifecycleEvents() {
@@ -219,12 +217,16 @@ export function createRnboOscAdapter(config, runtime = {}) {
     },
     schedulePreparedActivations(options = {}) {
       const targetId = String(options.targetId ?? "").trim();
+      const targetIds = Array.isArray(options.targetIds)
+        ? new Set(options.targetIds.map((value) => String(value ?? "").trim()).filter(Boolean))
+        : null;
       const blockId = String(options.blockId ?? "").trim();
       const initialStage = clampInt(options.initialStage ?? 0, 0, 2147483647);
       const requests = [...lastSendStatus.values()]
         .filter((status) => status.stagedScoreActivation === true)
         .filter((status) => Number.isInteger(status.preparedTransaction))
         .filter((status) => !targetId || status.targetId === targetId)
+        .filter((status) => !targetIds || targetIds.has(status.targetId))
         .filter((status) => !blockId || status.blockId === blockId)
         .map((status) => ({
           targetId: status.targetId,
@@ -323,6 +325,15 @@ export function createRnboOscAdapter(config, runtime = {}) {
     }
   };
   return adapter;
+
+  async function waitForSendQueueIdle() {
+    while (debounceTimer || sendLoopActive || queuedSend) {
+      if (debounceTimer) {
+        await delay(Math.max(5, resendDebounceMs(config) + 1));
+      }
+      await sendLoopPromise;
+    }
+  }
 
   async function runPreparedBlockActivation(blockId = "", options = {}) {
     if (!store) throw new Error("RNBO adapter is not attached to a score store");
@@ -504,7 +515,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
           requireReady: true,
           targetIds: options.targetIds
         });
-        await adapter.waitForIdle();
+        await waitForSendQueueIdle();
         updates = await adapter.playbackUpdates(selectedBlockId, { targetIds: options.targetIds });
       }
       activationPolicy = playbackActivationPolicy(Object.values(updates.targets));
@@ -631,7 +642,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
           requireReady: true,
           targetIds: options.targetIds
         });
-        await adapter.waitForIdle();
+        await waitForSendQueueIdle();
         restoredPreparation = { ok: true, blockId: restoreBlockId };
       } catch (error) {
         restoredPreparation = { ok: false, blockId: restoreBlockId, error: messageForError(error) };

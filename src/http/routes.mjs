@@ -31,6 +31,12 @@ import { buildAuthoritativeTransportState, deriveSyncHealth, resolveTransportLoc
 import { createAuthoritativeTransportPublisher } from "../transport/authoritative-transport-publisher.mjs";
 import { phaseStageAtBeat } from "../transport/ensemble-sync-supervisor.mjs";
 import { planClockArmWindow } from "../transport/clock-arm-window.mjs";
+import {
+  beginTransportTransition,
+  completeTransportTransition,
+  transportTransitionSnapshot,
+  updateTransportTransition
+} from "../transport/transport-transition.mjs";
 
 const REVISION_CONTROL_FIELDS = ["expectedVersion", "expectedScoreRevision", "expectedStructureRevision"];
 const OSC_SEQUENCER_APPS = new Set([
@@ -2525,6 +2531,7 @@ function performanceTransportSnapshot(runtime, playback = runtime.macroPlayback?
       lastExternalIntent: performance.lastExternalIntent,
       phaseAlignment: performance.lastExternalPhaseAlignment,
       clockStartAcknowledgement: performance.lastClockStartAcknowledgement,
+      transition: transportTransitionSnapshot(runtime),
       session: performancePlaybackSession(runtime, performance),
       syncRecovery: runtime.ensembleSyncSupervisor?.snapshot?.() ?? null
     },
@@ -3219,6 +3226,23 @@ async function transportFacadeStatus(store, config, runtime) {
 }
 
 async function startUnifiedTransport(store, config, runtime, body = {}, sourceClientId = "transport") {
+  const transitionId = beginTransportTransition(runtime, {
+    kind: body.phaseOnly === true ? "resync" : "play"
+  });
+  try {
+    const result = await runUnifiedTransportStart(store, config, runtime, body, sourceClientId, transitionId);
+    const transition = completeTransportTransition(runtime, transitionId, { ok: true });
+    return { ...result, transition };
+  } catch (error) {
+    completeTransportTransition(runtime, transitionId, {
+      ok: false,
+      error: messageForError(error)
+    });
+    throw error;
+  }
+}
+
+async function runUnifiedTransportStart(store, config, runtime, body = {}, sourceClientId = "transport", transitionId) {
   const playback = requireMacroPlayback(runtime);
   const playbackOperations = playbackOperationService(runtime);
   const performance = performanceTransportFor(runtime);
@@ -3270,6 +3294,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     // phase transaction, then resume from the verified client witness below.
     playback.stop();
   }
+  updateTransportTransition(runtime, transitionId, "discovering");
   let witnessContext = await readBeatWitnessContext(score, config, runtime);
   const startupCohort = await awaitAssignedPlaybackCohort(score, config, runtime, witnessContext);
   witnessContext = startupCohort.context;
@@ -3284,6 +3309,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     witnessContext = await readBeatWitnessContext(score, config, runtime);
     externalPlayback = observedRnboPlayback(witnessContext);
   }
+  updateTransportTransition(runtime, transitionId, "preparing");
   const initialReadiness = phaseOnly
     ? {
         allActive: true,
@@ -3353,6 +3379,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
       expectedScoreRevision: score.scoreRevision ?? score.version,
       targetIds: participatingTargetIds
     });
+  updateTransportTransition(runtime, transitionId, "configuring");
   const tempo = tempoPolicyFor(store, config, runtime).snapshot().live;
   const tempoApplication = await applyLiveTempo(store, config, runtime, tempo, {
     targetIds: participatingTargetIds
@@ -3370,6 +3397,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     distributeSwingForBlock(score, config, runtime, score.structureState?.activeBlockId)
   ]);
   const snapshotRecall = await recallOscSnapshotsForBlock(store, config, runtime, score.structureState?.activeBlockId);
+  updateTransportTransition(runtime, transitionId, "synchronizing");
   const phaseStage = body.phaseReset === false
     ? null
     : await transportRestartStage(store, score, config, runtime, {
@@ -3392,6 +3420,23 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
         && assignedVoiceForTarget(score, target)
         && participatingTargetIds.includes(optionalString(target.id))
       );
+  const phaseProtectedTargetIds = witnessContext.rnboTargets
+    .filter((target) => participatingTargetIds.includes(optionalString(target.id)))
+    .filter((target) => target.clockStartAckPath && target.clockPhaseResetPath && target.clockPhaseAckPath)
+    .map((target) => optionalString(target.id));
+  const exactPhaseCohortRequired = participatingTargetIds.length > 0
+    && phaseProtectedTargetIds.length === participatingTargetIds.length;
+  if (body.phaseReset !== false && exactPhaseCohortRequired) {
+    const missingAckTargets = missingPhaseCohortTargetIds(participatingTargetIds, phaseAckTargets);
+    if (missingAckTargets.length) {
+      const rollback = await rollbackFailedClockStart(store, config, runtime, { targetId });
+      const error = new Error(`RNBO participating target${missingAckTargets.length === 1 ? "" : "s"} left the phase acknowledgement cohort: ${missingAckTargets.join(", ")}; playback was stopped`);
+      error.code = "RNBO_PHASE_COHORT_CHANGED";
+      error.statusCode = 503;
+      error.rollback = rollback;
+      throw error;
+    }
+  }
   const clockStartAckBaselines = body.phaseReset === false
     ? {}
     : await readClockStartAckBaselines(config, runtime, phaseAckTargets);
@@ -3399,6 +3444,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     ? []
     : playbackOperations?.schedulePreparedActivations?.({
         targetId,
+        targetIds: participatingTargetIds,
         blockId: score.structureState?.activeBlockId ?? "",
         initialStage: phaseStage
       }) ?? [];
@@ -3406,6 +3452,7 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId, targetIds: participatingTargetIds }),
     writeOscSequencerClocks(score, config, runtime, "On")
   ]);
+  updateTransportTransition(runtime, transitionId, "verifying");
   const clockStartAcknowledgement = body.phaseReset === false
     ? { required: false, verified: true, expectedStage: null, targetCount: 0, acknowledgements: [] }
     : await verifyClockStartAcknowledgements(
@@ -3440,11 +3487,13 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
   const clockPhaseArmWindow = clockPhaseResetSupported && clockStartCorrectionWrites.length > 0
     ? await awaitClockArmWindow(config, runtime)
     : { available: false, delayed: false, delayMs: 0, reason: "clock phase reset is not scheduled" };
+  updateTransportTransition(runtime, transitionId, "synchronizing");
   const clockPhaseResetWrites = clockPhaseResetSupported
     && clockStartCorrectionWrites.length > 0
     && clockPhaseArmWindow.available
     ? await writeTransportControlsToPlaybackTargets(score, config, runtime, { clock_phase_reset: 1 }, { targetId, targetIds: participatingTargetIds })
     : [];
+  updateTransportTransition(runtime, transitionId, "verifying");
   const clockPhaseAcknowledgement = clockPhaseResetWrites.length > 0
     ? await verifyClockPhaseAcknowledgements(config, runtime, phaseAckTargets, clockPhaseAckBaselines, phaseStage)
     : {
@@ -3564,6 +3613,12 @@ async function startUnifiedTransport(store, config, runtime, body = {}, sourceCl
     phaseAnchor,
     phaseStage
   };
+}
+
+export function missingPhaseCohortTargetIds(expectedTargetIds = [], targets = []) {
+  const observedTargetIds = new Set(targets.map((target) => optionalString(target?.id)).filter(Boolean));
+  return [...new Set(expectedTargetIds.map(optionalString).filter(Boolean))]
+    .filter((id) => !observedTargetIds.has(id));
 }
 
 async function transportRestartStage(store, score, config, runtime, body = {}) {

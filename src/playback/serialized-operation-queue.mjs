@@ -27,6 +27,10 @@ export function createSerializedOperationQueue() {
     },
     status() {
       return { active, queued };
+    },
+    async waitForIdle() {
+      await tail.catch(() => undefined);
+      return { active, queued };
     }
   };
 }

@@ -2339,6 +2339,9 @@ test("RNBO adapter serializes overlapping block activation operations", async ()
 
     const second = adapter.applyBlockUpdate("A", { expectedScoreRevision: 11, fetchImpl });
     await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(adapter.sendQueueStatus().activation, { active: true, queued: 1 });
+    assert.equal(adapter.sendQueueStatus().inProgress, true);
+    assert.equal(adapter.sendQueueStatus().queued, true);
     assert.equal(adapter.metrics().transmissionCount, 1);
     assert.equal(addresses.filter((address) => address.endsWith("/ActivatePrepared")).length, 0);
 

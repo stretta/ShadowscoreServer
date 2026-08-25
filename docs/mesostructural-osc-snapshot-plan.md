@@ -537,8 +537,9 @@ and applied in one revision-checked store swap. The plan reports players, note
 clips, blocks, macro entries, OSC roles, and implicit Unspecified block/role
 slots. Live device fields are rejected so discovery and onboarding remain a
 separate phase. A four-player, six-section request document is checked in at
-`config/score-initialization.four-player.json`. An Admin form remains deferred
-until this API has been exercised in normal setup work.
+`config/score-initialization.four-player.json`. Setup now provides a
+preview-first New Score wizard for manual counts or selected current playback
+clients, with empty, first-block test, and all-block test material choices.
 
 - Add a declarative score-initialization request that can create players,
   sections/mesostructural blocks, macro order, note clips, loop lengths, OSC

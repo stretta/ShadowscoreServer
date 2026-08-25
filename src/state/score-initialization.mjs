@@ -2,6 +2,74 @@ import { DEFAULT_SCALE, normalizeScale, normalizeTtid, scaleToTtid } from "../ha
 import { DEFAULT_SWING, DEFAULT_SWING_AMT, normalizeSwing, normalizeSwingAmt } from "../sequencer/swing.mjs";
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+const WIZARD_MATERIAL_MODES = new Set(["empty", "first-block", "all-blocks"]);
+const WIZARD_COLORS = ["#6ee7b7", "#60a5fa", "#f59e0b", "#f472b6", "#a78bfa", "#22d3ee", "#fb7185", "#a3e635"];
+
+export function createWizardScoreInitializationRequest(options = {}) {
+  if (!isObject(options)) throw new Error("score initialization wizard options must be an object");
+  const playerDocuments = options.players === undefined
+    ? Array.from({ length: boundedWizardCount(options.playerCount, "playerCount") }, (_, index) => ({
+        id: `player-${index + 1}`,
+        label: `Player ${index + 1}`
+      }))
+    : requiredArray(options.players, "players").map((player, index) => {
+        if (!isObject(player)) throw new Error(`players[${index}] must be an object`);
+        return {
+          id: validId(player.id ?? `player-${index + 1}`, `players[${index}].id`),
+          label: cleanString(player.label) || `Player ${index + 1}`,
+          color: cleanString(player.color) || WIZARD_COLORS[index % WIZARD_COLORS.length]
+        };
+      });
+  const blockCount = boundedWizardCount(options.blockCount, "blockCount");
+  const bars = boundedWizardCount(options.blockBars ?? 1, "blockBars", 64);
+  const tempo = positiveTempo(options.tempo, "tempo", 120);
+  const material = cleanString(options.material) || "empty";
+  if (!WIZARD_MATERIAL_MODES.has(material)) {
+    throw new Error("material must be 'empty', 'first-block', or 'all-blocks'");
+  }
+
+  const players = playerDocuments.map((player, index) => ({
+    ...player,
+    color: player.color || WIZARD_COLORS[index % WIZARD_COLORS.length]
+  }));
+  const blocks = Array.from({ length: blockCount }, (_, blockIndex) => {
+    const id = wizardBlockId(blockIndex);
+    return {
+      id,
+      tempo,
+      duration: { bars },
+      players: Object.fromEntries(players.map((player) => [player.id, `${id.toLowerCase()}-${player.id}`]))
+    };
+  });
+  const clips = blocks.flatMap((block, blockIndex) => players.map((player, playerIndex) => ({
+    id: block.players[player.id],
+    notes: wizardNotes(material, blockIndex, playerIndex),
+    duration: { bars },
+    playbackType: "looped",
+    context: {
+      clip: { TimeSignature: { numerator: 4, denominator: 4 } },
+      scale: structuredClone(DEFAULT_SCALE),
+      grid: { subdivision: 4 },
+      seed: 0
+    },
+    behavior: {
+      initialization: {
+        placeholder: true,
+        material
+      }
+    }
+  })));
+
+  return {
+    name: cleanString(options.name) || `${players.length}-player ${blocks.length}-block score`,
+    context: defaultContext(),
+    players,
+    clips,
+    blocks,
+    macrostructure: { blocks: blocks.map(({ id }) => id) },
+    oscRoles: []
+  };
+}
 
 export function createScoreInitializationPlan(request, options = {}) {
   if (!isObject(request)) throw new Error("score initialization request must be an object");
@@ -178,6 +246,35 @@ function positiveTempo(value, field, fallback) {
   const candidate = value === undefined || value === null || value === "" ? fallback : Number(value);
   if (!Number.isFinite(candidate) || candidate <= 0) throw new Error(`${field} must be a positive number`);
   return candidate;
+}
+
+function boundedWizardCount(value, field, maximum = 32) {
+  const candidate = Number(value);
+  if (!Number.isInteger(candidate) || candidate < 1 || candidate > maximum) {
+    throw new Error(`${field} must be an integer from 1 through ${maximum}`);
+  }
+  return candidate;
+}
+
+function wizardBlockId(index) {
+  let value = index + 1;
+  let id = "";
+  while (value > 0) {
+    value -= 1;
+    id = String.fromCharCode(65 + (value % 26)) + id;
+    value = Math.floor(value / 26);
+  }
+  return id;
+}
+
+function wizardNotes(material, blockIndex, playerIndex) {
+  if (material === "empty" || (material === "first-block" && blockIndex > 0)) return [];
+  return [{
+    pitch: 48 + (playerIndex % 24),
+    start_time: 0,
+    duration: 0.25,
+    velocity: 100
+  }];
 }
 
 function assertUnique(entries, label) {

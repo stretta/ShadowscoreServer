@@ -3,6 +3,15 @@
 Phase G provides a dry-run-first public transaction for creating a complete
 score skeleton without hand-editing persisted JSON.
 
+The Setup page exposes the same transaction as a three-step **New Score**
+wizard. It can generate players from a manual count or from selected online
+ShadowScore playback clients, then creates one independent clip for every
+player/block cell. Initial material defaults to empty parts; optional sparse
+test notes can be placed in the first block or in every block. Client-derived
+players are structurally created first, mapped to their selected live targets
+second, and updated through the normal playback-update route when transport
+permits.
+
 The request owns structural intent only:
 
 - `players`: stable player ids plus optional labels, colors, and assignees;
@@ -81,3 +90,27 @@ does not re-add configured default players after restart.
 creates four players, 24 independent one-bar loop clips, six one-bar sections,
 a six-entry macro order, three unmapped AnalogSequencer roles, and 18 implicit
 Unspecified OSC slots.
+
+## Wizard Request
+
+The preview and apply routes also accept a compact wizard document:
+
+```json
+{
+  "wizard": {
+    "name": "Seven by six",
+    "playerCount": 7,
+    "blockCount": 6,
+    "blockBars": 1,
+    "tempo": 120,
+    "material": "empty"
+  }
+}
+```
+
+`material` is `empty`, `first-block`, or `all-blocks`. Instead of
+`playerCount`, callers may provide `players` with stable ids, labels, and
+colors. Wizard-generated clips include placeholder provenance in `behavior`,
+have the same duration as their block, and are never shared between blocks.
+Apply requests add the revision fields returned by preview alongside the
+`wizard` object.

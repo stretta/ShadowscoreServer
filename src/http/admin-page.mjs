@@ -46,6 +46,53 @@ export function adminPage() {
     .score-save-row input { max-width: 360px; }
     .voice-tools { margin: 0 0 12px; }
     .voice-tools input { max-width: 240px; }
+    .score-wizard {
+      background: var(--ss-panel);
+      border: 1px solid var(--ss-border-strong);
+      border-radius: var(--ss-radius-ui);
+      color: var(--ss-text);
+      max-height: min(760px, calc(100vh - 32px));
+      max-width: 680px;
+      padding: 0;
+      width: calc(100vw - 32px);
+    }
+    .score-wizard::backdrop { background: rgba(4, 9, 14, 0.78); }
+    .score-wizard-form { display: grid; gap: 16px; padding: 20px; }
+    .score-wizard-head { align-items: start; display: flex; gap: 12px; justify-content: space-between; }
+    .score-wizard-head h2 { font-size: 20px; margin: 0; }
+    .score-wizard-progress { color: var(--ss-muted); font-size: 12px; margin-top: 4px; text-transform: uppercase; }
+    .score-wizard-step { display: grid; gap: 14px; }
+    .score-wizard-step[hidden] { display: none; }
+    .score-wizard-grid { display: grid; gap: 12px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .score-wizard-grid label, .score-wizard-fieldset { color: var(--ss-muted); display: grid; font-size: 12px; gap: 5px; }
+    .score-wizard-fieldset { border: 0; margin: 0; padding: 0; }
+    .score-wizard-options { display: grid; gap: 8px; }
+    .score-wizard-options label { align-items: center; color: var(--ss-text); display: flex; gap: 8px; }
+    .score-wizard-options input { flex: 0 0 auto; width: 18px; }
+    .score-wizard-player-list { display: grid; gap: 7px; max-height: 300px; overflow-y: auto; }
+    .score-wizard-player {
+      align-items: center;
+      background: rgba(38, 51, 65, 0.46);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-control);
+      display: flex;
+      gap: 9px;
+      padding: 9px;
+    }
+    .score-wizard-player span { display: grid; gap: 2px; }
+    .score-wizard-player code { color: var(--ss-muted); font-size: 11px; }
+    .score-wizard-review {
+      background: rgba(38, 51, 65, 0.46);
+      border: 1px solid var(--ss-border);
+      border-radius: var(--ss-radius-control);
+      display: grid;
+      gap: 8px;
+      padding: 14px;
+    }
+    .score-wizard-review strong { font-size: 16px; }
+    .score-wizard-actions { display: flex; gap: 8px; justify-content: flex-end; }
+    .score-wizard-actions button[hidden] { display: none; }
+    .score-wizard-error { color: var(--ss-danger); min-height: 18px; }
     .qr {
       background: #fff;
       border: 1px solid var(--ss-border-strong);
@@ -209,6 +256,7 @@ export function adminPage() {
       .oscquery-device-form { grid-template-columns: 1fr; }
       .osc-role-form { grid-template-columns: 1fr; }
       .osc-role-options { grid-column: auto; }
+      .score-wizard-grid { grid-template-columns: 1fr; }
     }
   </style>
 </head>
@@ -265,9 +313,71 @@ export function adminPage() {
       </div>
       <div class="score-detail" id="saved-score-detail"></div>
       <div class="score-new-row">
-        <button class="danger" id="new-score" type="button">New score</button>
+        <button class="danger" id="new-score" type="button" data-legacy-endpoint="/admin/scores/new">New score…</button>
       </div>
     </section>
+    <dialog class="score-wizard" id="score-wizard">
+      <form class="score-wizard-form" id="score-wizard-form" method="dialog">
+        <div class="score-wizard-head">
+          <div>
+            <h2>New Score</h2>
+            <div class="score-wizard-progress" id="score-wizard-progress">Step 1 of 3 · Structure</div>
+          </div>
+          <button id="score-wizard-close" type="button" aria-label="Close new score wizard">Close</button>
+        </div>
+        <section class="score-wizard-step" data-wizard-step="1">
+          <div class="score-wizard-grid">
+            <label>Score name
+              <input id="score-wizard-name" autocomplete="off" value="Untitled score">
+            </label>
+            <label>Players
+              <select id="score-wizard-source">
+                <option value="manual">Enter a player count</option>
+                <option value="clients">Use current playback clients</option>
+              </select>
+            </label>
+            <label id="score-wizard-player-count-label">Player count
+              <input id="score-wizard-player-count" type="number" min="1" max="32" value="4">
+            </label>
+            <label>Block count
+              <input id="score-wizard-block-count" type="number" min="1" max="32" value="6">
+            </label>
+            <label>Bars per block
+              <input id="score-wizard-block-bars" type="number" min="1" max="64" value="1">
+            </label>
+            <label>Written tempo
+              <input id="score-wizard-tempo" type="number" min="1" step="0.01" value="120">
+            </label>
+          </div>
+          <fieldset class="score-wizard-fieldset">
+            <legend>Initial material</legend>
+            <div class="score-wizard-options">
+              <label><input name="score-wizard-material" type="radio" value="empty" checked> Empty parts — create no notes</label>
+              <label><input name="score-wizard-material" type="radio" value="first-block"> Test notes in the first block</label>
+              <label><input name="score-wizard-material" type="radio" value="all-blocks"> Test notes in every block</label>
+            </div>
+          </fieldset>
+          <div class="hint">Every player receives an independent clip in every block. Empty parts are the default.</div>
+        </section>
+        <section class="score-wizard-step" data-wizard-step="2" hidden>
+          <div>
+            <strong id="score-wizard-player-heading">Players</strong>
+            <div class="hint" id="score-wizard-player-hint"></div>
+          </div>
+          <div class="score-wizard-player-list" id="score-wizard-players"></div>
+        </section>
+        <section class="score-wizard-step" data-wizard-step="3" hidden>
+          <div class="score-wizard-review" id="score-wizard-review"></div>
+          <div class="hint">Creating the score replaces the current score atomically. Save a copy first if you may need it again.</div>
+        </section>
+        <div class="score-wizard-error" id="score-wizard-error" role="alert"></div>
+        <div class="score-wizard-actions">
+          <button id="score-wizard-back" type="button" hidden>Back</button>
+          <button class="primary" id="score-wizard-next" type="button">Next</button>
+          <button class="danger" id="score-wizard-create" type="button" hidden>Create score</button>
+        </div>
+      </form>
+    </dialog>
     <section class="targets" id="routing">
       <h2>Discovered RNBO targets</h2>
       <div class="rnbo-transfer-monitor" id="rnbo-transfer-monitor" aria-live="polite"></div>
@@ -395,6 +505,19 @@ export function adminPage() {
     const savedScoreDetailEl = document.querySelector("#saved-score-detail");
     const loadSavedScoreEl = document.querySelector("#load-saved-score");
     const removeSavedScoreEl = document.querySelector("#remove-saved-score");
+    const scoreWizardEl = document.querySelector("#score-wizard");
+    const scoreWizardProgressEl = document.querySelector("#score-wizard-progress");
+    const scoreWizardSourceEl = document.querySelector("#score-wizard-source");
+    const scoreWizardPlayerCountLabelEl = document.querySelector("#score-wizard-player-count-label");
+    const scoreWizardPlayerCountEl = document.querySelector("#score-wizard-player-count");
+    const scoreWizardPlayersEl = document.querySelector("#score-wizard-players");
+    const scoreWizardPlayerHeadingEl = document.querySelector("#score-wizard-player-heading");
+    const scoreWizardPlayerHintEl = document.querySelector("#score-wizard-player-hint");
+    const scoreWizardReviewEl = document.querySelector("#score-wizard-review");
+    const scoreWizardErrorEl = document.querySelector("#score-wizard-error");
+    const scoreWizardBackEl = document.querySelector("#score-wizard-back");
+    const scoreWizardNextEl = document.querySelector("#score-wizard-next");
+    const scoreWizardCreateEl = document.querySelector("#score-wizard-create");
     const inputs = new Map();
     let discoveredTargets = [];
     let hardwareUnits = [];
@@ -410,6 +533,10 @@ export function adminPage() {
     let suggestedOscRoleFields = {};
     let currentScore = null;
     let savedScores = [];
+    let scoreWizardStep = 1;
+    let scoreWizardPreview = null;
+    let scoreWizardInitialization = null;
+    let scoreWizardSelectedTargets = [];
     let rnboSendQueue = {
       inProgress: false,
       queued: false,
@@ -431,7 +558,12 @@ export function adminPage() {
     document.querySelector("#add-voice").addEventListener("click", addVoice);
     document.querySelector("#save-score").addEventListener("click", saveScoreToLibrary);
     document.querySelector("#refresh-scores").addEventListener("click", loadSavedScores);
-    document.querySelector("#new-score").addEventListener("click", createNewScore);
+    document.querySelector("#new-score").addEventListener("click", openScoreWizard);
+    document.querySelector("#score-wizard-close").addEventListener("click", closeScoreWizard);
+    scoreWizardSourceEl.addEventListener("change", updateScoreWizardSource);
+    scoreWizardBackEl.addEventListener("click", previousScoreWizardStep);
+    scoreWizardNextEl.addEventListener("click", nextScoreWizardStep);
+    scoreWizardCreateEl.addEventListener("click", createScoreFromWizard);
     savedScoreSelectEl.addEventListener("change", renderSelectedSavedScore);
     loadSavedScoreEl.addEventListener("click", () => {
       if (savedScoreSelectEl.value) void loadSavedScore(savedScoreSelectEl.value);
@@ -1562,18 +1694,272 @@ export function adminPage() {
       await loadSavedScores();
     }
 
-    async function createNewScore() {
-      if (!confirm("Create a new score from defaults? Current score state will be replaced.")) return;
-      const response = await fetch("/admin/scores/new", { method: "POST" });
-      const score = await response.json();
-      if (score.ok === false) {
-        if (score.score) render(score.score);
-        setStatus(score.error);
+    function openScoreWizard() {
+      scoreWizardStep = 1;
+      scoreWizardPreview = null;
+      scoreWizardInitialization = null;
+      scoreWizardSelectedTargets = [];
+      scoreWizardErrorEl.textContent = "";
+      document.querySelector("#score-wizard-name").value = "Untitled score";
+      scoreWizardSourceEl.value = discoveredTargets.some((target) => target.available !== false) ? "clients" : "manual";
+      document.querySelector('input[name="score-wizard-material"][value="empty"]').checked = true;
+      updateScoreWizardSource();
+      showScoreWizardStep(1);
+      scoreWizardEl.showModal();
+    }
+
+    function closeScoreWizard() {
+      scoreWizardEl.close();
+    }
+
+    function updateScoreWizardSource() {
+      const usesClients = scoreWizardSourceEl.value === "clients";
+      scoreWizardPlayerCountLabelEl.hidden = usesClients;
+      scoreWizardErrorEl.textContent = usesClients && !discoveredTargets.some((target) => target.available !== false)
+        ? "No online ShadowScore playback clients are currently available."
+        : "";
+    }
+
+    function showScoreWizardStep(step) {
+      scoreWizardStep = step;
+      const labels = ["Structure", "Players", "Review"];
+      for (const section of document.querySelectorAll("[data-wizard-step]")) {
+        section.hidden = Number(section.dataset.wizardStep) !== step;
+      }
+      scoreWizardProgressEl.textContent = "Step " + step + " of 3 · " + labels[step - 1];
+      scoreWizardBackEl.hidden = step === 1;
+      scoreWizardNextEl.hidden = step === 3;
+      scoreWizardCreateEl.hidden = step !== 3;
+      scoreWizardErrorEl.textContent = "";
+    }
+
+    function previousScoreWizardStep() {
+      showScoreWizardStep(Math.max(1, scoreWizardStep - 1));
+    }
+
+    async function nextScoreWizardStep() {
+      try {
+        if (scoreWizardStep === 1) {
+          validateScoreWizardStructure();
+          renderScoreWizardPlayers();
+          showScoreWizardStep(2);
+          return;
+        }
+        scoreWizardInitialization = scoreWizardOptions();
+        scoreWizardSelectedTargets = selectedScoreWizardTargets();
+        const response = await fetch("/admin/scores/initialize/preview", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ wizard: scoreWizardInitialization })
+        });
+        const body = await response.json();
+        if (!response.ok || body.ok === false) throw new Error(body.error || "Score preview failed.");
+        scoreWizardPreview = body;
+        renderScoreWizardReview();
+        showScoreWizardStep(3);
+      } catch (error) {
+        scoreWizardErrorEl.textContent = error.message;
+      }
+    }
+
+    function validateScoreWizardStructure() {
+      const fields = [
+        document.querySelector("#score-wizard-block-count"),
+        document.querySelector("#score-wizard-block-bars"),
+        document.querySelector("#score-wizard-tempo")
+      ];
+      if (scoreWizardSourceEl.value === "manual") fields.push(scoreWizardPlayerCountEl);
+      const invalid = fields.find((field) => !field.checkValidity());
+      if (invalid) {
+        invalid.reportValidity();
+        throw new Error("Correct the highlighted score setting before continuing.");
+      }
+      if (scoreWizardSourceEl.value === "clients" && !discoveredTargets.some((target) => target.available !== false)) {
+        throw new Error("No online ShadowScore playback clients are currently available.");
+      }
+    }
+
+    function renderScoreWizardPlayers() {
+      scoreWizardPlayersEl.textContent = "";
+      if (scoreWizardSourceEl.value === "clients") {
+        const available = discoveredTargets.filter((target) => target.available !== false);
+        scoreWizardPlayerHeadingEl.textContent = "Current playback clients";
+        scoreWizardPlayerHintEl.textContent = "Choose the clients that should become routed players. Their live addresses remain separate from the score skeleton.";
+        available.forEach((target, index) => {
+          const label = document.createElement("label");
+          label.className = "score-wizard-player";
+          const checkbox = document.createElement("input");
+          checkbox.type = "checkbox";
+          checkbox.checked = true;
+          checkbox.dataset.wizardTargetIndex = String(index);
+          const text = document.createElement("span");
+          const name = document.createElement("strong");
+          name.textContent = scoreWizardTargetLabel(target, index);
+          const endpoint = document.createElement("code");
+          endpoint.textContent = target.id;
+          text.append(name, endpoint);
+          label.append(checkbox, text);
+          scoreWizardPlayersEl.append(label);
+        });
         return;
       }
-      render(score);
-      setStatus("Created new score from defaults and updated players.");
-      await loadSavedScores();
+      const count = Number(scoreWizardPlayerCountEl.value);
+      scoreWizardPlayerHeadingEl.textContent = count + " generated players";
+      scoreWizardPlayerHintEl.textContent = "Players can be renamed and routed from Setup after the score is created.";
+      for (let index = 0; index < count; index += 1) {
+        const row = document.createElement("div");
+        row.className = "score-wizard-player";
+        const text = document.createElement("span");
+        const name = document.createElement("strong");
+        name.textContent = "Player " + (index + 1);
+        const id = document.createElement("code");
+        id.textContent = "player-" + (index + 1);
+        text.append(name, id);
+        row.append(text);
+        scoreWizardPlayersEl.append(row);
+      }
+    }
+
+    function selectedScoreWizardTargets() {
+      if (scoreWizardSourceEl.value !== "clients") return [];
+      const available = discoveredTargets.filter((target) => target.available !== false);
+      return [...scoreWizardPlayersEl.querySelectorAll("input[data-wizard-target-index]:checked")]
+        .map((checkbox) => available[Number(checkbox.dataset.wizardTargetIndex)])
+        .filter(Boolean);
+    }
+
+    function scoreWizardOptions() {
+      const targets = selectedScoreWizardTargets();
+      if (scoreWizardSourceEl.value === "clients" && targets.length === 0) {
+        throw new Error("Select at least one playback client.");
+      }
+      const options = {
+        name: document.querySelector("#score-wizard-name").value.trim(),
+        blockCount: Number(document.querySelector("#score-wizard-block-count").value),
+        blockBars: Number(document.querySelector("#score-wizard-block-bars").value),
+        tempo: Number(document.querySelector("#score-wizard-tempo").value),
+        material: document.querySelector('input[name="score-wizard-material"]:checked').value
+      };
+      if (scoreWizardSourceEl.value === "clients") {
+        options.players = targets.map((target, index) => ({
+          id: "player-" + (index + 1),
+          label: scoreWizardTargetLabel(target, index),
+          color: scoreWizardColor(index)
+        }));
+      } else {
+        options.playerCount = Number(scoreWizardPlayerCountEl.value);
+      }
+      return options;
+    }
+
+    function renderScoreWizardReview() {
+      scoreWizardReviewEl.textContent = "";
+      const summary = scoreWizardPreview.summary;
+      const title = document.createElement("strong");
+      title.textContent = summary.name;
+      const counts = document.createElement("div");
+      counts.textContent = summary.playerCount + " players · " + summary.blockCount + " blocks · " + summary.clipCount + " independent clips";
+      const notes = document.createElement("div");
+      notes.textContent = "Initial material: " + scoreWizardMaterialLabel(scoreWizardInitialization.material) + " · " + summary.noteCount + " notes";
+      const order = document.createElement("div");
+      order.textContent = "Arrangement: " + summary.macroOrder.join(" → ");
+      const routing = document.createElement("div");
+      routing.textContent = scoreWizardSelectedTargets.length
+        ? scoreWizardSelectedTargets.length + " selected live clients will be assigned after structural creation."
+        : "Players will be created without live client mappings.";
+      scoreWizardReviewEl.append(title, counts, notes, order, routing);
+    }
+
+    async function createScoreFromWizard() {
+      if (!scoreWizardPreview || !scoreWizardInitialization) return;
+      scoreWizardCreateEl.disabled = true;
+      scoreWizardBackEl.disabled = true;
+      scoreWizardErrorEl.textContent = "Creating score…";
+      try {
+        const response = await fetch("/admin/scores/initialize", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            wizard: scoreWizardInitialization,
+            expectedVersion: scoreWizardPreview.base.version,
+            expectedScoreRevision: scoreWizardPreview.base.scoreRevision,
+            expectedStructureRevision: scoreWizardPreview.base.structureRevision
+          })
+        });
+        const result = await response.json();
+        if (!response.ok || result.ok === false) throw new Error(result.error || "Score creation failed.");
+
+        let score = result.score;
+        const mappingFailures = [];
+        for (let index = 0; index < scoreWizardSelectedTargets.length; index += 1) {
+          const target = scoreWizardSelectedTargets[index];
+          const playerId = "player-" + (index + 1);
+          const assignmentResponse = await fetch("/voices/" + encodeURIComponent(playerId) + "/assignment", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              assignee: "",
+              deviceId: target.hardwareUnitId || "",
+              clientId: target.clientId ?? null,
+              rnboTargetId: target.id,
+              rnboHost: target.host,
+              rnboPort: target.port,
+              rnboAddress: target.address,
+              label: scoreWizardTargetLabel(target, index),
+              color: scoreWizardColor(index),
+              locked: false
+            })
+          });
+          const assignment = await assignmentResponse.json();
+          if (!assignmentResponse.ok || assignment.ok === false) {
+            mappingFailures.push(playerId + ": " + (assignment.error || "mapping failed"));
+          } else {
+            score = assignment;
+          }
+        }
+
+        let updateFailure = "";
+        if (scoreWizardSelectedTargets.length && mappingFailures.length === 0) {
+          const updateResponse = await fetch("/playback/updates/update-now", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ blockId: score.structureState?.activeBlockId || "A" })
+          });
+          const update = await updateResponse.json();
+          if (!updateResponse.ok || update.ok === false) updateFailure = update.error || "Players could not be updated.";
+        }
+
+        closeScoreWizard();
+        await loadSession();
+        const detail = mappingFailures.length
+          ? " Score created; some client mappings need attention: " + mappingFailures.join("; ")
+          : updateFailure
+            ? " Score and mappings created; player update needs attention: " + updateFailure
+            : scoreWizardSelectedTargets.length
+              ? " Score created, clients assigned, and players updated."
+              : " Score created with unmapped players.";
+        setStatus(result.summary.playerCount + " players · " + result.summary.blockCount + " blocks · " + result.summary.noteCount + " notes." + detail);
+      } catch (error) {
+        scoreWizardErrorEl.textContent = error.message;
+      } finally {
+        scoreWizardCreateEl.disabled = false;
+        scoreWizardBackEl.disabled = false;
+      }
+    }
+
+    function scoreWizardTargetLabel(target, index) {
+      return target.hardwareUnitName || target.hardwareUnitId || target.name || target.id || "Player " + (index + 1);
+    }
+
+    function scoreWizardColor(index) {
+      const colors = ["#6ee7b7", "#60a5fa", "#f59e0b", "#f472b6", "#a78bfa", "#22d3ee", "#fb7185", "#a3e635"];
+      return colors[index % colors.length];
+    }
+
+    function scoreWizardMaterialLabel(material) {
+      if (material === "first-block") return "Test notes in first block";
+      if (material === "all-blocks") return "Test notes in every block";
+      return "Empty parts";
     }
 
     async function loadSavedScore(id) {

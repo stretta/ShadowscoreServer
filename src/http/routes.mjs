@@ -24,6 +24,7 @@ import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createSessionSnapshot } from "../session.mjs";
 import { distributeBlockSwing } from "../sequencer/distribution.mjs";
 import { deleteScoreFromLibrary, listSavedScores, loadScoreFromLibrary, saveScoreToLibrary } from "../state/persistence.mjs";
+import { createWizardScoreInitializationRequest } from "../state/score-initialization.mjs";
 import { buildAuthoritativeTransportState, deriveSyncHealth, resolveTransportLocation, transportObjectDescriptor } from "../transport/authoritative-transport.mjs";
 import { createAuthoritativeTransportPublisher } from "../transport/authoritative-transport-publisher.mjs";
 import { phaseStageAtBeat } from "../transport/ensemble-sync-supervisor.mjs";
@@ -1295,7 +1296,7 @@ export async function routeRequest(request, response, store, config, runtime = {
       writeJson(response, 200, {
         ok: true,
         dryRun: true,
-        ...store.previewScoreInitialization(withoutControlFields(body, REVISION_CONTROL_FIELDS))
+        ...store.previewScoreInitialization(scoreInitializationDocument(body))
       });
     } catch (error) {
       writeError(response, error);
@@ -1309,7 +1310,7 @@ export async function routeRequest(request, response, store, config, runtime = {
       writeJson(response, 200, {
         ok: true,
         dryRun: false,
-        ...store.initializeScore(withoutControlFields(body, REVISION_CONTROL_FIELDS), revisionOptions(body))
+        ...store.initializeScore(scoreInitializationDocument(body), revisionOptions(body))
       });
     } catch (error) {
       writeError(response, error);
@@ -4734,6 +4735,15 @@ function readControlField(body, field) {
     return body.get(field);
   }
   return body?.[field];
+}
+
+function scoreInitializationDocument(body) {
+  const document = withoutControlFields(body, REVISION_CONTROL_FIELDS);
+  if (document.wizard === undefined) return document;
+  const wizard = document.wizard;
+  const unexpected = Object.keys(document).filter((field) => field !== "wizard");
+  if (unexpected.length) throw new Error(`wizard initialization cannot include '${unexpected[0]}'`);
+  return createWizardScoreInitializationRequest(wizard);
 }
 
 function withoutControlFields(document, fields) {

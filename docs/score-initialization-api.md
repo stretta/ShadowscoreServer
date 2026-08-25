@@ -10,7 +10,8 @@ player/block cell. Initial material defaults to empty parts; optional sparse
 test notes can be placed in the first block or in every block. Client-derived
 players are structurally created first, mapped to their selected live targets
 second, and updated through the normal playback-update route when transport
-permits.
+permits. Generated clips can be `1`, `0.5`, or `0.25` times the duration of
+their containing block without changing the block duration.
 
 The request owns structural intent only:
 
@@ -28,16 +29,16 @@ The canonical block harmonic shape is:
 {
   "scale": {
     "root_note": 0,
-    "scale_intervals": [0, 2, 4, 5, 7, 9, 11],
-    "scale_name": "Ionian"
+    "scale_intervals": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    "scale_name": "Chromatic"
   },
-  "ttid": 2741,
+  "ttid": 4095,
   "swing": 0,
   "swingAmt": 0.5
 }
 ```
 
-Initialization normalizes omitted new-score harmonic values to this C Ionian
+Initialization normalizes omitted new-score harmonic values to this C Chromatic
 default, omitted written tempo to 120 BPM, and omitted Swing to Off with an
 amount of `0.5`. Swing amount accepts `0.5` through `1`, where `0.5` is straight
 timing. Every stored block contains these fields. OSC roles may
@@ -102,15 +103,17 @@ The preview and apply routes also accept a compact wizard document:
     "playerCount": 7,
     "blockCount": 6,
     "blockBars": 1,
+    "clipDurationMultiplier": 0.5,
     "tempo": 120,
     "material": "empty"
   }
 }
 ```
 
-`material` is `empty`, `first-block`, or `all-blocks`. Instead of
+`material` is `empty`, `first-block`, or `all-blocks`.
+`clipDurationMultiplier` is `1`, `0.5`, or `0.25` and defaults to `1`. Instead of
 `playerCount`, callers may provide `players` with stable ids, labels, and
 colors. Wizard-generated clips include placeholder provenance in `behavior`,
-have the same duration as their block, and are never shared between blocks.
+use the selected fraction of their block duration, and are never shared between blocks.
 Apply requests add the revision fields returned by preview alongside the
 `wizard` object.

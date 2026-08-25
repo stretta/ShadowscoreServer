@@ -345,6 +345,13 @@ export function adminPage() {
             <label>Bars per block
               <input id="score-wizard-block-bars" type="number" min="1" max="64" value="1">
             </label>
+            <label>Clip duration
+              <select id="score-wizard-clip-duration">
+                <option value="1">1× block duration</option>
+                <option value="0.5">0.5× block duration</option>
+                <option value="0.25">0.25× block duration</option>
+              </select>
+            </label>
             <label>Written tempo
               <input id="score-wizard-tempo" type="number" min="1" step="0.01" value="120">
             </label>
@@ -1837,6 +1844,7 @@ export function adminPage() {
         name: document.querySelector("#score-wizard-name").value.trim(),
         blockCount: Number(document.querySelector("#score-wizard-block-count").value),
         blockBars: Number(document.querySelector("#score-wizard-block-bars").value),
+        clipDurationMultiplier: Number(document.querySelector("#score-wizard-clip-duration").value),
         tempo: Number(document.querySelector("#score-wizard-tempo").value),
         material: document.querySelector('input[name="score-wizard-material"]:checked').value
       };
@@ -1861,13 +1869,16 @@ export function adminPage() {
       counts.textContent = summary.playerCount + " players · " + summary.blockCount + " blocks · " + summary.clipCount + " independent clips";
       const notes = document.createElement("div");
       notes.textContent = "Initial material: " + scoreWizardMaterialLabel(scoreWizardInitialization.material) + " · " + summary.noteCount + " notes";
+      const clipDuration = document.createElement("div");
+      clipDuration.textContent = "Clip duration: " + scoreWizardInitialization.clipDurationMultiplier + "× block · "
+        + (scoreWizardInitialization.blockBars * scoreWizardInitialization.clipDurationMultiplier) + " bars per clip";
       const order = document.createElement("div");
       order.textContent = "Arrangement: " + summary.macroOrder.join(" → ");
       const routing = document.createElement("div");
       routing.textContent = scoreWizardSelectedTargets.length
         ? scoreWizardSelectedTargets.length + " selected live clients will be assigned after structural creation."
         : "Players will be created without live client mappings.";
-      scoreWizardReviewEl.append(title, counts, notes, order, routing);
+      scoreWizardReviewEl.append(title, counts, notes, clipDuration, order, routing);
     }
 
     async function createScoreFromWizard() {

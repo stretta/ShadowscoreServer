@@ -539,7 +539,8 @@ slots. Live device fields are rejected so discovery and onboarding remain a
 separate phase. A four-player, six-section request document is checked in at
 `config/score-initialization.four-player.json`. Setup now provides a
 preview-first New Score wizard for manual counts or selected current playback
-clients, with empty, first-block test, and all-block test material choices.
+clients, with empty, first-block test, and all-block test material choices plus
+clip durations of 1x, 0.5x, or 0.25x their containing block.
 
 - Add a declarative score-initialization request that can create players,
   sections/mesostructural blocks, macro order, note clips, loop lengths, OSC

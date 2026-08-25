@@ -1,9 +1,15 @@
-import { DEFAULT_SCALE, normalizeScale, normalizeTtid, scaleToTtid } from "../harmonic/scale.mjs";
+import { normalizeScale, normalizeTtid, scaleToTtid } from "../harmonic/scale.mjs";
 import { DEFAULT_SWING, DEFAULT_SWING_AMT, normalizeSwing, normalizeSwingAmt } from "../sequencer/swing.mjs";
 
 const ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
 const WIZARD_MATERIAL_MODES = new Set(["empty", "first-block", "all-blocks"]);
+const WIZARD_CLIP_DURATION_MULTIPLIERS = new Set([1, 0.5, 0.25]);
 const WIZARD_COLORS = ["#6ee7b7", "#60a5fa", "#f59e0b", "#f472b6", "#a78bfa", "#22d3ee", "#fb7185", "#a3e635"];
+const INITIALIZED_SCORE_DEFAULT_SCALE = Object.freeze({
+  root_note: 0,
+  scale_intervals: Object.freeze(Array.from({ length: 12 }, (_, pitchClass) => pitchClass)),
+  scale_name: "Chromatic"
+});
 
 export function createWizardScoreInitializationRequest(options = {}) {
   if (!isObject(options)) throw new Error("score initialization wizard options must be an object");
@@ -22,6 +28,10 @@ export function createWizardScoreInitializationRequest(options = {}) {
       });
   const blockCount = boundedWizardCount(options.blockCount, "blockCount");
   const bars = boundedWizardCount(options.blockBars ?? 1, "blockBars", 64);
+  const clipDurationMultiplier = Number(options.clipDurationMultiplier ?? 1);
+  if (!WIZARD_CLIP_DURATION_MULTIPLIERS.has(clipDurationMultiplier)) {
+    throw new Error("clipDurationMultiplier must be 1, 0.5, or 0.25");
+  }
   const tempo = positiveTempo(options.tempo, "tempo", 120);
   const material = cleanString(options.material) || "empty";
   if (!WIZARD_MATERIAL_MODES.has(material)) {
@@ -44,18 +54,19 @@ export function createWizardScoreInitializationRequest(options = {}) {
   const clips = blocks.flatMap((block, blockIndex) => players.map((player, playerIndex) => ({
     id: block.players[player.id],
     notes: wizardNotes(material, blockIndex, playerIndex),
-    duration: { bars },
+    duration: { bars: bars * clipDurationMultiplier },
     playbackType: "looped",
     context: {
       clip: { TimeSignature: { numerator: 4, denominator: 4 } },
-      scale: structuredClone(DEFAULT_SCALE),
+      scale: structuredClone(INITIALIZED_SCORE_DEFAULT_SCALE),
       grid: { subdivision: 4 },
       seed: 0
     },
     behavior: {
       initialization: {
         placeholder: true,
-        material
+        material,
+        clipDurationMultiplier
       }
     }
   })));
@@ -202,8 +213,8 @@ function normalizeBlock(document, index, fallbackTempo = 120) {
     id,
     tempo: positiveTempo(document.tempo, `block '${id}' tempo`, fallbackTempo),
     duration: structuredClone(document.duration ?? { bars: 1 }),
-    scale: normalizeScale(document.scale ?? DEFAULT_SCALE),
-    ttid: document.ttid === undefined ? scaleToTtid(document.scale ?? DEFAULT_SCALE) : normalizeTtid(document.ttid),
+    scale: normalizeScale(document.scale ?? INITIALIZED_SCORE_DEFAULT_SCALE),
+    ttid: document.ttid === undefined ? scaleToTtid(document.scale ?? INITIALIZED_SCORE_DEFAULT_SCALE) : normalizeTtid(document.ttid),
     swing: normalizeSwing(document.swing ?? DEFAULT_SWING),
     swingAmt: normalizeSwingAmt(document.swingAmt ?? DEFAULT_SWING_AMT),
     players
@@ -317,7 +328,7 @@ function cleanString(value) {
 }
 
 function defaultContext() {
-  return { clip: {}, scale: structuredClone(DEFAULT_SCALE), grid: {}, seed: 0 };
+  return { clip: {}, scale: structuredClone(INITIALIZED_SCORE_DEFAULT_SCALE), grid: {}, seed: 0 };
 }
 
 function isObject(value) {

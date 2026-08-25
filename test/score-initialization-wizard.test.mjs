@@ -28,6 +28,12 @@ test("score initialization wizard creates independent empty clips by default", (
   assert.deepEqual(plan.summary.macroOrder, ["A", "B", "C", "D", "E", "F"]);
   assert.equal(plan.score.mesostructure.A.tempo, 96);
   assert.deepEqual(plan.score.mesostructure.A.duration, { bars: 2 });
+  assert.deepEqual(plan.score.mesostructure.A.scale, {
+    root_note: 0,
+    scale_intervals: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+    scale_name: "Chromatic"
+  });
+  assert.equal(plan.score.mesostructure.A.ttid, 4095);
   assert.equal(plan.score.mesostructure.A.players["player-1"], "a-player-1");
   assert.equal(plan.score.mesostructure.B.players["player-1"], "b-player-1");
   assert.notEqual(
@@ -35,8 +41,31 @@ test("score initialization wizard creates independent empty clips by default", (
     plan.score.mesostructure.B.players["player-1"]
   );
   assert.deepEqual(plan.score.clips["a-player-1"].notes, []);
+  assert.deepEqual(plan.score.clips["a-player-1"].duration, { bars: 2 });
+  assert.equal(plan.score.context.scale.scale_name, "Chromatic");
+  assert.equal(plan.score.clips["a-player-1"].context.scale.scale_name, "Chromatic");
   assert.equal(plan.score.clips["a-player-1"].behavior.initialization.placeholder, true);
   assert.equal(plan.score.clips["a-player-1"].behavior.initialization.material, "empty");
+  assert.equal(plan.score.clips["a-player-1"].behavior.initialization.clipDurationMultiplier, 1);
+});
+
+test("score initialization wizard scales clip duration independently from block duration", () => {
+  const half = createScoreInitializationPlan(createWizardScoreInitializationRequest({
+    playerCount: 1,
+    blockCount: 1,
+    blockBars: 3,
+    clipDurationMultiplier: 0.5
+  }));
+  const quarter = createScoreInitializationPlan(createWizardScoreInitializationRequest({
+    playerCount: 1,
+    blockCount: 1,
+    blockBars: 3,
+    clipDurationMultiplier: 0.25
+  }));
+
+  assert.deepEqual(half.score.mesostructure.A.duration, { bars: 3 });
+  assert.deepEqual(half.score.clips["a-player-1"].duration, { bars: 1.5 });
+  assert.deepEqual(quarter.score.clips["a-player-1"].duration, { bars: 0.75 });
 });
 
 test("score initialization wizard can add test notes to only the first block", () => {
@@ -84,6 +113,10 @@ test("score initialization wizard validates bounded counts and material modes", 
     () => createWizardScoreInitializationRequest({ playerCount: 1, blockCount: 1, material: "seeded defaults" }),
     /material must be/
   );
+  assert.throws(
+    () => createWizardScoreInitializationRequest({ playerCount: 1, blockCount: 1, clipDurationMultiplier: 0.75 }),
+    /clipDurationMultiplier must be 1, 0.5, or 0.25/
+  );
 });
 
 test("Admin exposes a preview-first New Score wizard with optional test material", () => {
@@ -94,6 +127,8 @@ test("Admin exposes a preview-first New Score wizard with optional test material
   assert.match(page, /value="empty" checked/);
   assert.match(page, /Test notes in the first block/);
   assert.match(page, /Test notes in every block/);
+  assert.match(page, /0\.5× block duration/);
+  assert.match(page, /0\.25× block duration/);
   assert.match(page, /\/admin\/scores\/initialize\/preview/);
   assert.match(page, /\/admin\/scores\/initialize/);
   assert.match(page, /\/playback\/updates\/update-now/);

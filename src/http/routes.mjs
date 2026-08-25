@@ -2885,6 +2885,7 @@ async function coherentPlaybackSnapshot(runtime, store, config) {
     sendQueue: playbackOperationQueueStatus(runtime),
     transfers: playbackDeliveryStatus(runtime),
     lifecycleEvents: playbackLifecycleEvents(runtime),
+    participantRuntime: runtime.playbackCoordinator?.participantRuntimeStatus?.() ?? [],
     updates,
     staleAfterMs: config.transport?.rnboClient?.staleAfterMs ?? 1000
   });

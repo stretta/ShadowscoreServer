@@ -168,6 +168,17 @@ test("playback snapshot exposes shared desired/prepared/active update state", ()
   assert.deepEqual(snapshot.updates, updates);
 });
 
+test("playback snapshot exposes software participant execution truth separately", () => {
+  const participantRuntime = [{
+    adapter: "websocket-json",
+    active: [{ participantId: "realtime:laptop", status: "active" }],
+    execution: [{ participantId: "realtime:laptop", status: "advancing", fresh: true }]
+  }];
+  const snapshot = buildPlaybackSnapshot({ participantRuntime });
+  assert.deepEqual(snapshot.participantRuntime, participantRuntime);
+  assert.deepEqual(snapshot.targets, {});
+});
+
 test("playback snapshot projects timestamped client phase to the coherent boundary and compares across loop wrap", () => {
   const observedAt = Date.parse("2026-08-17T21:00:05.000Z");
   const snapshot = buildPlaybackSnapshot({

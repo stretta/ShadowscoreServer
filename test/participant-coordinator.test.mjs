@@ -48,6 +48,7 @@ test("playback participant coordinator exposes transport-neutral read capabiliti
       prepareBlock: true,
       prepareParticipants: false,
       activateParticipants: false,
+      participantRuntime: false,
       applyBlockUpdate: true,
       activatePreparedBlock: true,
       lifecycleEvents: true,
@@ -85,6 +86,7 @@ test("playback participant coordinator exposes transport-neutral read capabiliti
   assert.deepEqual(coordinator.lifecycleEvents(), [{ type: "prepare_completed" }]);
   assert.equal(coordinator.deliveryStatus().summary.readyCount, 1);
   assert.deepEqual(coordinator.participantDeliveryStatus(), [{ targetId: "finch" }]);
+  assert.deepEqual(coordinator.participantRuntimeStatus(), []);
   assert.deepEqual(coordinator.operationQueueStatus(), { inProgress: false, queued: false });
   assert.deepEqual(await coordinator.waitForIdle(), { inProgress: false, queued: false });
   assert.equal(coordinator.deliveryEvents, deliveryEvents);
@@ -95,6 +97,7 @@ test("disabled playback participant coordinator has safe diagnostics and rejects
   assert.equal(coordinator.enabled, false);
   assert.deepEqual(coordinator.lifecycleEvents(), []);
   assert.deepEqual(coordinator.participantDeliveryStatus(), []);
+  assert.deepEqual(coordinator.participantRuntimeStatus(), []);
   assert.deepEqual(coordinator.operationQueueStatus(), {
     inProgress: false,
     queued: false,
@@ -144,6 +147,9 @@ test("playback participant coordinator assigns one operation id across participa
       async activatePreparedBlock(blockId, options) {
         calls.push({ activateBlockId: blockId, activateOptions: options });
         return { participating: true, operationId: options.operationId };
+      },
+      snapshot() {
+        return { adapter: "websocket-json", execution: [{ status: "advancing" }] };
       }
     }]
   });
@@ -168,6 +174,11 @@ test("playback participant coordinator assigns one operation id across participa
   }]);
 
   assert.equal(coordinator.descriptor().capabilities.activateParticipants, true);
+  assert.equal(coordinator.descriptor().capabilities.participantRuntime, true);
+  assert.deepEqual(coordinator.participantRuntimeStatus(), [{
+    adapter: "websocket-json",
+    execution: [{ status: "advancing" }]
+  }]);
   const activation = await coordinator.activateParticipants("B", {
     operationId: "activation-7",
     preparedOperationId: "operation-7",

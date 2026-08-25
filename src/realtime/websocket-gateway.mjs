@@ -8,7 +8,14 @@ export const PLAYBACK_PARTICIPANT_PROTOCOL_VERSION = 1;
 
 const ROLE_CAPABILITIES = Object.freeze({
   observer: Object.freeze(["topics:read"]),
-  playback: Object.freeze(["topics:read", "participant:register", "playback:ready", "playback:active"])
+  playback: Object.freeze([
+    "topics:read",
+    "participant:register",
+    "playback:ready",
+    "playback:active",
+    "playback:execution",
+    "playback:reconcile"
+  ])
 });
 
 export function attachRealtimeGateway(server, broker, options = {}) {
@@ -188,6 +195,9 @@ export function attachRealtimeGateway(server, broker, options = {}) {
         } : null
       }
     });
+    if (session.participantAdapterConnected) {
+      options.playbackParticipantAdapter.requestReconciliation?.(session.participantId, session.connectionId);
+    }
     await subscribeTopics(session, acceptedTopics);
   }
 
@@ -239,6 +249,26 @@ export function attachRealtimeGateway(server, broker, options = {}) {
             throw protocolError("playback_role_required", "playback.active requires a registered playback participant");
           }
           payload = await options.playbackParticipantAdapter.acceptActive({
+            participantId: session.participantId,
+            connectionId: session.connectionId,
+            payload: message.payload
+          });
+          break;
+        case "playback.execution":
+          if (session.role !== "playback" || !session.participantAdapterConnected) {
+            throw protocolError("playback_role_required", "playback.execution requires a registered playback participant");
+          }
+          payload = await options.playbackParticipantAdapter.acceptExecution({
+            participantId: session.participantId,
+            connectionId: session.connectionId,
+            payload: message.payload
+          });
+          break;
+        case "playback.reconciled":
+          if (session.role !== "playback" || !session.participantAdapterConnected) {
+            throw protocolError("playback_role_required", "playback.reconciled requires a registered playback participant");
+          }
+          payload = await options.playbackParticipantAdapter.acceptReconciled({
             participantId: session.participantId,
             connectionId: session.connectionId,
             payload: message.payload
@@ -361,7 +391,7 @@ export function attachRealtimeGateway(server, broker, options = {}) {
 
   function capabilitiesForRole(role) {
     return ROLE_CAPABILITIES[role].filter((capability) =>
-      !["playback:ready", "playback:active"].includes(capability) || Boolean(options.playbackParticipantAdapter)
+      !capability.startsWith("playback:") || Boolean(options.playbackParticipantAdapter)
     );
   }
 }

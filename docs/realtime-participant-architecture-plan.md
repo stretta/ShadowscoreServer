@@ -157,6 +157,22 @@ deployed tree, live `playback:active` discovery and grant, rejection of an
 unsolicited ACTIVE, hardware smoke, stopped transport, and aligned RNBO
 players.
 
+Implementation update, 2026-08-25: the fourth Phase 7 slice is implemented and
+deployed to `wren`. Exact, sequenced software execution observations now keep
+ACTIVE, observed, advancing, stationary, and stale truth distinct. Disconnect
+or replacement immediately clears ACTIVE and execution truth while retaining
+only a bounded exact reconciliation expectation; a capable replacement must
+answer the server's challenge with the same activation identity and a fresh
+execution observation, then provide another increasing observation before it
+is advancing. Expiry, missing capability, mismatch, server restart, and
+unsolicited claims fail closed. `/playback/snapshot` exposes this state under
+`participantRuntime`, separate from RNBO targets. Production orchestration
+remains RNBO-only. Deployment verification proved 643 local tests, 211 focused
+tests from Wren's deployed tree, live capability discovery and snapshot
+visibility, rejection of unsolicited execution and reconciliation claims,
+hardware smoke, stopped transport, aligned synchronization, and receiver-
+confirmed READY RNBO transfers.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer
@@ -873,6 +889,60 @@ prepared and active in-memory truth. The playback role grants
 `playback:active`, `/session` advertises `playback.active`, and the client must
 also declare `score:activate`. Execution witness, reconnect reconciliation, and
 production-cohort enrollment remain later boundaries.
+
+#### Phase 7d execution witness and reconnect reconciliation boundary
+
+The fourth Phase 7 slice keeps ACTIVE as an application acknowledgement and
+adds a separate execution-evidence channel. A client declaring
+`execution:witness` may send `playback.execution` only for its exact current
+activation identity:
+
+```json
+{
+  "protocol": "shadowscore.realtime.v2",
+  "type": "playback.execution",
+  "request_id": "execution-42",
+  "payload": {
+    "operation_id": "activate-1",
+    "prepared_operation_id": "prepare-1",
+    "block_id": "A",
+    "score_revision": 45339,
+    "payload_hash": "same-active-payload-hash",
+    "execution": {
+      "sequence": 42,
+      "playing": true,
+      "position": { "absolute_beat": 18.25, "beat_into_block": 2.25 }
+    }
+  }
+}
+```
+
+`position.absolute_beat` is the monotonic Live song position, not a wrapping
+clip-local position. The first valid observation is `observed`. A later,
+higher sequence with a strictly higher absolute beat is `advancing`; a stopped
+or non-moving observation is `stationary`. Duplicate or decreasing sequences
+are rejected. Witness freshness is evaluated independently of ACTIVE, and an
+old observation becomes `stale` without rewriting its recorded status.
+
+Disconnect or connection replacement immediately removes current ACTIVE and
+execution truth. The server retains only the exact former ACTIVE identity for
+a bounded reconciliation window. If the replacement connection declares
+`execution:witness`, the server sends a non-coalescible `playback.reconcile`
+challenge. The client answers with `playback.reconciled`, either confirming
+`idle` against that exact identity or confirming `active` with the exact
+identity plus a fresh execution observation. A restored ACTIVE begins with an
+`observed` witness and needs another increasing observation before becoming
+`advancing` again. Mismatch leaves reconciliation pending; expiration, a new
+prepare, or a new activation clears it. A server restart intentionally loses
+this in-memory expectation and therefore cannot adopt an uncorrelated client
+claim.
+
+The playback role advertises `playback:execution` and
+`playback:reconcile`; `/session` lists `playback.execution` and
+`playback.reconciled`. `/playback/snapshot` exposes the adapter state under
+`participantRuntime`, separate from RNBO `targets`. Normal transport,
+look-ahead, cue, and activation orchestration remain RNBO-only. Production-
+cohort enrollment and physical audibility remain later acceptance boundaries.
 
 ### Phase 8: Optional consumer migration and retirement
 

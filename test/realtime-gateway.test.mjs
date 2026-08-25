@@ -276,7 +276,7 @@ test("realtime gateway requires a valid versioned declaration for playback parti
   assert.equal(participantRegistry.snapshot().participants.length, 0);
 });
 
-test("realtime coordinator delivers preparation and activation with exact READY and ACTIVE acknowledgements", async (t) => {
+test("realtime coordinator requires exact READY, ACTIVE, execution, and reconnect reconciliation", async (t) => {
   const score = createInitialScore(defaultConfig);
   score.assignments["player-1"] = { clientId: "laptop", deviceId: "ableton-laptop", locked: false };
   const participantRegistry = createParticipantRegistry({ getAssignments: () => score.assignments });
@@ -309,12 +309,17 @@ test("realtime coordinator delivers preparation and activation with exact READY 
     participant: {
       protocol_version: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
       stable_device_id: "ableton-laptop",
-      capabilities: ["score:prepare", "score:activate"]
+      capabilities: ["score:prepare", "score:activate", "execution:witness"]
     }
   }));
   const welcome = await inbox.next((message) => message.type === "welcome");
   assert.deepEqual(welcome.payload.capabilities, [
-    "topics:read", "participant:register", "playback:ready", "playback:active"
+    "topics:read",
+    "participant:register",
+    "playback:ready",
+    "playback:active",
+    "playback:execution",
+    "playback:reconcile"
   ]);
 
   const preparation = coordinator.prepareParticipants("A", "integration-test", { operationId: "prepare-1" });
@@ -408,6 +413,85 @@ test("realtime coordinator delivers preparation and activation with exact READY 
   assert.equal(activationResult.results[0].acknowledgements[0].status, "active");
   assert.equal(playbackParticipantAdapter.snapshot().pendingActivations.length, 0);
   assert.equal(playbackParticipantAdapter.snapshot().active[0].operationId, "activate-1");
+
+  const activeIdentity = {
+    operation_id: activate.payload.operation_id,
+    prepared_operation_id: activate.payload.prepared_operation_id,
+    block_id: activate.payload.block_id,
+    score_revision: activate.payload.score_revision,
+    payload_hash: activate.payload.payload_hash
+  };
+  client.send(JSON.stringify({
+    type: "playback.execution",
+    request_id: "execution-1",
+    payload: { ...activeIdentity, execution: { sequence: 1, playing: true, position: { absolute_beat: 16 } } }
+  }));
+  const observed = await inbox.next((message) => message.type === "result" && message.request_id === "execution-1");
+  assert.equal(observed.payload.status, "observed");
+  client.send(JSON.stringify({
+    type: "playback.execution",
+    request_id: "execution-2",
+    payload: { ...activeIdentity, execution: { sequence: 2, playing: true, position: { absolute_beat: 16.25 } } }
+  }));
+  const advancing = await inbox.next((message) => message.type === "result" && message.request_id === "execution-2");
+  assert.equal(advancing.payload.status, "advancing");
+  assert.equal(playbackParticipantAdapter.snapshot().execution[0].status, "advancing");
+
+  const firstClosed = onceClose(client);
+  client.close();
+  await firstClosed;
+  await waitUntil(() => playbackParticipantAdapter.snapshot().reconciliation.length === 1);
+  assert.equal(playbackParticipantAdapter.snapshot().active.length, 0);
+
+  const replacement = connect(context.url("/realtime"), REALTIME_PROTOCOL);
+  t.after(() => replacement.close());
+  const replacementInbox = createInbox(replacement);
+  await onceOpen(replacement);
+  await replacementInbox.next((message) => message.type === "hello.required");
+  replacement.send(JSON.stringify({
+    protocol: REALTIME_PROTOCOL,
+    type: "hello",
+    client_id: "laptop",
+    role: "playback",
+    topics: [],
+    participant: {
+      protocol_version: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
+      stable_device_id: "ableton-laptop",
+      capabilities: ["score:prepare", "score:activate", "execution:witness"]
+    }
+  }));
+  await replacementInbox.next((message) => message.type === "welcome");
+  const reconcile = await replacementInbox.next((message) => message.type === "playback.reconcile");
+  assert.equal(reconcile.payload.operation_id, "activate-1");
+  replacement.send(JSON.stringify({
+    type: "playback.reconciled",
+    request_id: "reconcile-wrong",
+    payload: {
+      ...reconcile.payload,
+      state: "active",
+      payload_hash: "wrong",
+      execution: { sequence: 1, playing: true, position: { absolute_beat: 17 } }
+    }
+  }));
+  const reconcileMismatch = await replacementInbox.next(
+    (message) => message.type === "error" && message.request_id === "reconcile-wrong"
+  );
+  assert.equal(reconcileMismatch.payload.code, "PLAYBACK_RECONCILIATION_MISMATCH");
+  replacement.send(JSON.stringify({
+    type: "playback.reconciled",
+    request_id: "reconcile-correct",
+    payload: {
+      ...reconcile.payload,
+      state: "active",
+      execution: { sequence: 1, playing: true, position: { absolute_beat: 17 } }
+    }
+  }));
+  const reconciled = await replacementInbox.next(
+    (message) => message.type === "result" && message.request_id === "reconcile-correct"
+  );
+  assert.equal(reconciled.payload.state, "active");
+  assert.equal(reconciled.payload.execution.status, "observed");
+  assert.equal(playbackParticipantAdapter.snapshot().active[0].reconciled, true);
 });
 
 test("realtime and collaboration WebSockets coexist and unknown upgrades retain 404", async (t) => {

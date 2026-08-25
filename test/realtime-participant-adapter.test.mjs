@@ -152,6 +152,111 @@ test("realtime playback adapter activates only the exact prepared slot and requi
   registry.close();
 });
 
+test("realtime playback adapter distinguishes execution progress and reconciles reconnects explicitly", async () => {
+  const score = assignedScore();
+  const registry = createParticipantRegistry({ getAssignments: () => score.assignments });
+  registry.connectRealtimeSession(registrySession());
+  const sent = [];
+  let currentTime = 1_000;
+  const adapter = createRealtimePlaybackParticipantAdapter({
+    getScore: () => score,
+    getParticipantRegistry: () => registry,
+    witnessFreshnessMs: 250,
+    reconciliationTimeoutMs: 1_000,
+    now: () => currentTime,
+    unrefTimers: false
+  });
+  const capabilities = ["score:prepare", "score:activate", "execution:witness"];
+  adapter.connectSession(adapterSession(capabilities, (message) => sent.push(message)));
+
+  await prepareAndReady(adapter, sent, "prepare-witness");
+  const activation = adapter.activatePreparedBlock("A", {
+    operationId: "activate-witness",
+    preparedOperationId: "prepare-witness"
+  });
+  const activate = sent.at(-1);
+  adapter.acceptActive({
+    participantId: "realtime:laptop",
+    connectionId: "connection-1",
+    payload: activePayload(activate)
+  });
+  await activation;
+
+  assert.throws(() => adapter.acceptExecution({
+    participantId: "realtime:laptop",
+    connectionId: "connection-1",
+    payload: { ...activePayload(activate), payload_hash: "wrong", execution: executionPayload(1, 8) }
+  }), (error) => error.code === "PLAYBACK_EXECUTION_MISMATCH");
+  const observed = adapter.acceptExecution({
+    participantId: "realtime:laptop",
+    connectionId: "connection-1",
+    payload: { ...activePayload(activate), execution: executionPayload(1, 8) }
+  });
+  assert.equal(observed.status, "observed");
+  currentTime += 100;
+  const advancing = adapter.acceptExecution({
+    participantId: "realtime:laptop",
+    connectionId: "connection-1",
+    payload: { ...activePayload(activate), execution: executionPayload(2, 8.5) }
+  });
+  assert.equal(advancing.status, "advancing");
+  assert.equal(adapter.snapshot().execution[0].fresh, true);
+  assert.throws(() => adapter.acceptExecution({
+    participantId: "realtime:laptop",
+    connectionId: "connection-1",
+    payload: { ...activePayload(activate), execution: executionPayload(2, 9) }
+  }), (error) => error.code === "PLAYBACK_EXECUTION_STALE");
+  currentTime += 300;
+  assert.equal(adapter.snapshot().execution[0].status, "stale");
+
+  adapter.disconnectSession("connection-1");
+  assert.equal(adapter.snapshot().active.length, 0);
+  assert.equal(adapter.snapshot().execution.length, 0);
+  assert.equal(adapter.snapshot().reconciliation.length, 1);
+
+  adapter.connectSession(adapterSession(capabilities, (message) => sent.push(message), "connection-2"));
+  assert.equal(adapter.requestReconciliation("realtime:laptop", "connection-2").requested, true);
+  const reconcile = sent.at(-1);
+  assert.equal(reconcile.type, "playback.reconcile");
+  assert.throws(() => adapter.acceptExecution({
+    participantId: "realtime:laptop",
+    connectionId: "connection-2",
+    payload: { ...activePayload(activate), execution: executionPayload(1, 9) }
+  }), (error) => error.code === "PLAYBACK_EXECUTION_NOT_EXPECTED");
+  assert.throws(() => adapter.acceptReconciled({
+    participantId: "realtime:laptop",
+    connectionId: "connection-2",
+    payload: { ...reconcile.payload, state: "active", payload_hash: "wrong", execution: executionPayload(1, 9) }
+  }), (error) => error.code === "PLAYBACK_RECONCILIATION_MISMATCH");
+  const reconciled = adapter.acceptReconciled({
+    participantId: "realtime:laptop",
+    connectionId: "connection-2",
+    payload: { ...reconcile.payload, state: "active", execution: executionPayload(1, 9) }
+  });
+  assert.equal(reconciled.state, "active");
+  assert.equal(reconciled.execution.status, "observed");
+  assert.equal(adapter.snapshot().active[0].reconciled, true);
+  assert.equal(adapter.snapshot().reconciliation.length, 0);
+
+  const resumed = adapter.acceptExecution({
+    participantId: "realtime:laptop",
+    connectionId: "connection-2",
+    payload: { ...activePayload(activate), execution: executionPayload(2, 9.25) }
+  });
+  assert.equal(resumed.status, "advancing");
+
+  adapter.disconnectSession("connection-2");
+  adapter.connectSession(adapterSession(["score:prepare", "score:activate"], (message) => sent.push(message), "connection-3"));
+  assert.equal(adapter.requestReconciliation("realtime:laptop", "connection-3").reason, "capability-required");
+  assert.equal(adapter.snapshot().active.length, 0);
+  currentTime += 1_001;
+  assert.equal(adapter.requestReconciliation("realtime:laptop", "connection-3"), null);
+  assert.equal(adapter.snapshot().reconciliation.length, 0);
+
+  adapter.close();
+  registry.close();
+});
+
 function assignedScore() {
   const score = createInitialScore(defaultConfig);
   score.assignments["player-1"] = { clientId: "laptop", deviceId: "ableton-laptop", locked: false };
@@ -211,4 +316,8 @@ function activePayload(command) {
     score_revision: command.payload.score_revision,
     payload_hash: command.payload.payload_hash
   };
+}
+
+function executionPayload(sequence, beat, playing = true) {
+  return { sequence, playing, position: { absolute_beat: beat } };
 }

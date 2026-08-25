@@ -361,7 +361,12 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.realtime.readOnly, false);
   assert.deepEqual(session.realtime.roles, ["observer", "playback"]);
   assert.equal(session.realtime.playbackParticipantProtocolVersion, 1);
-  assert.deepEqual(session.realtime.commands, ["playback.ready", "playback.active"]);
+  assert.deepEqual(session.realtime.commands, [
+    "playback.ready",
+    "playback.active",
+    "playback.execution",
+    "playback.reconciled"
+  ]);
   assert.deepEqual(session.realtime.topics, ["score", "transport", "playback", "playback.transfers", "participants"]);
   assert.equal(session.endpoints.transportStatus, "http://127.0.0.1/transport/status");
   assert.equal(session.macroPlayback.running, false);
@@ -3515,6 +3520,12 @@ test("playback snapshot is versioned and reports authoritative and execution pos
       }
     }),
     runtime: {
+      playbackCoordinator: {
+        participantRuntimeStatus: () => [{
+          adapter: "websocket-json",
+          execution: [{ participantId: "realtime:laptop", status: "advancing", fresh: true }]
+        }]
+      },
       rnboAdapter: {
         sendStatus: () => [{
           targetId: "finch",
@@ -3566,6 +3577,8 @@ test("playback snapshot is versioned and reports authoritative and execution pos
   assert.equal(first.targets.finch.activeTransaction, 1103);
   assert.equal(first.targets.finch.noteCount, 392);
   assert.equal(first.lifecycleEvents[0].type, "prepare_completed");
+  assert.equal(first.participantRuntime[0].adapter, "websocket-json");
+  assert.equal(first.participantRuntime[0].execution[0].status, "advancing");
 });
 
 test("transport object path resolves to one revisioned musician-facing authority", async () => {

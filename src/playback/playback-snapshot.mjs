@@ -21,6 +21,7 @@ export function buildPlaybackSnapshot({
   sendQueue = {},
   transfers = null,
   lifecycleEvents = [],
+  participantRuntime = [],
   updates = null,
   staleAfterMs = 1000
 } = {}) {
@@ -140,6 +141,7 @@ export function buildPlaybackSnapshot({
     sendQueue,
     transfers,
     lifecycleEvents: lifecycleEvents.slice(-100),
+    participantRuntime,
     updates
   };
 }

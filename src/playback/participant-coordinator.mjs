@@ -18,6 +18,7 @@ export function createPlaybackParticipantCoordinator(options = {}) {
           prepareBlock: typeof adapter?.prepareBlock === "function",
           prepareParticipants: participantAdapters.some((entry) => typeof entry.prepareBlock === "function"),
           activateParticipants: participantAdapters.some((entry) => typeof entry.activatePreparedBlock === "function"),
+          participantRuntime: participantAdapters.some((entry) => typeof entry.snapshot === "function"),
           applyBlockUpdate: typeof adapter?.applyBlockUpdate === "function",
           activatePreparedBlock: typeof adapter?.activatePreparedBlock === "function",
           lifecycleEvents: typeof adapter?.lifecycleEvents === "function",
@@ -86,6 +87,11 @@ export function createPlaybackParticipantCoordinator(options = {}) {
     },
     participantDeliveryStatus() {
       return adapter?.sendStatus?.() ?? [];
+    },
+    participantRuntimeStatus() {
+      return participantAdapters
+        .filter((entry) => typeof entry.snapshot === "function")
+        .map((entry) => entry.snapshot());
     },
     operationQueueStatus() {
       return adapter?.sendQueueStatus?.() ?? emptyOperationQueueStatus();

@@ -9,6 +9,9 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
   const unrefTimers = options.unrefTimers !== false;
   const prepareTimeoutMs = Math.max(250, Number(options.prepareTimeoutMs) || 5_000);
   const activationTimeoutMs = Math.max(250, Number(options.activationTimeoutMs) || 5_000);
+  const witnessFreshnessMs = Math.max(250, Number(options.witnessFreshnessMs) || 2_000);
+  const reconciliationTimeoutMs = Math.max(250, Number(options.reconciliationTimeoutMs) || 30_000);
+  const now = options.now ?? Date.now;
   const sessions = new Map();
   const sessionsByConnectionId = new Map();
   const pending = new Map();
@@ -16,6 +19,8 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
   const prepareCohorts = new Map();
   const prepared = new Map();
   const active = new Map();
+  const execution = new Map();
+  const reconciliation = new Map();
   let closed = false;
 
   return {
@@ -26,6 +31,9 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     activatePreparedBlock,
     acceptReady,
     acceptActive,
+    acceptExecution,
+    requestReconciliation,
+    acceptReconciled,
     snapshot,
     close
   };
@@ -48,7 +56,9 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     if (previous && previous.connectionId !== connectionId) {
       sessionsByConnectionId.delete(previous.connectionId);
       prepared.delete(participantId);
+      preserveActiveForReconciliation(participantId, previous.connectionId);
       active.delete(participantId);
+      execution.delete(participantId);
       rejectPendingForConnection(
         previous.connectionId,
         adapterError("PLAYBACK_PARTICIPANT_REPLACED", `participant '${participantId}' reconnected before READY`)
@@ -69,7 +79,11 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     const session = sessions.get(participantId);
     if (session?.connectionId === connectionId) sessions.delete(participantId);
     if (session?.connectionId === connectionId) prepared.delete(participantId);
-    if (session?.connectionId === connectionId) active.delete(participantId);
+    if (session?.connectionId === connectionId) {
+      preserveActiveForReconciliation(participantId, connectionId);
+      active.delete(participantId);
+      execution.delete(participantId);
+    }
     rejectPendingForConnection(connectionId, adapterError("PLAYBACK_PARTICIPANT_DISCONNECTED", `participant '${participantId}' disconnected`));
     rejectPendingActivationsForConnection(connectionId, adapterError("PLAYBACK_PARTICIPANT_DISCONNECTED", `participant '${participantId}' disconnected`));
     return session?.connectionId === connectionId;
@@ -250,6 +264,8 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
       status: "active"
     };
     active.set(participantId, acknowledgement);
+    clearReconciliation(participantId);
+    execution.delete(participantId);
     settlePendingActivation(key, null, acknowledgement);
     return {
       accepted: true,
@@ -264,13 +280,112 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     };
   }
 
+  function acceptExecution(input = {}) {
+    const participantId = requiredIdentifier(input.participantId ?? input.participant_id, "participant_id");
+    const connectionId = requiredIdentifier(input.connectionId ?? input.connection_id, "connection_id");
+    const payload = input.payload ?? {};
+    const session = sessions.get(participantId);
+    if (!session || session.connectionId !== connectionId || !session.declaredCapabilities.includes("execution:witness")) {
+      throw adapterError("PLAYBACK_CAPABILITY_REQUIRED", `participant '${participantId}' does not declare execution:witness`);
+    }
+    const activeState = active.get(participantId);
+    if (!activeState || activeState.connectionId !== connectionId) {
+      throw adapterError("PLAYBACK_EXECUTION_NOT_EXPECTED", `participant '${participantId}' has no ACTIVE operation on this connection`);
+    }
+    validateExecutionIdentity(payload, activeState, "PLAYBACK_EXECUTION_MISMATCH", "execution witness");
+    const witness = recordExecution(participantId, connectionId, activeState, payload.execution);
+    return executionResult(witness);
+  }
+
+  function requestReconciliation(participantIdValue, connectionIdValue) {
+    const participantId = requiredIdentifier(participantIdValue, "participant_id");
+    const connectionId = requiredIdentifier(connectionIdValue, "connection_id");
+    const session = sessions.get(participantId);
+    const expected = reconciliation.get(participantId);
+    if (!expected || expected.expiresAt <= now()) {
+      clearReconciliation(participantId);
+      return null;
+    }
+    if (!session || session.connectionId !== connectionId) return null;
+    if (!session.declaredCapabilities.includes("execution:witness")) {
+      return { requested: false, reason: "capability-required", expiresAt: expected.expiresAt };
+    }
+    const accepted = session.send({
+      type: "playback.reconcile",
+      payload: {
+        operation_id: expected.operationId,
+        prepared_operation_id: expected.preparedOperationId,
+        participant_id: participantId,
+        block_id: expected.blockId,
+        voice_ids: [...expected.voiceIds],
+        score_revision: expected.scoreRevision,
+        payload_hash: expected.payloadHash,
+        expires_at: new Date(expected.expiresAt).toISOString()
+      }
+    });
+    if (accepted === false) return { requested: false, reason: "send-unavailable", expiresAt: expected.expiresAt };
+    expected.requestedConnectionId = connectionId;
+    return { requested: true, expiresAt: expected.expiresAt };
+  }
+
+  function acceptReconciled(input = {}) {
+    const participantId = requiredIdentifier(input.participantId ?? input.participant_id, "participant_id");
+    const connectionId = requiredIdentifier(input.connectionId ?? input.connection_id, "connection_id");
+    const payload = input.payload ?? {};
+    const expected = reconciliation.get(participantId);
+    if (!expected || expected.expiresAt <= now() || expected.requestedConnectionId !== connectionId) {
+      clearReconciliation(participantId);
+      throw adapterError("PLAYBACK_RECONCILIATION_NOT_EXPECTED", `participant '${participantId}' has no reconciliation request on this connection`);
+    }
+    if (payload.state === "idle") {
+      validateExecutionIdentity(payload, expected, "PLAYBACK_RECONCILIATION_MISMATCH", "idle reconciliation");
+      clearReconciliation(participantId);
+      active.delete(participantId);
+      execution.delete(participantId);
+      return { accepted: true, participant_id: participantId, state: "idle" };
+    }
+    if (payload.state !== "active") {
+      throw adapterError("PLAYBACK_RECONCILIATION_INVALID", "reconciliation state must be 'active' or 'idle'");
+    }
+    validateExecutionIdentity(payload, expected, "PLAYBACK_RECONCILIATION_MISMATCH", "active reconciliation");
+    normalizeExecution(payload.execution);
+    const restored = {
+      participantId,
+      connectionId,
+      operationId: expected.operationId,
+      preparedOperationId: expected.preparedOperationId,
+      blockId: expected.blockId,
+      voiceIds: [...expected.voiceIds],
+      scoreRevision: expected.scoreRevision,
+      payloadHash: expected.payloadHash,
+      status: "active",
+      reconciled: true
+    };
+    active.set(participantId, restored);
+    execution.delete(participantId);
+    const witness = recordExecution(participantId, connectionId, restored, payload.execution);
+    clearReconciliation(participantId);
+    return {
+      accepted: true,
+      participant_id: participantId,
+      state: "active",
+      operation_id: restored.operationId,
+      prepared_operation_id: restored.preparedOperationId,
+      block_id: restored.blockId,
+      execution: executionResult(witness)
+    };
+  }
+
   function snapshot() {
     return {
+      adapter: "websocket-json",
       sessions: [...sessions.values()].map(sessionSnapshot),
       pending: [...pending.values()].map((request) => requestSnapshot(request)),
       pendingActivations: [...pendingActivations.values()].map((request) => activationRequestSnapshot(request)),
       prepared: [...prepared.values()].map((entry) => structuredClone(entry)),
-      active: [...active.values()].map((entry) => structuredClone(entry))
+      active: [...active.values()].map((entry) => structuredClone(entry)),
+      execution: [...execution.values()].map(executionSnapshot),
+      reconciliation: [...reconciliation.values()].map(reconciliationSnapshot)
     };
   }
 
@@ -286,6 +401,8 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     prepareCohorts.clear();
     prepared.clear();
     active.clear();
+    execution.clear();
+    for (const participantId of reconciliation.keys()) clearReconciliation(participantId);
   }
 
   function selectedSoftwareParticipants(score, operationOptions) {
@@ -319,6 +436,9 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     const previousPrepared = prepared.get(participantId);
     if (previousPrepared) prepareCohorts.delete(previousPrepared.operationId);
     prepared.delete(participantId);
+    clearReconciliation(participantId);
+    active.delete(participantId);
+    execution.delete(participantId);
     const payloadHash = crypto.createHash("sha256").update(JSON.stringify(desired)).digest("hex");
     const request = {
       participantId,
@@ -392,7 +512,9 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     });
     pendingActivations.set(key, request);
     prepared.delete(participantId);
+    clearReconciliation(participantId);
     active.delete(participantId);
+    execution.delete(participantId);
     request.timer = timers.setTimeout(() => {
       settlePendingActivation(
         key,
@@ -452,6 +574,93 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     for (const [key, request] of pendingActivations) {
       if (request.connectionId === connectionId) settlePendingActivation(key, error);
     }
+  }
+
+  function preserveActiveForReconciliation(participantId, connectionId) {
+    const activeState = active.get(participantId);
+    if (!activeState || activeState.connectionId !== connectionId) return;
+    clearReconciliation(participantId);
+    const expected = {
+      ...structuredClone(activeState),
+      disconnectedConnectionId: connectionId,
+      requestedConnectionId: null,
+      expiresAt: now() + reconciliationTimeoutMs,
+      timer: null
+    };
+    expected.timer = timers.setTimeout(() => clearReconciliation(participantId), reconciliationTimeoutMs);
+    if (unrefTimers) expected.timer?.unref?.();
+    reconciliation.set(participantId, expected);
+  }
+
+  function clearReconciliation(participantId) {
+    const expected = reconciliation.get(participantId);
+    if (!expected) return;
+    reconciliation.delete(participantId);
+    timers.clearTimeout(expected.timer);
+  }
+
+  function validateExecutionIdentity(payload, expected, code, label) {
+    const mismatches = [
+      ["operation_id", payload.operation_id, expected.operationId],
+      ["prepared_operation_id", payload.prepared_operation_id, expected.preparedOperationId],
+      ["block_id", payload.block_id, expected.blockId],
+      ["score_revision", payload.score_revision, expected.scoreRevision],
+      ["payload_hash", payload.payload_hash, expected.payloadHash]
+    ].filter(([, actual, wanted]) => actual !== wanted);
+    if (mismatches.length) {
+      throw adapterError(code, `${label} does not match ${mismatches.map(([field]) => field).join(", ")}`);
+    }
+  }
+
+  function recordExecution(participantId, connectionId, activeState, value) {
+    const observation = normalizeExecution(value);
+    const previous = execution.get(participantId);
+    if (previous?.connectionId === connectionId && observation.sequence <= previous.sequence) {
+      throw adapterError("PLAYBACK_EXECUTION_STALE", `execution sequence ${observation.sequence} does not advance beyond ${previous.sequence}`);
+    }
+    const advancing = Boolean(
+      observation.playing
+      && previous?.connectionId === connectionId
+      && observation.sequence > previous.sequence
+      && observation.position.absolute_beat > previous.position.absolute_beat
+    );
+    const witness = {
+      participantId,
+      connectionId,
+      operationId: activeState.operationId,
+      preparedOperationId: activeState.preparedOperationId,
+      blockId: activeState.blockId,
+      scoreRevision: activeState.scoreRevision,
+      payloadHash: activeState.payloadHash,
+      sequence: observation.sequence,
+      playing: observation.playing,
+      position: observation.position,
+      receivedAt: now(),
+      status: advancing
+        ? "advancing"
+        : observation.playing && (!previous || previous.connectionId !== connectionId)
+          ? "observed"
+          : "stationary"
+    };
+    execution.set(participantId, witness);
+    return witness;
+  }
+
+  function executionSnapshot(witness) {
+    const ageMs = Math.max(0, now() - witness.receivedAt);
+    const fresh = ageMs <= witnessFreshnessMs;
+    return {
+      ...structuredClone(witness),
+      observedStatus: witness.status,
+      status: fresh ? witness.status : "stale",
+      ageMs,
+      fresh
+    };
+  }
+
+  function reconciliationSnapshot(expected) {
+    const { timer, ...value } = expected;
+    return { ...structuredClone(value), expired: expected.expiresAt <= now() };
   }
 }
 
@@ -537,6 +746,51 @@ function activationRequestSnapshot(request) {
     payloadHash: request.payloadHash,
     boundary: request.boundary,
     position: structuredClone(request.position)
+  };
+}
+
+function normalizeExecution(value) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw adapterError("PLAYBACK_EXECUTION_INVALID", "execution must be an object");
+  }
+  const sequence = Number(value.sequence);
+  if (!Number.isSafeInteger(sequence) || sequence < 0) {
+    throw adapterError("PLAYBACK_EXECUTION_INVALID", "execution.sequence must be a non-negative safe integer");
+  }
+  if (typeof value.playing !== "boolean") {
+    throw adapterError("PLAYBACK_EXECUTION_INVALID", "execution.playing must be boolean");
+  }
+  const position = value.position;
+  if (!position || typeof position !== "object" || Array.isArray(position)) {
+    throw adapterError("PLAYBACK_EXECUTION_INVALID", "execution.position must be an object");
+  }
+  const absoluteBeat = Number(position.absolute_beat);
+  if (!Number.isFinite(absoluteBeat) || absoluteBeat < 0) {
+    throw adapterError("PLAYBACK_EXECUTION_INVALID", "execution.position.absolute_beat must be a non-negative finite number");
+  }
+  const normalizedPosition = { absolute_beat: absoluteBeat };
+  for (const field of ["seconds", "beat_into_block", "block_beat"]) {
+    if (position[field] === undefined) continue;
+    const number = Number(position[field]);
+    if (!Number.isFinite(number) || number < 0) {
+      throw adapterError("PLAYBACK_EXECUTION_INVALID", `execution.position.${field} must be a non-negative finite number`);
+    }
+    normalizedPosition[field] = number;
+  }
+  return { sequence, playing: value.playing, position: normalizedPosition };
+}
+
+function executionResult(witness) {
+  return {
+    accepted: true,
+    participant_id: witness.participantId,
+    operation_id: witness.operationId,
+    prepared_operation_id: witness.preparedOperationId,
+    block_id: witness.blockId,
+    sequence: witness.sequence,
+    playing: witness.playing,
+    position: structuredClone(witness.position),
+    status: witness.status
   };
 }
 

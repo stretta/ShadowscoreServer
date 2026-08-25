@@ -98,17 +98,23 @@ export function createParticipantRegistry(options = {}) {
     const observedAt = isoNow();
     const descriptor = {
       participant_id: participantId,
-      stable_device_id: clientId,
+      stable_device_id: requiredIdentifier(session.stableDeviceId ?? session.stable_device_id ?? clientId, "stable_device_id"),
       kind: "software",
       adapter: "websocket-json",
       status: "online",
       available: true,
-      capabilities: structuredClone(session.capabilities ?? []),
+      capabilities: {
+        protocol_version: Number(session.participantProtocolVersion ?? session.participant_protocol_version) || 1,
+        declared: structuredClone(session.declaredCapabilities ?? session.declared_capabilities ?? []),
+        granted: structuredClone(session.capabilities ?? [])
+      },
       endpoint: {
         protocol: String(session.protocol ?? ""),
         connection_id: connectionId,
         role: String(session.role ?? "observer"),
-        topics: [...(session.topics ?? [])]
+        topics: [...(session.topics ?? [])],
+        display_name: String(session.displayName ?? session.display_name ?? ""),
+        runtime: structuredClone(session.runtime ?? {})
       },
       last_seen_at: observedAt,
       expires_at: null

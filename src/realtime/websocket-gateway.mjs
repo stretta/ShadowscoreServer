@@ -4,6 +4,12 @@ import { attachWebSocketEndpoint } from "./websocket-endpoint.mjs";
 export { createOutboundQueue } from "./websocket-endpoint.mjs";
 
 export const REALTIME_PROTOCOL = "shadowscore.realtime.v2";
+export const PLAYBACK_PARTICIPANT_PROTOCOL_VERSION = 1;
+
+const ROLE_CAPABILITIES = Object.freeze({
+  observer: Object.freeze(["topics:read"]),
+  playback: Object.freeze(["topics:read", "participant:register"])
+});
 
 export function attachRealtimeGateway(server, broker, options = {}) {
   const path = options.path ?? "/realtime";
@@ -49,6 +55,7 @@ export function attachRealtimeGateway(server, broker, options = {}) {
       outbound: connection.outbound,
       subscriptions: new Map(),
       requestCache: new Map(),
+      participantRegistered: false,
       initialized: false,
       closed: false
     };
@@ -67,7 +74,12 @@ export function attachRealtimeGateway(server, broker, options = {}) {
       payload: {
         protocol: REALTIME_PROTOCOL,
         hello_timeout_ms: helloTimeoutMs,
-        available_topics: broker.topics("observer")
+        available_topics: broker.topics("observer"),
+        available_roles: Object.entries(ROLE_CAPABILITIES).map(([role, capabilities]) => ({
+          role,
+          capabilities: [...capabilities],
+          participant_protocol_version: role === "playback" ? PLAYBACK_PARTICIPANT_PROTOCOL_VERSION : null
+        }))
       }
     });
   }
@@ -101,24 +113,36 @@ export function attachRealtimeGateway(server, broker, options = {}) {
     if (message.protocol !== REALTIME_PROTOCOL || message.type !== "hello") {
       throw protocolError("hello_required", `first message must be a '${REALTIME_PROTOCOL}' hello`);
     }
-    if (message.role !== undefined && message.role !== "observer") {
-      throw protocolError("role_forbidden", `role '${message.role}' is not available`);
+    const role = message.role ?? "observer";
+    if (!Object.hasOwn(ROLE_CAPABILITIES, role)) {
+      throw protocolError("role_forbidden", `role '${role}' is not available`);
     }
     const requestedClientId = optionalClientId(message.client_id);
     session.clientId = requestedClientId || `client-${crypto.randomUUID()}`;
-    session.role = "observer";
+    session.role = role;
     const previous = sessionsByClientId.get(session.clientId);
     const requestedTopics = normalizeTopics(message.topics ?? []);
     const acceptedTopics = validateTopics(requestedTopics, session.role);
-    const capabilities = ["topics:read"];
-    options.participantRegistry?.connectRealtimeSession?.({
-      clientId: session.clientId,
-      connectionId: session.connectionId,
-      protocol: REALTIME_PROTOCOL,
-      role: session.role,
-      capabilities,
-      topics: acceptedTopics
-    });
+    const capabilities = [...ROLE_CAPABILITIES[session.role]];
+    const participant = session.role === "playback"
+      ? normalizePlaybackParticipant(message.participant, session.clientId)
+      : null;
+    let registeredParticipant = null;
+    if (participant) {
+      if (typeof options.participantRegistry?.connectRealtimeSession !== "function") {
+        throw protocolError("participant_unavailable", "playback participant registration is unavailable");
+      }
+      registeredParticipant = options.participantRegistry.connectRealtimeSession({
+        clientId: session.clientId,
+        connectionId: session.connectionId,
+        protocol: REALTIME_PROTOCOL,
+        role: session.role,
+        capabilities,
+        topics: acceptedTopics,
+        ...participant
+      }) ?? null;
+      session.participantRegistered = Boolean(registeredParticipant);
+    }
     if (previous && previous !== session) closeSession(previous, 4001, "replaced by newer connection");
     sessionsByClientId.set(session.clientId, session);
     session.initialized = true;
@@ -135,7 +159,13 @@ export function attachRealtimeGateway(server, broker, options = {}) {
         capabilities,
         heartbeat_interval_ms: heartbeatIntervalMs,
         heartbeat_timeout_ms: heartbeatTimeoutMs,
-        topics: acceptedTopics
+        topics: acceptedTopics,
+        participant: registeredParticipant ? {
+          participant_id: registeredParticipant.participant_id,
+          protocol_version: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
+          stable_device_id: registeredParticipant.stable_device_id,
+          declared_capabilities: [...participant.declaredCapabilities]
+        } : null
       }
     });
     await subscribeTopics(session, acceptedTopics);
@@ -279,7 +309,7 @@ export function attachRealtimeGateway(server, broker, options = {}) {
     for (const topic of [...session.subscriptions.keys()]) unsubscribeTopic(session, topic);
     sessions.delete(session.connectionId);
     if (sessionsByClientId.get(session.clientId) === session) sessionsByClientId.delete(session.clientId);
-    if (session.initialized) options.participantRegistry?.disconnectRealtimeSession?.(session.connectionId);
+    if (session.participantRegistered) options.participantRegistry?.disconnectRealtimeSession?.(session.connectionId);
   }
 
   function closeSession(session, code, reason) {
@@ -287,6 +317,65 @@ export function attachRealtimeGateway(server, broker, options = {}) {
     removeSession(session);
     session.connection.close(code, reason);
   }
+}
+
+function normalizePlaybackParticipant(value, clientId) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw protocolError("participant_required", "playback role requires a participant declaration");
+  }
+  const protocolVersion = Number(value.protocol_version);
+  if (protocolVersion !== PLAYBACK_PARTICIPANT_PROTOCOL_VERSION) {
+    throw protocolError(
+      "participant_protocol_unsupported",
+      `participant protocol_version must be ${PLAYBACK_PARTICIPANT_PROTOCOL_VERSION}`
+    );
+  }
+  return {
+    participantProtocolVersion: protocolVersion,
+    stableDeviceId: optionalSafeIdentifier(value.stable_device_id, "stable_device_id", clientId),
+    displayName: optionalSafeText(value.display_name, "display_name", ""),
+    declaredCapabilities: normalizeCapabilities(value.capabilities),
+    runtime: normalizeRuntime(value.runtime)
+  };
+}
+
+function normalizeCapabilities(value) {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > 32) {
+    throw protocolError("invalid_participant_capabilities", "participant capabilities must be an array of at most 32 names");
+  }
+  return [...new Set(value.map((capability) => {
+    if (typeof capability !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(capability)) {
+      throw protocolError("invalid_participant_capabilities", "participant capability names must contain 1-128 safe identifier characters");
+    }
+    return capability;
+  }))];
+}
+
+function normalizeRuntime(value) {
+  if (value === undefined) return {};
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw protocolError("invalid_participant_runtime", "participant runtime must be an object");
+  }
+  return Object.fromEntries(["name", "version", "platform"]
+    .filter((field) => value[field] !== undefined)
+    .map((field) => [field, optionalSafeText(value[field], `runtime.${field}`, "")]));
+}
+
+function optionalSafeIdentifier(value, field, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string" || !/^[A-Za-z0-9._:-]{1,128}$/.test(value)) {
+    throw protocolError("invalid_participant", `${field} must contain 1-128 safe identifier characters`);
+  }
+  return value;
+}
+
+function optionalSafeText(value, field, fallback) {
+  if (value === undefined || value === null || value === "") return fallback;
+  if (typeof value !== "string" || value.length > 128 || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw protocolError("invalid_participant", `${field} must be a string of at most 128 printable characters`);
+  }
+  return value.trim() || fallback;
 }
 
 function normalizeTopics(value) {

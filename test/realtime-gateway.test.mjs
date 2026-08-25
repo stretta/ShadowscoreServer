@@ -9,7 +9,12 @@ import { createParticipantRegistry } from "../src/playback/participant-registry.
 import { createEventPublisher, createLoadedPublisher } from "../src/realtime/publisher.mjs";
 import { createRealtimeTopicBroker } from "../src/realtime/topic-broker.mjs";
 import { attachUnknownWebSocketFallback } from "../src/realtime/upgrade-routing.mjs";
-import { attachRealtimeGateway, createOutboundQueue, REALTIME_PROTOCOL } from "../src/realtime/websocket-gateway.mjs";
+import {
+  attachRealtimeGateway,
+  createOutboundQueue,
+  PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
+  REALTIME_PROTOCOL
+} from "../src/realtime/websocket-gateway.mjs";
 import { createInitialScore, createScoreStore } from "../src/state/score-store.mjs";
 
 test("realtime topic broker sequences shared upstream events and enforces roles", async () => {
@@ -54,6 +59,14 @@ test("realtime gateway negotiates v2, correlates requests, and streams read-only
   const required = await inbox.next((message) => message.type === "hello.required");
   assert.equal(required.protocol, REALTIME_PROTOCOL);
   assert.deepEqual(required.payload.available_topics.map((topic) => topic.name), ["score", "transport"]);
+  assert.deepEqual(required.payload.available_roles, [
+    { role: "observer", capabilities: ["topics:read"], participant_protocol_version: null },
+    {
+      role: "playback",
+      capabilities: ["topics:read", "participant:register"],
+      participant_protocol_version: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION
+    }
+  ]);
 
   client.send(JSON.stringify({
     protocol: REALTIME_PROTOCOL,
@@ -145,20 +158,44 @@ test("realtime gateway projects software sessions into participant snapshots and
   }));
   await watcherInbox.next((message) => message.type === "welcome");
   const initial = await watcherInbox.next((message) => message.type === "snapshot" && message.topic === "participants");
-  assert.equal(initial.payload.value.participants.some((entry) => entry.participant_id === "realtime:watcher"), true);
+  assert.equal(initial.payload.value.participants.some((entry) => entry.participant_id === "realtime:watcher"), false);
 
   const first = connect(context.url("/realtime"), REALTIME_PROTOCOL);
   const firstInbox = createInbox(first);
   t.after(() => first.close());
   await onceOpen(first);
   await firstInbox.next((message) => message.type === "hello.required");
-  first.send(JSON.stringify({ protocol: REALTIME_PROTOCOL, type: "hello", client_id: "laptop", topics: [] }));
-  await firstInbox.next((message) => message.type === "welcome");
+  first.send(JSON.stringify({
+    protocol: REALTIME_PROTOCOL,
+    type: "hello",
+    client_id: "laptop",
+    role: "playback",
+    topics: [],
+    participant: {
+      protocol_version: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
+      stable_device_id: "ableton-laptop",
+      display_name: "Ableton Live",
+      capabilities: ["score:prepare", "score:activate", "execution:witness"],
+      runtime: { name: "Shadowscore M4L", version: "0.1.0", platform: "max" }
+    }
+  }));
+  const firstWelcome = await firstInbox.next((message) => message.type === "welcome");
+  assert.deepEqual(firstWelcome.payload.capabilities, ["topics:read", "participant:register"]);
+  assert.deepEqual(firstWelcome.payload.participant, {
+    participant_id: "realtime:laptop",
+    protocol_version: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
+    stable_device_id: "ableton-laptop",
+    declared_capabilities: ["score:prepare", "score:activate", "execution:witness"]
+  });
   const added = await watcherInbox.next((message) =>
     message.type === "event" && message.payload.value.event?.type === "participant.added"
       && message.payload.value.event.participant_id === "realtime:laptop"
   );
-  assert.equal(added.payload.value.participants.find((entry) => entry.participant_id === "realtime:laptop").available, true);
+  const addedParticipant = added.payload.value.participants.find((entry) => entry.participant_id === "realtime:laptop");
+  assert.equal(addedParticipant.available, true);
+  assert.equal(addedParticipant.stable_device_id, "ableton-laptop");
+  assert.equal(addedParticipant.endpoint.runtime.name, "Shadowscore M4L");
+  assert.deepEqual(addedParticipant.capabilities.granted, ["topics:read", "participant:register"]);
 
   const second = connect(context.url("/realtime"), REALTIME_PROTOCOL);
   const secondInbox = createInbox(second);
@@ -166,7 +203,18 @@ test("realtime gateway projects software sessions into participant snapshots and
   await onceOpen(second);
   await secondInbox.next((message) => message.type === "hello.required");
   const firstClosed = onceClose(first);
-  second.send(JSON.stringify({ protocol: REALTIME_PROTOCOL, type: "hello", client_id: "laptop", topics: [] }));
+  second.send(JSON.stringify({
+    protocol: REALTIME_PROTOCOL,
+    type: "hello",
+    client_id: "laptop",
+    role: "playback",
+    topics: [],
+    participant: {
+      protocol_version: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
+      stable_device_id: "ableton-laptop",
+      capabilities: []
+    }
+  }));
   await secondInbox.next((message) => message.type === "welcome");
   assert.equal((await firstClosed).code, 4001);
   const replaced = await watcherInbox.next((message) =>
@@ -185,6 +233,45 @@ test("realtime gateway projects software sessions into participant snapshots and
   await watcherClosed;
   await waitUntil(() => participantRegistry.subscriberCount() === 0);
   assert.equal(participantRegistry.subscriberCount(), 0);
+});
+
+test("realtime gateway requires a valid versioned declaration for playback participants", async (t) => {
+  const participantRegistry = createParticipantRegistry();
+  const context = await createGatewayServer({ participantRegistry });
+  t.after(() => {
+    context.close();
+    participantRegistry.close();
+  });
+  const client = connect(context.url("/realtime"), REALTIME_PROTOCOL);
+  t.after(() => client.close());
+  const inbox = createInbox(client);
+  await onceOpen(client);
+  await inbox.next((message) => message.type === "hello.required");
+
+  client.send(JSON.stringify({
+    protocol: REALTIME_PROTOCOL,
+    type: "hello",
+    request_id: "playback-hello-1",
+    client_id: "invalid-laptop",
+    role: "playback",
+    topics: []
+  }));
+  const missing = await inbox.next((message) => message.type === "error" && message.request_id === "playback-hello-1");
+  assert.equal(missing.payload.code, "participant_required");
+  assert.equal(participantRegistry.snapshot().participants.length, 0);
+
+  client.send(JSON.stringify({
+    protocol: REALTIME_PROTOCOL,
+    type: "hello",
+    request_id: "playback-hello-2",
+    client_id: "invalid-laptop",
+    role: "playback",
+    topics: [],
+    participant: { protocol_version: 2 }
+  }));
+  const unsupported = await inbox.next((message) => message.type === "error" && message.request_id === "playback-hello-2");
+  assert.equal(unsupported.payload.code, "participant_protocol_unsupported");
+  assert.equal(participantRegistry.snapshot().participants.length, 0);
 });
 
 test("realtime and collaboration WebSockets coexist and unknown upgrades retain 404", async (t) => {
@@ -277,11 +364,11 @@ async function createGatewayServer(options = {}) {
   });
   const transportPublisher = createLoadedPublisher(() => ({ rolling: false }), { intervalMs: 500 });
   const definitions = {
-    score: { publisher: scorePublisher, roles: ["observer"] },
-    transport: { publisher: transportPublisher, roles: ["observer"] }
+    score: { publisher: scorePublisher, roles: ["observer", "playback"] },
+    transport: { publisher: transportPublisher, roles: ["observer", "playback"] }
   };
   if (options.participantRegistry) {
-    definitions.participants = { publisher: options.participantRegistry, roles: ["observer"] };
+    definitions.participants = { publisher: options.participantRegistry, roles: ["observer", "playback"] };
   }
   const broker = createRealtimeTopicBroker(definitions);
   const server = http.createServer((_request, response) => {

@@ -1,4 +1,4 @@
-import { REALTIME_PROTOCOL } from "./realtime/websocket-gateway.mjs";
+import { PLAYBACK_PARTICIPANT_PROTOCOL_VERSION, REALTIME_PROTOCOL } from "./realtime/websocket-gateway.mjs";
 
 export function createSessionSnapshot(score, config, request, runtime = {}) {
   const baseUrl = publicBaseUrl(config, request);
@@ -40,7 +40,8 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
     realtime: {
       protocol: REALTIME_PROTOCOL,
       readOnly: true,
-      roles: ["observer"],
+      roles: ["observer", "playback"],
+      playbackParticipantProtocolVersion: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
       topics: ["score", "transport", "playback", "playback.transfers", "participants"]
     },
     voices: Object.keys(score.voices).map((voiceId) => ({

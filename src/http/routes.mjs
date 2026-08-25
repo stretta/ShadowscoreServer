@@ -1822,12 +1822,13 @@ export async function routeRequest(request, response, store, config, runtime = {
 }
 
 export function realtimeTopicDefinitions(store, config, runtime) {
+  const readerRoles = ["observer", "playback"];
   return {
-    score: { publisher: scorePublisher(store, runtime), version: 1, roles: ["observer"] },
-    transport: { publisher: authoritativeTransportPublisher(store, config, runtime), version: 1, roles: ["observer"] },
-    playback: { publisher: playbackSnapshotPublisher(runtime, store, config), version: 1, roles: ["observer"] },
-    "playback.transfers": { publisher: playbackTransferPublisher(runtime), version: 1, roles: ["observer"] },
-    participants: { publisher: runtime.participantRegistry, version: 1, roles: ["observer"] }
+    score: { publisher: scorePublisher(store, runtime), version: 1, roles: readerRoles },
+    transport: { publisher: authoritativeTransportPublisher(store, config, runtime), version: 1, roles: readerRoles },
+    playback: { publisher: playbackSnapshotPublisher(runtime, store, config), version: 1, roles: readerRoles },
+    "playback.transfers": { publisher: playbackTransferPublisher(runtime), version: 1, roles: readerRoles },
+    participants: { publisher: runtime.participantRegistry, version: 1, roles: readerRoles }
   };
 }
 

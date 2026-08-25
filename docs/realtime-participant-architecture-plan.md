@@ -112,6 +112,21 @@ identical coordinator and RNBO prepared transactions, stable repeated-read
 compilation, an idle operation queue, stopped transport, aligned
 synchronization, and receiver-confirmed READY transfers.
 
+Implementation update, 2026-08-25: the first Phase 7 slice is implemented and
+deployed to `wren`. The version-2 gateway now advertises separate `observer`
+and `playback` roles. Playback clients register through a required version-1
+participant declaration with stable device identity, display metadata,
+declared capabilities, and bounded runtime metadata; the server returns its
+granted role capabilities and normalized participant identity. Observer
+sessions no longer appear as playback participants. `/session` and the initial
+`hello.required` envelope expose the role and participant-version contract for
+discovery. This slice adds no prepare, READY, activation, ACTIVE, execution-
+witness, score, or transport commands. Deployment verification proved exact
+source parity, the complete local suite, focused remote gateway and route
+tests, live observer separation, live playback add/offline lifecycle events,
+stopped transport, aligned synchronization, and receiver-confirmed READY RNBO
+transfers.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer
@@ -696,6 +711,47 @@ generic gateway:
 
 The first non-RNBO client should be treated as an acceptance consumer of this
 architecture, not as the source of its semantics.
+
+#### Phase 7a contract boundary
+
+The first Phase 7 slice establishes registration without exposing preparation
+or activation writes. The existing `observer` role remains compatible and is
+not projected as a playback participant. A client that requests the `playback`
+role must include a versioned participant declaration in its initial hello:
+
+```json
+{
+  "protocol": "shadowscore.realtime.v2",
+  "type": "hello",
+  "request_id": "hello-1",
+  "client_id": "ableton-laptop",
+  "role": "playback",
+  "topics": ["score", "transport", "playback", "participants"],
+  "participant": {
+    "protocol_version": 1,
+    "stable_device_id": "ableton-laptop",
+    "display_name": "Ableton Live",
+    "capabilities": ["score:prepare", "score:activate", "execution:witness"],
+    "runtime": {
+      "name": "Shadowscore M4L",
+      "version": "0.1.0",
+      "platform": "max"
+    }
+  }
+}
+```
+
+The server validates the declaration, grants only its role capabilities, and
+returns the normalized participant identity in `welcome`. The registry keeps
+declared client capabilities separate from server-granted permissions. The
+`hello.required` envelope and `/session` advertise the available roles and
+participant protocol version, so a client can discover this contract before
+registering. Unknown participant versions fail explicitly; they are never
+silently treated as the current protocol.
+
+This boundary deliberately does not add prepare, READY, activate, ACTIVE, or
+execution-witness messages. Those messages require their own coordinator-backed
+delivery and exact operation-ID characterization before they can be granted.
 
 ### Phase 8: Optional consumer migration and retirement
 

@@ -64,6 +64,12 @@ test("participant registry replaces realtime endpoints without an old disconnect
   registry.connectRealtimeSession(session("laptop", "connection-2"));
   assert.equal(registry.disconnectRealtimeSession("connection-1"), false);
   assert.equal(registry.snapshot().participants[0].endpoint.connection_id, "connection-2");
+  assert.equal(registry.snapshot().participants[0].stable_device_id, "ableton-laptop");
+  assert.deepEqual(registry.snapshot().participants[0].capabilities, {
+    protocol_version: 1,
+    declared: ["score:prepare"],
+    granted: ["topics:read", "participant:register"]
+  });
   assert.equal(registry.snapshot().participants[0].available, true);
   assert.equal(events.at(-1).event, "participant.endpoint_replaced");
 
@@ -127,8 +133,13 @@ function session(clientId, connectionId) {
     clientId,
     connectionId,
     protocol: "shadowscore.realtime.v2",
-    role: "observer",
-    capabilities: ["topics:read"],
+    role: "playback",
+    capabilities: ["topics:read", "participant:register"],
+    declaredCapabilities: ["score:prepare"],
+    participantProtocolVersion: 1,
+    stableDeviceId: "ableton-laptop",
+    displayName: "Ableton Live",
+    runtime: { name: "Shadowscore M4L", version: "0.1.0", platform: "max" },
     topics: ["participants"]
   };
 }

@@ -47,6 +47,7 @@ test("playback participant coordinator exposes transport-neutral read capabiliti
       playbackUpdates: true,
       prepareBlock: true,
       prepareParticipants: false,
+      activateParticipants: false,
       applyBlockUpdate: true,
       activatePreparedBlock: true,
       lifecycleEvents: true,
@@ -139,6 +140,10 @@ test("playback participant coordinator assigns one operation id across participa
       async prepareBlock(blockId, reason, options) {
         calls.push({ blockId, reason, options });
         return { participating: true, operationId: options.operationId };
+      },
+      async activatePreparedBlock(blockId, options) {
+        calls.push({ activateBlockId: blockId, activateOptions: options });
+        return { participating: true, operationId: options.operationId };
       }
     }]
   });
@@ -161,4 +166,25 @@ test("playback participant coordinator assigns one operation id across participa
       participantIds: ["realtime:laptop"]
     }
   }]);
+
+  assert.equal(coordinator.descriptor().capabilities.activateParticipants, true);
+  const activation = await coordinator.activateParticipants("B", {
+    operationId: "activation-7",
+    preparedOperationId: "operation-7",
+    boundary: "next-cycle"
+  });
+  assert.deepEqual(activation, {
+    operationId: "activation-7",
+    preparedOperationId: "operation-7",
+    blockId: "B",
+    results: [{ participating: true, operationId: "activation-7" }]
+  });
+  assert.deepEqual(calls.at(-1), {
+    activateBlockId: "B",
+    activateOptions: {
+      operationId: "activation-7",
+      preparedOperationId: "operation-7",
+      boundary: "next-cycle"
+    }
+  });
 });

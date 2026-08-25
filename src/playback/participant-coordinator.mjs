@@ -17,6 +17,7 @@ export function createPlaybackParticipantCoordinator(options = {}) {
           playbackUpdates: typeof adapter?.playbackUpdates === "function",
           prepareBlock: typeof adapter?.prepareBlock === "function",
           prepareParticipants: participantAdapters.some((entry) => typeof entry.prepareBlock === "function"),
+          activateParticipants: participantAdapters.some((entry) => typeof entry.activatePreparedBlock === "function"),
           applyBlockUpdate: typeof adapter?.applyBlockUpdate === "function",
           activatePreparedBlock: typeof adapter?.activatePreparedBlock === "function",
           lifecycleEvents: typeof adapter?.lifecycleEvents === "function",
@@ -40,6 +41,21 @@ export function createPlaybackParticipantCoordinator(options = {}) {
         operationId
       })));
       return { operationId, blockId, results };
+    },
+    async activateParticipants(blockId, operationOptions = {}) {
+      const adapters = participantAdapters.filter((entry) => typeof entry.activatePreparedBlock === "function");
+      if (!adapters.length) throw new Error("playback participant coordinator cannot activateParticipants");
+      const preparedOperationId = String(
+        operationOptions.preparedOperationId ?? operationOptions.prepared_operation_id ?? ""
+      ).trim();
+      if (!preparedOperationId) throw new Error("preparedOperationId is required");
+      const operationId = String(operationOptions.operationId ?? operationOptions.operation_id ?? crypto.randomUUID());
+      const results = await Promise.all(adapters.map((entry) => entry.activatePreparedBlock(blockId, {
+        ...operationOptions,
+        operationId,
+        preparedOperationId
+      })));
+      return { operationId, preparedOperationId, blockId, results };
     },
     async applyBlockUpdate(blockId = "", operationOptions = {}) {
       return requireMethod("applyBlockUpdate")(blockId, operationOptions);

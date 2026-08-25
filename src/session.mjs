@@ -42,7 +42,7 @@ export function createSessionSnapshot(score, config, request, runtime = {}) {
       readOnly: false,
       roles: ["observer", "playback"],
       playbackParticipantProtocolVersion: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
-      commands: ["playback.ready"],
+      commands: ["playback.ready", "playback.active"],
       topics: ["score", "transport", "playback", "playback.transfers", "participants"]
     },
     voices: Object.keys(score.voices).map((voiceId) => ({

@@ -8,7 +8,7 @@ export const PLAYBACK_PARTICIPANT_PROTOCOL_VERSION = 1;
 
 const ROLE_CAPABILITIES = Object.freeze({
   observer: Object.freeze(["topics:read"]),
-  playback: Object.freeze(["topics:read", "participant:register", "playback:ready"])
+  playback: Object.freeze(["topics:read", "participant:register", "playback:ready", "playback:active"])
 });
 
 export function attachRealtimeGateway(server, broker, options = {}) {
@@ -234,6 +234,16 @@ export function attachRealtimeGateway(server, broker, options = {}) {
             payload: message.payload
           });
           break;
+        case "playback.active":
+          if (session.role !== "playback" || !session.participantAdapterConnected) {
+            throw protocolError("playback_role_required", "playback.active requires a registered playback participant");
+          }
+          payload = await options.playbackParticipantAdapter.acceptActive({
+            participantId: session.participantId,
+            connectionId: session.connectionId,
+            payload: message.payload
+          });
+          break;
         default:
           throw protocolError("read_only_gateway", `message type '${message.type}' is not available on the read-only gateway`);
       }
@@ -351,7 +361,7 @@ export function attachRealtimeGateway(server, broker, options = {}) {
 
   function capabilitiesForRole(role) {
     return ROLE_CAPABILITIES[role].filter((capability) =>
-      capability !== "playback:ready" || Boolean(options.playbackParticipantAdapter)
+      !["playback:ready", "playback:active"].includes(capability) || Boolean(options.playbackParticipantAdapter)
     );
   }
 }

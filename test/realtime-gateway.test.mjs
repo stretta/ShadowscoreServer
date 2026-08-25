@@ -276,7 +276,7 @@ test("realtime gateway requires a valid versioned declaration for playback parti
   assert.equal(participantRegistry.snapshot().participants.length, 0);
 });
 
-test("realtime coordinator delivers prepare and accepts only an exact READY acknowledgement", async (t) => {
+test("realtime coordinator delivers preparation and activation with exact READY and ACTIVE acknowledgements", async (t) => {
   const score = createInitialScore(defaultConfig);
   score.assignments["player-1"] = { clientId: "laptop", deviceId: "ableton-laptop", locked: false };
   const participantRegistry = createParticipantRegistry({ getAssignments: () => score.assignments });
@@ -309,11 +309,13 @@ test("realtime coordinator delivers prepare and accepts only an exact READY ackn
     participant: {
       protocol_version: PLAYBACK_PARTICIPANT_PROTOCOL_VERSION,
       stable_device_id: "ableton-laptop",
-      capabilities: ["score:prepare"]
+      capabilities: ["score:prepare", "score:activate"]
     }
   }));
   const welcome = await inbox.next((message) => message.type === "welcome");
-  assert.deepEqual(welcome.payload.capabilities, ["topics:read", "participant:register", "playback:ready"]);
+  assert.deepEqual(welcome.payload.capabilities, [
+    "topics:read", "participant:register", "playback:ready", "playback:active"
+  ]);
 
   const preparation = coordinator.prepareParticipants("A", "integration-test", { operationId: "prepare-1" });
   const command = await inbox.next((message) => message.type === "playback.prepare");
@@ -357,6 +359,55 @@ test("realtime coordinator delivers prepare and accepts only an exact READY ackn
   assert.equal(result.results[0].acknowledgements[0].status, "ready");
   assert.equal(playbackParticipantAdapter.snapshot().pending.length, 0);
   assert.equal(playbackParticipantAdapter.snapshot().prepared[0].operationId, "prepare-1");
+
+  const activation = coordinator.activateParticipants("A", {
+    operationId: "activate-1",
+    preparedOperationId: "prepare-1",
+    boundary: "next-cycle",
+    position: { beat: 16 }
+  });
+  const activate = await inbox.next((message) => message.type === "playback.activate");
+  assert.equal(activate.payload.operation_id, "activate-1");
+  assert.equal(activate.payload.prepared_operation_id, "prepare-1");
+  assert.equal(activate.payload.boundary, "next-cycle");
+  assert.deepEqual(activate.payload.position, { beat: 16 });
+  assert.equal(playbackParticipantAdapter.snapshot().prepared.length, 0);
+  assert.equal(playbackParticipantAdapter.snapshot().pendingActivations.length, 1);
+
+  client.send(JSON.stringify({
+    type: "playback.active",
+    request_id: "active-wrong",
+    payload: {
+      operation_id: activate.payload.operation_id,
+      prepared_operation_id: activate.payload.prepared_operation_id,
+      block_id: activate.payload.block_id,
+      score_revision: activate.payload.score_revision,
+      payload_hash: "wrong"
+    }
+  }));
+  const activeMismatch = await inbox.next((message) => message.type === "error" && message.request_id === "active-wrong");
+  assert.equal(activeMismatch.payload.code, "PLAYBACK_ACTIVE_MISMATCH");
+  assert.equal(playbackParticipantAdapter.snapshot().pendingActivations.length, 1);
+
+  client.send(JSON.stringify({
+    type: "playback.active",
+    request_id: "active-correct",
+    payload: {
+      operation_id: activate.payload.operation_id,
+      prepared_operation_id: activate.payload.prepared_operation_id,
+      block_id: activate.payload.block_id,
+      score_revision: activate.payload.score_revision,
+      payload_hash: activate.payload.payload_hash
+    }
+  }));
+  const active = await inbox.next((message) => message.type === "result" && message.request_id === "active-correct");
+  assert.equal(active.payload.status, "active");
+  assert.equal(active.payload.operation_id, "activate-1");
+  const activationResult = await activation;
+  assert.equal(activationResult.preparedOperationId, "prepare-1");
+  assert.equal(activationResult.results[0].acknowledgements[0].status, "active");
+  assert.equal(playbackParticipantAdapter.snapshot().pendingActivations.length, 0);
+  assert.equal(playbackParticipantAdapter.snapshot().active[0].operationId, "activate-1");
 });
 
 test("realtime and collaboration WebSockets coexist and unknown upgrades retain 404", async (t) => {

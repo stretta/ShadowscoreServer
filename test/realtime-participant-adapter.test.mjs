@@ -67,6 +67,91 @@ test("realtime playback adapter rejects missing capability, disconnect, and READ
   registry.close();
 });
 
+test("realtime playback adapter activates only the exact prepared slot and requires exact ACTIVE", async () => {
+  const score = assignedScore();
+  const registry = createParticipantRegistry({ getAssignments: () => score.assignments });
+  registry.connectRealtimeSession(registrySession());
+  const sent = [];
+  const adapter = createRealtimePlaybackParticipantAdapter({
+    getScore: () => score,
+    getParticipantRegistry: () => registry,
+    activationTimeoutMs: 250,
+    unrefTimers: false
+  });
+  adapter.connectSession(adapterSession(["score:prepare", "score:activate"], (message) => sent.push(message)));
+
+  await prepareAndReady(adapter, sent, "prepare-1");
+  await assert.rejects(
+    adapter.activatePreparedBlock("A", { operationId: "activate-wrong", preparedOperationId: "not-prepared" }),
+    (error) => error.code === "PLAYBACK_ACTIVATION_NOT_READY"
+  );
+
+  const activation = adapter.activatePreparedBlock("A", {
+    operationId: "activate-1",
+    preparedOperationId: "prepare-1",
+    boundary: "next-cycle"
+  });
+  const command = sent.at(-1);
+  assert.equal(command.type, "playback.activate");
+  await assert.rejects(
+    adapter.prepareBlock("A", "test", { operationId: "prepare-conflict" }),
+    (error) => error.code === "PLAYBACK_OPERATION_PENDING"
+  );
+  assert.throws(() => adapter.acceptActive({
+    participantId: "realtime:laptop",
+    connectionId: "connection-1",
+    payload: { ...activePayload(command), payload_hash: "wrong" }
+  }), (error) => error.code === "PLAYBACK_ACTIVE_MISMATCH");
+  adapter.acceptActive({
+    participantId: "realtime:laptop",
+    connectionId: "connection-1",
+    payload: activePayload(command)
+  });
+  assert.equal((await activation).acknowledgements[0].status, "active");
+  assert.equal(adapter.snapshot().active[0].operationId, "activate-1");
+
+  await prepareAndReady(adapter, sent, "prepare-2");
+  const supersedingPreparation = adapter.prepareBlock("A", "test", { operationId: "prepare-3" });
+  await assert.rejects(
+    adapter.activatePreparedBlock("A", { operationId: "activate-stale", preparedOperationId: "prepare-2" }),
+    (error) => error.code === "PLAYBACK_ACTIVATION_NOT_READY"
+  );
+  const supersedingCommand = sent.at(-1);
+  adapter.acceptReady({
+    participantId: "realtime:laptop",
+    connectionId: "connection-1",
+    payload: readyPayload(supersedingCommand)
+  });
+  await supersedingPreparation;
+
+  await assert.rejects(
+    adapter.activatePreparedBlock("A", { operationId: "activate-timeout", preparedOperationId: "prepare-3" }),
+    (error) => error.code === "PLAYBACK_ACTIVE_TIMEOUT"
+  );
+  assert.equal(adapter.snapshot().prepared.length, 0);
+  assert.equal(adapter.snapshot().active.length, 0);
+
+  await prepareAndReady(adapter, sent, "prepare-4");
+  const replacedActivation = adapter.activatePreparedBlock("A", {
+    operationId: "activate-replaced",
+    preparedOperationId: "prepare-4"
+  });
+  const replaced = assert.rejects(
+    replacedActivation,
+    (error) => error.code === "PLAYBACK_PARTICIPANT_REPLACED"
+  );
+  adapter.connectSession(adapterSession(
+    ["score:prepare", "score:activate"],
+    (message) => sent.push(message),
+    "connection-2"
+  ));
+  await replaced;
+  assert.equal(adapter.snapshot().pendingActivations.length, 0);
+
+  adapter.close();
+  registry.close();
+});
+
 function assignedScore() {
   const score = createInitialScore(defaultConfig);
   score.assignments["player-1"] = { clientId: "laptop", deviceId: "ableton-laptop", locked: false };
@@ -94,5 +179,36 @@ function adapterSession(capabilities, send, connectionId = "connection-1") {
     clientId: "laptop",
     declaredCapabilities: capabilities,
     send
+  };
+}
+
+async function prepareAndReady(adapter, sent, operationId) {
+  const preparation = adapter.prepareBlock("A", "test", { operationId });
+  const command = sent.at(-1);
+  assert.equal(command.type, "playback.prepare");
+  adapter.acceptReady({
+    participantId: "realtime:laptop",
+    connectionId: "connection-1",
+    payload: readyPayload(command)
+  });
+  return preparation;
+}
+
+function readyPayload(command) {
+  return {
+    operation_id: command.payload.operation_id,
+    block_id: command.payload.block_id,
+    score_revision: command.payload.score_revision,
+    payload_hash: command.payload.payload_hash
+  };
+}
+
+function activePayload(command) {
+  return {
+    operation_id: command.payload.operation_id,
+    prepared_operation_id: command.payload.prepared_operation_id,
+    block_id: command.payload.block_id,
+    score_revision: command.payload.score_revision,
+    payload_hash: command.payload.payload_hash
   };
 }

@@ -142,6 +142,21 @@ source parity, the complete local suite, focused remote tests, live capability
 discovery and unsolicited-READY rejection, hardware smoke, stopped transport,
 aligned synchronization, and receiver-confirmed READY RNBO transfers.
 
+Implementation update, 2026-08-25: the third Phase 7 slice is implemented and
+deployed to `wren`. The coordinator can explicitly activate the exact frozen
+software cohort produced by a completed prepare operation. Activation consumes
+each prepared slot, carries a distinct operation ID plus the exact prepared
+operation ID, and accepts ACTIVE only when connection, activation, preparation,
+block, score revision, and payload hash all match. Mismatch leaves the request
+pending for correction; timeout, send failure, disconnect, replacement, and
+shutdown clear both prepared and active truth. Normal transport, look-ahead,
+cue, and activation orchestration remain RNBO-only pending execution witness,
+reconnect reconciliation, and explicit production-cohort enrollment.
+Deployment verification proved 641 local tests, 200 focused tests from Wren's
+deployed tree, live `playback:active` discovery and grant, rejection of an
+unsolicited ACTIVE, hardware smoke, stopped transport, and aligned RNBO
+players.
+
 The Max for Live playback-client discussion exposed the need for this work, but
 the architecture is not specific to Ableton Live. The goal is to establish one
 transport-neutral participant model and one reusable realtime publication layer
@@ -816,6 +831,48 @@ connection invalidates pending and prepared truth from the older endpoint.
 before the adapter will send a desired-state document. Activation, ACTIVE,
 execution witness, reconnect reconciliation, and production-cohort enrollment
 remain later boundaries.
+
+#### Phase 7c activation and ACTIVE boundary
+
+The third Phase 7 slice adds explicit coordinator-driven activation without
+enrolling software participants in normal transport. Activation has its own
+`operation_id` and references the exact `prepared_operation_id` that produced
+READY. The adapter activates the frozen cohort recorded by that prepare
+operation; it never discovers a new participant at activation time.
+
+```json
+{
+  "protocol": "shadowscore.realtime.v2",
+  "type": "playback.activate",
+  "payload": {
+    "operation_id": "activate-1",
+    "prepared_operation_id": "prepare-1",
+    "participant_id": "realtime:ableton-laptop",
+    "block_id": "A",
+    "voice_ids": ["player-1"],
+    "score_revision": 45339,
+    "payload_hash": "same-prepared-payload-hash",
+    "boundary": "next-cycle",
+    "position": { "beat": 16 }
+  }
+}
+```
+
+Sending activation consumes the participant's prepared slot. The client sends
+a correlated `playback.active` request only after the prepared document is the
+executing document. ACTIVE must match the activation operation, prepared
+operation, participant connection, block, score revision, and payload hash.
+Mismatches leave the exact activation pending for correction. Timeout, send
+failure, disconnect, connection replacement, or shutdown leaves neither READY
+nor ACTIVE truth for that participant and requires a new preparation or later
+reconciliation.
+
+Only one prepare or activation operation may be pending per participant. A new
+prepare invalidates an older prepared token, and reconnect invalidates both
+prepared and active in-memory truth. The playback role grants
+`playback:active`, `/session` advertises `playback.active`, and the client must
+also declare `score:activate`. Execution witness, reconnect reconciliation, and
+production-cohort enrollment remain later boundaries.
 
 ### Phase 8: Optional consumer migration and retirement
 

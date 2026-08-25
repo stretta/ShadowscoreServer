@@ -361,7 +361,7 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.realtime.readOnly, false);
   assert.deepEqual(session.realtime.roles, ["observer", "playback"]);
   assert.equal(session.realtime.playbackParticipantProtocolVersion, 1);
-  assert.deepEqual(session.realtime.commands, ["playback.ready"]);
+  assert.deepEqual(session.realtime.commands, ["playback.ready", "playback.active"]);
   assert.deepEqual(session.realtime.topics, ["score", "transport", "playback", "playback.transfers", "participants"]);
   assert.equal(session.endpoints.transportStatus, "http://127.0.0.1/transport/status");
   assert.equal(session.macroPlayback.running, false);

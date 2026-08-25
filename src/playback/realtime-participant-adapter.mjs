@@ -8,10 +8,14 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
   const timers = options.timers ?? globalThis;
   const unrefTimers = options.unrefTimers !== false;
   const prepareTimeoutMs = Math.max(250, Number(options.prepareTimeoutMs) || 5_000);
+  const activationTimeoutMs = Math.max(250, Number(options.activationTimeoutMs) || 5_000);
   const sessions = new Map();
   const sessionsByConnectionId = new Map();
   const pending = new Map();
+  const pendingActivations = new Map();
+  const prepareCohorts = new Map();
   const prepared = new Map();
+  const active = new Map();
   let closed = false;
 
   return {
@@ -19,7 +23,9 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     connectSession,
     disconnectSession,
     prepareBlock,
+    activatePreparedBlock,
     acceptReady,
+    acceptActive,
     snapshot,
     close
   };
@@ -42,9 +48,14 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     if (previous && previous.connectionId !== connectionId) {
       sessionsByConnectionId.delete(previous.connectionId);
       prepared.delete(participantId);
+      active.delete(participantId);
       rejectPendingForConnection(
         previous.connectionId,
         adapterError("PLAYBACK_PARTICIPANT_REPLACED", `participant '${participantId}' reconnected before READY`)
+      );
+      rejectPendingActivationsForConnection(
+        previous.connectionId,
+        adapterError("PLAYBACK_PARTICIPANT_REPLACED", `participant '${participantId}' reconnected before ACTIVE`)
       );
     }
     return sessionSnapshot(descriptor);
@@ -58,7 +69,9 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     const session = sessions.get(participantId);
     if (session?.connectionId === connectionId) sessions.delete(participantId);
     if (session?.connectionId === connectionId) prepared.delete(participantId);
+    if (session?.connectionId === connectionId) active.delete(participantId);
     rejectPendingForConnection(connectionId, adapterError("PLAYBACK_PARTICIPANT_DISCONNECTED", `participant '${participantId}' disconnected`));
+    rejectPendingActivationsForConnection(connectionId, adapterError("PLAYBACK_PARTICIPANT_DISCONNECTED", `participant '${participantId}' disconnected`));
     return session?.connectionId === connectionId;
   }
 
@@ -71,13 +84,25 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     const selections = selectedSoftwareParticipants(score, operationOptions);
     const available = selections.filter((selection) => selection.session);
     const unavailable = selections.filter((selection) => !selection.session);
-    const acknowledgements = await Promise.all(available.map((selection) => prepareOne({
+    const preparedSelections = available.map((selection) => {
+      if (!selection.session.declaredCapabilities.includes("score:prepare")) {
+        throw adapterError("PLAYBACK_CAPABILITY_REQUIRED", `participant '${selection.participantId}' does not declare score:prepare`);
+      }
+      return { ...selection, desired: compilePlaybackScore(score, blockId, selection.voiceIds) };
+    });
+    const acknowledgements = await Promise.all(preparedSelections.map((selection) => prepareOne({
       blockId,
       operationId,
       reason,
       score,
       ...selection
     })));
+    prepareCohorts.set(operationId, {
+      operationId,
+      blockId,
+      participantIds: available.map((selection) => selection.participantId)
+    });
+    while (prepareCohorts.size > 128) prepareCohorts.delete(prepareCohorts.keys().next().value);
     return {
       adapter: "websocket-json",
       operationId,
@@ -86,6 +111,62 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
       participatingParticipantIds: available.map((selection) => selection.participantId),
       unavailableParticipantIds: unavailable.map((selection) => selection.participantId),
       degraded: unavailable.length > 0,
+      acknowledgements
+    };
+  }
+
+  async function activatePreparedBlock(blockIdValue, operationOptions = {}) {
+    if (closed) throw adapterError("PLAYBACK_ADAPTER_CLOSED", "realtime playback adapter is closed");
+    const blockId = requiredIdentifier(blockIdValue, "block_id");
+    const operationId = requiredIdentifier(operationOptions.operationId ?? operationOptions.operation_id, "operation_id");
+    const preparedOperationId = requiredIdentifier(
+      operationOptions.preparedOperationId ?? operationOptions.prepared_operation_id,
+      "prepared_operation_id"
+    );
+    const cohort = prepareCohorts.get(preparedOperationId);
+    if (!cohort || cohort.blockId !== blockId) {
+      throw adapterError("PLAYBACK_ACTIVATION_NOT_READY", `prepare operation '${preparedOperationId}' is not READY for block '${blockId}'`);
+    }
+    const selections = cohort.participantIds.map((participantId) => ({
+      participantId,
+      session: sessions.get(participantId),
+      prepared: prepared.get(participantId)
+    }));
+    const invalid = selections.filter((selection) =>
+      !selection.session
+      || selection.prepared?.operationId !== preparedOperationId
+      || selection.prepared?.blockId !== blockId
+      || selection.prepared?.connectionId !== selection.session.connectionId
+    );
+    if (invalid.length) {
+      throw adapterError(
+        "PLAYBACK_ACTIVATION_NOT_READY",
+        `participants are not READY for prepare operation '${preparedOperationId}': ${invalid.map((entry) => entry.participantId).join(", ")}`
+      );
+    }
+    const incapable = selections.filter((selection) => !selection.session.declaredCapabilities.includes("score:activate"));
+    if (incapable.length) {
+      throw adapterError(
+        "PLAYBACK_CAPABILITY_REQUIRED",
+        `participants do not declare score:activate: ${incapable.map((entry) => entry.participantId).join(", ")}`
+      );
+    }
+    const acknowledgements = await Promise.all(selections.map((selection) => activateOne({
+      ...selection,
+      blockId,
+      operationId,
+      preparedOperationId,
+      boundary: operationOptions.boundary ?? "immediate",
+      position: operationOptions.position ?? null
+    })));
+    prepareCohorts.delete(preparedOperationId);
+    return {
+      adapter: "websocket-json",
+      operationId,
+      preparedOperationId,
+      blockId,
+      participating: selections.length > 0,
+      participatingParticipantIds: selections.map((selection) => selection.participantId),
       acknowledgements
     };
   }
@@ -113,6 +194,7 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     }
     const acknowledgement = {
       participantId,
+      connectionId,
       operationId,
       blockId: request.blockId,
       voiceIds: [...request.voiceIds],
@@ -134,11 +216,61 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     };
   }
 
+  function acceptActive(input = {}) {
+    const participantId = requiredIdentifier(input.participantId ?? input.participant_id, "participant_id");
+    const connectionId = requiredIdentifier(input.connectionId ?? input.connection_id, "connection_id");
+    const payload = input.payload ?? {};
+    const operationId = requiredIdentifier(payload.operation_id, "operation_id");
+    const key = pendingKey(participantId, operationId);
+    const request = pendingActivations.get(key);
+    if (!request || request.connectionId !== connectionId) {
+      throw adapterError("PLAYBACK_ACTIVE_NOT_EXPECTED", `no activation operation '${operationId}' is pending for '${participantId}'`);
+    }
+    const mismatches = [
+      ["prepared_operation_id", payload.prepared_operation_id, request.preparedOperationId],
+      ["block_id", payload.block_id, request.blockId],
+      ["score_revision", payload.score_revision, request.scoreRevision],
+      ["payload_hash", payload.payload_hash, request.payloadHash]
+    ].filter(([, actual, expected]) => actual !== expected);
+    if (mismatches.length) {
+      throw adapterError(
+        "PLAYBACK_ACTIVE_MISMATCH",
+        `ACTIVE does not match ${mismatches.map(([field]) => field).join(", ")}`
+      );
+    }
+    const acknowledgement = {
+      participantId,
+      connectionId,
+      operationId,
+      preparedOperationId: request.preparedOperationId,
+      blockId: request.blockId,
+      voiceIds: [...request.voiceIds],
+      scoreRevision: request.scoreRevision,
+      payloadHash: request.payloadHash,
+      status: "active"
+    };
+    active.set(participantId, acknowledgement);
+    settlePendingActivation(key, null, acknowledgement);
+    return {
+      accepted: true,
+      participant_id: participantId,
+      operation_id: operationId,
+      prepared_operation_id: request.preparedOperationId,
+      block_id: request.blockId,
+      voice_ids: [...request.voiceIds],
+      score_revision: request.scoreRevision,
+      payload_hash: request.payloadHash,
+      status: "active"
+    };
+  }
+
   function snapshot() {
     return {
       sessions: [...sessions.values()].map(sessionSnapshot),
       pending: [...pending.values()].map((request) => requestSnapshot(request)),
-      prepared: [...prepared.values()].map((entry) => structuredClone(entry))
+      pendingActivations: [...pendingActivations.values()].map((request) => activationRequestSnapshot(request)),
+      prepared: [...prepared.values()].map((entry) => structuredClone(entry)),
+      active: [...active.values()].map((entry) => structuredClone(entry))
     };
   }
 
@@ -146,9 +278,14 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     if (closed) return;
     closed = true;
     for (const [key] of pending) settlePending(key, adapterError("PLAYBACK_ADAPTER_CLOSED", "realtime playback adapter is closed"));
+    for (const [key] of pendingActivations) {
+      settlePendingActivation(key, adapterError("PLAYBACK_ADAPTER_CLOSED", "realtime playback adapter is closed"));
+    }
     sessions.clear();
     sessionsByConnectionId.clear();
+    prepareCohorts.clear();
     prepared.clear();
+    active.clear();
   }
 
   function selectedSoftwareParticipants(score, operationOptions) {
@@ -174,13 +311,14 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     return [...selected.values()];
   }
 
-  function prepareOne({ participantId, voiceIds, session, blockId, operationId, reason, score }) {
-    if (!session.declaredCapabilities.includes("score:prepare")) {
-      throw adapterError("PLAYBACK_CAPABILITY_REQUIRED", `participant '${participantId}' does not declare score:prepare`);
-    }
+  function prepareOne({ participantId, voiceIds, session, blockId, operationId, reason, desired }) {
     const key = pendingKey(participantId, operationId);
-    if (pending.has(key)) throw adapterError("PLAYBACK_OPERATION_PENDING", `prepare operation '${operationId}' is already pending for '${participantId}'`);
-    const desired = compilePlaybackScore(score, blockId, voiceIds);
+    if (hasPendingForParticipant(pending, participantId) || hasPendingForParticipant(pendingActivations, participantId)) {
+      throw adapterError("PLAYBACK_OPERATION_PENDING", `a playback operation is already pending for '${participantId}'`);
+    }
+    const previousPrepared = prepared.get(participantId);
+    if (previousPrepared) prepareCohorts.delete(previousPrepared.operationId);
+    prepared.delete(participantId);
     const payloadHash = crypto.createHash("sha256").update(JSON.stringify(desired)).digest("hex");
     const request = {
       participantId,
@@ -228,6 +366,64 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
     return result;
   }
 
+  function activateOne({ participantId, session, prepared: preparedState, blockId, operationId, preparedOperationId, boundary, position }) {
+    const key = pendingKey(participantId, operationId);
+    if (hasPendingForParticipant(pending, participantId) || hasPendingForParticipant(pendingActivations, participantId)) {
+      throw adapterError("PLAYBACK_OPERATION_PENDING", `a playback operation is already pending for '${participantId}'`);
+    }
+    const request = {
+      participantId,
+      connectionId: session.connectionId,
+      operationId,
+      preparedOperationId,
+      blockId,
+      voiceIds: [...preparedState.voiceIds],
+      scoreRevision: preparedState.scoreRevision,
+      payloadHash: preparedState.payloadHash,
+      boundary: String(boundary ?? "immediate"),
+      position: structuredClone(position),
+      resolve: null,
+      reject: null,
+      timer: null
+    };
+    const result = new Promise((resolve, reject) => {
+      request.resolve = resolve;
+      request.reject = reject;
+    });
+    pendingActivations.set(key, request);
+    prepared.delete(participantId);
+    active.delete(participantId);
+    request.timer = timers.setTimeout(() => {
+      settlePendingActivation(
+        key,
+        adapterError("PLAYBACK_ACTIVE_TIMEOUT", `participant '${participantId}' did not acknowledge activation operation '${operationId}'`)
+      );
+    }, activationTimeoutMs);
+    if (unrefTimers) request.timer?.unref?.();
+    try {
+      const accepted = session.send({
+        type: "playback.activate",
+        payload: {
+          operation_id: operationId,
+          prepared_operation_id: preparedOperationId,
+          participant_id: participantId,
+          block_id: blockId,
+          voice_ids: [...request.voiceIds],
+          score_revision: request.scoreRevision,
+          payload_hash: request.payloadHash,
+          boundary: request.boundary,
+          position: request.position
+        }
+      });
+      if (accepted === false) {
+        settlePendingActivation(key, adapterError("PLAYBACK_SEND_UNAVAILABLE", `participant '${participantId}' cannot receive activation commands`));
+      }
+    } catch (error) {
+      settlePendingActivation(key, error);
+    }
+    return result;
+  }
+
   function settlePending(key, error, value) {
     const request = pending.get(key);
     if (!request) return;
@@ -240,6 +436,21 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
   function rejectPendingForConnection(connectionId, error) {
     for (const [key, request] of pending) {
       if (request.connectionId === connectionId) settlePending(key, error);
+    }
+  }
+
+  function settlePendingActivation(key, error, value) {
+    const request = pendingActivations.get(key);
+    if (!request) return;
+    pendingActivations.delete(key);
+    timers.clearTimeout(request.timer);
+    if (error) request.reject(error);
+    else request.resolve(value);
+  }
+
+  function rejectPendingActivationsForConnection(connectionId, error) {
+    for (const [key, request] of pendingActivations) {
+      if (request.connectionId === connectionId) settlePendingActivation(key, error);
     }
   }
 }
@@ -288,6 +499,10 @@ function pendingKey(participantId, operationId) {
   return `${participantId}\u001f${operationId}`;
 }
 
+function hasPendingForParticipant(requests, participantId) {
+  return [...requests.values()].some((request) => request.participantId === participantId);
+}
+
 function sessionSnapshot(session) {
   return {
     participantId: session.participantId,
@@ -307,6 +522,21 @@ function requestSnapshot(request) {
     scoreRevision: request.scoreRevision,
     payloadHash: request.payloadHash,
     reason: request.reason
+  };
+}
+
+function activationRequestSnapshot(request) {
+  return {
+    participantId: request.participantId,
+    connectionId: request.connectionId,
+    operationId: request.operationId,
+    preparedOperationId: request.preparedOperationId,
+    blockId: request.blockId,
+    voiceIds: [...request.voiceIds],
+    scoreRevision: request.scoreRevision,
+    payloadHash: request.payloadHash,
+    boundary: request.boundary,
+    position: structuredClone(request.position)
   };
 }
 

@@ -172,6 +172,13 @@ cohort still must reach READY before activation. Each target status records the
 fleet limit, cohort size, worker slot, and time spent queued so the resulting
 READY latency and event-loop backlog can be compared with the seven-way fanout.
 
+The populated-block comparison then isolated a separate hot-path defect: score
+packets used each peer's mDNS hostname even when shared discovery had already
+resolved a numeric transport host. This forced hostname work into every paced
+row send while transport inports and activation requests used the resolved
+address. The fourth Phase 6 checkpoint makes score packets use that same
+`transportHost` preference, retaining the advertised hostname as fallback.
+
 ## Checkpoint and Deployment Policy
 
 Each phase is a separate reviewed local commit. Before deploying to Wren:

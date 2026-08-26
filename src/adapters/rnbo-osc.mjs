@@ -2587,7 +2587,7 @@ function durationBeats(duration, context) {
 async function sendOscMessage(socket, config, target, values) {
   const packet = encodeOscMessage(target.address, values);
   await new Promise((resolve, reject) => {
-    socket.send(packet, target.port, target.host, (error) => {
+    socket.send(packet, target.port, target.transportHost ?? target.host, (error) => {
       if (error) {
         reject(error);
       } else {

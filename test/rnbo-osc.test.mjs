@@ -1369,7 +1369,8 @@ test("assignment-bound RNBO targets inherit live target connection details", asy
           {
             id: "peer-a:rnbo-inst-4:shadowscore",
             localId: "rnbo-inst-4:shadowscore",
-            host: "192.168.68.88",
+            host: "peer-a.local",
+            transportHost: "192.168.68.88",
             port: 1234,
             address: "/rnbo/inst/4/messages/in/shadowscore",
             clientId: "90",
@@ -1383,6 +1384,7 @@ test("assignment-bound RNBO targets inherit live target connection details", asy
   const result = await sendScoreTransaction(socket, config, score, 701, { runtime });
 
   assert.equal(packets[0].host, "192.168.68.88");
+  assert.equal(packets.every(({ host }) => host === "192.168.68.88"), true);
   assert.equal(packets[0].port, 1234);
   assert.deepEqual(result.messages[0].values, [90, 1, 701, 1, 1, 32, 16, 1]);
   assert.deepEqual(result.messages.at(-1).values, [90, 90, 701, 1, 0]);

@@ -336,3 +336,20 @@ test("unified preparation accepts the RNBO single-target compiled result", async
   assert.equal(prepared.state, "ready");
   assert.deepEqual(prepared.partitions[0].participantIds, ["finch"]);
 });
+
+test("unified preparation accepts an explicit RNBO no-op target list", async () => {
+  const coordinator = createPlaybackParticipantCoordinator({
+    adapter: {
+      enabled: true,
+      async prepareBlock() {
+        return { targets: [], partial: true, scope: "staged-only" };
+      }
+    },
+    adapterId: "rnbo"
+  });
+
+  const prepared = await coordinator.prepareOperation("A", "transport-start", { operationId: "already-ready" });
+  assert.equal(prepared.state, "ready");
+  assert.equal(prepared.partitions[0].state, "empty");
+  assert.deepEqual(prepared.partitions[0].participantIds, []);
+});

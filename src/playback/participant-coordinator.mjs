@@ -305,7 +305,7 @@ function normalizePreparationEvidence(adapterId, result = {}) {
   const states = resultStates(result);
   const state = result.state === "active" || states.includes("active")
     ? "active"
-    : result.participating === false
+    : result.participating === false || (Array.isArray(result.targets) && result.targets.length === 0)
       ? "empty"
       : result.prepared === true || result.state === "prepared" || (states.length > 0 && states.every((value) => ["prepared", "ready", "active"].includes(value)))
       ? participantIds.length ? "ready" : "empty"

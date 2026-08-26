@@ -3367,6 +3367,13 @@ test("transport play prefers one atomic ClockArm list for a complete live cohort
   assert.equal(started.atomicClockArmStart.ok, true);
   assert.equal(started.atomicClockArmStart.atomicClockArm, true);
   assert.equal(started.transactionalTransportStart, null);
+  assert.equal(started.transportStartStrategy.strategyId, "atomic-clock-arm");
+  assert.deepEqual(started.transportStartStrategy.evidence, {
+    ok: true,
+    activeVerified: true,
+    phaseVerified: true,
+    targetIds: [targetId]
+  });
   assert.equal(started.clockStartAcknowledgement.transactional, false);
   assert.equal(started.clockStartAcknowledgement.atomicClockArm, true);
   assert.equal(started.clockStartPhaseVerification.verified, true);

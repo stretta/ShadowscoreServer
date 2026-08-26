@@ -130,6 +130,14 @@ frozen inventory and one compiled timing set.
 Compatibility strategies remain available until deployed capability evidence
 shows that a path can be retired.
 
+The first Phase 5 checkpoint freezes one exact RNBO participant inventory and
+one compiled timing set before selecting atomic clock arm, transactional
+transport start, or legacy coordinated start. Atomic and transactional
+execution now share normalized ACTIVE/phase evidence and rollback dispatch;
+the selected strategy and evidence are returned in transport-start diagnostics.
+The legacy implementation remains the selected compatibility driver and keeps
+its existing inline execution path pending the next extraction checkpoint.
+
 ## Phase 6: Capability-Gated RNBO Flow Control
 
 Do not raise UDP batch size speculatively. Define and validate a receiver

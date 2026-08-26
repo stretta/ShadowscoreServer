@@ -22,15 +22,18 @@ import { rnboCurrentStageUrl, rnboOscQueryValueUrl } from "../playback/rnbo-stag
 import { buildPlaybackSnapshot, nextPlaybackSnapshotGeneration } from "../playback/playback-snapshot.mjs";
 import { createTempoPolicy } from "../playback/tempo-policy.mjs";
 import {
-  atomicClockArmRequest,
-  selectAtomicClockArmCohort
+  atomicClockArmRequest
 } from "../playback/atomic-clock-arm.mjs";
 import {
   TRANSPORT_START_MAX_OPERATION_ID,
   coordinateTransactionalTransportStart,
-  selectTransactionalTransportStartCohort,
   verifySustainedCohortStages
 } from "../playback/transactional-transport-start.mjs";
+import {
+  executeTransportStartStrategy,
+  planTransportStartStrategy,
+  TRANSPORT_START_STRATEGY_IDS
+} from "../playback/transport-start-strategies.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createEventPublisher, createLoadedPublisher } from "../realtime/publisher.mjs";
 import { runtimePublisher } from "../realtime/runtime-publishers.mjs";
@@ -3543,12 +3546,17 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
         ...body,
         locateBeatIntoBlock: requestedStartOffsetBeats
       });
-  const atomicClockArmStart = body.phaseReset === false
+  const transportStartPlan = body.phaseReset === false
     ? null
-    : await maybeCoordinateAtomicClockArmStart(store, score, config, runtime, {
-        targetId,
+    : await planRnboTransportStartStrategy(score, config, runtime, {
         targetIds: participatingTargetIds,
-        phaseStage,
+        phaseStage
+      });
+  const plannedTransportStart = !transportStartPlan
+    || transportStartPlan.strategyId === TRANSPORT_START_STRATEGY_IDS.legacy
+    ? null
+    : await executeRnboTransportStartStrategy(store, score, config, runtime, transportStartPlan, {
+        targetId,
         beforeArm: playbackUpdate
           ? null
           : () => playbackOperations?.schedulePreparedActivations?.({
@@ -3558,21 +3566,12 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
               initialStage: phaseStage
             }) ?? []
       });
-  const transactionalTransportStart = body.phaseReset === false || atomicClockArmStart
-    ? null
-    : await maybeCoordinateTransactionalTransportStart(store, score, config, runtime, {
-        targetId,
-        targetIds: participatingTargetIds,
-        phaseStage,
-        beforeArm: playbackUpdate
-          ? null
-          : () => playbackOperations?.schedulePreparedActivations?.({
-              targetId,
-              targetIds: participatingTargetIds,
-              blockId: score.structureState?.activeBlockId ?? "",
-              initialStage: phaseStage
-            }) ?? []
-      });
+  const atomicClockArmStart = transportStartPlan?.strategyId === TRANSPORT_START_STRATEGY_IDS.atomic
+    ? plannedTransportStart
+    : null;
+  const transactionalTransportStart = transportStartPlan?.strategyId === TRANSPORT_START_STRATEGY_IDS.transactional
+    ? plannedTransportStart
+    : null;
   const coordinatedTransportStart = atomicClockArmStart ?? transactionalTransportStart;
   if (coordinatedTransportStart) {
     updateTransportTransition(runtime, transitionId, "verifying");
@@ -3652,6 +3651,11 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
       phaseWrites: coordinatedTransportStart.armWrites,
       phaseAnchor,
       phaseStage,
+      transportStartStrategy: {
+        strategyId: plannedTransportStart.strategyId,
+        targetIds: plannedTransportStart.strategyEvidence.targetIds,
+        evidence: plannedTransportStart.strategyEvidence
+      },
       atomicClockArmStart,
       transactionalTransportStart
     };
@@ -3883,43 +3887,78 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
     oscClockWrites,
     phaseWrites,
     phaseAnchor,
-    phaseStage
+    phaseStage,
+    transportStartStrategy: transportStartPlan
+      ? {
+          strategyId: transportStartPlan.strategyId,
+          targetIds: transportStartPlan.targetIds,
+          evidence: {
+            ok: true,
+            activeVerified: clockStartAcknowledgement.verified === true,
+            phaseVerified: body.phaseReset === false || clockPhaseAcknowledgement.verified === true
+          }
+        }
+      : null
   };
 }
 
-async function maybeCoordinateAtomicClockArmStart(store, score, config, runtime, options = {}) {
-  const targetIds = [...new Set((options.targetIds ?? []).map(optionalString).filter(Boolean))];
-  if (!targetIds.length) return null;
+async function planRnboTransportStartStrategy(score, config, runtime, options = {}) {
   const assigned = (await readAllRnboTargets(config, runtime)).filter((target) =>
     target.available !== false && assignedVoiceForTarget(score, target)
   );
-  const targets = selectAtomicClockArmCohort(assigned, targetIds);
-  if (!targets.length || targets.some((target) => !rnboOscQueryValueUrl(target, target.clockPhaseAckPath))) return null;
-
-  try {
-    return await runAtomicClockArmStart(score, config, runtime, { ...options, targetIds, targets });
-  } catch (cause) {
-    const rollback = await rollbackFailedClockStart(store, config, runtime, { targetId: options.targetId });
-    cause.statusCode = 503;
-    cause.rollback = { atomicClockArm: true, transport: rollback };
-    throw cause;
-  }
+  return planTransportStartStrategy({
+    targets: assigned,
+    targetIds: options.targetIds,
+    phaseStage: options.phaseStage,
+    compileTiming(target) {
+      const voiceId = assignedVoiceForTarget(score, target);
+      const compiled = compiledScoreTransaction(score, config, runtime, { ...target, voiceId });
+      return {
+        patternLength: compiled.patternLength,
+        ticksPerStage: compiled.timing.ticksPerStage
+      };
+    },
+    hasPhaseAcknowledgement: (target) => Boolean(rnboOscQueryValueUrl(target, target.clockPhaseAckPath))
+  });
 }
 
-async function runAtomicClockArmStart(score, config, runtime, options) {
-  const phaseStage = Number(options.phaseStage);
-  const cohort = options.targets.map((target) => {
-    const voiceId = assignedVoiceForTarget(score, target);
-    const compiled = compiledScoreTransaction(score, config, runtime, { ...target, voiceId });
+async function executeRnboTransportStartStrategy(store, score, config, runtime, strategyPlan, options = {}) {
+  const rollback = async (kind, _plan, cause) => {
+    const transactionalCancel = kind === TRANSPORT_START_STRATEGY_IDS.transactional
+      ? cause.rollback ?? null
+      : null;
+    const transport = await rollbackFailedClockStart(store, config, runtime, { targetId: options.targetId });
+    cause.statusCode = 503;
+    cause.rollback = kind === TRANSPORT_START_STRATEGY_IDS.atomic
+      ? { atomicClockArm: true, transport }
+      : { transactionalCancel, transport };
+    return cause.rollback;
+  };
+  return executeTransportStartStrategy(strategyPlan, {
+    [TRANSPORT_START_STRATEGY_IDS.atomic]: {
+      execute: (plan) => runAtomicClockArmStart(config, runtime, plan, options),
+      rollback: (plan, cause) => rollback(TRANSPORT_START_STRATEGY_IDS.atomic, plan, cause)
+    },
+    [TRANSPORT_START_STRATEGY_IDS.transactional]: {
+      execute: (plan) => runTransactionalTransportStart(score, config, runtime, plan, options),
+      rollback: (plan, cause) => rollback(TRANSPORT_START_STRATEGY_IDS.transactional, plan, cause)
+    }
+  });
+}
+
+async function runAtomicClockArmStart(config, runtime, strategyPlan, options) {
+  const phaseStage = Number(strategyPlan.phaseStage);
+  const cohort = strategyPlan.entries.map(({ target, timing }) => {
     const request = atomicClockArmRequest({
-      clockInterval: compiled.timing.ticksPerStage,
-      maxSteps: compiled.patternLength,
+      clockInterval: timing.ticksPerStage,
+      maxSteps: timing.patternLength,
       setStage: phaseStage
     });
     return { target, request };
   });
   const startedAt = Date.now();
-  const baselines = await readClockPhaseAckBaselines(config, runtime, options.targets);
+  const targets = strategyPlan.entries.map(({ target }) => target);
+  const baselines = await readClockPhaseAckBaselines(config, runtime, targets);
   const activationSchedule = typeof options.beforeArm === "function" ? await options.beforeArm() : [];
   const activationWindow = await awaitClockArmWindow(config, runtime);
   if (activationWindow.available !== true) {
@@ -3932,7 +3971,7 @@ async function runAtomicClockArmStart(score, config, runtime, options) {
   const acknowledgement = await verifyClockPhaseAcknowledgements(
     config,
     runtime,
-    options.targets,
+    targets,
     baselines,
     phaseStage
   );
@@ -3952,7 +3991,7 @@ async function runAtomicClockArmStart(score, config, runtime, options) {
   return {
     ok: true,
     atomicClockArm: true,
-    targetIds: options.targetIds,
+    targetIds: strategyPlan.targetIds,
     armWrites,
     armed: barrier,
     activationWindow,
@@ -3981,41 +4020,11 @@ async function sendAtomicClockArmRequest(runtime, target, request) {
   });
 }
 
-async function maybeCoordinateTransactionalTransportStart(store, score, config, runtime, options = {}) {
-  const targetIds = [...new Set((options.targetIds ?? []).map(optionalString).filter(Boolean))];
-  if (!targetIds.length) return null;
-  const assigned = (await readAllRnboTargets(config, runtime)).filter((target) =>
-    target.available !== false && assignedVoiceForTarget(score, target)
-  );
-  const discovered = selectTransactionalTransportStartCohort(assigned, targetIds, {
-    requirePhaseReset: true
-  });
-  if (!discovered.length || discovered.some((target) => !rnboOscQueryValueUrl(target, target.clockPhaseAckPath))) return null;
-
-  try {
-    return await runTransactionalTransportStart(score, config, runtime, {
-      ...options,
-      targetIds,
-      targets: discovered
-    });
-  } catch (cause) {
-    const rollback = await rollbackFailedClockStart(store, config, runtime, { targetId: options.targetId });
-    cause.statusCode = 503;
-    cause.rollback = {
-      transactionalCancel: cause.rollback ?? null,
-      transport: rollback
-    };
-    throw cause;
-  }
-}
-
-async function runTransactionalTransportStart(score, config, runtime, options) {
-  const phaseStage = Number(options.phaseStage);
-  const cohort = options.targets.map((target) => {
-    const voiceId = assignedVoiceForTarget(score, target);
-    const compiled = compiledScoreTransaction(score, config, runtime, { ...target, voiceId });
-    if (!Number.isInteger(phaseStage) || phaseStage < 0 || phaseStage >= compiled.patternLength) {
-      const error = new Error(`transactional start stage ${String(options.phaseStage)} is outside target '${target.id}' pattern length ${compiled.patternLength}`);
+async function runTransactionalTransportStart(score, config, runtime, strategyPlan, options) {
+  const phaseStage = Number(strategyPlan.phaseStage);
+  const cohort = strategyPlan.entries.map(({ target, timing }) => {
+    if (!Number.isInteger(phaseStage) || phaseStage < 0 || phaseStage >= timing.patternLength) {
+      const error = new Error(`transactional start stage ${String(strategyPlan.phaseStage)} is outside target '${target.id}' pattern length ${timing.patternLength}`);
       error.code = "TRANSPORT_START_STAGE_UNAVAILABLE";
       error.statusCode = 503;
       throw error;
@@ -4023,13 +4032,14 @@ async function runTransactionalTransportStart(score, config, runtime, options) {
     return {
       target,
       startStage: phaseStage,
-      maxSteps: compiled.patternLength,
-      clockInterval: compiled.timing.ticksPerStage
+      maxSteps: timing.patternLength,
+      clockInterval: timing.ticksPerStage
     };
   });
 
   const operationId = nextTransactionalTransportOperationId(runtime);
-  const phaseResetBaselines = await readClockPhaseAckBaselines(config, runtime, options.targets);
+  const targets = strategyPlan.entries.map(({ target }) => target);
+  const phaseResetBaselines = await readClockPhaseAckBaselines(config, runtime, targets);
   const phaseResetWindow = await awaitClockArmWindow(config, runtime);
   if (phaseResetWindow.available !== true) {
     const error = new Error(phaseResetWindow.reason || "transactional phase reset arm window is unavailable");
@@ -4042,12 +4052,12 @@ async function runTransactionalTransportStart(score, config, runtime, options) {
     config,
     runtime,
     { clock_phase_reset: 1 },
-    { targetId: options.targetId, targetIds: options.targetIds }
+    { targetId: options.targetId, targetIds: strategyPlan.targetIds }
   );
   const phaseResetAcknowledgement = await verifyClockPhaseAcknowledgements(
     config,
     runtime,
-    options.targets,
+    targets,
     phaseResetBaselines,
     null
   );

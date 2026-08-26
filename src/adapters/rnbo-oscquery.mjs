@@ -182,6 +182,9 @@ export function extractRnboTargets(tree, config) {
       clockPhaseResetPath: normalizeAddress(instanceNode?.CONTENTS?.messages?.CONTENTS?.in?.CONTENTS?.clock_phase_reset?.FULL_PATH) || undefined,
       clockPhaseAckPath: outports.clock_phase_ack,
       clockPhaseAck: outports.clock_phase_ack_value,
+      transportStartPath: normalizeAddress(instanceNode?.CONTENTS?.messages?.CONTENTS?.in?.CONTENTS?.TransportStart?.FULL_PATH) || undefined,
+      transportStartAckPath: outports.transport_start_ack,
+      transportStartAck: outports.transport_start_ack_value,
       clientId: readClientId(node, instanceNode),
       capabilities: rnboPlaybackCapabilities(config, observedTargetCapabilities(node, instanceNode)),
       source: "rnbooscquery",
@@ -519,7 +522,9 @@ function readMessageOutports(instanceNode) {
     clock_start_ack: normalizeAddress(contents.clock_start_ack?.FULL_PATH) || undefined,
     clock_start_ack_value: numericList(contents.clock_start_ack?.VALUE),
     clock_phase_ack: normalizeAddress(contents.clock_phase_ack?.FULL_PATH) || undefined,
-    clock_phase_ack_value: numericList(contents.clock_phase_ack?.VALUE)
+    clock_phase_ack_value: numericList(contents.clock_phase_ack?.VALUE),
+    transport_start_ack: normalizeAddress(contents.transport_start_ack?.FULL_PATH) || undefined,
+    transport_start_ack_value: numericList(contents.transport_start_ack?.VALUE)
   };
 }
 
@@ -551,12 +556,17 @@ function readTargetCapabilities(inportNode, instanceNode) {
 function observedTargetCapabilities(inportNode, instanceNode) {
   const advertised = readTargetCapabilities(inportNode, instanceNode) ?? {};
   const messageInputs = instanceNode?.CONTENTS?.messages?.CONTENTS?.in?.CONTENTS ?? {};
+  const messageOutputs = instanceNode?.CONTENTS?.messages?.CONTENTS?.out?.CONTENTS ?? {};
   return {
     ...advertised,
     // Continuing activation is a live protocol surface, not a configuration
     // promise. A peer may retain newer config while an older RNBO export is
     // loaded, so the actual inport is authoritative in both directions.
-    continuingScoreActivation: Boolean(messageInputs.ActivatePrepared)
+    continuingScoreActivation: Boolean(messageInputs.ActivatePrepared),
+    // Transactional start must be capability-gated by the complete live
+    // request/acknowledgement surface. Configuration metadata alone cannot
+    // make an older export safe to use for coordinated playback.
+    transactionalTransportStart: Boolean(messageInputs.TransportStart && messageOutputs.transport_start_ack)
   };
 }
 
@@ -697,6 +707,9 @@ function normalizeConfiguredTarget(target, rnbo, index) {
     clockPhaseResetPath: stringField(target.clockPhaseResetPath) || undefined,
     clockPhaseAckPath: stringField(target.clockPhaseAckPath) || undefined,
     clockPhaseAck: numericList(target.clockPhaseAck),
+    transportStartPath: stringField(target.transportStartPath) || undefined,
+    transportStartAckPath: stringField(target.transportStartAckPath) || undefined,
+    transportStartAck: numericList(target.transportStartAck),
     voiceId: target.voiceId,
     clientId: target.clientId,
     capabilities: rnboPlaybackCapabilities({ rnbo }, target.capabilities),

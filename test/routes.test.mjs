@@ -3074,6 +3074,110 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
   assert.equal(started.activations[0].acknowledgement.status, "active");
 });
 
+test("transport play uses transactional start only for a complete live cohort", async () => {
+  const targetId = "transactional-client";
+  const requests = [];
+  const phaseWaits = [];
+  let phaseCounter = 0;
+  let transportAck = [];
+  let running = false;
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: {
+        oscQuery: { enabled: false },
+        phaseAlignment: {
+          startAckTimeoutMs: 20,
+          phaseAckTimeoutMs: 20,
+          phaseAckPollIntervalMs: 10
+        },
+        targets: [{
+          id: targetId,
+          host: "127.0.0.1",
+          port: 1234,
+          address: "/rnbo/inst/9/messages/in/shadowscore",
+          currentStagePath: "/rnbo/inst/9/messages/out/current_stage",
+          clockPath: "/rnbo/inst/9/params/Clock",
+          clockPhaseResetPath: "/rnbo/inst/9/messages/in/clock_phase_reset",
+          clockPhaseAckPath: "/rnbo/inst/9/messages/out/clock_phase_ack",
+          transportStartPath: "/rnbo/inst/9/messages/in/TransportStart",
+          transportStartAckPath: "/rnbo/inst/9/messages/out/transport_start_ack",
+          capabilities: { transactionalTransportStart: true }
+        }]
+      },
+      transport: { rnboClient: { startupCohortGraceMs: 0 } }
+    }),
+    runtime: {
+      jackTransport: {
+        snapshot: () => ({
+          fresh: true,
+          ageMs: 0,
+          latest: { state: "rolling", absoluteBeat: 8.75, beatsPerMinute: 120 }
+        })
+      },
+      phaseAlignmentWait: async (milliseconds) => { phaseWaits.push(milliseconds); },
+      rnboParamWriter: async (write) => {
+        if (write.path.endsWith("/clock_phase_reset")) phaseCounter += 1;
+      },
+      rnboAckFetch: async (url) => ({
+        ok: true,
+        async json() {
+          return { VALUE: url.endsWith("/clock_phase_ack") ? [phaseCounter, 0] : [] };
+        }
+      }),
+      rnboTransportStartWriter: async ({ target, request }) => {
+        requests.push({ targetId: target.id, request: [...request] });
+        const operationId = request[2];
+        transportAck = request[1] === 1
+          ? [1, 1, operationId, request[3], 0, 1]
+          : request[1] === 2
+            ? [1, 2, operationId, 0, 0, 1]
+            : [1, 3, operationId, 0, 0, 1];
+        return { targetId: target.id, request: [...request] };
+      },
+      rnboTransportStartAckFetch: async () => ({
+        ok: true,
+        async json() { return { VALUE: transportAck }; }
+      }),
+      rnboAdapter: {
+        enabled: true,
+        async waitForIdle() {},
+        sendStatus: () => [{ targetId, ack: { ok: true, status: "active" } }],
+        sendQueueStatus: () => ({ inProgress: false, queued: false }),
+        lifecycleEvents: () => []
+      },
+      macroPlayback: {
+        snapshot: () => ({ running, activeBlockId: "A", macroIndex: 0 }),
+        start: () => {
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => { running = false; }
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: targetId,
+    rnboHost: "127.0.0.1",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/9/messages/in/shadowscore"
+  });
+
+  const started = await requestJson(context, "POST", "/transport/play", {
+    mode: "timer",
+    forceRestart: true,
+    phaseReset: true
+  });
+
+  assert.equal(started.transactionalTransportStart.ok, true);
+  assert.equal(started.clockStartAcknowledgement.transactional, true);
+  assert.equal(started.clockStartPhaseVerification.verified, true);
+  assert.deepEqual(requests.map(({ request }) => request[1]), [1, 2]);
+  assert.equal(requests[0].request[3], 0);
+  assert.equal(requests[1].request[2], requests[0].request[2]);
+  assert.deepEqual(phaseWaits, [150, 150]);
+  assert.equal(running, true);
+});
+
 test("transport start freezes its participating cohort before JACK starts", async () => {
   let peerAvailable = false;
   let running = false;

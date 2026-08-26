@@ -161,6 +161,33 @@ boundary/deadline, armed acknowledgement, activation acknowledgement, and
 cancel/reconciliation behavior. This is the path to removing server round trips
 without exchanging reliability for speed.
 
+The client canary now implements a fixed seven-integer `TransportStart` request
+with operation-matched ARM, ACTIVATE, and CANCEL commands and distinct ARMED,
+ACTIVE, CANCELED, and REJECTED acknowledgements. ACTIVE is emitted only after
+the first resulting playback stage is witnessed. A post-ACTIVE CANCEL remains
+valid and idempotent, while a delayed ACTIVATE cannot revive the canceled
+operation.
+
+Discovery reports `transactionalTransportStart: true` only when both the live
+`TransportStart` inport and `transport_start_ack` outport exist in the same
+running export; advertised configuration, or either surface by itself, is
+insufficient. The server selects the transactional path only when every frozen
+participating target exposes that complete surface plus the existing phase
+reset acknowledgement contract. Mixed and older fleets retain the proven
+legacy coordinated-start sequence unchanged.
+
+The four-bird canary established two required safe JACK beat windows. Sending
+phase reset or ACTIVATE at arbitrary points in a beat reproducibly split first
+stage witnesses between 20 and 21. Sending each command near the beginning of a
+fresh JACK beat gave every client almost one full beat to arm, and Wren, Raven,
+Finch, and Heron all acknowledged ACTIVE at stage 20. The server sequence is
+therefore: ensure JACK rolling; phase reset in a safe window and verify every
+phase ACK; schedule any prepared score activation; ARM every client and wait
+for the full ARMED barrier; ACTIVATE in a second safe window; then require every
+ACTIVE acknowledgement to match both operation ID and first stage. Any reject,
+timeout, cohort mismatch, or stage mismatch sends CANCEL to the full
+transactional cohort and invokes the existing stop/JACK rollback.
+
 ## Live acceptance matrix
 
 - Warm and cold starts with every assigned bird online.

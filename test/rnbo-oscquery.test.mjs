@@ -44,6 +44,7 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
   assert.equal(capabilities.stagedScoreActivation, true);
   assert.equal(capabilities.resumableScoreReplace, false);
   assert.equal(capabilities.continuingScoreActivation, false);
+  assert.equal(capabilities.transactionalTransportStart, false);
 });
 
 test("derives continuing activation from the live ActivatePrepared inport", () => {
@@ -105,6 +106,45 @@ test("discovers the live Clock, start ACK, and immediate phase-reset contract", 
     rnboTransportControlWrites(target, { clock_phase_reset: 1 })[0].path,
     "/rnbo/inst/2/messages/in/clock_phase_reset"
   );
+});
+
+test("derives transactional transport start only from the complete live request and ACK surface", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      capabilities: { transactionalTransportStart: true },
+      oscQuery: { enabled: true }
+    }
+  });
+  const advertisedOnly = createOscQueryTree();
+  advertisedOnly.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.messages.CONTENTS.in.CONTENTS.shadowscore.CONTENTS = {
+    capabilities: { VALUE: JSON.stringify({ transactionalTransportStart: true }) }
+  };
+  assert.equal(extractRnboTargets(advertisedOnly, config)[0].capabilities.transactionalTransportStart, false);
+
+  const requestOnly = createOscQueryTree();
+  requestOnly.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.messages.CONTENTS.in.CONTENTS.TransportStart = {
+    FULL_PATH: "/rnbo/inst/2/messages/in/TransportStart",
+    TYPE: "iiiiiii"
+  };
+  assert.equal(extractRnboTargets(requestOnly, config)[0].capabilities.transactionalTransportStart, false);
+
+  const complete = createOscQueryTree();
+  const messages = complete.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.messages.CONTENTS;
+  messages.in.CONTENTS.TransportStart = {
+    FULL_PATH: "/rnbo/inst/2/messages/in/TransportStart",
+    TYPE: "iiiiiii"
+  };
+  messages.out.CONTENTS.transport_start_ack = {
+    FULL_PATH: "/rnbo/inst/2/messages/out/transport_start_ack",
+    TYPE: "iiiiii",
+    VALUE: [90, 1, 4001, 0, 2, 1]
+  };
+
+  const target = extractRnboTargets(complete, config)[0];
+  assert.equal(target.capabilities.transactionalTransportStart, true);
+  assert.equal(target.transportStartPath, "/rnbo/inst/2/messages/in/TransportStart");
+  assert.equal(target.transportStartAckPath, "/rnbo/inst/2/messages/out/transport_start_ack");
+  assert.deepEqual(target.transportStartAck, [90, 1, 4001, 0, 2, 1]);
 });
 
 test("extracts ShadowScoreClient compact replacement capabilities from OSCQuery metadata", () => {

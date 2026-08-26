@@ -2413,6 +2413,68 @@ test("Players Play starts the available cohort while an assigned player is offli
   assert.equal(writes.every((write) => write.host === "finch.local"), true);
 });
 
+test("Players Play excludes globally assigned voices absent from the active block", async () => {
+  let running = false;
+  const writes = [];
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      targets: [
+        { id: "finch", host: "finch.local", port: 1234, address: "/rnbo/inst/2/messages/in/shadowscore" },
+        { id: "silent", host: "silent.local", port: 1234, address: "/rnbo/inst/3/messages/in/shadowscore" }
+      ]
+    }
+  });
+  const initialScore = createInitialScore(config);
+  delete initialScore.mesostructure.A.players["player-5"];
+  const context = createRouteContext({
+    config,
+    initialScore,
+    runtime: {
+      rnboAdapter: {
+        enabled: true,
+        async waitForIdle() {},
+        async playbackUpdates() {
+          return {
+            targets: {
+              finch: { targetId: "finch", voiceId: "player-1", state: "active", activeTransaction: 1005 },
+              silent: { targetId: "silent", voiceId: "player-5", state: "activation-failed" }
+            }
+          };
+        },
+        sendStatus: () => [],
+        sendQueueStatus: () => ({ inProgress: false, queued: false })
+      },
+      rnboParamWriter: async (write) => { writes.push(write); },
+      macroPlayback: {
+        snapshot: () => ({ running, mode: running ? "timer" : "stopped", activeBlockId: "A", macroIndex: 0 }),
+        start: () => { running = true; return context.runtime.macroPlayback.snapshot(); },
+        stop: () => { running = false; return context.runtime.macroPlayback.snapshot(); }
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "finch",
+    rnboHost: "finch.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-5/assignment", {
+    rnboTargetId: "silent",
+    rnboHost: "silent.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/3/messages/in/shadowscore"
+  });
+
+  const played = await requestJson(context, "POST", "/transport/players/play", {
+    mode: "timer",
+    phaseReset: false
+  });
+
+  assert.equal(played.rnboReadiness.ready, true);
+  assert.deepEqual(played.rnboReadiness.participatingTargetIds, ["finch"]);
+  assert.equal(writes.every((write) => write.host === "finch.local"), true);
+});
+
 test("Players Play ignores a failed redundant prepare when the desired payload is already active", async () => {
   let prepareCount = 0;
   let applyCount = 0;

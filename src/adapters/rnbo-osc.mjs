@@ -125,8 +125,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
         return Promise.reject(new Error("RNBO adapter is not attached to a score store"));
       }
       const score = scoreWithActiveBlock(store.getScore(), blockId);
+      const assignedVoiceIds = blockAssignedVoiceIds(score, blockId);
       const updates = await adapter.playbackUpdates(blockId);
-      const availableUpdates = playbackActivationPolicy(Object.values(updates.targets)).participating;
+      const availableUpdates = playbackActivationPolicy(Object.values(updates.targets), assignedVoiceIds).participating;
       const unreadyVoiceIds = options.requireReady === true
         ? availableUpdates
             .filter((update) => !["prepared", "active"].includes(update.state))
@@ -136,7 +137,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
       const voiceIds = mergeOptionalSelection(
         options.voiceIds,
         [...dirtyVoiceSelection(score, blockId), ...unreadyVoiceIds]
-      );
+      )?.filter((voiceId) => assignedVoiceIds.includes(voiceId));
       return resendScore(score, `${reason}:${blockId}`, {
         ...options,
         immediate: true,
@@ -163,9 +164,11 @@ export function createRnboOscAdapter(config, runtime = {}) {
       const canonical = store.getScore();
       const selectedBlockId = String(blockId || canonical.structureState?.activeBlockId || "").trim();
       const score = selectedBlockId ? scoreWithActiveBlock(canonical, selectedBlockId) : canonical;
+      const voiceIds = selectedBlockId ? blockAssignedVoiceIds(score, selectedBlockId) : options.voiceIds;
       const targets = await rnboTargetsForSend(config, score, runtime, {
         liveTargets: options.targets,
-        targetIds: options.targetIds
+        targetIds: options.targetIds,
+        voiceIds
       });
       metrics.targetEnumerationCount += targets.length;
       const updates = targets.map((target) => desiredUpdateForTarget(score, selectedBlockId, target));
@@ -505,8 +508,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
       let updates = options.reusePrepared === true
         ? await adapter.playbackUpdates(selectedBlockId, { targetIds: options.targetIds })
         : null;
+      const assignedVoiceIds = blockAssignedVoiceIds(canonical, selectedBlockId);
       let activationPolicy = updates
-        ? playbackActivationPolicy(Object.values(updates.targets))
+        ? playbackActivationPolicy(Object.values(updates.targets), assignedVoiceIds)
         : null;
       const reusable = activationPolicy?.reusable === true;
       if (!reusable) {
@@ -518,7 +522,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
         await waitForSendQueueIdle();
         updates = await adapter.playbackUpdates(selectedBlockId, { targetIds: options.targetIds });
       }
-      activationPolicy = playbackActivationPolicy(Object.values(updates.targets));
+      activationPolicy = playbackActivationPolicy(Object.values(updates.targets), assignedVoiceIds);
       const pending = activationPolicy.pending;
       if (!pending.length) {
         result = { ...updates, activationMode, action: "already-active", activations: [] };
@@ -1108,7 +1112,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   }
 
   function dirtyVoiceSelection(score, blockId) {
-    const assigned = Object.keys(score.mesostructure?.[blockId]?.players ?? {});
+    const assigned = blockAssignedVoiceIds(score, blockId);
     return playbackPreparationState.selectVoices(
       blockId,
       assigned,
@@ -1899,6 +1903,10 @@ function scoreWithActiveBlock(score, blockId) {
       macroIndex: macroIndex >= 0 ? macroIndex : score.structureState?.macroIndex ?? 0
     }
   };
+}
+
+function blockAssignedVoiceIds(score, blockId) {
+  return Object.keys(score?.mesostructure?.[blockId]?.players ?? {});
 }
 
 async function readLiveRnboTargets(config, runtime = {}, options = {}) {

@@ -73,7 +73,7 @@
     "transactionStart": 10000,
     "transactionIdMode": "persistent",
     "transactionStatePath": "data/rnbo-transaction.json",
-    "sendBatchSize": 4,
+    "sendBatchSize": 1,
     "sendDelayMs": 5
   }
 }

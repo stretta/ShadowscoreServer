@@ -4,8 +4,10 @@ export function evaluatePreparedPlaybackCohort(options = {}) {
   const states = [...(options.states ?? [])];
   const availability = [...(options.availability ?? [])];
   const assignedVoiceIds = [...new Set(options.assignedVoiceIds ?? [])];
-  const unavailableStates = states.filter((state) => state.state === "unavailable");
-  const participatingStates = states.filter((state) => state.state !== "unavailable");
+  const assignedVoiceIdSet = new Set(assignedVoiceIds);
+  const assignedStates = states.filter((state) => !state.voiceId || assignedVoiceIdSet.has(state.voiceId));
+  const unavailableStates = assignedStates.filter((state) => state.state === "unavailable");
+  const participatingStates = assignedStates.filter((state) => state.state !== "unavailable");
   const unavailableVoiceIds = new Set([
     ...availability
       .filter((record) => record.available === false)
@@ -21,14 +23,14 @@ export function evaluatePreparedPlaybackCohort(options = {}) {
   let decision = "ready";
   if (!participatingVoiceIds.length) decision = "no-targets";
   else if (!participatingStates.length || missingVoiceIds.length || invalidStates.length) decision = "not-ready";
-  else if (participatingStates.every((state) => state.state === "active")) decision = "already-active";
+  else if (participatingStates.every((state) => state.state === "active" && !hasUnpromotedPreparation(state))) decision = "already-active";
 
   return {
     decision,
     ready: ["ready", "already-active"].includes(decision),
     degraded,
     participatingStates,
-    preparedStates: participatingStates.filter((state) => state.state === "prepared"),
+    preparedStates: participatingStates.filter((state) => state.state === "prepared" || hasUnpromotedPreparation(state)),
     unavailableVoiceIds: [...unavailableVoiceIds],
     participatingVoiceIds,
     missingVoiceIds,
@@ -38,10 +40,14 @@ export function evaluatePreparedPlaybackCohort(options = {}) {
   };
 }
 
-export function playbackActivationPolicy(updates = []) {
-  const participating = updates.filter((update) => update.state !== "unavailable");
-  const unavailable = updates.filter((update) => update.state === "unavailable");
-  const pending = participating.filter((update) => update.state !== "active");
+export function playbackActivationPolicy(updates = [], assignedVoiceIds = null) {
+  const assigned = Array.isArray(assignedVoiceIds) ? new Set(assignedVoiceIds) : null;
+  const relevant = assigned
+    ? updates.filter((update) => !update.voiceId || assigned.has(update.voiceId))
+    : updates;
+  const participating = relevant.filter((update) => update.state !== "unavailable");
+  const unavailable = relevant.filter((update) => update.state === "unavailable");
+  const pending = participating.filter((update) => update.state !== "active" || hasUnpromotedPreparation(update));
   return {
     participating,
     unavailable,
@@ -54,4 +60,9 @@ export function playbackActivationPolicy(updates = []) {
 export function activationActionForState(state) {
   if (state === "active") return "active";
   return "activation-failed";
+}
+
+function hasUnpromotedPreparation(state = {}) {
+  return Number.isInteger(state.preparedTransaction)
+    && state.preparedTransaction !== state.activeTransaction;
 }

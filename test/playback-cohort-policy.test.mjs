@@ -53,6 +53,27 @@ test("prepared playback cohort distinguishes missing, invalid, active, and empty
   assert.equal(empty.degraded, true);
 });
 
+test("prepared playback cohort ignores states for voices outside the selected block", () => {
+  const cohort = evaluatePreparedPlaybackCohort({
+    assignedVoiceIds: ["player-1"],
+    states: [
+      { targetId: "finch", voiceId: "player-1", state: "prepared" },
+      { targetId: "silent", voiceId: "player-5", state: "activation-failed" }
+    ]
+  });
+
+  assert.equal(cohort.decision, "ready");
+  assert.deepEqual(cohort.participatingStates.map((state) => state.targetId), ["finch"]);
+  assert.deepEqual(cohort.invalidStates, []);
+
+  const policy = playbackActivationPolicy([
+    { targetId: "finch", voiceId: "player-1", state: "prepared" },
+    { targetId: "silent", voiceId: "player-5", state: "activation-failed" }
+  ], ["player-1"]);
+  assert.equal(policy.reusable, true);
+  assert.deepEqual(policy.participating.map((state) => state.targetId), ["finch"]);
+});
+
 test("activation policy excludes unavailable targets from readiness and failure", () => {
   const policy = playbackActivationPolicy([
     { targetId: "finch", state: "active" },
@@ -68,4 +89,24 @@ test("activation policy excludes unavailable targets from readiness and failure"
   assert.equal(activationActionForState("active"), "active");
   assert.equal(activationActionForState("no-targets"), "activation-failed");
   assert.equal(activationActionForState("failed"), "activation-failed");
+});
+
+test("activation policy promotes a newer prepared transaction even when stale state is active", () => {
+  const staleActive = {
+    targetId: "raven",
+    voiceId: "player-3",
+    state: "active",
+    activeTransaction: 15405,
+    preparedTransaction: 15418
+  };
+  const policy = playbackActivationPolicy([staleActive], ["player-3"]);
+  assert.equal(policy.reusable, true);
+  assert.deepEqual(policy.pending, [staleActive]);
+
+  const cohort = evaluatePreparedPlaybackCohort({
+    assignedVoiceIds: ["player-3"],
+    states: [staleActive]
+  });
+  assert.equal(cohort.decision, "ready");
+  assert.deepEqual(cohort.preparedStates, [staleActive]);
 });

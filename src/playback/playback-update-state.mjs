@@ -131,12 +131,12 @@ export function createPlaybackUpdateState(options = {}) {
 export function summarizePlaybackUpdates(updates = []) {
   const participating = updates.filter((update) => update.state !== "unavailable");
   const unavailable = updates.filter((update) => update.state === "unavailable");
-  const affected = participating.filter((update) => update.state !== "active");
+  const affected = participating.filter((update) => update.state !== "active" || hasUnpromotedPreparation(update));
   return {
     state: aggregatePlaybackUpdateState(updates),
     affectedTargetCount: affected.length,
-    preparedTargetCount: updates.filter((update) => update.state === "prepared").length,
-    activeTargetCount: updates.filter((update) => update.state === "active").length,
+    preparedTargetCount: updates.filter((update) => update.state === "prepared" || hasUnpromotedPreparation(update)).length,
+    activeTargetCount: updates.filter((update) => update.state === "active" && !hasUnpromotedPreparation(update)).length,
     participatingTargetCount: participating.length,
     unavailableTargetCount: unavailable.length,
     unavailableTargetIds: unavailable.map((update) => update.targetId),
@@ -147,10 +147,15 @@ export function summarizePlaybackUpdates(updates = []) {
 export function aggregatePlaybackUpdateState(updates = []) {
   const participating = updates.filter((update) => update.state !== "unavailable");
   if (!participating.length) return "no-targets";
-  if (participating.every((update) => update.state === "active")) return "active";
+  if (participating.every((update) => update.state === "active" && !hasUnpromotedPreparation(update))) return "active";
   if (participating.some((update) => update.state === "failed")) return "failed";
   if (participating.every((update) => ["active", "prepared"].includes(update.state))) return "prepared";
   return "saved-not-active";
+}
+
+function hasUnpromotedPreparation(state = {}) {
+  return Number.isInteger(state.preparedTransaction)
+    && state.preparedTransaction !== state.activeTransaction;
 }
 
 function updateKey(blockId, targetId) {

@@ -2455,8 +2455,18 @@ function assignedVoiceForTarget(score, target) {
 
 function availablePlaybackTargets(score, targets) {
   const available = (targets ?? []).filter((target) => target.available !== false);
-  const assigned = available.filter((target) => assignedVoiceForTarget(score, target));
-  return assigned.length > 0 ? assigned : available;
+  const globallyAssigned = available
+    .map((target) => ({ target, voiceId: assignedVoiceForTarget(score, target) }))
+    .filter((entry) => entry.voiceId);
+  if (!globallyAssigned.length) return available;
+  const activeBlockId = optionalString(score.structureState?.activeBlockId);
+  const blockPlayers = score.mesostructure?.[activeBlockId]?.players;
+  const assignedBlockVoiceIds = blockPlayers && typeof blockPlayers === "object"
+    ? new Set(Object.keys(blockPlayers))
+    : null;
+  return globallyAssigned
+    .filter((entry) => !assignedBlockVoiceIds || assignedBlockVoiceIds.has(entry.voiceId))
+    .map((entry) => entry.target);
 }
 
 async function readHardwareUnits(config, runtime) {
@@ -5052,18 +5062,33 @@ async function rnboPlaybackReadiness(runtime, score, { waitForIdle = false } = {
   if (waitForIdle && typeof playbackReader.waitForIdle === "function") {
     await playbackReader.waitForIdle();
   }
-  const assignedTargetKeys = new Set(Object.values(score.assignments ?? {})
+  const allAssignments = Object.entries(score.assignments ?? {})
+    .filter(([, assignment]) => assignment?.rnboTargetId || assignment?.rnboAddress);
+  const activeBlockId = optionalString(score.structureState?.activeBlockId);
+  const blockPlayers = score.mesostructure?.[activeBlockId]?.players;
+  const assignedBlockVoiceIds = allAssignments.length > 0 && blockPlayers && typeof blockPlayers === "object"
+    ? new Set(Object.keys(blockPlayers))
+    : null;
+  const relevantAssignments = allAssignments
+    .filter(([voiceId]) => !assignedBlockVoiceIds || assignedBlockVoiceIds.has(voiceId))
+    .map(([, assignment]) => assignment);
+  const assignedTargetKeys = new Set(relevantAssignments
     .flatMap((assignment) => [assignment?.rnboTargetId, assignment?.rnboAddress])
     .map(optionalString)
     .filter(Boolean));
-  const assignedTargetIds = new Set(Object.values(score.assignments ?? {})
+  const assignedTargetIds = new Set(relevantAssignments
     .map((assignment) => optionalString(assignment?.rnboTargetId))
     .filter(Boolean));
   if (typeof playbackReader.playbackUpdates === "function") {
     const updates = await playbackReader.playbackUpdates(score.structureState?.activeBlockId ?? "");
     const entries = Object.entries(updates?.targets ?? {})
-      .filter(([targetId, update]) => assignedTargetKeys.size === 0 || assignedTargetKeys.has(optionalString(targetId))
-        || assignedTargetKeys.has(optionalString(update?.targetId)));
+      .filter(([targetId, update]) => assignedBlockVoiceIds
+        ? assignedBlockVoiceIds.has(optionalString(update?.voiceId))
+          || assignedTargetKeys.has(optionalString(targetId))
+          || assignedTargetKeys.has(optionalString(update?.targetId))
+        : assignedTargetKeys.size === 0
+          || assignedTargetKeys.has(optionalString(targetId))
+          || assignedTargetKeys.has(optionalString(update?.targetId)));
     if (entries.length) {
       const presentTargetIds = new Set(entries.flatMap(([targetId, update]) => [optionalString(targetId), optionalString(update?.targetId)]).filter(Boolean));
       const missing = [...assignedTargetIds].filter((targetId) => !presentTargetIds.has(targetId));
@@ -5094,10 +5119,14 @@ async function rnboPlaybackReadiness(runtime, score, { waitForIdle = false } = {
     }
   }
   const statuses = playbackParticipantDeliveryStatus(runtime);
-  const relevantStatuses = assignedTargetKeys.size === 0
-    ? statuses
-    : statuses.filter((status) => assignedTargetKeys.has(optionalString(status.targetId))
-      || assignedTargetKeys.has(optionalString(status.address)));
+  const relevantStatuses = assignedBlockVoiceIds
+    ? statuses.filter((status) => assignedBlockVoiceIds.has(optionalString(status.voiceId))
+      || assignedTargetKeys.has(optionalString(status.targetId))
+      || assignedTargetKeys.has(optionalString(status.address)))
+    : assignedTargetKeys.size === 0
+      ? statuses
+      : statuses.filter((status) => assignedTargetKeys.has(optionalString(status.targetId))
+        || assignedTargetKeys.has(optionalString(status.address)));
   const failed = relevantStatuses.filter((status) => status.ack?.ok === false);
   return {
     ready: failed.length === 0,

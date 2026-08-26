@@ -62,6 +62,25 @@ test("playback update summaries retain unavailable cohort semantics", () => {
   assert.equal(aggregatePlaybackUpdateState([{ state: "saved-not-active" }]), "saved-not-active");
 });
 
+test("playback update summaries expose newer prepared transactions on active records", () => {
+  const updates = [{
+    targetId: "raven",
+    state: "active",
+    activeTransaction: 15405,
+    preparedTransaction: 15418
+  }];
+  assert.deepEqual(summarizePlaybackUpdates(updates), {
+    state: "prepared",
+    affectedTargetCount: 1,
+    preparedTargetCount: 1,
+    activeTargetCount: 0,
+    participatingTargetCount: 1,
+    unavailableTargetCount: 0,
+    unavailableTargetIds: [],
+    degraded: false
+  });
+});
+
 test("playback update desired invalidation and cached reads remain isolated", () => {
   const state = createPlaybackUpdateState();
   state.recordDelivery(delivery({ blockId: "A", transactionId: 401, hash: "hash-a", active: true }));

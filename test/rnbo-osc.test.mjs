@@ -1305,7 +1305,7 @@ test("score transaction retries once when RNBO ACK reports a rejected commit", a
   assert.equal(result.ack.attempt, 1);
   assert.deepEqual(result.deliveryProfile, {
     attempt: 1,
-    batchSize: 2,
+    batchSize: 1,
     delayMs: 0,
     mode: "conservative-retry"
   });
@@ -2531,6 +2531,68 @@ test("RNBO look-ahead preparation sends to every mandatory staged target", async
     assert.equal(adapter.sendStatus().length, 2);
     assert.equal(adapter.sendStatus().every((status) => status.stagedScoreActivation), true);
     assert.equal(adapter.sendStatus().every((status) => status.blockId === "B"), true);
+  } finally {
+    adapter.close();
+  }
+});
+
+test("RNBO block preparation excludes globally assigned voices absent from the block", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      enabled: true,
+      clearRowCount: 0,
+      sendDelayMs: 0,
+      discoveryResendIntervalMs: 0,
+      log: false,
+      oscQuery: { enabled: false },
+      ack: { enabled: false },
+      targets: [
+        {
+          id: "finch",
+          voiceId: "player-1",
+          host: "127.0.0.1",
+          port: 1234,
+          address: "/rnbo/inst/20/messages/in/shadowscore",
+          capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true }
+        },
+        {
+          id: "silent",
+          voiceId: "player-2",
+          host: "127.0.0.1",
+          port: 1234,
+          address: "/rnbo/inst/22/messages/in/shadowscore",
+          capabilities: { ...compactReplaceCapabilities(), stagedScoreActivation: true }
+        }
+      ]
+    }
+  });
+  const base = scoreWithBlock(18);
+  const score = {
+    ...base,
+    assignments: {
+      "player-1": { rnboTargetId: "finch", rnboAddress: "/rnbo/inst/20/messages/in/shadowscore" },
+      "player-2": { rnboTargetId: "silent", rnboAddress: "/rnbo/inst/22/messages/in/shadowscore" }
+    }
+  };
+  const addresses = [];
+  const adapter = createRnboOscAdapter(config, {
+    socket: {
+      send(packet, port, host, callback) {
+        addresses.push(readOscAddress(packet));
+        callback();
+      },
+      close() {}
+    }
+  });
+  adapter.attach({ events: new EventEmitter(), getScore: () => score });
+  try {
+    const updates = await adapter.playbackUpdates("A");
+    assert.deepEqual(Object.keys(updates.targets), ["finch"]);
+
+    await adapter.prepareBlock("A", "transport-start", { requireReady: true });
+    assert.equal(addresses.some((address) => address.includes("/inst/20/")), true);
+    assert.equal(addresses.some((address) => address.includes("/inst/22/")), false);
+    assert.deepEqual(adapter.sendStatus().map((status) => status.targetId), ["finch"]);
   } finally {
     adapter.close();
   }

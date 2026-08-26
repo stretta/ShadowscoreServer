@@ -165,6 +165,13 @@ samples plus mean and maximum delay beyond the intentional wait. This reuses
 the transaction's existing timers, adds no polling loop, and does not change
 packet ordering, requested batch size, effective batch size, or delay policy.
 
+The third Phase 6 checkpoint responds to the measured Wren baseline by bounding
+whole-target score transactions to two concurrent transfers. Per-target packet
+ordering and one-row/five-millisecond pacing remain unchanged, and the exact
+cohort still must reach READY before activation. Each target status records the
+fleet limit, cohort size, worker slot, and time spent queued so the resulting
+READY latency and event-loop backlog can be compared with the seven-way fanout.
+
 ## Checkpoint and Deployment Policy
 
 Each phase is a separate reviewed local commit. Before deploying to Wren:

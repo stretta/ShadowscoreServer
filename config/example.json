@@ -85,6 +85,7 @@
     },
     "stagesPerBeat": 16,
     "transactionStart": 1000,
+    "maxConcurrentScoreTransfers": 2,
     "sendBatchSize": 1,
     "sendDelayMs": 5
   }

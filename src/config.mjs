@@ -386,6 +386,7 @@ export const defaultConfig = Object.freeze({
       requestTimeoutMs: 300
     },
     lookAheadBeats: 12,
+    maxConcurrentScoreTransfers: 2,
     sendBatchSize: 1,
     sendDelayMs: 5
   },

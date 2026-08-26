@@ -6,8 +6,9 @@ import { dirname, resolve } from "node:path";
 import { encodeOscMessage } from "./osc.mjs";
 import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
-import { rnboFlowControlEvidence, rnboScoreDeliveryProfile } from "../playback/rnbo-flow-control.mjs";
+import { rnboFlowControlEvidence, rnboScoreDeliveryProfile, rnboTargetTransferConcurrency } from "../playback/rnbo-flow-control.mjs";
 import { createEventLoopBacklogSampler } from "../playback/flow-control-telemetry.mjs";
+import { mapWithConcurrency } from "../playback/bounded-concurrency.mjs";
 import {
   activationActionForState,
   evaluatePreparedPlaybackCohort,
@@ -875,6 +876,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
         retryCount: compiled?.retryCount ?? 0,
         flowControl: compiled?.flowControl ?? null,
         eventLoopBacklog: compiled?.eventLoopBacklog ?? null,
+        transferScheduling: compiled?.transferScheduling ?? null,
         resumedRowCount: compiled?.resumedRowCount ?? 0,
         activeTransaction: compiled?.stagedScoreActivation === true
           ? lastSendStatus.get(targetId)?.activeTransaction ?? null
@@ -1330,7 +1332,8 @@ function persistTransactionId(statePath, transactionId) {
 
 export async function sendScoreTransaction(socket, config, score, transactionId, options = {}) {
   const targets = await rnboTargetsForSend(config, score, options.runtime, options);
-  const compiledTargets = await Promise.all(targets.map(async (target) => {
+  const transferLimit = rnboTargetTransferConcurrency(config);
+  const compiledTargets = await mapWithConcurrency(targets, transferLimit, async (target, index, transferScheduling) => {
     const preview = compiledTransactionForDelivery(score, config, transactionId, target, options);
     const reusedStatus = options.reuseCompiledTarget?.(target, preview);
     if (reusedStatus) {
@@ -1345,6 +1348,7 @@ export async function sendScoreTransaction(socket, config, score, transactionId,
         reused: true,
         reusedAt,
         reuseReason: "identical-staged-payload",
+        transferScheduling,
         ack: reusedStatus.ack
       };
       emitLifecycleEvent(options, "prepare_reused", compiled, target, {
@@ -1354,7 +1358,10 @@ export async function sendScoreTransaction(socket, config, score, transactionId,
       });
       return { target, compiled };
     }
-    const compiled = await sendCompiledScoreTransaction(socket, config, score, transactionId, target, options);
+    const compiled = await sendCompiledScoreTransaction(socket, config, score, transactionId, target, {
+      ...options,
+      transferScheduling
+    });
     if (config.rnbo.log !== false) {
       const ack = compiled.ack?.ok === false ? ` ack=${compiled.ack.status}` : "";
       console.log(
@@ -1362,7 +1369,7 @@ export async function sendScoreTransaction(socket, config, score, transactionId,
       );
     }
     return { target, compiled };
-  }));
+  });
 
   if (options.stagedOnly === true || Array.isArray(options.targetIds)) {
     return {
@@ -1401,7 +1408,8 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
       ...(artifact
         ? bindCompiledScoreArtifact(artifact, transactionId)
         : compileScoreTransaction(score, config, transactionId, target, options)),
-      deliveryProfile
+      deliveryProfile,
+      transferScheduling: options.transferScheduling ?? null
     };
     const delivery = resumeFromRow > 0
       ? {
@@ -1481,6 +1489,7 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
     retryCount: compiled?.deliveryProfile?.attempt ?? 0,
     flowControl: rnboFlowControlEvidence(config, target, compiled?.deliveryProfile),
     eventLoopBacklog: eventLoopBacklog.snapshot(),
+    transferScheduling: options.transferScheduling ?? null,
     resumedRowCount,
     targetId: target.id ?? target.address ?? "",
     voiceId: target.voiceId ?? "",

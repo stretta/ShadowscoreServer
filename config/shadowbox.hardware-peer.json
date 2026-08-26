@@ -44,6 +44,7 @@
     "stagesPerBeat": 16,
     "clearRowCount": 64,
     "transactionStart": 1000,
+    "maxConcurrentScoreTransfers": 2,
     "sendBatchSize": 1,
     "sendDelayMs": 5
   }

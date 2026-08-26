@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { rnboFlowControlEvidence, rnboScoreDeliveryProfile } from "../src/playback/rnbo-flow-control.mjs";
+import { rnboFlowControlEvidence, rnboScoreDeliveryProfile, rnboTargetTransferConcurrency } from "../src/playback/rnbo-flow-control.mjs";
 
 test("RNBO flow control keeps unadvertised receivers on one-row pacing", () => {
   const config = { rnbo: { sendBatchSize: 8, sendDelayMs: 5, oscQuery: { enabled: true } } };
@@ -33,4 +33,10 @@ test("RNBO flow control requires bounded ingestion, commit ACK, and ACK polling"
   assert.equal(rnboScoreDeliveryProfile(enabled, {
     capabilities: { ...target.capabilities, scoreBatchAcknowledgement: "none" }
   }, 0).batchSize, 1);
+});
+
+test("RNBO target fanout defaults to two and remains explicitly configurable", () => {
+  assert.equal(rnboTargetTransferConcurrency({ rnbo: {} }), 2);
+  assert.equal(rnboTargetTransferConcurrency({ rnbo: { maxConcurrentScoreTransfers: 1 } }), 1);
+  assert.equal(rnboTargetTransferConcurrency({ rnbo: { maxConcurrentScoreTransfers: 200 } }), 64);
 });

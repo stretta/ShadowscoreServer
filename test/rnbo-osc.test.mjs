@@ -1245,6 +1245,55 @@ test("sends one transaction per configured RNBO target", async () => {
   assert.equal(packets.map(({ packet }) => readOscAddress(packet)).includes("/rnbo/inst/4/messages/in/Tempo"), false);
 });
 
+test("score target fanout obeys the configured whole-transaction concurrency limit", async () => {
+  const targets = [1, 2, 3, 4].map((number) => ({
+    id: `target-${number}`,
+    voiceId: `player-${number}`,
+    host: `target-${number}.local`,
+    clientId: number,
+    address: `/rnbo/inst/${number}/messages/in/shadowscore`,
+    capabilities: compactReplaceCapabilities()
+  }));
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      port: 9000,
+      clearRowCount: 0,
+      maxConcurrentScoreTransfers: 2,
+      sendDelayMs: 0,
+      log: false,
+      targets
+    }
+  });
+  const activeHosts = new Set();
+  const observedHosts = new Set();
+  let maxActive = 0;
+  const socket = {
+    send(packet, port, host, callback) {
+      if (!observedHosts.has(host)) {
+        observedHosts.add(host);
+        activeHosts.add(host);
+        maxActive = Math.max(maxActive, activeHosts.size);
+      }
+      setImmediate(() => {
+        callback();
+        if (readOscAddress(packet).endsWith("/MaxSteps")) activeHosts.delete(host);
+      });
+    }
+  };
+
+  const result = await sendScoreTransaction(socket, config, createScore(), 502);
+
+  assert.equal(maxActive, 2);
+  assert.equal(observedHosts.size, 4);
+  assert.deepEqual(result.targets.map(({ target }) => target.id), targets.map(({ id }) => id));
+  for (const { compiled } of result.targets) {
+    assert.equal(compiled.transferScheduling.limit, 2);
+    assert.equal(compiled.transferScheduling.cohortSize, 4);
+    assert.ok([0, 1].includes(compiled.transferScheduling.workerSlot));
+    assert.ok(compiled.transferScheduling.queuedDurationMs >= 0);
+  }
+});
+
 test("sends score updates to assignment-bound RNBO targets", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {

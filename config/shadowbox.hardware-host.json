@@ -73,6 +73,7 @@
     "transactionStart": 10000,
     "transactionIdMode": "persistent",
     "transactionStatePath": "data/rnbo-transaction.json",
+    "maxConcurrentScoreTransfers": 2,
     "sendBatchSize": 1,
     "sendDelayMs": 5
   }

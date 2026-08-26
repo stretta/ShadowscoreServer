@@ -34,6 +34,10 @@ export function rnboFlowControlEvidence(config = {}, target = {}, deliveryProfil
   };
 }
 
+export function rnboTargetTransferConcurrency(config = {}) {
+  return clampInt(config.rnbo?.maxConcurrentScoreTransfers ?? 2, 2, 1, 64);
+}
+
 function clampInt(value, fallback, min, max) {
   const number = Math.round(Number(value));
   return Number.isFinite(number) ? Math.min(max, Math.max(min, number)) : fallback;

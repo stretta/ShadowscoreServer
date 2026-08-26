@@ -5484,6 +5484,12 @@ test("RNBO targets route exposes resend queue and per-target commit status", asy
                 meanMs: 0.2,
                 maxMs: 1.7
               },
+              transferScheduling: {
+                limit: 2,
+                cohortSize: 7,
+                workerSlot: 1,
+                queuedDurationMs: 3200
+              },
               ack: {
                 ok: true,
                 status: "committed",
@@ -5528,6 +5534,12 @@ test("RNBO targets route exposes resend queue and per-target commit status", asy
     sampleCount: 821,
     meanMs: 0.2,
     maxMs: 1.7
+  });
+  assert.deepEqual(targets.targets[0].sendStatus.transferScheduling, {
+    limit: 2,
+    cohortSize: 7,
+    workerSlot: 1,
+    queuedDurationMs: 3200
   });
 
   const session = await requestJson(context, "GET", "/session");

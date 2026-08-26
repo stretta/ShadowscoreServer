@@ -402,6 +402,48 @@ test("session route exposes host metadata and voice assignments", async () => {
   assert.equal(session.hardwareUnits[0].local, true);
 });
 
+test("session runtime acquires all local RNBO inventory views once", async () => {
+  let discoveryCount = 0;
+  const target = {
+    id: "rnbo-inst-2:shadowscore",
+    host: "127.0.0.1",
+    port: 1234,
+    address: "/rnbo/inst/2/messages/in/shadowscore",
+    available: true
+  };
+  const device = {
+    id: "wren",
+    name: "Wren",
+    host: "127.0.0.1",
+    available: true
+  };
+  const controlTarget = {
+    id: "rnbo-inst-3:poland",
+    host: "127.0.0.1",
+    port: 1234,
+    app: "poland",
+    available: true,
+    parameters: [],
+    inputPorts: []
+  };
+  const context = createRouteContext({
+    runtime: {
+      async discoverRnboRuntime() {
+        discoveryCount += 1;
+        return { targets: [target], devices: [device], controlTargets: [controlTarget] };
+      }
+    }
+  });
+
+  const session = await requestJson(context, "GET", "/session");
+
+  assert.equal(discoveryCount, 1);
+  assert.equal(session.rnbo.targets[0].id, target.id);
+  assert.ok(session.rnbo.devices[0].id.endsWith(`:${device.id}`));
+  assert.equal(session.hardwareUnits[0].oscTargets.length, 1);
+  assert.equal(session.hardwareUnits[0].oscTargets[0].app, controlTarget.app);
+});
+
 test("transport routes store JACK snapshots and report freshness", async () => {
   let now = 1782580000100;
   const context = createRouteContext({

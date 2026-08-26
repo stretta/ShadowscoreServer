@@ -3,7 +3,7 @@ import { adminPage } from "./admin-page.mjs";
 import { serveStaticAsset } from "./static-files.mjs";
 import { transportPage } from "./transport-page.mjs";
 import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
-import { configuredRnboTargets, discoverRnboControlTargets, discoverRnboDevices, discoverRnboTargets, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
+import { configuredRnboTargets, discoverRnboRuntime, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
 import { editorManifests } from "../editors/manifest.mjs";
 import { distributeBlockTtid } from "../harmonic/distribution.mjs";
 import { scaleCatalog } from "../harmonic/scale.mjs";
@@ -2010,22 +2010,23 @@ function setCors(response) {
   response.setHeader("Access-Control-Allow-Origin", "*");
 }
 
-async function readRnboTargets(config) {
-  const discovered = await discoverRnboTargets(config);
-  return discovered.length > 0 ? discovered : configuredRnboTargets(config);
-}
-
 async function readSessionRuntime(config, runtime) {
-  const localTargets = await readRnboTargets(config);
-  const localRnboDevices = await readRnboDevices(config);
-  const localOscTargets = await readOscControlTargets(config);
+  const discoverRuntime = runtime.discoverRnboRuntime ?? discoverRnboRuntime;
+  const [localRuntime, manualTargets, manualOscTargets, manualRnboDevices] = await Promise.all([
+    discoverRuntime(config),
+    runtime.manualOscQueryDevices?.rnboTargets?.() ?? [],
+    runtime.manualOscQueryDevices?.oscTargets?.() ?? [],
+    runtime.manualOscQueryDevices?.rnboDevices?.() ?? []
+  ]);
+  const localTargets = localRuntime.targets.length > 0
+    ? localRuntime.targets
+    : configuredRnboTargets(config);
+  const localRnboDevices = localRuntime.devices;
+  const localOscTargets = localRuntime.controlTargets;
   const localUnit = createLocalHardwareUnit(config, localTargets, localRnboDevices, localOscTargets);
   const peerUnits = runtime.peerRegistry?.snapshot?.() ?? [];
   const peerTargets = runtime.peerRegistry?.targets?.() ?? [];
   const peerOscTargets = runtime.peerRegistry?.oscTargets?.() ?? [];
-  const manualTargets = await runtime.manualOscQueryDevices?.rnboTargets?.() ?? [];
-  const manualOscTargets = await runtime.manualOscQueryDevices?.oscTargets?.() ?? [];
-  const manualRnboDevices = await runtime.manualOscQueryDevices?.rnboDevices?.() ?? [];
   const sessionRuntime = {
     rnboTargets: [...localUnit.targets, ...peerTargets, ...manualTargets],
     oscTargets: [...localUnit.oscTargets, ...peerOscTargets, ...manualOscTargets],
@@ -2051,14 +2052,6 @@ function requireCoordinator(runtime) {
     throw new Error("coordinator manager is not available");
   }
   return runtime.coordinator;
-}
-
-async function readRnboDevices(config) {
-  return discoverRnboDevices(config);
-}
-
-async function readOscControlTargets(config) {
-  return discoverRnboControlTargets(config);
 }
 
 async function readAllRnboTargets(config, runtime, options = {}) {

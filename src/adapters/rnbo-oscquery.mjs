@@ -5,6 +5,31 @@ import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 const TRANSPORT_PARAM_CONTROLS = new Set(["Clock"]);
 const TRANSPORT_INPORT_CONTROLS = new Set(["MaxSteps", "ClockInterval", "Tempo", "SetStage", "Stage", "clock_phase_reset"]);
 
+export async function discoverRnboRuntime(config, options = {}) {
+  const rnbo = config.rnbo ?? {};
+  const oscQuery = rnbo.oscQuery ?? {};
+  if (!oscQuery.enabled) {
+    return emptyRuntimeInventory();
+  }
+
+  try {
+    const tree = await fetchOscQueryTree(oscQuery, options.fetchImpl ?? globalThis.fetch);
+    return {
+      targets: extractRnboTargets(tree, config),
+      devices: extractRnboDevices(tree, config),
+      controlTargets: extractRnboControlTargets(tree, config)
+    };
+  } catch (error) {
+    if (options.throwOnError === true) {
+      throw error;
+    }
+    if (rnbo.log !== false) {
+      console.error(`[rnbo-oscquery] runtime discovery failed: ${messageForError(error)}`);
+    }
+    return emptyRuntimeInventory();
+  }
+}
+
 export async function discoverRnboTargets(config, options = {}) {
   const rnbo = config.rnbo ?? {};
   const oscQuery = rnbo.oscQuery ?? {};
@@ -60,6 +85,10 @@ export async function discoverRnboControlTargets(config, options = {}) {
     }
     return [];
   }
+}
+
+function emptyRuntimeInventory() {
+  return { targets: [], devices: [], controlTargets: [] };
 }
 
 export async function writeRnboTransportControls(config, target, controls, options = {}) {

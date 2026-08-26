@@ -1,7 +1,36 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { discoverRnboTargets, extractRnboControlTargets, extractRnboDevices, extractRnboTargets, rnboTransportControlWrites } from "../src/adapters/rnbo-oscquery.mjs";
+import { discoverRnboRuntime, discoverRnboTargets, extractRnboControlTargets, extractRnboDevices, extractRnboTargets, rnboTransportControlWrites } from "../src/adapters/rnbo-oscquery.mjs";
+
+test("discovers all local RNBO runtime views from one OSCQuery fetch", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "192.168.68.96",
+      port: 1234,
+      oscQuery: { enabled: true, url: "http://pt5.local:5678/" },
+      log: false
+    }
+  });
+  let fetchCount = 0;
+
+  const inventory = await discoverRnboRuntime(config, {
+    fetchImpl: async () => {
+      fetchCount += 1;
+      return {
+        ok: true,
+        async json() {
+          return createOscQueryTree();
+        }
+      };
+    }
+  });
+
+  assert.equal(fetchCount, 1);
+  assert.equal(inventory.targets.length, 1);
+  assert.equal(inventory.devices.length, 1);
+  assert.ok(Array.isArray(inventory.controlTargets));
+});
 
 test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () => {
   const config = mergeConfig(defaultConfig, {

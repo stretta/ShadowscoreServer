@@ -3535,6 +3535,13 @@ test("transport start freezes its participating cohort before JACK starts", asyn
     phaseReset: true
   });
 
+  assert.equal(started.transportStartStrategy.strategyId, "legacy-coordinated-start");
+  assert.deepEqual(started.transportStartStrategy.evidence, {
+    ok: true,
+    activeVerified: true,
+    phaseVerified: true,
+    targetIds: ["local-client"]
+  });
   assert.equal(started.clockStartAcknowledgement.verified, true);
   assert.equal(started.clockStartAcknowledgement.attemptCount, 1);
   assert.equal(started.clockStartAcknowledgement.attempts[0].verified, true);

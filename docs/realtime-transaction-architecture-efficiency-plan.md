@@ -135,8 +135,11 @@ one compiled timing set before selecting atomic clock arm, transactional
 transport start, or legacy coordinated start. Atomic and transactional
 execution now share normalized ACTIVE/phase evidence and rollback dispatch;
 the selected strategy and evidence are returned in transport-start diagnostics.
-The legacy implementation remains the selected compatibility driver and keeps
-its existing inline execution path pending the next extraction checkpoint.
+The second Phase 5 checkpoint routes legacy coordinated execution through that
+same driver boundary, including the intentional no-phase-reset variant. Legacy
+success now publishes the same normalized ACTIVE/phase evidence shape, and any
+failure in its Clock Off, SetStage, Clock On, acknowledgement, correction, or
+phase-verification sequence dispatches one centralized playback-stop rollback.
 
 ## Phase 6: Capability-Gated RNBO Flow Control
 

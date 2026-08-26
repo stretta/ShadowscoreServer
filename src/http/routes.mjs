@@ -3660,245 +3660,274 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
       transactionalTransportStart
     };
   }
-  const phaseClockStopWrites = body.phaseReset === false
-    ? []
-    : await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 0 }, { targetId, targetIds: participatingTargetIds });
-  const phaseWrites = body.phaseReset === false
-    ? []
-    : await writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: phaseStage }, { targetId, targetIds: participatingTargetIds });
-  // Read the acknowledgement cohort at the phase-write boundary. Preparation
-  // can take long enough for peer registrations and exported instances to
-  // change after the initial beat-witness snapshot.
-  const phaseAckTargets = body.phaseReset === false
-    ? []
-    : (await readAllRnboTargets(config, runtime)).filter((target) =>
-        target.available !== false
-        && assignedVoiceForTarget(score, target)
-        && participatingTargetIds.includes(optionalString(target.id))
-      );
-  const phaseProtectedTargetIds = witnessContext.rnboTargets
-    .filter((target) => participatingTargetIds.includes(optionalString(target.id)))
-    .filter((target) => target.clockStartAckPath && target.clockPhaseResetPath && target.clockPhaseAckPath)
-    .map((target) => optionalString(target.id));
-  const exactPhaseCohortRequired = participatingTargetIds.length > 0
-    && phaseProtectedTargetIds.length === participatingTargetIds.length;
-  if (body.phaseReset !== false && exactPhaseCohortRequired) {
-    const missingAckTargets = missingPhaseCohortTargetIds(participatingTargetIds, phaseAckTargets);
-    if (missingAckTargets.length) {
-      const rollback = await rollbackFailedClockStart(store, config, runtime, { targetId });
-      const error = new Error(`RNBO participating target${missingAckTargets.length === 1 ? "" : "s"} left the phase acknowledgement cohort: ${missingAckTargets.join(", ")}; playback was stopped`);
-      error.code = "RNBO_PHASE_COHORT_CHANGED";
+  const runLegacyCoordinatedStart = async () => {
+    const phaseClockStopWrites = body.phaseReset === false
+      ? []
+      : await writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 0 }, { targetId, targetIds: participatingTargetIds });
+    const phaseWrites = body.phaseReset === false
+      ? []
+      : await writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: phaseStage }, { targetId, targetIds: participatingTargetIds });
+    // Read the acknowledgement cohort at the phase-write boundary. Preparation
+    // can take long enough for peer registrations and exported instances to
+    // change after the initial beat-witness snapshot.
+    const phaseAckTargets = body.phaseReset === false
+      ? []
+      : (await readAllRnboTargets(config, runtime)).filter((target) =>
+          target.available !== false
+          && assignedVoiceForTarget(score, target)
+          && participatingTargetIds.includes(optionalString(target.id))
+        );
+    const phaseProtectedTargetIds = witnessContext.rnboTargets
+      .filter((target) => participatingTargetIds.includes(optionalString(target.id)))
+      .filter((target) => target.clockStartAckPath && target.clockPhaseResetPath && target.clockPhaseAckPath)
+      .map((target) => optionalString(target.id));
+    const exactPhaseCohortRequired = participatingTargetIds.length > 0
+      && phaseProtectedTargetIds.length === participatingTargetIds.length;
+    if (body.phaseReset !== false && exactPhaseCohortRequired) {
+      const missingAckTargets = missingPhaseCohortTargetIds(participatingTargetIds, phaseAckTargets);
+      if (missingAckTargets.length) {
+        const error = new Error(`RNBO participating target${missingAckTargets.length === 1 ? "" : "s"} left the phase acknowledgement cohort: ${missingAckTargets.join(", ")}; playback was stopped`);
+        error.code = "RNBO_PHASE_COHORT_CHANGED";
+        error.statusCode = 503;
+        throw error;
+      }
+    }
+    const clockStartAckBaselines = body.phaseReset === false
+      ? {}
+      : await readClockStartAckBaselines(config, runtime, phaseAckTargets);
+    const activationSchedule = body.phaseReset === false || playbackUpdate
+      ? []
+      : playbackOperations?.schedulePreparedActivations?.({
+          targetId,
+          targetIds: participatingTargetIds,
+          blockId: score.structureState?.activeBlockId ?? "",
+          initialStage: phaseStage
+        }) ?? [];
+    await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
+    const [clockWrites, oscClockWrites] = await Promise.all([
+      writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId, targetIds: participatingTargetIds }),
+      writeOscSequencerClocks(score, config, runtime, "On")
+    ]);
+    await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
+    updateTransportTransition(runtime, transitionId, "verifying");
+    const coordinatedStartTimings = {};
+    const timeCoordinatedStartStep = async (name, operation) => {
+      const startedAt = Date.now();
+      try {
+        return await operation();
+      } finally {
+        coordinatedStartTimings[name] = Math.max(0, Date.now() - startedAt);
+      }
+    };
+    const clockStartAcknowledgement = body.phaseReset === false
+      ? { required: false, verified: true, expectedStage: null, targetCount: 0, acknowledgements: [] }
+      : await timeCoordinatedStartStep("clockStartAcknowledgementMs", () => verifyClockStartAcknowledgements(
+          config,
+          runtime,
+          phaseAckTargets,
+          clockStartAckBaselines,
+          phaseStage
+        ));
+    // Clock On is only quantized locally by each RNBO client. The ACK cohort is
+    // therefore a barrier, not proof that every client caught the same beat.
+    // Once every client has actually started, one concurrent SetStage write
+    // gives the freewheeling clocks a shared phase without stopping them again.
+    const clockStartCorrectionWrites = body.phaseReset === false
+      || !clockStartAcknowledgement.required
+      || !clockStartAcknowledgement.verified
+      ? []
+      : await timeCoordinatedStartStep("clockStartCorrectionWritesMs", () =>
+          writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: phaseStage }, { targetId, targetIds: participatingTargetIds }));
+    if (clockStartCorrectionWrites.length > 0) {
+      await timeCoordinatedStartStep("clockStartCorrectionSettleMs", () =>
+        phaseAlignmentSettle(config.rnbo?.phaseAlignment?.startCorrectionSettleMs ?? 100));
+    }
+    const clockPhaseResetSupported = phaseAckTargets.length > 0 && phaseAckTargets.every((target) =>
+      target.clockPhaseResetPath && rnboOscQueryValueUrl(target, target.clockPhaseAckPath)
+    );
+    const clockPhaseAckBaselines = clockPhaseResetSupported
+      ? await timeCoordinatedStartStep("clockPhaseAckBaselinesMs", () =>
+          readClockPhaseAckBaselines(config, runtime, phaseAckTargets))
+      : {};
+    // A phase reset arms each client's freewheeling clock on its next received
+    // beat. Sending near the end of a beat can split the flock across adjacent
+    // beats even though every client acknowledges the command. Prefer the
+    // beginning of a JACK beat so all clients have almost one full beat to arm.
+    updateTransportTransition(runtime, transitionId, "synchronizing");
+    const clockPhaseArmWindow = clockPhaseResetSupported && clockStartCorrectionWrites.length > 0
+      ? await timeCoordinatedStartStep("clockPhaseArmWindowMs", () => awaitClockArmWindow(config, runtime))
+      : { available: false, delayed: false, delayMs: 0, reason: "clock phase reset is not scheduled" };
+    const clockPhaseResetWrites = clockPhaseResetSupported
+      && clockStartCorrectionWrites.length > 0
+      && clockPhaseArmWindow.available
+      ? await timeCoordinatedStartStep("clockPhaseResetWritesMs", () =>
+          writeTransportControlsToPlaybackTargets(score, config, runtime, { clock_phase_reset: 1 }, { targetId, targetIds: participatingTargetIds }))
+      : [];
+    updateTransportTransition(runtime, transitionId, "verifying");
+    const clockPhaseAcknowledgement = clockPhaseResetWrites.length > 0
+      ? await timeCoordinatedStartStep("clockPhaseAcknowledgementMs", () =>
+          verifyClockPhaseAcknowledgements(config, runtime, phaseAckTargets, clockPhaseAckBaselines, phaseStage))
+      : {
+          required: phaseAckTargets.length > 0,
+          supported: false,
+          verified: false,
+          expectedStage: phaseStage,
+          targetCount: 0,
+          acknowledgements: []
+        };
+    const clockStartPhaseVerification = clockPhaseAcknowledgement.verified
+      ? await timeCoordinatedStartStep("directPhaseVerificationMs", () =>
+          verifyExternalTransportPhase(score, config, runtime, phaseAckTargets))
+      : {
+          verified: false,
+          complete: false,
+          targetCount: 0,
+          expectedTargetCount: phaseAckTargets.length,
+          witness: {
+            source: "rnbo-client",
+            usable: false,
+            fresh: false,
+            reason: clockPhaseResetSupported
+              ? "clock phase reset acknowledgement failed"
+              : "clock phase reset is not available on every playback client"
+          }
+        };
+    performance.lastClockStartAcknowledgement = {
+      ...clockStartAcknowledgement,
+      correctionWriteCount: clockStartCorrectionWrites.length,
+      clockPhaseResetWriteCount: clockPhaseResetWrites.length,
+      clockPhaseArmWindow,
+      clockPhaseAcknowledgement,
+      phaseVerification: clockStartPhaseVerification,
+      coordinatedStartTimings
+    };
+    const coordinatedPhaseRequired = body.phaseReset !== false
+      && phaseAckTargets.length > 0
+      && clockPhaseResetSupported;
+    if (coordinatedPhaseRequired && (
+      clockStartAcknowledgement.verified !== true
+      || clockPhaseAcknowledgement.verified !== true
+      || clockStartPhaseVerification.verified !== true
+    )) {
+      const reason = clockStartAcknowledgement.verified !== true
+        ? "quantized clock start acknowledgement failed"
+        : clockPhaseAcknowledgement.verified !== true
+          ? "clock phase reset acknowledgement failed"
+          : "direct client phase verification failed";
+      const error = new Error(`RNBO coordinated start failed: ${reason}; playback was stopped`);
       error.statusCode = 503;
-      error.rollback = rollback;
       throw error;
     }
-  }
-  const clockStartAckBaselines = body.phaseReset === false
-    ? {}
-    : await readClockStartAckBaselines(config, runtime, phaseAckTargets);
-  const activationSchedule = body.phaseReset === false || playbackUpdate
-    ? []
-    : playbackOperations?.schedulePreparedActivations?.({
-        targetId,
-        targetIds: participatingTargetIds,
-        blockId: score.structureState?.activeBlockId ?? "",
-        initialStage: phaseStage
-      }) ?? [];
-  await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
-  const [clockWrites, oscClockWrites] = await Promise.all([
-    writeTransportControlsToPlaybackTargets(score, config, runtime, { Clock: 1 }, { targetId, targetIds: participatingTargetIds }),
-    writeOscSequencerClocks(score, config, runtime, "On")
-  ]);
-  await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
-  updateTransportTransition(runtime, transitionId, "verifying");
-  const coordinatedStartTimings = {};
-  const timeCoordinatedStartStep = async (name, operation) => {
-    const startedAt = Date.now();
-    try {
-      return await operation();
-    } finally {
-      coordinatedStartTimings[name] = Math.max(0, Date.now() - startedAt);
+    const startWitnessContext = body.phaseReset === false
+      ? witnessContext
+      : await readBeatWitnessContext(score, config, runtime);
+    const phaseAnchor = body.phaseReset === false
+      ? null
+      : clockStartPhaseVerification?.verified === true
+        ? clockStartPhaseVerification.witness
+        : observedRnboPlayback(startWitnessContext).witness;
+    const verifiedPhaseAnchorBeat = clockStartPhaseVerification?.verified === true
+      && phaseAnchor?.usable
+      && Number.isFinite(phaseAnchor.absoluteBeat)
+      ? phaseAnchor.absoluteBeat
+      : null;
+    const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
+    await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
+    if (requestedArrangementMode === "run") {
+      playback.start({
+        mode,
+        reset: Boolean(body.reset),
+        sourceClientId,
+        witnessContext: startWitnessContext,
+        anchorOffsetBeats: Number.isFinite(verifiedPhaseAnchorBeat)
+          ? verifiedPhaseAnchorBeat
+          : Number.isFinite(requestedStartOffsetBeats)
+            ? requestedStartOffsetBeats
+            : phaseAnchor?.usable && Number.isFinite(phaseAnchor.absoluteBeat)
+            ? phaseAnchor.absoluteBeat
+            : undefined
+      });
+    } else {
+      playback.stop();
     }
-  };
-  const clockStartAcknowledgement = body.phaseReset === false
-    ? { required: false, verified: true, expectedStage: null, targetCount: 0, acknowledgements: [] }
-    : await timeCoordinatedStartStep("clockStartAcknowledgementMs", () => verifyClockStartAcknowledgements(
-        config,
-        runtime,
-        phaseAckTargets,
-        clockStartAckBaselines,
-        phaseStage
-      ));
-  // Clock On is only quantized locally by each RNBO client. The ACK cohort is
-  // therefore a barrier, not proof that every client caught the same beat.
-  // Once every client has actually started, one concurrent SetStage write
-  // gives the freewheeling clocks a shared phase without stopping them again.
-  const clockStartCorrectionWrites = body.phaseReset === false
-    || !clockStartAcknowledgement.required
-    || !clockStartAcknowledgement.verified
-    ? []
-    : await timeCoordinatedStartStep("clockStartCorrectionWritesMs", () =>
-        writeTransportControlsToPlaybackTargets(score, config, runtime, { SetStage: phaseStage }, { targetId, targetIds: participatingTargetIds }));
-  if (clockStartCorrectionWrites.length > 0) {
-    await timeCoordinatedStartStep("clockStartCorrectionSettleMs", () =>
-      phaseAlignmentSettle(config.rnbo?.phaseAlignment?.startCorrectionSettleMs ?? 100));
-  }
-  const clockPhaseResetSupported = phaseAckTargets.length > 0 && phaseAckTargets.every((target) =>
-    target.clockPhaseResetPath && rnboOscQueryValueUrl(target, target.clockPhaseAckPath)
-  );
-  const clockPhaseAckBaselines = clockPhaseResetSupported
-    ? await timeCoordinatedStartStep("clockPhaseAckBaselinesMs", () =>
-        readClockPhaseAckBaselines(config, runtime, phaseAckTargets))
-    : {};
-  // A phase reset arms each client's freewheeling clock on its next received
-  // beat. Sending near the end of a beat can split the flock across adjacent
-  // beats even though every client acknowledges the command. Prefer the
-  // beginning of a JACK beat so all clients have almost one full beat to arm.
-  updateTransportTransition(runtime, transitionId, "synchronizing");
-  const clockPhaseArmWindow = clockPhaseResetSupported && clockStartCorrectionWrites.length > 0
-    ? await timeCoordinatedStartStep("clockPhaseArmWindowMs", () => awaitClockArmWindow(config, runtime))
-    : { available: false, delayed: false, delayMs: 0, reason: "clock phase reset is not scheduled" };
-  const clockPhaseResetWrites = clockPhaseResetSupported
-    && clockStartCorrectionWrites.length > 0
-    && clockPhaseArmWindow.available
-    ? await timeCoordinatedStartStep("clockPhaseResetWritesMs", () =>
-        writeTransportControlsToPlaybackTargets(score, config, runtime, { clock_phase_reset: 1 }, { targetId, targetIds: participatingTargetIds }))
-    : [];
-  updateTransportTransition(runtime, transitionId, "verifying");
-  const clockPhaseAcknowledgement = clockPhaseResetWrites.length > 0
-    ? await timeCoordinatedStartStep("clockPhaseAcknowledgementMs", () =>
-        verifyClockPhaseAcknowledgements(config, runtime, phaseAckTargets, clockPhaseAckBaselines, phaseStage))
-    : {
-        required: phaseAckTargets.length > 0,
-        supported: false,
-        verified: false,
-        expectedStage: phaseStage,
-        targetCount: 0,
-        acknowledgements: []
-      };
-  const clockStartPhaseVerification = clockPhaseAcknowledgement.verified
-    ? await timeCoordinatedStartStep("directPhaseVerificationMs", () =>
-        verifyExternalTransportPhase(score, config, runtime, phaseAckTargets))
-    : {
-        verified: false,
-        complete: false,
-        targetCount: 0,
-        expectedTargetCount: phaseAckTargets.length,
-        witness: {
-          source: "rnbo-client",
-          usable: false,
-          fresh: false,
-          reason: clockPhaseResetSupported
-            ? "clock phase reset acknowledgement failed"
-            : "clock phase reset is not available on every playback client"
-        }
-      };
-  performance.lastClockStartAcknowledgement = {
-    ...clockStartAcknowledgement,
-    correctionWriteCount: clockStartCorrectionWrites.length,
-    clockPhaseResetWriteCount: clockPhaseResetWrites.length,
-    clockPhaseArmWindow,
-    clockPhaseAcknowledgement,
-    phaseVerification: clockStartPhaseVerification,
-    coordinatedStartTimings
-  };
-  const coordinatedPhaseRequired = body.phaseReset !== false
-    && phaseAckTargets.length > 0
-    && clockPhaseResetSupported;
-  if (coordinatedPhaseRequired && (
-    clockStartAcknowledgement.verified !== true
-    || clockPhaseAcknowledgement.verified !== true
-    || clockStartPhaseVerification.verified !== true
-  )) {
-    const rollback = await rollbackFailedClockStart(store, config, runtime, { targetId });
-    performance.lastClockStartAcknowledgement.rollback = rollback;
-    const reason = clockStartAcknowledgement.verified !== true
-      ? "quantized clock start acknowledgement failed"
-      : clockPhaseAcknowledgement.verified !== true
-        ? "clock phase reset acknowledgement failed"
-        : "direct client phase verification failed";
-    const error = new Error(`RNBO coordinated start failed: ${reason}; playback was stopped`);
-    error.statusCode = 503;
-    throw error;
-  }
-  const startWitnessContext = body.phaseReset === false
-    ? witnessContext
-    : await readBeatWitnessContext(score, config, runtime);
-  const phaseAnchor = body.phaseReset === false
-    ? null
-    : clockStartPhaseVerification?.verified === true
-      ? clockStartPhaseVerification.witness
-      : observedRnboPlayback(startWitnessContext).witness;
-  const verifiedPhaseAnchorBeat = clockStartPhaseVerification?.verified === true
-    && phaseAnchor?.usable
-    && Number.isFinite(phaseAnchor.absoluteBeat)
-    ? phaseAnchor.absoluteBeat
-    : null;
-  const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
-  await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
-  if (requestedArrangementMode === "run") {
-    playback.start({
+    setPerformancePlayersPlaying(runtime, performance, true);
+    performance.playerControlOrigin = "shadowscore";
+    performance.adoptionPayloadVerified = null;
+    const activations = playbackUpdate?.activations ?? (activationSchedule.length
+      ? await playbackOperations.confirmPreparedActivations(activationSchedule, {
+        tempo
+      })
+      : []);
+    return {
       mode,
-      reset: Boolean(body.reset),
-      sourceClientId,
-      witnessContext: startWitnessContext,
-      anchorOffsetBeats: Number.isFinite(verifiedPhaseAnchorBeat)
-        ? verifiedPhaseAnchorBeat
-        : Number.isFinite(requestedStartOffsetBeats)
-          ? requestedStartOffsetBeats
-          : phaseAnchor?.usable && Number.isFinite(phaseAnchor.absoluteBeat)
-          ? phaseAnchor.absoluteBeat
-          : undefined
-    });
-  } else {
-    playback.stop();
-  }
-  setPerformancePlayersPlaying(runtime, performance, true);
-  performance.playerControlOrigin = "shadowscore";
-  performance.adoptionPayloadVerified = null;
-  const activations = playbackUpdate?.activations ?? (activationSchedule.length
-    ? await playbackOperations.confirmPreparedActivations(activationSchedule, {
-      tempo
-    })
-    : []);
-  return {
-    mode,
-    rnboReadiness,
-    startupCohort: withoutContext(startupCohort),
-    continuingClockContract,
-    jackStart,
-    jackTempo,
-    tempoWrites: tempoApplication.rnboWrites,
-    ttidDistribution,
-    swingDistribution,
-    snapshotRecall,
-    playbackUpdate,
-    activations,
-    patternLengthWrites,
-    phaseClockStopWrites,
-    clockWrites,
-    clockStartAcknowledgement,
-    clockStartCorrectionWrites,
-    clockPhaseArmWindow,
-    clockPhaseResetWrites,
-    clockPhaseAcknowledgement,
-    clockStartPhaseVerification,
-    coordinatedStartTimings,
-    oscClockWrites,
-    phaseWrites,
-    phaseAnchor,
-    phaseStage,
-    transportStartStrategy: transportStartPlan
-      ? {
-          strategyId: transportStartPlan.strategyId,
-          targetIds: transportStartPlan.targetIds,
-          evidence: {
-            ok: true,
-            activeVerified: clockStartAcknowledgement.verified === true,
-            phaseVerified: body.phaseReset === false || clockPhaseAcknowledgement.verified === true
-          }
+      rnboReadiness,
+      startupCohort: withoutContext(startupCohort),
+      continuingClockContract,
+      jackStart,
+      jackTempo,
+      tempoWrites: tempoApplication.rnboWrites,
+      ttidDistribution,
+      swingDistribution,
+      snapshotRecall,
+      playbackUpdate,
+      activations,
+      patternLengthWrites,
+      phaseClockStopWrites,
+      clockWrites,
+      clockStartAcknowledgement,
+      clockStartCorrectionWrites,
+      clockPhaseArmWindow,
+      clockPhaseResetWrites,
+      clockPhaseAcknowledgement,
+      clockStartPhaseVerification,
+      coordinatedStartTimings,
+      oscClockWrites,
+      phaseWrites,
+      phaseAnchor,
+      phaseStage
+    };
+  };
+  const legacyTransportStartPlan = transportStartPlan ?? Object.freeze({
+    strategyId: TRANSPORT_START_STRATEGY_IDS.legacy,
+    phaseStage: null,
+    targetIds: Object.freeze([...participatingTargetIds]),
+    entries: Object.freeze([]),
+    complete: true
+  });
+  const legacyTransportStart = await executeTransportStartStrategy(legacyTransportStartPlan, {
+    [TRANSPORT_START_STRATEGY_IDS.legacy]: {
+      execute: runLegacyCoordinatedStart,
+      normalizeEvidence(result, strategyPlan) {
+        return Object.freeze({
+          ok: true,
+          activeVerified: result.clockStartAcknowledgement?.required !== true
+            || result.clockStartAcknowledgement?.verified === true,
+          phaseVerified: body.phaseReset === false
+            || result.clockPhaseAcknowledgement?.required !== true
+            || result.clockPhaseAcknowledgement?.supported !== true
+            || result.clockPhaseAcknowledgement?.verified === true,
+          targetIds: strategyPlan.targetIds
+        });
+      },
+      async rollback(_plan, cause) {
+        const transport = await rollbackFailedClockStart(store, config, runtime, { targetId });
+        cause.statusCode ??= 503;
+        cause.rollback = transport;
+        if (performance.lastClockStartAcknowledgement) {
+          performance.lastClockStartAcknowledgement.rollback = transport;
         }
-      : null
+        return transport;
+      }
+    }
+  });
+  const { strategyId, strategyEvidence, ...legacyResult } = legacyTransportStart;
+  return {
+    ...legacyResult,
+    transportStartStrategy: {
+      strategyId,
+      targetIds: strategyEvidence.targetIds,
+      evidence: strategyEvidence
+    }
   };
 }
 

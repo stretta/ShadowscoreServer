@@ -70,7 +70,8 @@ export async function executeTransportStartStrategy(plan, handlers = {}) {
   }
   try {
     const result = await driver.execute(plan, execute);
-    const evidence = driver.normalizeEvidence(result);
+    const normalizeEvidence = handlers[driver.id]?.normalizeEvidence ?? driver.normalizeEvidence;
+    const evidence = normalizeEvidence(result, plan);
     driver.verify(evidence);
     return { ...result, strategyId: driver.id, strategyEvidence: evidence };
   } catch (cause) {

@@ -72,6 +72,30 @@ test("transport-start execution normalizes evidence and dispatches rollback", as
   );
 });
 
+test("transport-start execution accepts driver-specific normalized evidence", async () => {
+  const legacyTarget = target("legacy");
+  legacyTarget.capabilities.atomicClockArm = false;
+  legacyTarget.capabilities.transactionalTransportStart = false;
+  const legacyPlan = plan([legacyTarget], ["legacy"]);
+  const executed = await executeTransportStartStrategy(legacyPlan, {
+    [TRANSPORT_START_STRATEGY_IDS.legacy]: {
+      async execute() {
+        return { clockStarted: true, phaseAligned: true };
+      },
+      normalizeEvidence(result, strategyPlan) {
+        return {
+          ok: result.clockStarted,
+          activeVerified: result.clockStarted,
+          phaseVerified: result.phaseAligned,
+          targetIds: strategyPlan.targetIds
+        };
+      }
+    }
+  });
+  assert.equal(executed.strategyId, TRANSPORT_START_STRATEGY_IDS.legacy);
+  assert.equal(executed.strategyEvidence.phaseVerified, true);
+});
+
 function plan(targets, targetIds) {
   return planTransportStartStrategy({
     targets,

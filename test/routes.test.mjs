@@ -5147,7 +5147,12 @@ test("hardware registration appears in session and RNBO targets", async () => {
         name: "ShadowScoreClient / shadowscore",
         host: "192.168.68.71",
         port: 9000,
-        address: "/rnbo/inst/2/messages/in/shadowscore"
+        address: "/rnbo/inst/2/messages/in/shadowscore",
+        clockPhaseResetPath: "/rnbo/inst/2/messages/in/clock_phase_reset",
+        clockPhaseAckPath: "/rnbo/inst/2/messages/out/clock_phase_ack",
+        transportStartPath: "/rnbo/inst/2/messages/in/TransportStart",
+        transportStartAckPath: "/rnbo/inst/2/messages/out/transport_start_ack",
+        capabilities: { transactionalTransportStart: true }
       }
     ]
   });
@@ -5166,6 +5171,11 @@ test("hardware registration appears in session and RNBO targets", async () => {
   assert.equal(target.capabilities.maxNoteRows, 819);
   assert.equal(target.capabilities.noteDataFloatCount, 16384);
   assert.equal(target.capabilities.stagedScoreActivation, true);
+  assert.equal(target.capabilities.transactionalTransportStart, true);
+  assert.equal(target.clockPhaseResetPath, "/rnbo/inst/2/messages/in/clock_phase_reset");
+  assert.equal(target.clockPhaseAckPath, "/rnbo/inst/2/messages/out/clock_phase_ack");
+  assert.equal(target.transportStartPath, "/rnbo/inst/2/messages/in/TransportStart");
+  assert.equal(target.transportStartAckPath, "/rnbo/inst/2/messages/out/transport_start_ack");
   assert.deepEqual(targets.sendQueue, {
     inProgress: false,
     queued: false,

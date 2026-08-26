@@ -110,6 +110,16 @@ methods with one operation that:
 RNBO remains the only production adapter until parity and live acceptance are
 complete. Software-participant enrollment is a later, explicit checkpoint.
 
+Checkpoint implementation completed locally on 2026-08-26: the participant
+coordinator now records one bounded operation ledger for preparation and
+activation, freezes each adapter partition and its participant identities,
+passes one operation identity through each enrolled adapter, normalizes READY
+and ACTIVE evidence, and records rollback outcomes for partial preparation or
+activation failure. Existing RNBO prepare/activate entry points delegate through
+this operation seam. The WebSocket JSON adapter remains visible in diagnostics
+but is excluded from production operations unless its adapter id is explicitly
+enrolled when constructing the coordinator; Wren does not enable that option.
+
 ## Phase 5: Transport-Start Strategy Drivers
 
 Extract atomic clock arm, transactional transport start, and legacy coordinated

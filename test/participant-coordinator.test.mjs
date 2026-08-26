@@ -53,7 +53,8 @@ test("playback participant coordinator exposes transport-neutral read capabiliti
       activatePreparedBlock: true,
       lifecycleEvents: true,
       deliveryStatus: true,
-      operationQueueStatus: true
+      operationQueueStatus: true,
+      orchestratedOperations: true
     }
   });
   assert.deepEqual(await coordinator.playbackUpdates("A", { targets: ["cached"] }), {
@@ -78,10 +79,14 @@ test("playback participant coordinator exposes transport-neutral read capabiliti
     transactionId: 42,
     tempo: 120
   }]);
+  const preparedOperationId = calls[1].prepare.options.operationId;
+  const activationOperationId = calls[3].activate.options.operationId;
+  assert.match(preparedOperationId, /^[0-9a-f-]{36}$/);
+  assert.match(activationOperationId, /^[0-9a-f-]{36}$/);
   assert.deepEqual(calls.slice(1), [
-    { prepare: { blockId: "B", reason: "lookahead", options: { requireReady: true } } },
+    { prepare: { blockId: "B", reason: "lookahead", options: { requireReady: true, operationId: preparedOperationId } } },
     { apply: { blockId: "A", options: { activationMode: "now" } } },
-    { activate: { blockId: "B", options: { boundary: "next-cycle" } } }
+    { activate: { blockId: "B", options: { boundary: "next-cycle", operationId: activationOperationId, preparedOperationId } } }
   ]);
   assert.deepEqual(coordinator.lifecycleEvents(), [{ type: "prepare_completed" }]);
   assert.equal(coordinator.deliveryStatus().summary.readyCount, 1);
@@ -198,4 +203,136 @@ test("playback participant coordinator assigns one operation id across participa
       boundary: "next-cycle"
     }
   });
+});
+
+test("unified operations freeze the RNBO cohort while software adapters remain diagnostics-only", async () => {
+  const calls = [];
+  const primary = {
+    enabled: true,
+    async prepareBlock(blockId, reason, options) {
+      calls.push({ kind: "prepare", blockId, reason, options });
+      return { targets: [
+        { target: { id: "finch" }, compiled: { ack: { status: "prepared" } } },
+        { target: { id: "raven" }, compiled: { ack: { status: "prepared" } } }
+      ] };
+    },
+    async activatePreparedBlock(blockId, options) {
+      calls.push({ kind: "activate", blockId, options });
+      return { state: "active", targets: {
+        finch: { state: "active" },
+        raven: { state: "active" }
+      } };
+    }
+  };
+  const software = {
+    enabled: true,
+    adapterId: "websocket-json",
+    async prepareBlock() { throw new Error("diagnostics-only adapter was enrolled"); },
+    snapshot() { return { adapter: "websocket-json" }; }
+  };
+  const coordinator = createPlaybackParticipantCoordinator({
+    adapter: primary,
+    adapterId: "rnbo",
+    participantAdapters: [software]
+  });
+
+  const prepared = await coordinator.prepareOperation("B", "lookahead", { operationId: "prepare-frozen" });
+  assert.equal(prepared.state, "ready");
+  assert.deepEqual(prepared.partitions.map(({ adapterId, enrolled, state, participantIds }) => ({ adapterId, enrolled, state, participantIds })), [
+    { adapterId: "rnbo", enrolled: true, state: "ready", participantIds: ["finch", "raven"] },
+    { adapterId: "websocket-json", enrolled: false, state: "excluded", participantIds: undefined }
+  ]);
+
+  const activated = await coordinator.activateOperation("B", {
+    operationId: "activate-frozen",
+    preparedOperationId: "prepare-frozen"
+  });
+  assert.equal(activated.state, "active");
+  assert.deepEqual(calls.at(-1).options.targetIds, ["finch", "raven"]);
+  assert.equal(coordinator.operationStatus("activate-frozen").state, "active");
+});
+
+test("unified activation rolls back already-active partitions when a later adapter fails", async () => {
+  const rolledBack = [];
+  const primary = {
+    enabled: true,
+    async prepareBlock() {
+      return { targets: [{ target: { id: "finch" }, compiled: { ack: { status: "prepared" } } }] };
+    },
+    async activatePreparedBlock() {
+      return { state: "active", targets: { finch: { state: "active" } } };
+    },
+    async rollbackBlock(blockId, options) {
+      rolledBack.push({ blockId, operationId: options.operationId });
+      return { stopped: true };
+    }
+  };
+  const software = {
+    enabled: true,
+    adapterId: "websocket-json",
+    async prepareBlock() {
+      return { participatingParticipantIds: ["realtime:laptop"], acknowledgements: [{ status: "ready" }] };
+    },
+    async activatePreparedBlock() {
+      throw Object.assign(new Error("software ACTIVE timeout"), { code: "PLAYBACK_ACTIVE_TIMEOUT" });
+    },
+    snapshot() { return { adapter: "websocket-json" }; }
+  };
+  const coordinator = createPlaybackParticipantCoordinator({
+    adapter: primary,
+    adapterId: "rnbo",
+    participantAdapters: [software],
+    enrolledParticipantAdapters: ["websocket-json"]
+  });
+
+  await coordinator.prepareOperation("A", "test", { operationId: "prepare-all" });
+  await assert.rejects(
+    coordinator.activateOperation("A", { operationId: "activate-all", preparedOperationId: "prepare-all" }),
+    (error) => error.code === "PLAYBACK_ACTIVE_TIMEOUT" && error.operation.rollback[0].ok === true
+  );
+  assert.deepEqual(rolledBack, [{ blockId: "A", operationId: "activate-all" }]);
+  assert.equal(coordinator.operationStatus("activate-all").state, "failed");
+});
+
+test("unified operations reject missing READY and ACTIVE evidence", async () => {
+  const missingReady = createPlaybackParticipantCoordinator({
+    adapter: { enabled: true, async prepareBlock() { return {}; } },
+    adapterId: "rnbo"
+  });
+  await assert.rejects(
+    missingReady.prepareOperation("A", "test", { operationId: "missing-ready" }),
+    (error) => error.code === "PLAYBACK_PREPARE_INCOMPLETE"
+  );
+
+  const missingActive = createPlaybackParticipantCoordinator({
+    adapter: {
+      enabled: true,
+      async prepareBlock() {
+        return { targets: [{ target: { id: "finch" }, compiled: { ack: { status: "prepared" } } }] };
+      },
+      async activatePreparedBlock() { return {}; }
+    },
+    adapterId: "rnbo"
+  });
+  await missingActive.prepareOperation("A", "test", { operationId: "ready" });
+  await assert.rejects(
+    missingActive.activateOperation("A", { operationId: "missing-active", preparedOperationId: "ready" }),
+    (error) => error.code === "PLAYBACK_ACTIVATION_INCOMPLETE"
+  );
+});
+
+test("unified preparation accepts the RNBO single-target compiled result", async () => {
+  const coordinator = createPlaybackParticipantCoordinator({
+    adapter: {
+      enabled: true,
+      async prepareBlock() {
+        return { targetId: "finch", ack: { ok: true, status: "prepared" } };
+      }
+    },
+    adapterId: "rnbo"
+  });
+
+  const prepared = await coordinator.prepareOperation("A", "test", { operationId: "single-target" });
+  assert.equal(prepared.state, "ready");
+  assert.deepEqual(prepared.partitions[0].participantIds, ["finch"]);
 });

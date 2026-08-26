@@ -24,6 +24,7 @@ export function createRealtimePlaybackParticipantAdapter(options = {}) {
   let closed = false;
 
   return {
+    adapterId: "websocket-json",
     enabled: true,
     connectSession,
     disconnectSession,

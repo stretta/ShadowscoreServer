@@ -46,3 +46,27 @@ test("loaded publisher coalesces simultaneous fresh reads without caching sequen
   assert.deepEqual(await concurrent, { generation: 1 });
   assert.deepEqual(await publisher.current(), { generation: 2 });
 });
+
+test("loaded publisher reuses a bounded fresh generation and refreshes after expiry", async () => {
+  let timestamp = 1_000;
+  let loads = 0;
+  const publisher = createLoadedPublisher(async () => ({ generation: ++loads }), {
+    refreshOnCurrent: true,
+    freshnessMs: 125,
+    now: () => timestamp
+  });
+
+  assert.deepEqual(await publisher.current(), { generation: 1 });
+  timestamp += 100;
+  assert.deepEqual(await publisher.current(), { generation: 1 });
+  timestamp += 26;
+  assert.deepEqual(await publisher.current(), { generation: 2 });
+  assert.deepEqual(publisher.stats(), {
+    loadCount: 2,
+    cacheHitCount: 1,
+    coalescedCount: 0,
+    hasLatest: true,
+    freshnessMs: 125,
+    latestAgeMs: 0
+  });
+});

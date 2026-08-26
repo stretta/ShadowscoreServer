@@ -14,17 +14,38 @@ export function createLoadedPublisher(loadSnapshot, options = {}) {
     ? null
     : Math.max(100, Number(options.intervalMs) || 500);
   const refreshOnCurrent = options.refreshOnCurrent === true;
+  const freshnessMs = Math.max(0, Number(options.freshnessMs) || 0);
+  const now = options.now ?? Date.now;
   const subscribers = new Set();
   let timer;
   let latest = null;
   let hasLatest = false;
   let pending = null;
+  let loadedAtMs = 0;
+  const stats = { loadCount: 0, cacheHitCount: 0, coalescedCount: 0 };
 
   return {
     current() {
-      return !refreshOnCurrent && hasLatest ? Promise.resolve(latest) : refresh();
+      if (pending) {
+        stats.coalescedCount += 1;
+        return pending;
+      }
+      const fresh = hasLatest && freshnessMs > 0 && now() - loadedAtMs <= freshnessMs;
+      if (hasLatest && (!refreshOnCurrent || fresh)) {
+        stats.cacheHitCount += 1;
+        return Promise.resolve(latest);
+      }
+      return refresh();
     },
     refresh,
+    stats() {
+      return {
+        ...stats,
+        hasLatest,
+        freshnessMs,
+        latestAgeMs: hasLatest ? Math.max(0, now() - loadedAtMs) : null
+      };
+    },
     subscribe(observer) {
       subscribers.add(observer);
       if (intervalMs !== null && timer === undefined) {
@@ -54,12 +75,19 @@ export function createLoadedPublisher(loadSnapshot, options = {}) {
   }
 
   function refresh() {
-    if (pending) return pending;
+    if (pending) {
+      stats.coalescedCount += 1;
+      return pending;
+    }
     pending = Promise.resolve()
-      .then(loadSnapshot)
+      .then(() => {
+        stats.loadCount += 1;
+        return loadSnapshot();
+      })
       .then((snapshot) => {
         latest = snapshot;
         hasLatest = true;
+        loadedAtMs = now();
         for (const observer of subscribers) notify(observer, { event: "snapshot", payload: snapshot });
         return snapshot;
       })

@@ -80,6 +80,7 @@ export function buildAuthoritativeTransportState({
     path: "shadow_score transport",
     type: "ShadowScoreTransport",
     revision: positiveInteger(revision, 1),
+    playback_generation: positiveInteger(playbackSnapshot.generation, 1),
     observed_at: new Date(observedAt).toISOString(),
     authority: "server",
     clock_source: transport.authority ?? "jack",

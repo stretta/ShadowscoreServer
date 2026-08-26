@@ -85,6 +85,15 @@ instead of rebuilding playback independently at 250 ms and 500 ms intervals.
 Preserve fresh HTTP semantics by coalescing in-flight work and defining a short,
 explicit freshness window.
 
+Checkpoint implementation completed locally on 2026-08-26: playback HTTP and
+authoritative transport reads share the same runtime publisher, overlapping
+loads are coalesced, and sequential reads reuse a generation for at most 125 ms.
+Publisher load/cache/coalescing metrics and a playback acquisition counter make
+reuse measurable. Command responses and automatic sync-recovery decisions force
+a new shared generation so bounded read caching never weakens fresh-after-write
+or fail-closed control semantics. The authoritative transport object exposes
+the playback generation from which it was derived.
+
 ## Phase 4: Unified Participant Orchestration
 
 Replace the privileged primary-adapter methods plus separate software-participant

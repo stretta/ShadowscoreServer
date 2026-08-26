@@ -4033,7 +4033,7 @@ test("playback snapshot is versioned and reports authoritative and execution pos
   const first = await requestJson(context, "GET", "/playback/snapshot");
   const second = await requestJson(context, "GET", "/playback/snapshot");
 
-  assert.equal(second.generation, first.generation + 1);
+  assert.equal(second.generation, first.generation);
   assert.equal(first.transport.authority, "jack");
   assert.equal(first.transport.beatIntoBlock, 4);
   assert.equal(first.targets.finch.currentStage, 60);
@@ -4090,6 +4090,8 @@ test("transport object path resolves to one revisioned musician-facing authority
   assert.equal(first.object.clock_source, "jack");
   assert.equal(first.object.position_beats, 2);
   assert.equal(second.object.revision, first.object.revision + 1);
+  assert.equal(second.object.playback_generation, first.object.playback_generation);
+  assert.equal(context.runtime.playbackSnapshotAcquisitionCount, 1);
   assert.equal(first.object.capabilities.can_locate, true);
 });
 
@@ -4379,9 +4381,17 @@ test("playback snapshots consume server-owned stage observations without forcing
 
   await requestJson(context, "GET", "/playback/snapshot");
   await requestJson(context, "GET", "/playback/snapshot");
-  assert.equal(ensureCalls, 2);
+  assert.equal(ensureCalls, 1);
   assert.deepEqual(updateTargets, [cachedTarget]);
-  assert.equal(timingContractReferences[0], timingContractReferences[1]);
+  assert.equal(timingContractReferences.length, 1);
+  assert.deepEqual(context.runtime.realtimePublishers.get("playback").stats(), {
+    loadCount: 1,
+    cacheHitCount: 1,
+    coalescedCount: 0,
+    hasLatest: true,
+    freshnessMs: 125,
+    latestAgeMs: context.runtime.realtimePublishers.get("playback").stats().latestAgeMs
+  });
 });
 
 test("playback updates route reads shared live-edit state through the participant coordinator", async () => {

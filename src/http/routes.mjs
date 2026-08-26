@@ -681,7 +681,7 @@ export async function routeRequest(request, response, store, config, runtime = {
         request_id: optionalString(body.request_id),
         operation: optionalString(body.operation),
         result,
-        object: await authoritativeTransportSnapshot(store, config, runtime)
+        object: await authoritativeTransportSnapshot(store, config, runtime, { fresh: true })
       });
     } catch (error) {
       writeError(response, error, error?.statusCode ?? 400);
@@ -1995,7 +1995,12 @@ function legacyTransportPublisher(config, runtime) {
 function playbackSnapshotPublisher(runtime, store, config) {
   return runtimePublisher(runtime, "playback", () => createLoadedPublisher(
     () => coherentPlaybackSnapshot(runtime, store, config),
-    { refreshOnCurrent: true, intervalMs: 250 }
+    {
+      refreshOnCurrent: true,
+      intervalMs: 250,
+      freshnessMs: Math.max(25, Number(runtime.playbackSnapshotFreshnessMs) || 125),
+      now: runtime.now
+    }
   ));
 }
 
@@ -2878,6 +2883,7 @@ function assertCueRevisions(score, revisions) {
 }
 
 async function coherentPlaybackSnapshot(runtime, store, config) {
+  runtime.playbackSnapshotAcquisitionCount = Math.max(0, Number(runtime.playbackSnapshotAcquisitionCount) || 0) + 1;
   const score = store.getScore();
   let targets = await readAllRnboTargets(config, runtime, { preferCached: true });
   if (runtime.rnboStageCollector?.ensureObservations) {
@@ -2923,10 +2929,11 @@ async function coherentPlaybackSnapshot(runtime, store, config) {
   });
 }
 
-async function authoritativeTransportSnapshot(store, config, runtime) {
+async function authoritativeTransportSnapshot(store, config, runtime, options = {}) {
   runtime.authoritativeTransportRevision = Math.max(0, Number(runtime.authoritativeTransportRevision) || 0) + 1;
   const revision = runtime.authoritativeTransportRevision;
-  const playbackSnapshot = await coherentPlaybackSnapshot(runtime, store, config);
+  const publisher = playbackSnapshotPublisher(runtime, store, config);
+  const playbackSnapshot = await (options.fresh === true ? publisher.refresh() : publisher.current());
   return buildAuthoritativeTransportState({
     score: store.getScore(),
     playbackSnapshot,
@@ -2947,7 +2954,7 @@ export async function runAutomaticSyncRecovery(store, config, runtime) {
   if (runtime.automaticSyncRecoveryPromise) return runtime.automaticSyncRecoveryPromise;
   const expectedStopEpoch = transportStopEpoch(runtime);
   runtime.automaticSyncRecoveryPromise = (async () => {
-    const playbackSnapshot = await coherentPlaybackSnapshot(runtime, store, config);
+    const playbackSnapshot = await playbackSnapshotPublisher(runtime, store, config).refresh();
     if (!performance.playersPlaying
       || transportStopIsInProgress(runtime)
       || transportStopEpoch(runtime) !== expectedStopEpoch) {

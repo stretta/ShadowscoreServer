@@ -8,7 +8,8 @@ import {
   coordinateTransactionalTransportStart,
   selectTransactionalTransportStartCohort,
   supportsTransactionalTransportStart,
-  validateTransportStartAck
+  validateTransportStartAck,
+  verifySustainedCohortStages
 } from "../src/playback/transactional-transport-start.mjs";
 
 test("transactional start requests use the fixed seven-integer client contract", () => {
@@ -58,6 +59,70 @@ test("transactional start acknowledgements require exact operation, event, versi
   assert.equal(validateTransportStartAck([1, 4, 4001, 12, 9, 0], { operationId: 4001 }).status, "rejected");
   assert.equal(validateTransportStartAck([2, 1, 4001, 12, 0, 1], { operationId: 4001 }).status, "version-mismatch");
   assert.equal(validateTransportStartAck([1, 1, 4001], { operationId: 4001 }).status, "malformed");
+  assert.equal(validateTransportStartAck([], { operationId: 4001 }).status, "uninitialized");
+});
+
+test("transactional fleet start waits through a cold uninitialized ACK", async () => {
+  const target = cohortTarget("wren");
+  const acknowledgements = [
+    [],
+    [1, 1, 4100, 20, 0, 1],
+    [1, 1, 4100, 20, 0, 1],
+    [1, 2, 4100, 20, 0, 1]
+  ];
+  let now = 0;
+  const result = await coordinateTransactionalTransportStart({
+    targets: [target],
+    operationId: 4100,
+    sendRequest: async () => ({ ok: true }),
+    readAcknowledgement: async () => acknowledgements.shift(),
+    awaitActivationWindow: async () => ({ available: true }),
+    wait: async (milliseconds) => { now += milliseconds; },
+    now: () => now,
+    timeoutMs: 100,
+    pollIntervalMs: 10
+  });
+
+  assert.equal(result.armed.attemptCount, 2);
+  assert.equal(result.active.attemptCount, 2);
+  assert.equal(result.ok, true);
+});
+
+test("sustained stage verification accepts advancing clients with transient boundary reads", async () => {
+  const targets = [cohortTarget("wren"), cohortTarget("raven")];
+  const stages = new Map([
+    ["wren", [20, 20, 21, 21, 22, 22, 23]],
+    ["raven", [20, 21, 21, 21, 22, 23, 23]]
+  ]);
+  const result = await verifySustainedCohortStages(targets, {
+    readStage: async (target) => stages.get(target.id).shift(),
+    wait: async () => {},
+    sampleCount: 7,
+    requiredAdvance: 1
+  });
+
+  assert.equal(result.verified, true);
+  assert.deepEqual(result.advances.map(({ advance }) => advance), [3, 3]);
+  assert.equal(result.pairOffsets[0].medianOffset, 0);
+});
+
+test("sustained stage diagnostics detect persistent post-ACTIVE stage skew", async () => {
+  const targets = [cohortTarget("wren"), cohortTarget("heron")];
+  const stages = new Map([
+    ["wren", [20, 21, 21, 22, 22, 23, 23]],
+    ["heron", [20, 20, 20, 21, 21, 22, 22]]
+  ]);
+  await assert.rejects(() => verifySustainedCohortStages(targets, {
+    readStage: async (target) => stages.get(target.id).shift(),
+    wait: async () => {},
+    sampleCount: 7,
+    sampleIntervalMs: 0
+  }), (error) => {
+    assert.equal(error.code, "TRANSPORT_START_SUSTAINED_STAGE_SKEW");
+    assert.equal(error.divergent[0].medianOffset, 1);
+    assert.equal(error.samples.length, 7);
+    return true;
+  });
 });
 
 test("transactional fleet start waits for every ARMED client and a safe activation window", async () => {

@@ -31,6 +31,7 @@ export function rnboPlaybackCapabilities(config, override = {}) {
     stagedScoreActivation: true,
     resumableScoreReplace: boolCapability(override, configured, "resumableScoreReplace", false),
     continuingScoreActivation: boolCapability(override, configured, "continuingScoreActivation", false),
+    atomicClockArm: boolCapability(override, configured, "atomicClockArm", false),
     transactionalTransportStart: boolCapability(override, configured, "transactionalTransportStart", false),
     contractTransport: String(override.contractTransport ?? configured.contractTransport ?? "rnbo-osc"),
     bestEffort: boolCapability(override, configured, "bestEffort", true),

@@ -262,6 +262,7 @@ function normalizeTargets(targets, hardwareUnitId, hardwareUnitName, config) {
       clockStartAckPath: stringField(target.clockStartAckPath) || undefined,
       clockStartAck: numericListField(target.clockStartAck),
       clockPhaseResetPath: stringField(target.clockPhaseResetPath) || undefined,
+      clockArmPath: stringField(target.clockArmPath) || undefined,
       clockPhaseAckPath: stringField(target.clockPhaseAckPath) || undefined,
       clockPhaseAck: numericListField(target.clockPhaseAck),
       transportStartPath: stringField(target.transportStartPath) || undefined,

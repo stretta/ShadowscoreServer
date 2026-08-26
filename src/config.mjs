@@ -53,6 +53,9 @@ export const defaultConfig = Object.freeze({
       startupCohortGraceMs: 5000,
       startupCohortPollMs: 250,
       startupAdoptionGraceMs: 350,
+      transactionalStartStageSampleCount: 7,
+      transactionalStartStageSampleIntervalMs: 50,
+      transactionalStartRequiredStageAdvance: 1,
       autoResync: {
         enabled: true,
         intervalMs: 1000,

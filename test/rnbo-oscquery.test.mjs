@@ -44,6 +44,7 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
   assert.equal(capabilities.stagedScoreActivation, true);
   assert.equal(capabilities.resumableScoreReplace, false);
   assert.equal(capabilities.continuingScoreActivation, false);
+  assert.equal(capabilities.atomicClockArm, false);
   assert.equal(capabilities.transactionalTransportStart, false);
 });
 
@@ -145,6 +146,35 @@ test("derives transactional transport start only from the complete live request 
   assert.equal(target.transportStartPath, "/rnbo/inst/2/messages/in/TransportStart");
   assert.equal(target.transportStartAckPath, "/rnbo/inst/2/messages/out/transport_start_ack");
   assert.deepEqual(target.transportStartAck, [90, 1, 4001, 0, 2, 1]);
+});
+
+test("derives atomic clock arm only from ClockArm and the live onebang acknowledgement", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: { capabilities: { atomicClockArm: true }, oscQuery: { enabled: true } }
+  });
+  const clockArmOnly = createOscQueryTree();
+  clockArmOnly.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.messages.CONTENTS.in.CONTENTS.ClockArm = {
+    FULL_PATH: "/rnbo/inst/2/messages/in/ClockArm",
+    TYPE: "iii"
+  };
+  assert.equal(extractRnboTargets(clockArmOnly, config)[0].capabilities.atomicClockArm, false);
+
+  const complete = createOscQueryTree();
+  const messages = complete.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.messages.CONTENTS;
+  messages.in.CONTENTS.ClockArm = {
+    FULL_PATH: "/rnbo/inst/2/messages/in/ClockArm",
+    TYPE: "iii"
+  };
+  messages.out.CONTENTS.clock_phase_ack = {
+    FULL_PATH: "/rnbo/inst/2/messages/out/clock_phase_ack",
+    TYPE: "ff",
+    VALUE: [4, 12]
+  };
+
+  const target = extractRnboTargets(complete, config)[0];
+  assert.equal(target.capabilities.atomicClockArm, true);
+  assert.equal(target.clockArmPath, "/rnbo/inst/2/messages/in/ClockArm");
+  assert.equal(target.clockPhaseAckPath, "/rnbo/inst/2/messages/out/clock_phase_ack");
 });
 
 test("extracts ShadowScoreClient compact replacement capabilities from OSCQuery metadata", () => {

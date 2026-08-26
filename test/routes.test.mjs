@@ -2008,6 +2008,89 @@ test("automatic sync recovery refuses a Stop epoch that has been superseded", as
   assert.equal(context.runtime.performanceTransport.playersPlaying, false);
 });
 
+test("automatic sync recovery does not interrupt a transient client slip", async () => {
+  let confirmationCount = 0;
+  const supervisor = createEnsembleSyncSupervisor({
+    requiredConsecutiveSlips: 1,
+    cooldownMs: 0
+  });
+  const targets = [
+    {
+      id: "left-client",
+      host: "127.0.0.1",
+      port: 1234,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      currentStagePath: "/rnbo/inst/2/messages/out/current_stage"
+    },
+    {
+      id: "right-client",
+      host: "peer.local",
+      port: 1234,
+      address: "/rnbo/inst/7/messages/in/shadowscore",
+      currentStagePath: "/rnbo/inst/7/messages/out/current_stage"
+    }
+  ];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: { oscQuery: { enabled: false }, targets },
+      transport: {
+        rnboClient: {
+          autoResync: { enabled: true, requiredConsecutiveSlips: 1, cooldownMs: 0 }
+        }
+      }
+    }),
+    runtime: {
+      ensembleSyncSupervisor: supervisor,
+      performanceTransport: { playersPlaying: true },
+      verifyAutomaticClientSlip: async () => {
+        confirmationCount += 1;
+        return { confirmed: false, reason: "direct sustained samples reconverged" };
+      },
+      rnboStageCollector: {
+        async ensureObservations() {},
+        targets: (entries) => entries.map((target) => ({
+          ...target,
+          currentStage: target.id === "left-client" ? 0 : 4,
+          stateObservedAt: new Date().toISOString(),
+          stateAgeMs: 0,
+          fresh: true,
+          stageMovement: "moving",
+          stageReadbackStatus: "fresh"
+        }))
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          mode: "jack",
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: { source: "rnbo-client", usable: true, absoluteBeat: 0 }
+        })
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "left-client",
+    rnboHost: "127.0.0.1",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "right-client",
+    rnboHost: "peer.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/7/messages/in/shadowscore"
+  });
+
+  const recovery = await runAutomaticSyncRecovery(context.store, context.config, context.runtime);
+
+  assert.equal(confirmationCount, 1);
+  assert.equal(recovery.inProgress, false);
+  assert.equal(recovery.lastAttemptAt, null);
+  assert.equal(recovery.confirmation.confirmed, false);
+  assert.equal(context.runtime.performanceTransport.playersPlaying, true);
+});
+
 test("player and arrangement controls remain distinct and idempotent", async () => {
   const writes = [];
   const oscWrites = [];
@@ -3074,13 +3157,15 @@ test("transport play reconciles Finch prepared data after SetStage then Clock", 
   assert.equal(started.activations[0].acknowledgement.status, "active");
 });
 
-test("transport play uses transactional start only for a complete live cohort", async () => {
+test("transport play prefers one atomic ClockArm list for a complete live cohort", async () => {
   const targetId = "transactional-client";
   const requests = [];
+  const clockArmRequests = [];
   const phaseWaits = [];
   let phaseCounter = 0;
   let transportAck = [];
   let running = false;
+  let startOptions;
   const context = createRouteContext({
     config: mergeConfig(defaultConfig, {
       rnbo: {
@@ -3098,10 +3183,11 @@ test("transport play uses transactional start only for a complete live cohort", 
           currentStagePath: "/rnbo/inst/9/messages/out/current_stage",
           clockPath: "/rnbo/inst/9/params/Clock",
           clockPhaseResetPath: "/rnbo/inst/9/messages/in/clock_phase_reset",
+          clockArmPath: "/rnbo/inst/9/messages/in/ClockArm",
           clockPhaseAckPath: "/rnbo/inst/9/messages/out/clock_phase_ack",
           transportStartPath: "/rnbo/inst/9/messages/in/TransportStart",
           transportStartAckPath: "/rnbo/inst/9/messages/out/transport_start_ack",
-          capabilities: { transactionalTransportStart: true }
+          capabilities: { atomicClockArm: true, transactionalTransportStart: true }
         }]
       },
       transport: { rnboClient: { startupCohortGraceMs: 0 } }
@@ -3117,6 +3203,11 @@ test("transport play uses transactional start only for a complete live cohort", 
       phaseAlignmentWait: async (milliseconds) => { phaseWaits.push(milliseconds); },
       rnboParamWriter: async (write) => {
         if (write.path.endsWith("/clock_phase_reset")) phaseCounter += 1;
+      },
+      rnboClockArmWriter: async ({ target, request, path }) => {
+        clockArmRequests.push({ targetId: target.id, request: [...request], path });
+        phaseCounter += 1;
+        return { targetId: target.id, request: [...request], path };
       },
       rnboAckFetch: async (url) => ({
         ok: true,
@@ -3147,7 +3238,8 @@ test("transport play uses transactional start only for a complete live cohort", 
       },
       macroPlayback: {
         snapshot: () => ({ running, activeBlockId: "A", macroIndex: 0 }),
-        start: () => {
+        start: (options) => {
+          startOptions = options;
           running = true;
           return context.runtime.macroPlayback.snapshot();
         },
@@ -3168,13 +3260,25 @@ test("transport play uses transactional start only for a complete live cohort", 
     phaseReset: true
   });
 
-  assert.equal(started.transactionalTransportStart.ok, true);
-  assert.equal(started.clockStartAcknowledgement.transactional, true);
+  assert.equal(started.atomicClockArmStart.ok, true);
+  assert.equal(started.atomicClockArmStart.atomicClockArm, true);
+  assert.equal(started.transactionalTransportStart, null);
+  assert.equal(started.clockStartAcknowledgement.transactional, false);
+  assert.equal(started.clockStartAcknowledgement.atomicClockArm, true);
   assert.equal(started.clockStartPhaseVerification.verified, true);
-  assert.deepEqual(requests.map(({ request }) => request[1]), [1, 2]);
-  assert.equal(requests[0].request[3], 0);
-  assert.equal(requests[1].request[2], requests[0].request[2]);
-  assert.deepEqual(phaseWaits, [150, 150]);
+  assert.deepEqual(requests, []);
+  assert.deepEqual(clockArmRequests, [{
+    targetId,
+    request: [30, 256, 0],
+    path: "/rnbo/inst/9/messages/in/ClockArm"
+  }]);
+  assert.deepEqual(phaseWaits, [150]);
+  assert.equal(started.phaseAnchor.source, "rnbo-atomic-clock-arm");
+  assert.equal(started.phaseAnchor.absoluteBeat, 0);
+  assert.equal(started.phaseAnchor.currentStage, 0);
+  assert.equal(started.phaseAnchor.stagesPerBeat, 16);
+  assert.equal(started.phaseAnchor.jackAbsoluteBeat, 8.75);
+  assert.equal(startOptions.anchorOffsetBeats, 0);
   assert.equal(running, true);
 });
 
@@ -5149,6 +5253,7 @@ test("hardware registration appears in session and RNBO targets", async () => {
         port: 9000,
         address: "/rnbo/inst/2/messages/in/shadowscore",
         clockPhaseResetPath: "/rnbo/inst/2/messages/in/clock_phase_reset",
+        clockArmPath: "/rnbo/inst/2/messages/in/ClockArm",
         clockPhaseAckPath: "/rnbo/inst/2/messages/out/clock_phase_ack",
         transportStartPath: "/rnbo/inst/2/messages/in/TransportStart",
         transportStartAckPath: "/rnbo/inst/2/messages/out/transport_start_ack",
@@ -5173,6 +5278,7 @@ test("hardware registration appears in session and RNBO targets", async () => {
   assert.equal(target.capabilities.stagedScoreActivation, true);
   assert.equal(target.capabilities.transactionalTransportStart, true);
   assert.equal(target.clockPhaseResetPath, "/rnbo/inst/2/messages/in/clock_phase_reset");
+  assert.equal(target.clockArmPath, "/rnbo/inst/2/messages/in/ClockArm");
   assert.equal(target.clockPhaseAckPath, "/rnbo/inst/2/messages/out/clock_phase_ack");
   assert.equal(target.transportStartPath, "/rnbo/inst/2/messages/in/TransportStart");
   assert.equal(target.transportStartAckPath, "/rnbo/inst/2/messages/out/transport_start_ack");

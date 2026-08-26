@@ -38,6 +38,23 @@ test("RNBO stage collector polls peer OSCQuery paths concurrently and overlays o
   assert.equal(collector.currentTargets()[0].stageReadbackStatus, "stale");
 });
 
+test("RNBO stage collector timestamps a read at the request-response midpoint", async () => {
+  const times = [1000, 1120, 1200];
+  const collector = createRnboStageCollector({
+    transport: { rnboClient: { pollIntervalMs: 0 } }
+  }, {
+    autoStart: false,
+    now: () => times.shift(),
+    fetchImpl: async () => ({ ok: true, async json() { return { VALUE: [12] }; } })
+  });
+
+  await collector.refresh([targets[0]]);
+  const observed = collector.targets([targets[0]])[0];
+
+  assert.equal(observed.stateObservedAt, new Date(1060).toISOString());
+  assert.equal(observed.stateAgeMs, 140);
+});
+
 test("RNBO stage collector retains the last value and reports read failures", async () => {
   let fail = false;
   let now = 1000;

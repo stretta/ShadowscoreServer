@@ -22,9 +22,14 @@ import { rnboCurrentStageUrl, rnboOscQueryValueUrl } from "../playback/rnbo-stag
 import { buildPlaybackSnapshot, nextPlaybackSnapshotGeneration } from "../playback/playback-snapshot.mjs";
 import { createTempoPolicy } from "../playback/tempo-policy.mjs";
 import {
+  atomicClockArmRequest,
+  selectAtomicClockArmCohort
+} from "../playback/atomic-clock-arm.mjs";
+import {
   TRANSPORT_START_MAX_OPERATION_ID,
   coordinateTransactionalTransportStart,
-  selectTransactionalTransportStartCohort
+  selectTransactionalTransportStartCohort,
+  verifySustainedCohortStages
 } from "../playback/transactional-transport-start.mjs";
 import { createLocalHardwareUnit } from "../registration/peer-registry.mjs";
 import { createEventPublisher, createLoadedPublisher } from "../realtime/publisher.mjs";
@@ -2941,7 +2946,22 @@ export async function runAutomaticSyncRecovery(store, config, runtime) {
     }
     const health = deriveSyncHealth(playbackSnapshot);
     const decision = supervisor.observe(health);
-    if (!decision.trigger || !supervisor.begin()) return decision;
+    if (!decision.trigger) return decision;
+    if (health.state === "slipped") {
+      const confirmation = await (runtime.verifyAutomaticClientSlip
+        ?? verifyAutomaticClientSlip)(store.getScore(), config, runtime);
+      if (confirmation.confirmed !== true) {
+        supervisor.reset();
+        return { ...supervisor.snapshot(), confirmation };
+      }
+    }
+    if (!performance.playersPlaying
+      || transportStopIsInProgress(runtime)
+      || transportStopEpoch(runtime) !== expectedStopEpoch
+      || !supervisor.begin()) {
+      supervisor.reset();
+      return supervisor.snapshot();
+    }
     try {
       const result = await startUnifiedTransport(store, config, runtime, {
         forceRestart: true,
@@ -2970,6 +2990,68 @@ export async function runAutomaticSyncRecovery(store, config, runtime) {
     runtime.automaticSyncRecoveryPromise = null;
   });
   return runtime.automaticSyncRecoveryPromise;
+}
+
+async function verifyAutomaticClientSlip(score, config, runtime) {
+  const context = await readBeatWitnessContext(score, config, runtime);
+  const assigned = context.rnboTargets.filter((target) =>
+    target.available !== false && assignedVoiceForTarget(score, target)
+  );
+  const contractByTargetId = new Map(context.timingContracts.map((contract) => [
+    optionalString(contract.targetId),
+    contract
+  ]));
+  const cohort = assigned.flatMap((target) => {
+    const contract = contractByTargetId.get(optionalString(target.id));
+    const maxSteps = Number(contract?.timing?.patternLength);
+    if (!target.currentStagePath
+      || target.capabilities?.transactionalTransportStart !== true
+      || !Number.isInteger(maxSteps)
+      || maxSteps <= 0) {
+      return [];
+    }
+    return [{ target, startStage: 0, maxSteps, clockInterval: 1 }];
+  });
+  if (!assigned.length || cohort.length !== assigned.length) {
+    return {
+      confirmed: false,
+      reason: "the complete assigned cohort is unavailable for sustained slip confirmation"
+    };
+  }
+  try {
+    const evidence = await verifySustainedCohortStages(cohort, {
+      readStage: (target) => readTransactionalTransportStage(config, runtime, target),
+      wait: runtime.transactionalTransportWait
+        ?? runtime.phaseAlignmentWait
+        ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds))),
+      now: runtime.transactionalTransportNow ?? (() => Date.now()),
+      sampleCount: transactionalTransportStageSampleCount(config),
+      sampleIntervalMs: transactionalTransportStageSampleIntervalMs(config),
+      requiredAdvance: transactionalTransportRequiredStageAdvance(config)
+    });
+    return {
+      confirmed: false,
+      reason: "direct sustained samples reconverged",
+      evidence
+    };
+  } catch (error) {
+    if (error?.code === "TRANSPORT_START_SUSTAINED_STAGE_SKEW") {
+      return {
+        confirmed: true,
+        reason: "direct sustained samples confirmed persistent client skew",
+        evidence: {
+          samples: error.samples ?? [],
+          advances: error.advances ?? [],
+          pairOffsets: error.pairOffsets ?? [],
+          divergent: error.divergent ?? []
+        }
+      };
+    }
+    return {
+      confirmed: false,
+      reason: `sustained slip confirmation unavailable: ${messageForError(error)}`
+    };
+  }
 }
 
 async function executeAuthoritativeTransportOperation(store, config, runtime, body = {}) {
@@ -3444,7 +3526,22 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
         ...body,
         locateBeatIntoBlock: requestedStartOffsetBeats
       });
-  const transactionalTransportStart = body.phaseReset === false
+  const atomicClockArmStart = body.phaseReset === false
+    ? null
+    : await maybeCoordinateAtomicClockArmStart(store, score, config, runtime, {
+        targetId,
+        targetIds: participatingTargetIds,
+        phaseStage,
+        beforeArm: playbackUpdate
+          ? null
+          : () => playbackOperations?.schedulePreparedActivations?.({
+              targetId,
+              targetIds: participatingTargetIds,
+              blockId: score.structureState?.activeBlockId ?? "",
+              initialStage: phaseStage
+            }) ?? []
+      });
+  const transactionalTransportStart = body.phaseReset === false || atomicClockArmStart
     ? null
     : await maybeCoordinateTransactionalTransportStart(store, score, config, runtime, {
         targetId,
@@ -3459,13 +3556,19 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
               initialStage: phaseStage
             }) ?? []
       });
-  if (transactionalTransportStart) {
+  const coordinatedTransportStart = atomicClockArmStart ?? transactionalTransportStart;
+  if (coordinatedTransportStart) {
     updateTransportTransition(runtime, transitionId, "verifying");
     await ensureAutomaticSyncRecoveryCurrent(store, config, runtime, body, { targetId });
-    const activationSchedule = transactionalTransportStart.activationSchedule;
+    const activationSchedule = coordinatedTransportStart.activationSchedule;
     const oscClockWrites = await writeOscSequencerClocks(score, config, runtime, "On");
     const startWitnessContext = await readBeatWitnessContext(score, config, runtime);
-    const phaseAnchor = transactionalPhaseAnchor(runtime, transactionalTransportStart, phaseStage);
+    const phaseAnchor = transactionalPhaseAnchor(
+      runtime,
+      coordinatedTransportStart,
+      phaseStage,
+      startWitnessContext.timingContracts
+    );
     const mode = await playbackStartMode(score, config, runtime, optionalString(body.mode));
     if (requestedArrangementMode === "run") {
       playback.start({
@@ -3488,19 +3591,20 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
     const activations = playbackUpdate?.activations ?? (activationSchedule.length
       ? await playbackOperations.confirmPreparedActivations(activationSchedule, { tempo })
       : []);
-    const clockStartAcknowledgement = transactionalStartAcknowledgement(transactionalTransportStart, phaseStage);
+    const clockStartAcknowledgement = transactionalStartAcknowledgement(coordinatedTransportStart, phaseStage);
     const clockStartPhaseVerification = transactionalStartPhaseVerification(
-      transactionalTransportStart,
+      coordinatedTransportStart,
       phaseAnchor
     );
-    const coordinatedStartTimings = transactionalTransportStart.timings;
+    const coordinatedStartTimings = coordinatedTransportStart.timings;
     performance.lastClockStartAcknowledgement = {
       ...clockStartAcknowledgement,
-      transactional: true,
-      operationId: transactionalTransportStart.operationId,
-      clockPhaseResetWriteCount: transactionalTransportStart.phaseResetWrites.length,
-      clockPhaseArmWindow: transactionalTransportStart.phaseResetWindow,
-      clockPhaseAcknowledgement: transactionalTransportStart.phaseResetAcknowledgement,
+      transactional: transactionalTransportStart !== null,
+      atomicClockArm: atomicClockArmStart !== null,
+      operationId: coordinatedTransportStart.operationId ?? null,
+      clockPhaseResetWriteCount: coordinatedTransportStart.phaseResetWrites.length,
+      clockPhaseArmWindow: coordinatedTransportStart.phaseResetWindow,
+      clockPhaseAcknowledgement: coordinatedTransportStart.phaseResetAcknowledgement,
       phaseVerification: clockStartPhaseVerification,
       coordinatedStartTimings
     };
@@ -3519,18 +3623,19 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
       activations,
       patternLengthWrites,
       phaseClockStopWrites: [],
-      clockWrites: transactionalTransportStart.activateWrites,
+      clockWrites: coordinatedTransportStart.activateWrites,
       clockStartAcknowledgement,
       clockStartCorrectionWrites: [],
-      clockPhaseArmWindow: transactionalTransportStart.phaseResetWindow,
-      clockPhaseResetWrites: transactionalTransportStart.phaseResetWrites,
-      clockPhaseAcknowledgement: transactionalTransportStart.phaseResetAcknowledgement,
+      clockPhaseArmWindow: coordinatedTransportStart.phaseResetWindow,
+      clockPhaseResetWrites: coordinatedTransportStart.phaseResetWrites,
+      clockPhaseAcknowledgement: coordinatedTransportStart.phaseResetAcknowledgement,
       clockStartPhaseVerification,
       coordinatedStartTimings,
       oscClockWrites,
-      phaseWrites: transactionalTransportStart.armWrites,
+      phaseWrites: coordinatedTransportStart.armWrites,
       phaseAnchor,
       phaseStage,
+      atomicClockArmStart,
       transactionalTransportStart
     };
   }
@@ -3765,6 +3870,100 @@ async function runUnifiedTransportStart(store, config, runtime, body = {}, sourc
   };
 }
 
+async function maybeCoordinateAtomicClockArmStart(store, score, config, runtime, options = {}) {
+  const targetIds = [...new Set((options.targetIds ?? []).map(optionalString).filter(Boolean))];
+  if (!targetIds.length) return null;
+  const assigned = (await readAllRnboTargets(config, runtime)).filter((target) =>
+    target.available !== false && assignedVoiceForTarget(score, target)
+  );
+  const targets = selectAtomicClockArmCohort(assigned, targetIds);
+  if (!targets.length || targets.some((target) => !rnboOscQueryValueUrl(target, target.clockPhaseAckPath))) return null;
+
+  try {
+    return await runAtomicClockArmStart(score, config, runtime, { ...options, targetIds, targets });
+  } catch (cause) {
+    const rollback = await rollbackFailedClockStart(store, config, runtime, { targetId: options.targetId });
+    cause.statusCode = 503;
+    cause.rollback = { atomicClockArm: true, transport: rollback };
+    throw cause;
+  }
+}
+
+async function runAtomicClockArmStart(score, config, runtime, options) {
+  const phaseStage = Number(options.phaseStage);
+  const cohort = options.targets.map((target) => {
+    const voiceId = assignedVoiceForTarget(score, target);
+    const compiled = compileScoreTransaction(score, config, 0, { ...target, voiceId });
+    const request = atomicClockArmRequest({
+      clockInterval: compiled.timing.ticksPerStage,
+      maxSteps: compiled.patternLength,
+      setStage: phaseStage
+    });
+    return { target, request };
+  });
+  const startedAt = Date.now();
+  const baselines = await readClockPhaseAckBaselines(config, runtime, options.targets);
+  const activationSchedule = typeof options.beforeArm === "function" ? await options.beforeArm() : [];
+  const activationWindow = await awaitClockArmWindow(config, runtime);
+  if (activationWindow.available !== true) {
+    const error = new Error(activationWindow.reason || "atomic clock arm window is unavailable");
+    error.code = "CLOCK_ARM_WINDOW_UNAVAILABLE";
+    throw error;
+  }
+  const armWrites = await Promise.all(cohort.map(({ target, request }) =>
+    sendAtomicClockArmRequest(runtime, target, request)));
+  const acknowledgement = await verifyClockPhaseAcknowledgements(
+    config,
+    runtime,
+    options.targets,
+    baselines,
+    phaseStage
+  );
+  if (!acknowledgement.verified) {
+    const error = new Error("RNBO atomic clock arm failed: onebang boundary acknowledgement failed; playback was stopped");
+    error.code = "CLOCK_ARM_ACK_FAILED";
+    throw error;
+  }
+  const acknowledgements = acknowledgement.acknowledgements.map((entry) => ({
+    ...entry,
+    expectedStage: phaseStage,
+    ok: entry.acknowledged === true,
+    event: "active",
+    status: entry.acknowledged === true ? "active" : "unavailable"
+  }));
+  const barrier = { verified: true, acknowledgements };
+  return {
+    ok: true,
+    atomicClockArm: true,
+    targetIds: options.targetIds,
+    armWrites,
+    armed: barrier,
+    activationWindow,
+    activateWrites: armWrites,
+    active: barrier,
+    phaseResetWindow: activationWindow,
+    phaseResetWrites: armWrites,
+    phaseResetAcknowledgement: acknowledgement,
+    activationSchedule,
+    timings: { atomicClockArmStartMs: Math.max(0, Date.now() - startedAt) }
+  };
+}
+
+async function sendAtomicClockArmRequest(runtime, target, request) {
+  if (typeof runtime.rnboClockArmWriter === "function") {
+    return runtime.rnboClockArmWriter({ target, request, path: target.clockArmPath });
+  }
+  return sendOscMessage({
+    ...target,
+    host: target.transportHost ?? target.host,
+    port: Number(target.oscPort ?? target.port),
+    sendable: true
+  }, target.clockArmPath, request, {
+    sender: runtime.oscSender,
+    allowUnavailable: true
+  });
+}
+
 async function maybeCoordinateTransactionalTransportStart(store, score, config, runtime, options = {}) {
   const targetIds = [...new Set((options.targetIds ?? []).map(optionalString).filter(Boolean))];
   if (!targetIds.length) return null;
@@ -3906,6 +4105,42 @@ async function readTransactionalTransportAcknowledgement(config, runtime, target
   }
 }
 
+async function readTransactionalTransportStage(config, runtime, target) {
+  const url = rnboCurrentStageUrl(target);
+  if (!url) return { stage: null, error: "current_stage path is unavailable" };
+  const timeoutMs = Math.max(100, Math.min(5000,
+    Number(config.rnbo?.phaseAlignment?.verifyReadTimeoutMs) || 2000));
+  const fetchImpl = runtime.rnboTransactionalStageFetch
+    ?? runtime.rnboStageFetch
+    ?? globalThis.fetch;
+  const requestedAt = Date.now();
+  try {
+    const response = await fetchImpl(url, { signal: AbortSignal.timeout(timeoutMs) });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+    const body = await response.json();
+    const value = Array.isArray(body?.VALUE) ? body.VALUE[0] : body?.VALUE;
+    const stage = Number(value);
+    if (!Number.isInteger(stage)) throw new Error("current_stage VALUE is unavailable");
+    const observedAt = Date.now();
+    return {
+      stage,
+      requestedAt,
+      observedAt,
+      elapsedMs: Math.max(0, observedAt - requestedAt),
+      url
+    };
+  } catch (error) {
+    return {
+      stage: null,
+      requestedAt,
+      observedAt: Date.now(),
+      elapsedMs: Math.max(0, Date.now() - requestedAt),
+      url,
+      error: messageForError(error)
+    };
+  }
+}
+
 function nextTransactionalTransportOperationId(runtime) {
   const previous = Number(runtime.transactionalTransportOperationId);
   const next = Number.isInteger(previous) && previous > 0
@@ -3930,23 +4165,56 @@ function transactionalTransportPollIntervalMs(config) {
   return Number.isFinite(value) ? Math.max(10, Math.min(1000, value)) : 50;
 }
 
-function transactionalPhaseAnchor(runtime, transaction, stage) {
+function transactionalTransportStageSampleCount(config) {
+  const value = Number(config.transport?.rnboClient?.transactionalStartStageSampleCount);
+  return Number.isInteger(value) ? Math.max(3, Math.min(31, value)) : 7;
+}
+
+function transactionalTransportStageSampleIntervalMs(config) {
+  const value = Number(config.transport?.rnboClient?.transactionalStartStageSampleIntervalMs);
+  return Number.isFinite(value) ? Math.max(0, Math.min(1000, value)) : 50;
+}
+
+function transactionalTransportRequiredStageAdvance(config) {
+  const value = Number(config.transport?.rnboClient?.transactionalStartRequiredStageAdvance);
+  return Number.isInteger(value) ? Math.max(0, Math.min(16, value)) : 1;
+}
+
+function transactionalPhaseAnchor(runtime, transaction, stage, timingContracts = []) {
   const transport = jackTransportSnapshot(runtime);
   const latest = transport?.latest ?? {};
   const tempo = Number(latest.beatsPerMinute);
   const ageMs = Math.max(0, Number(transport?.ageMs) || 0);
-  const absoluteBeat = Number(latest.absoluteBeat);
+  const jackAbsoluteBeat = Number(latest.absoluteBeat);
+  const targetIds = new Set(transaction.targetIds ?? []);
+  const contract = timingContracts.find((entry) =>
+    targetIds.has(optionalString(entry.targetId))
+      && Number(entry.timing?.stagesPerBeat) > 0
+  );
+  const stagesPerBeat = Number(contract?.timing?.stagesPerBeat);
+  const patternLength = Number(contract?.timing?.patternLength);
+  const currentStage = Number(stage);
+  const absoluteBeat = Number.isInteger(currentStage) && stagesPerBeat > 0
+    ? currentStage / stagesPerBeat
+    : null;
   return {
-    source: "rnbo-transactional-start",
+    source: transaction.atomicClockArm ? "rnbo-atomic-clock-arm" : "rnbo-transactional-start",
     usable: Number.isFinite(absoluteBeat),
-    fresh: transport?.fresh === true,
-    absoluteBeat: Number.isFinite(absoluteBeat) && tempo > 0
-      ? absoluteBeat + ageMs * tempo / 60000
+    fresh: transaction.active?.verified === true,
+    absoluteBeat,
+    currentStage: Number.isInteger(currentStage) ? currentStage : null,
+    stagesPerBeat: stagesPerBeat > 0 ? stagesPerBeat : null,
+    cycleBeats: stagesPerBeat > 0 && patternLength > 0
+      ? patternLength / stagesPerBeat
       : null,
-    stage,
+    jackAbsoluteBeat: Number.isFinite(jackAbsoluteBeat) && tempo > 0
+      ? jackAbsoluteBeat + ageMs * tempo / 60000
+      : null,
     operationId: transaction.operationId,
     targetCount: transaction.targetIds.length,
-    reason: "all transactional clients acknowledged the same first stage"
+    reason: transaction.atomicClockArm
+      ? "all clients witnessed the same quantized onebang boundary"
+      : "all transactional clients acknowledged the same ACTIVE stage"
   };
 }
 
@@ -3954,8 +4222,9 @@ function transactionalStartAcknowledgement(transaction, expectedStage) {
   return {
     required: true,
     verified: transaction.armed?.verified === true,
-    transactional: true,
-    operationId: transaction.operationId,
+    transactional: transaction.atomicClockArm !== true,
+    atomicClockArm: transaction.atomicClockArm === true,
+    operationId: transaction.operationId ?? null,
     expectedStage,
     targetCount: transaction.targetIds.length,
     acknowledgements: transaction.armed?.acknowledgements ?? []

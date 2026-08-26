@@ -59,6 +59,9 @@ export function validateTransportStartAck(value, { operationId, expectedEvent } 
     success: successFlag === 1
   };
 
+  if (values.length === 0) {
+    return { ...base, status: "uninitialized" };
+  }
   if (values.length !== 6 || values.some((entry) => !Number.isInteger(entry))) {
     return { ...base, status: "malformed" };
   }
@@ -206,6 +209,107 @@ export async function coordinateTransactionalTransportStart({
   }
 }
 
+export async function verifySustainedCohortStages(cohortEntries, {
+  readStage,
+  wait = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)),
+  now = () => Date.now(),
+  sampleCount = 7,
+  sampleIntervalMs = 50,
+  requiredAdvance = 1
+} = {}) {
+  if (typeof readStage !== "function") throw new Error("readStage is required");
+  const cohort = normalizeCohort(cohortEntries);
+  if (!cohort.length) throw coordinatorError("TRANSPORT_START_EMPTY_COHORT", "sustained stage verification requires at least one target");
+  const samplesRequired = boundedInteger(sampleCount, 7, 3, 31);
+  const intervalMs = boundedMilliseconds(sampleIntervalMs, 50, 0, 1000);
+  const advanceRequired = boundedInteger(requiredAdvance, 1, 0, 16);
+  const startedAt = now();
+  const samples = [];
+
+  for (let sampleIndex = 0; sampleIndex < samplesRequired; sampleIndex += 1) {
+    const observed = await Promise.all(cohort.map(async (entry) => {
+      const read = await readStage(entry.target);
+      const stage = Number(typeof read === "object" && read !== null ? read.stage : read);
+      if (!Number.isInteger(stage) || stage < 0 || stage >= entry.maxSteps) {
+        throw coordinatorError(
+          "TRANSPORT_START_STAGE_WITNESS_UNAVAILABLE",
+          `target '${entry.id}' returned unavailable current_stage during sustained verification`,
+          { targetId: entry.id, stage: Number.isFinite(stage) ? stage : null, read }
+        );
+      }
+      return {
+        targetId: entry.id,
+        stage,
+        progress: signedCircularDelta(stage, entry.startStage, entry.maxSteps),
+        ...(typeof read === "object" && read !== null ? { read } : {})
+      };
+    }));
+    samples.push({
+      index: sampleIndex,
+      elapsedMs: Math.max(0, now() - startedAt),
+      targets: observed
+    });
+    if (sampleIndex + 1 < samplesRequired && intervalMs > 0) await wait(intervalMs);
+  }
+
+  const histories = new Map(cohort.map(({ id }) => [id, samples.map(({ targets }) =>
+    targets.find(({ targetId }) => targetId === id)?.progress
+  )]));
+  const advances = cohort.map(({ id }) => {
+    const history = histories.get(id) ?? [];
+    return {
+      targetId: id,
+      minimum: Math.min(...history),
+      maximum: Math.max(...history),
+      advance: Math.max(...history) - Math.min(...history)
+    };
+  });
+  const stalled = advances.filter(({ advance }) => advance < advanceRequired);
+  if (stalled.length) {
+    throw coordinatorError(
+      "TRANSPORT_START_STAGE_NOT_ADVANCING",
+      `transactional clients did not advance ${advanceRequired} stage${advanceRequired === 1 ? "" : "s"} during sustained verification`,
+      { samples, advances, stalledTargetIds: stalled.map(({ targetId }) => targetId) }
+    );
+  }
+
+  const pairOffsets = [];
+  for (let first = 0; first < cohort.length; first += 1) {
+    for (let second = first + 1; second < cohort.length; second += 1) {
+      const firstEntry = cohort[first];
+      const secondEntry = cohort[second];
+      const firstHistory = histories.get(firstEntry.id) ?? [];
+      const secondHistory = histories.get(secondEntry.id) ?? [];
+      const offsets = firstHistory.map((value, index) => value - secondHistory[index]);
+      pairOffsets.push({
+        firstTargetId: firstEntry.id,
+        secondTargetId: secondEntry.id,
+        offsets,
+        medianOffset: median(offsets)
+      });
+    }
+  }
+  const divergent = pairOffsets.filter(({ medianOffset }) => medianOffset !== 0);
+  if (divergent.length) {
+    throw coordinatorError(
+      "TRANSPORT_START_SUSTAINED_STAGE_SKEW",
+      "transactional clients diverged after the ACTIVE acknowledgement barrier",
+      { samples, advances, pairOffsets, divergent }
+    );
+  }
+
+  return {
+    verified: true,
+    sampleCount: samples.length,
+    sampleIntervalMs: intervalMs,
+    requiredAdvance: advanceRequired,
+    elapsedMs: Math.max(0, now() - startedAt),
+    samples,
+    advances,
+    pairOffsets
+  };
+}
+
 function operationRequest(command, operationId) {
   const operation = exactInt(operationId, "operationId", 1, TRANSPORT_START_MAX_OPERATION_ID);
   return request(command, operation, 0, 0, 0, 0);
@@ -326,6 +430,24 @@ function coordinatorError(code, message, details = {}) {
 function boundedMilliseconds(value, fallback, min, max) {
   const number = Number(value);
   return Number.isFinite(number) ? Math.max(min, Math.min(max, number)) : fallback;
+}
+
+function boundedInteger(value, fallback, min, max) {
+  const number = Number(value);
+  return Number.isInteger(number) ? Math.max(min, Math.min(max, number)) : fallback;
+}
+
+function signedCircularDelta(value, reference, modulus) {
+  const forward = ((value - reference) % modulus + modulus) % modulus;
+  return forward > modulus / 2 ? forward - modulus : forward;
+}
+
+function median(values) {
+  const sorted = [...values].sort((first, second) => first - second);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[middle]
+    : (sorted[middle - 1] + sorted[middle]) / 2;
 }
 
 function exactInt(value, name, min, max) {

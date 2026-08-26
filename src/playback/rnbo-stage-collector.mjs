@@ -96,7 +96,12 @@ async function pollTargets(targets, fetchImpl, now, settings, observations) {
       if (currentStage === null) throw new Error("current_stage VALUE is unavailable");
       const previous = observations.get(target.id);
       const changed = Number.isFinite(previous?.currentStage) && previous.currentStage !== currentStage;
-      const observedAt = now();
+      const completedAt = now();
+      // The value existed at some point during the request, not specifically
+      // when the response finished. Use the request/response midpoint so
+      // slower OSCQuery peers are not projected artificially behind faster
+      // peers when all samples are compared at a common time.
+      const observedAt = requestedAt + ((completedAt - requestedAt) / 2);
       observations.set(target.id, {
         targetId: target.id,
         url,

@@ -180,6 +180,7 @@ export function extractRnboTargets(tree, config) {
       clockStartAckPath: outports.clock_start_ack,
       clockStartAck: outports.clock_start_ack_value,
       clockPhaseResetPath: normalizeAddress(instanceNode?.CONTENTS?.messages?.CONTENTS?.in?.CONTENTS?.clock_phase_reset?.FULL_PATH) || undefined,
+      clockArmPath: normalizeAddress(instanceNode?.CONTENTS?.messages?.CONTENTS?.in?.CONTENTS?.ClockArm?.FULL_PATH) || undefined,
       clockPhaseAckPath: outports.clock_phase_ack,
       clockPhaseAck: outports.clock_phase_ack_value,
       transportStartPath: normalizeAddress(instanceNode?.CONTENTS?.messages?.CONTENTS?.in?.CONTENTS?.TransportStart?.FULL_PATH) || undefined,
@@ -563,6 +564,9 @@ function observedTargetCapabilities(inportNode, instanceNode) {
     // promise. A peer may retain newer config while an older RNBO export is
     // loaded, so the actual inport is authoritative in both directions.
     continuingScoreActivation: Boolean(messageInputs.ActivatePrepared),
+    // ClockArm is an atomic [ClockInterval, MaxSteps, SetStage] message whose
+    // completion witness is emitted by the actual quantized onebang boundary.
+    atomicClockArm: Boolean(messageInputs.ClockArm && messageOutputs.clock_phase_ack),
     // Transactional start must be capability-gated by the complete live
     // request/acknowledgement surface. Configuration metadata alone cannot
     // make an older export safe to use for coordinated playback.
@@ -705,6 +709,7 @@ function normalizeConfiguredTarget(target, rnbo, index) {
     clockStartAckPath: stringField(target.clockStartAckPath) || undefined,
     clockStartAck: numericList(target.clockStartAck),
     clockPhaseResetPath: stringField(target.clockPhaseResetPath) || undefined,
+    clockArmPath: stringField(target.clockArmPath) || undefined,
     clockPhaseAckPath: stringField(target.clockPhaseAckPath) || undefined,
     clockPhaseAck: numericList(target.clockPhaseAck),
     transportStartPath: stringField(target.transportStartPath) || undefined,

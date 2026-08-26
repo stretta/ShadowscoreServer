@@ -539,6 +539,42 @@ test("score transactions stay serial when batching is configured without ACK pol
   assert.deepEqual(batchSizes, [1, 1, 1, 1, 1, 1]);
 });
 
+test("score transactions publish pacing backlog telemetry without changing delivery", async () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      host: "127.0.0.1",
+      port: 9000,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      clearRowCount: 0,
+      sendDelayMs: 5,
+      log: false,
+      ack: { enabled: false }
+    }
+  });
+  let sampleCount = 0;
+  const result = await sendScoreTransaction({
+    send(packet, port, host, callback) {
+      callback();
+    }
+  }, config, createScore(), 126, {
+    eventLoopBacklogSamplerFactory: () => ({
+      async pace() {
+        sampleCount += 1;
+      },
+      snapshot() {
+        return { sampleCount, meanMs: 0.25, maxMs: 0.5 };
+      }
+    })
+  });
+
+  assert.ok(sampleCount > 0);
+  assert.deepEqual(result.eventLoopBacklog, {
+    sampleCount,
+    meanMs: 0.25,
+    maxMs: 0.5
+  });
+});
+
 test("fidelity timing contract chooses the lowest grid that meets the error target", () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
@@ -2887,6 +2923,9 @@ test("RNBO adapter records automatic score changes without sending and leaves ma
       receiverMaxBatchSize: 1,
       acknowledgement: "none"
     });
+    assert.equal(adapter.sendStatus()[0].eventLoopBacklog.sampleCount, 0);
+    assert.ok(adapter.sendStatus()[0].eventLoopBacklog.meanMs >= 0);
+    assert.ok(adapter.sendStatus()[0].eventLoopBacklog.maxMs >= 0);
     const transfer = adapter.transferStatus();
     const target = Object.values(transfer.targets)[0];
     assert.equal(target.state, "live");

@@ -159,6 +159,12 @@ counts, and first activation acknowledgement duration. Wren advertises no such
 batch capability, so this checkpoint intentionally leaves its five-millisecond
 one-row pacing unchanged.
 
+The second Phase 6 checkpoint measures event-loop scheduling backlog at the
+existing RNBO pacing waits. Each target status reports the number of pacing
+samples plus mean and maximum delay beyond the intentional wait. This reuses
+the transaction's existing timers, adds no polling loop, and does not change
+packet ordering, requested batch size, effective batch size, or delay policy.
+
 ## Checkpoint and Deployment Policy
 
 Each phase is a separate reviewed local commit. Before deploying to Wren:

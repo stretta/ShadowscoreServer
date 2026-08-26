@@ -5479,6 +5479,11 @@ test("RNBO targets route exposes resend queue and per-target commit status", asy
               at: "2026-07-08T20:53:50.401Z",
               noteCount: 4,
               transmittedRowCount: 819,
+              eventLoopBacklog: {
+                sampleCount: 821,
+                meanMs: 0.2,
+                maxMs: 1.7
+              },
               ack: {
                 ok: true,
                 status: "committed",
@@ -5519,6 +5524,11 @@ test("RNBO targets route exposes resend queue and per-target commit status", asy
   assert.equal(targets.sendQueue.queued, true);
   assert.equal(targets.sendQueue.active.transactionId, 1002);
   assert.equal(targets.targets[0].sendStatus.ack.status, "committed");
+  assert.deepEqual(targets.targets[0].sendStatus.eventLoopBacklog, {
+    sampleCount: 821,
+    meanMs: 0.2,
+    maxMs: 1.7
+  });
 
   const session = await requestJson(context, "GET", "/session");
   assert.equal(session.rnbo.sendQueue.active.transactionId, 1002);

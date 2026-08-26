@@ -7,6 +7,7 @@ import { encodeOscMessage } from "./osc.mjs";
 import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
 import { rnboFlowControlEvidence, rnboScoreDeliveryProfile } from "../playback/rnbo-flow-control.mjs";
+import { createEventLoopBacklogSampler } from "../playback/flow-control-telemetry.mjs";
 import {
   activationActionForState,
   evaluatePreparedPlaybackCohort,
@@ -873,6 +874,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
         attemptCount: compiled?.attemptCount ?? 1,
         retryCount: compiled?.retryCount ?? 0,
         flowControl: compiled?.flowControl ?? null,
+        eventLoopBacklog: compiled?.eventLoopBacklog ?? null,
         resumedRowCount: compiled?.resumedRowCount ?? 0,
         activeTransaction: compiled?.stagedScoreActivation === true
           ? lastSendStatus.get(targetId)?.activeTransaction ?? null
@@ -1387,6 +1389,11 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
   let resumeFromRow = 0;
   let resumedRowCount = 0;
   const artifact = options.compiledArtifacts?.get(score, target, options);
+  const eventLoopBacklog = (
+    options.eventLoopBacklogSamplerFactory
+    ?? options.runtime?.eventLoopBacklogSamplerFactory
+    ?? createEventLoopBacklogSampler
+  )({ target });
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const deliveryProfile = rnboScoreDeliveryProfile(config, target, attempt);
@@ -1412,7 +1419,10 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
       deliveryProfile,
       delivery
     });
-    await sendCompiledMessages(socket, config, target, compiled, deliveryProfile, delivery, options);
+    await sendCompiledMessages(socket, config, target, compiled, deliveryProfile, delivery, {
+      ...options,
+      eventLoopBacklog
+    });
     sendCompletedMs = now();
     ack = await readScoreTransactionAck(config, target, compiled, transactionId, {
       ...options,
@@ -1470,6 +1480,7 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
     attemptCount: (compiled?.deliveryProfile?.attempt ?? 0) + 1,
     retryCount: compiled?.deliveryProfile?.attempt ?? 0,
     flowControl: rnboFlowControlEvidence(config, target, compiled?.deliveryProfile),
+    eventLoopBacklog: eventLoopBacklog.snapshot(),
     resumedRowCount,
     targetId: target.id ?? target.address ?? "",
     voiceId: target.voiceId ?? "",
@@ -1496,7 +1507,7 @@ async function sendCompiledMessages(socket, config, target, compiled, deliveryPr
   // remain batched, preserving throughput for large scores.
   if (begin) {
     await sendOscMessage(socket, config, target, begin.values);
-    if (delayMs > 0) await delay(delayMs);
+    if (delayMs > 0) await pacingDelay(delayMs, options);
   }
   for (let index = 0; index < pendingMessages.length; index += batchSize) {
     const batch = pendingMessages.slice(index, index + batchSize);
@@ -1509,17 +1520,17 @@ async function sendCompiledMessages(socket, config, target, compiled, deliveryPr
       sentRowCount: Math.min(compiled.transmittedRowCount, resumeFromRow + index + batch.length)
     });
     if (delayMs > 0) {
-      await delay(delayMs);
+      await pacingDelay(delayMs, options);
     }
   }
   if (commit) {
     await sendOscMessage(socket, config, target, commit.values);
-    if (delayMs > 0) await delay(delayMs);
+    if (delayMs > 0) await pacingDelay(delayMs, options);
   }
   for (const message of scoreTransportInportMessages(config, compiled, options)) {
     await sendOscInportMessage(socket, target, message.name, message.value);
     if (delayMs > 0) {
-      await delay(delayMs);
+      await pacingDelay(delayMs, options);
     }
   }
   emitTransferProgress(options, compiled, target, {
@@ -1529,6 +1540,10 @@ async function sendCompiledMessages(socket, config, target, compiled, deliveryPr
     delivery,
     sentRowCount: compiled.transmittedRowCount
   });
+}
+
+function pacingDelay(delayMs, options = {}) {
+  return options.eventLoopBacklog?.pace?.(delayMs) ?? delay(delayMs);
 }
 
 function emitTransferProgress(options, compiled, target, details = {}) {

@@ -75,6 +75,36 @@ test("extracts ShadowScoreClient RNBO message targets from OSCQuery tree", () =>
   assert.equal(capabilities.continuingScoreActivation, false);
   assert.equal(capabilities.atomicClockArm, false);
   assert.equal(capabilities.transactionalTransportStart, false);
+  assert.equal(capabilities.boundedScoreBatchIngestion, false);
+  assert.equal(capabilities.maxScoreBatchRows, 1);
+  assert.equal(capabilities.scoreBatchAcknowledgement, "none");
+});
+
+test("derives bounded score batching only from live receiver metadata", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      capabilities: {
+        boundedScoreBatchIngestion: true,
+        maxScoreBatchRows: 8,
+        scoreBatchAcknowledgement: "commit"
+      },
+      oscQuery: { enabled: true }
+    }
+  });
+  assert.equal(extractRnboTargets(createOscQueryTree(), config)[0].capabilities.boundedScoreBatchIngestion, false);
+
+  const advertised = createOscQueryTree();
+  advertised.CONTENTS.rnbo.CONTENTS.inst.CONTENTS["2"].CONTENTS.messages.CONTENTS.in.CONTENTS.shadowscore.CONTENTS = {
+    capabilities: { VALUE: JSON.stringify({
+      boundedScoreBatchIngestion: true,
+      maxScoreBatchRows: 4,
+      scoreBatchAcknowledgement: "commit"
+    }) }
+  };
+  const capability = extractRnboTargets(advertised, config)[0].capabilities;
+  assert.equal(capability.boundedScoreBatchIngestion, true);
+  assert.equal(capability.maxScoreBatchRows, 4);
+  assert.equal(capability.scoreBatchAcknowledgement, "commit");
 });
 
 test("derives continuing activation from the live ActivatePrepared inport", () => {

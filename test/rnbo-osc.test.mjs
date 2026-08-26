@@ -505,7 +505,7 @@ test("staged look-ahead preparation does not retime the active block", async () 
   assert.equal(packets.every(({ packet }) => readOscAddress(packet).endsWith("/shadowscore")), true);
 });
 
-test("score transactions isolate boundaries and queue note bursts before transport writes", async () => {
+test("score transactions stay serial when batching is configured without ACK polling", async () => {
   const config = mergeConfig(defaultConfig, {
     rnbo: {
       host: "127.0.0.1",
@@ -527,7 +527,7 @@ test("score transactions isolate boundaries and queue note bursts before transpo
   const batchSizes = [];
   const sending = sendScoreTransaction(socket, config, createScore(), 125);
 
-  for (const expectedSize of [1, 2, 1, 1, 1]) {
+  for (const expectedSize of [1, 1, 1, 1, 1, 1]) {
     await new Promise((resolve) => setImmediate(resolve));
     batchSizes.push(pending.length);
     assert.equal(pending.length, expectedSize);
@@ -536,7 +536,7 @@ test("score transactions isolate boundaries and queue note bursts before transpo
   }
   await sending;
 
-  assert.deepEqual(batchSizes, [1, 2, 1, 1, 1]);
+  assert.deepEqual(batchSizes, [1, 1, 1, 1, 1, 1]);
 });
 
 test("fidelity timing contract chooses the lowest grid that meets the error target", () => {
@@ -1376,7 +1376,12 @@ test("score transaction retries with progressively safer delivery profiles", asy
       log: false,
       targets: [{
         address: "/rnbo/inst/2/messages/in/shadowscore",
-        capabilities: compactReplaceCapabilities()
+        capabilities: {
+          ...compactReplaceCapabilities(),
+          boundedScoreBatchIngestion: true,
+          maxScoreBatchRows: 4,
+          scoreBatchAcknowledgement: "commit"
+        }
       }],
       oscQuery: { enabled: true, url: "http://127.0.0.1:5678/" },
       ack: { enabled: true, retries: 2, retryDelayMs: 0, settleMs: 0 }
@@ -1420,7 +1425,12 @@ test("score transaction serializes begin and commit around batched note rows", a
       log: false,
       targets: [{
         address: "/rnbo/inst/2/messages/in/shadowscore",
-        capabilities: compactReplaceCapabilities()
+        capabilities: {
+          ...compactReplaceCapabilities(),
+          boundedScoreBatchIngestion: true,
+          maxScoreBatchRows: 4,
+          scoreBatchAcknowledgement: "commit"
+        }
       }],
       oscQuery: { enabled: true, url: "http://127.0.0.1:5678/" },
       ack: { enabled: true, retries: 0, settleMs: 0 }
@@ -1763,6 +1773,7 @@ test("RNBO adapter promotes only a prepared Finch transaction after ACTIVE readb
     assert.equal(adapter.sendStatus()[0].activeTransaction, 1104);
     assert.equal(adapter.sendStatus()[0].preparedTransaction, null);
     assert.equal(adapter.sendStatus()[0].activationAck.status, "active");
+    assert.ok(adapter.sendStatus()[0].activationDurationMs >= 0);
     assert.deepEqual(adapter.lifecycleEvents().slice(-2).map((event) => event.type), [
       "activation_scheduled",
       "activation_completed"
@@ -2867,6 +2878,15 @@ test("RNBO adapter records automatic score changes without sending and leaves ma
     assert.match(adapter.sendStatus()[0].payloadHash, /^[a-f0-9]{64}$/);
     assert.equal(adapter.sendStatus()[0].noteCount, 2);
     assert.ok(adapter.sendStatus()[0].preparationDurationMs >= 0);
+    assert.equal(adapter.sendStatus()[0].attemptCount, 1);
+    assert.equal(adapter.sendStatus()[0].retryCount, 0);
+    assert.deepEqual(adapter.sendStatus()[0].flowControl, {
+      requestedBatchSize: 1,
+      effectiveBatchSize: 1,
+      boundedIngestionAdvertised: false,
+      receiverMaxBatchSize: 1,
+      acknowledgement: "none"
+    });
     const transfer = adapter.transferStatus();
     const target = Object.values(transfer.targets)[0];
     assert.equal(target.state, "live");

@@ -6,6 +6,7 @@ import { dirname, resolve } from "node:path";
 import { encodeOscMessage } from "./osc.mjs";
 import { discoverRnboTargets } from "./rnbo-oscquery.mjs";
 import { rnboPlaybackCapabilities } from "../playback/target-capabilities.mjs";
+import { rnboFlowControlEvidence, rnboScoreDeliveryProfile } from "../playback/rnbo-flow-control.mjs";
 import {
   activationActionForState,
   evaluatePreparedPlaybackCohort,
@@ -268,6 +269,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
           await delay(activation.pollIntervalMs);
         }
         const completedAt = new Date().toISOString();
+        const activationDurationMs = Math.max(0, Date.now() - startedAt);
         const previous = lastSendStatus.get(request.targetId);
         if (acknowledgement.ok && previous?.preparedTransaction === request.transactionId) {
           lastSendStatus.set(request.targetId, {
@@ -276,6 +278,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
             activeBlockId: previous.blockId,
             preparedTransaction: null,
             activationAcknowledgementAt: completedAt,
+            activationDurationMs,
             activationAck: acknowledgement
           });
           promotePlaybackUpdate(request.targetId, request.transactionId, acknowledgement);
@@ -284,7 +287,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
             observedAt: completedAt,
             targetId: request.targetId,
             transactionId: request.transactionId,
-            activationDurationMs: Math.max(0, Date.now() - startedAt),
+            activationDurationMs,
             acknowledgement
           });
         } else {
@@ -292,6 +295,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
             lastSendStatus.set(request.targetId, {
               ...previous,
               activationAcknowledgementAt: completedAt,
+              activationDurationMs,
               activationAck: acknowledgement
             });
           }
@@ -300,7 +304,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
             observedAt: completedAt,
             targetId: request.targetId,
             transactionId: request.transactionId,
-            activationDurationMs: Math.max(0, Date.now() - startedAt),
+            activationDurationMs,
             acknowledgement
           });
         }
@@ -866,6 +870,9 @@ export function createRnboOscAdapter(config, runtime = {}) {
         sendCompletedAt: compiled?.sendCompletedAt ?? null,
         acknowledgementAt: compiled?.acknowledgementAt ?? null,
         preparationDurationMs: compiled?.preparationDurationMs ?? null,
+        attemptCount: compiled?.attemptCount ?? 1,
+        retryCount: compiled?.retryCount ?? 0,
+        flowControl: compiled?.flowControl ?? null,
         resumedRowCount: compiled?.resumedRowCount ?? 0,
         activeTransaction: compiled?.stagedScoreActivation === true
           ? lastSendStatus.get(targetId)?.activeTransaction ?? null
@@ -878,6 +885,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
           ? compiled?.transactionId ?? compiled?.ack?.transactionId ?? null
           : null,
         activationAcknowledgementAt: null,
+        activationDurationMs: null,
         activationAck: null,
         ack: compiled?.ack
       });
@@ -1381,7 +1389,7 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
   const artifact = options.compiledArtifacts?.get(score, target, options);
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
-    const deliveryProfile = scoreDeliveryProfile(config, attempt);
+    const deliveryProfile = rnboScoreDeliveryProfile(config, target, attempt);
     compiled = {
       ...(artifact
         ? bindCompiledScoreArtifact(artifact, transactionId)
@@ -1459,6 +1467,9 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
     sendCompletedAt: new Date(sendCompletedMs).toISOString(),
     acknowledgementAt: new Date(acknowledgementMs).toISOString(),
     preparationDurationMs: Math.max(0, acknowledgementMs - sendStartedMs),
+    attemptCount: (compiled?.deliveryProfile?.attempt ?? 0) + 1,
+    retryCount: compiled?.deliveryProfile?.attempt ?? 0,
+    flowControl: rnboFlowControlEvidence(config, target, compiled?.deliveryProfile),
     resumedRowCount,
     targetId: target.id ?? target.address ?? "",
     voiceId: target.voiceId ?? "",
@@ -1466,7 +1477,7 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
   };
 }
 
-async function sendCompiledMessages(socket, config, target, compiled, deliveryProfile = scoreDeliveryProfile(config, 0), delivery = {}, options = {}) {
+async function sendCompiledMessages(socket, config, target, compiled, deliveryProfile = rnboScoreDeliveryProfile(config, target, 0), delivery = {}, options = {}) {
   const { batchSize, delayMs } = deliveryProfile;
   const resumeFromRow = clampInt(delivery.resumeFromRow ?? 0, 0, compiled.transmittedRowCount);
   const pendingMessages = resumeFromRow > 0
@@ -1540,20 +1551,6 @@ function resumableRetryRow(target, compiled, ack) {
   const row = Number(ack.receivedNoteCount);
   if (!Number.isInteger(row) || row <= 0 || row >= compiled.transmittedRowCount) return null;
   return row;
-}
-
-function scoreDeliveryProfile(config, attempt = 0) {
-  const baseBatchSize = clampInt(config.rnbo.sendBatchSize ?? 1, 1, 64);
-  const baseDelayMs = clampInt(config.rnbo.sendDelayMs ?? 0, 0, 10000);
-  const divisor = 2 ** Math.max(0, attempt);
-  const multiplier = 2 ** Math.max(0, attempt);
-  const maxDelayMs = clampInt(config.rnbo.maxRetryDelayMs ?? 20, 0, 10000);
-  return {
-    attempt,
-    batchSize: Math.max(1, Math.ceil(baseBatchSize / divisor)),
-    delayMs: Math.min(maxDelayMs, baseDelayMs * multiplier),
-    mode: attempt === 0 ? "normal" : "conservative-retry"
-  };
 }
 
 export async function readScoreTransactionAck(config, target, compiled, transactionId, options = {}) {

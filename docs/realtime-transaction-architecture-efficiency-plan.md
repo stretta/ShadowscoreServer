@@ -149,6 +149,16 @@ Use current one-row pacing for clients without that capability. Measure transfer
 duration, event-thread backlog, READY latency, retry rate, and first activation
 before enabling a faster profile.
 
+The first Phase 6 checkpoint defines a receiver-owned bounded score-batch
+capability with an advertised maximum and commit acknowledgement mode. Delivery
+remains one row at a time unless all three fields are present in live OSCQuery
+metadata and ACK polling is enabled; retained server configuration alone cannot
+enable batching. Per-target send status now records the requested/effective
+batch, receiver limit, acknowledgement mode, READY duration, attempt/retry
+counts, and first activation acknowledgement duration. Wren advertises no such
+batch capability, so this checkpoint intentionally leaves its five-millisecond
+one-row pacing unchanged.
+
 ## Checkpoint and Deployment Policy
 
 Each phase is a separate reviewed local commit. Before deploying to Wren:

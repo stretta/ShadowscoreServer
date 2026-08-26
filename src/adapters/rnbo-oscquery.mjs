@@ -589,6 +589,15 @@ function observedTargetCapabilities(inportNode, instanceNode) {
   const messageOutputs = instanceNode?.CONTENTS?.messages?.CONTENTS?.out?.CONTENTS ?? {};
   return {
     ...advertised,
+    // Batching changes the receiver's event-thread load. Only live receiver
+    // metadata may enable it; a retained server configuration is not proof.
+    boundedScoreBatchIngestion: advertised.boundedScoreBatchIngestion === true,
+    maxScoreBatchRows: advertised.boundedScoreBatchIngestion === true
+      ? advertised.maxScoreBatchRows
+      : 1,
+    scoreBatchAcknowledgement: advertised.boundedScoreBatchIngestion === true
+      ? advertised.scoreBatchAcknowledgement
+      : "none",
     // Continuing activation is a live protocol surface, not a configuration
     // promise. A peer may retain newer config while an older RNBO export is
     // loaded, so the actual inport is authoritative in both directions.

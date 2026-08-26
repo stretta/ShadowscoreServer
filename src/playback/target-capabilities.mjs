@@ -33,6 +33,14 @@ export function rnboPlaybackCapabilities(config, override = {}) {
     continuingScoreActivation: boolCapability(override, configured, "continuingScoreActivation", false),
     atomicClockArm: boolCapability(override, configured, "atomicClockArm", false),
     transactionalTransportStart: boolCapability(override, configured, "transactionalTransportStart", false),
+    boundedScoreBatchIngestion: boolCapability(override, configured, "boundedScoreBatchIngestion", false),
+    maxScoreBatchRows: boolCapability(override, configured, "boundedScoreBatchIngestion", false)
+      ? clampInt(override.maxScoreBatchRows ?? configured.maxScoreBatchRows, 1, 1, 64)
+      : 1,
+    scoreBatchAcknowledgement: boolCapability(override, configured, "boundedScoreBatchIngestion", false)
+      && String(override.scoreBatchAcknowledgement ?? configured.scoreBatchAcknowledgement ?? "").trim().toLowerCase() === "commit"
+      ? "commit"
+      : "none",
     contractTransport: String(override.contractTransport ?? configured.contractTransport ?? "rnbo-osc"),
     bestEffort: boolCapability(override, configured, "bestEffort", true),
     supportedClockIntervals: clockIntervals(override.supportedClockIntervals ?? configured.supportedClockIntervals ?? resolution.supportedClockIntervals)

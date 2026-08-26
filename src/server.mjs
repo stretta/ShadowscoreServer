@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import http from "node:http";
-import { createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
+import { createCompiledScoreArtifactCache, createRnboOscAdapter } from "./adapters/rnbo-osc.mjs";
 import { attachWebSocketCollaboration } from "./collaboration/websocket.mjs";
 import { loadConfig } from "./config.mjs";
 import { createCoordinatorManager } from "./coordinator/coordinator-manager.mjs";
@@ -36,9 +36,11 @@ const manualOscQueryDevices = createManualOscQueryDeviceRegistry(config);
 const coordinator = await createCoordinatorManager(config);
 const oscSnapshotRecall = createOscSnapshotRecallService();
 let tempoPolicy;
+const rnboCompiledArtifacts = createCompiledScoreArtifactCache(config);
 const rnbo = createRnboOscAdapter(config, {
   peerRegistry,
   coordinator,
+  compiledArtifacts: rnboCompiledArtifacts,
   getTempo: () => tempoPolicy?.snapshot().live
 });
 const jackTransport = createJackTransportState(config);
@@ -59,6 +61,7 @@ const runtime = {
   manualOscQueryDevices,
   oscSnapshotRecall,
   rnboAdapter: rnbo,
+  rnboCompiledArtifacts,
   rnboStageCollector,
   ensembleSyncSupervisor
 };

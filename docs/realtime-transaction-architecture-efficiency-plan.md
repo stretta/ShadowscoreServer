@@ -65,6 +65,14 @@ desired-state comparison, timing contracts, preparation, retries, and transport
 configuration. Bind the adapter transaction ID at delivery time so retries do
 not rebuild notes, message rows, or payload hashes.
 
+Checkpoint implementation completed locally on 2026-08-26: a bounded immutable
+artifact cache is shared by the RNBO adapter and route runtime; transaction IDs
+are bound onto cloned wire rows only at delivery; desired hashes, retries,
+timing contracts, clock/pattern reassertion, transport-start planning, and the
+continuing-clock arrangement check consume the shared artifacts. Cache compile,
+hit, eviction, entry-count, and compile-duration metrics are exposed through
+the adapter metrics snapshot.
+
 Acceptance requires compile-count and duration instrumentation plus exact wire-
 message parity tests for normal, empty, loop-expanded, legacy-clear, compact,
 staged, and resumable transactions.

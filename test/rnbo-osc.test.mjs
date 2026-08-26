@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { defaultConfig, mergeConfig } from "../src/config.mjs";
-import { compileScoreTransaction, compileTimingContract, createRnboOscAdapter, createScoreTransactionCounter, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority, validateScoreActivationAck, validateScoreTransactionAck } from "../src/adapters/rnbo-osc.mjs";
+import { bindCompiledScoreArtifact, compileScoreTransaction, compileTimingContract, createCompiledScoreArtifactCache, createRnboOscAdapter, createScoreTransactionCounter, rnboTargetSignature, scoreTransportInportMessages, sendScoreTransaction, shouldSendScoreTransaction, tempoAuthority, validateScoreActivationAck, validateScoreTransactionAck } from "../src/adapters/rnbo-osc.mjs";
 
 test("hardware transaction ids remain exact and advance across server restarts", () => {
   const directory = mkdtempSync(join(tmpdir(), "shadowscore-rnbo-transaction-"));
@@ -64,6 +64,58 @@ test("compiles ensemble score into RNBO ShadowScore transaction messages", () =>
   assert.deepEqual(compiled.messages[3].values, [90, 123, 2, 0]);
   assert.match(compiled.payloadHash, /^[a-f0-9]{64}$/);
   assert.equal(compiled.payloadHash, compileScoreTransaction(score, config, 456).payloadHash);
+});
+
+test("compiled score artifacts bind delivery transaction ids with exact wire parity", () => {
+  const config = mergeConfig(defaultConfig, {
+    rnbo: {
+      clearRowCount: 0,
+      targets: [{
+        clientId: 90,
+        voiceId: "player-1",
+        address: "/rnbo/inst/2/messages/in/shadowscore",
+        capabilities: compactReplaceCapabilities()
+      }]
+    }
+  });
+  const score = createScore();
+  const target = config.rnbo.targets[0];
+  const artifact = createCompiledScoreArtifactCache(config).get(score, target);
+  const bound = bindCompiledScoreArtifact(artifact, 654321);
+  const direct = compileScoreTransaction(score, config, 654321, target);
+
+  assert.deepEqual(bound.messages, direct.messages);
+  assert.equal(bound.payloadHash, direct.payloadHash);
+  assert.equal(artifact.transactionId, 0);
+  assert.equal(artifact.messages[0].values[2], 0);
+});
+
+test("compiled score artifact cache reuses immutable work and reports duration metrics", () => {
+  const config = mergeConfig(defaultConfig, { rnbo: { clearRowCount: 0 } });
+  const score = createScore();
+  const cache = createCompiledScoreArtifactCache(config, { maxEntries: 2 });
+  const target = {
+    voiceId: "player-1",
+    address: "/rnbo/inst/2/messages/in/shadowscore",
+    capabilities: compactReplaceCapabilities()
+  };
+
+  const first = cache.get(score, target);
+  const second = cache.get(score, target);
+  assert.equal(first, second);
+  assert.equal(Object.isFrozen(first), true);
+  assert.equal(Object.isFrozen(first.messages[0].values), true);
+  assert.deepEqual(cache.metrics(), {
+    compileCount: 1,
+    hitCount: 1,
+    evictionCount: 0,
+    totalCompileDurationMs: cache.metrics().totalCompileDurationMs,
+    maxCompileDurationMs: cache.metrics().maxCompileDurationMs,
+    lastCompileDurationMs: cache.metrics().lastCompileDurationMs,
+    entryCount: 1,
+    maxEntries: 2
+  });
+  assert.equal(cache.metrics().lastCompileDurationMs >= 0, true);
 });
 
 test("RNBO target signature is stable across ordering and changes on reload-sensitive fields", () => {

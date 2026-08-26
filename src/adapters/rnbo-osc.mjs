@@ -59,6 +59,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
   }
 
   const socket = runtime.socket ?? dgram.createSocket("udp4");
+  const compiledArtifacts = runtime.compiledArtifacts ?? createCompiledScoreArtifactCache(config);
   const transactionCounter = createScoreTransactionCounter(config, runtime);
   let store;
   let discoveryTimer;
@@ -157,7 +158,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
       return playbackPreparationState.impacts();
     },
     metrics() {
-      return structuredClone(metrics);
+      return { ...structuredClone(metrics), compiledArtifacts: compiledArtifacts.metrics() };
     },
     async playbackUpdates(blockId = "", options = {}) {
       if (!store) throw new Error("RNBO adapter is not attached to a score store");
@@ -738,6 +739,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
         try {
           const result = await sendScoreTransaction(socket, config, request.score, transactionId, {
             runtime,
+            compiledArtifacts,
             scoreRevision: request.score?.scoreRevision ?? request.score?.version ?? 0,
             reuseCompiledTarget: payloadReuseAllowed(request)
               ? reusableStagedTargetStatus
@@ -1126,7 +1128,7 @@ export function createRnboOscAdapter(config, runtime = {}) {
     let desiredHash = previous.desiredHash ?? playbackPreparationState.desiredHash(blockId, targetId);
     if (!desiredHash) {
       metrics.compileCount += 1;
-      desiredHash = compileScoreTransaction(score, config, 0, target).payloadHash;
+      desiredHash = compiledArtifacts.get(score, target).payloadHash;
       playbackPreparationState.cacheDesiredHash(blockId, targetId, target.voiceId ?? "", desiredHash);
     }
     const active = previous.activeHash === desiredHash && Number.isInteger(previous.activeTransaction);
@@ -1319,7 +1321,7 @@ function persistTransactionId(statePath, transactionId) {
 export async function sendScoreTransaction(socket, config, score, transactionId, options = {}) {
   const targets = await rnboTargetsForSend(config, score, options.runtime, options);
   const compiledTargets = await Promise.all(targets.map(async (target) => {
-    const preview = compileScoreTransaction(score, config, transactionId, target, options);
+    const preview = compiledTransactionForDelivery(score, config, transactionId, target, options);
     const reusedStatus = options.reuseCompiledTarget?.(target, preview);
     if (reusedStatus) {
       const reusedAt = new Date().toISOString();
@@ -1376,11 +1378,14 @@ async function sendCompiledScoreTransaction(socket, config, score, transactionId
   let acknowledgementMs = sendStartedMs;
   let resumeFromRow = 0;
   let resumedRowCount = 0;
+  const artifact = options.compiledArtifacts?.get(score, target, options);
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     const deliveryProfile = scoreDeliveryProfile(config, attempt);
     compiled = {
-      ...compileScoreTransaction(score, config, transactionId, target, options),
+      ...(artifact
+        ? bindCompiledScoreArtifact(artifact, transactionId)
+        : compileScoreTransaction(score, config, transactionId, target, options)),
       deliveryProfile
     };
     const delivery = resumeFromRow > 0
@@ -2135,6 +2140,99 @@ export function compileScoreTransaction(score, config, transactionId, target = r
     payloadHash,
     blockId: timing.blockId
   };
+}
+
+export function createCompiledScoreArtifactCache(config, options = {}) {
+  const maxEntries = clampInt(options.maxEntries ?? 256, 1, 4096);
+  const entries = new Map();
+  const stats = {
+    compileCount: 0,
+    hitCount: 0,
+    evictionCount: 0,
+    totalCompileDurationMs: 0,
+    maxCompileDurationMs: 0,
+    lastCompileDurationMs: 0
+  };
+  return {
+    get(score, target = rnboTargets(config, score)[0], compileOptions = {}) {
+      const key = compiledScoreArtifactKey(score, config, target, compileOptions);
+      const cached = entries.get(key);
+      if (cached) {
+        entries.delete(key);
+        entries.set(key, cached);
+        stats.hitCount += 1;
+        return cached;
+      }
+      const started = performance.now();
+      const artifact = freezeCompiledScoreArtifact(compileScoreTransaction(score, config, 0, target, compileOptions));
+      const durationMs = performance.now() - started;
+      stats.compileCount += 1;
+      stats.lastCompileDurationMs = durationMs;
+      stats.totalCompileDurationMs += durationMs;
+      stats.maxCompileDurationMs = Math.max(stats.maxCompileDurationMs, durationMs);
+      entries.set(key, artifact);
+      if (entries.size > maxEntries) {
+        entries.delete(entries.keys().next().value);
+        stats.evictionCount += 1;
+      }
+      return artifact;
+    },
+    metrics() {
+      return { ...stats, entryCount: entries.size, maxEntries };
+    },
+    clear() {
+      entries.clear();
+    }
+  };
+}
+
+export function bindCompiledScoreArtifact(artifact, transactionId) {
+  const transactionValueIndex = artifact.transactionValueIndex ?? 1;
+  return {
+    ...artifact,
+    transactionId,
+    messages: artifact.messages.map((message) => {
+      const values = [...message.values];
+      values[transactionValueIndex] = transactionId;
+      return { ...message, values };
+    })
+  };
+}
+
+function compiledTransactionForDelivery(score, config, transactionId, target, options) {
+  const artifact = options.compiledArtifacts?.get(score, target, options);
+  return artifact
+    ? bindCompiledScoreArtifact(artifact, transactionId)
+    : compileScoreTransaction(score, config, transactionId, target, options);
+}
+
+function compiledScoreArtifactKey(score, config, target, options) {
+  const normalized = normalizeTransactionTarget(config, target);
+  return JSON.stringify({
+    scoreRevision: score.scoreRevision ?? score.version ?? 0,
+    blockId: activeMesoBlockId(score),
+    voiceId: normalized.voiceId ?? "",
+    clientId: normalized.clientId ?? null,
+    capabilities: normalized.capabilities,
+    forceFullClearRows: options.forceFullClearRows === true || config.rnbo?.forceFullClearRows === true,
+    clearRowCount: config.rnbo?.clearRowCount ?? 0,
+    stagesPerBeat: config.rnbo?.stagesPerBeat ?? 16,
+    resolution: config.rnbo?.resolution ?? null
+  });
+}
+
+function freezeCompiledScoreArtifact(compiled) {
+  const artifact = {
+    ...compiled,
+    transactionId: 0,
+    transactionValueIndex: compiled.messages[0]?.values[0] === OPCODES.BEGIN_REPLACE ? 1 : 2,
+    messages: compiled.messages.map((message) => Object.freeze({
+      ...message,
+      values: Object.freeze([...message.values])
+    }))
+  };
+  Object.freeze(artifact.messages);
+  return Object.freeze(artifact);
 }
 
 function emitLifecycleEvent(options, type, compiled, target, details = {}) {

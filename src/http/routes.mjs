@@ -2,7 +2,7 @@ import { randomInt } from "node:crypto";
 import { adminPage } from "./admin-page.mjs";
 import { serveStaticAsset } from "./static-files.mjs";
 import { transportPage } from "./transport-page.mjs";
-import { compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
+import { bindCompiledScoreArtifact, compileScoreTransaction } from "../adapters/rnbo-osc.mjs";
 import { configuredRnboTargets, discoverRnboRuntime, writeRnboTransportControls } from "../adapters/rnbo-oscquery.mjs";
 import { editorManifests } from "../editors/manifest.mjs";
 import { distributeBlockTtid } from "../harmonic/distribution.mjs";
@@ -962,7 +962,7 @@ export async function routeRequest(request, response, store, config, runtime = {
       }
       const body = await readJson(request);
       const controls = body.controls ?? body.params ?? body;
-      const preparedControls = prepareRnboTransportControls(store.getScore(), config, target, controls);
+      const preparedControls = prepareRnboTransportControls(store.getScore(), config, runtime, target, controls);
       const writes = await writeRnboTransportControls(config, target, preparedControls, {
         writer: runtime.rnboParamWriter
       });
@@ -2250,14 +2250,14 @@ function cachedPlaybackTimingContracts(score, config, runtime, targets) {
   if (runtime.playbackTimingContractsCache?.key === key) {
     return runtime.playbackTimingContractsCache.contracts;
   }
-  const contracts = targets.map((target) => playbackTimingContractForTarget(score, config, target));
+  const contracts = targets.map((target) => playbackTimingContractForTarget(score, config, runtime, target));
   runtime.playbackTimingContractsCache = { key, contracts };
   return contracts;
 }
 
-function playbackTimingContractForTarget(score, config, target) {
+function playbackTimingContractForTarget(score, config, runtime, target) {
   const assignedVoiceId = assignedVoiceForTarget(score, target);
-  const compiled = compileScoreTransaction(score, config, 0, assignedVoiceId ? { ...target, voiceId: assignedVoiceId } : target);
+  const compiled = compiledScoreTransaction(score, config, runtime, assignedVoiceId ? { ...target, voiceId: assignedVoiceId } : target);
   return {
     targetId: target.id ?? "",
     targetType: "rnbo",
@@ -2272,6 +2272,13 @@ function playbackTimingContractForTarget(score, config, target) {
     compactScoreReplace: compiled.compactScoreReplace === true,
     resumableScoreReplace: compiled.resumableScoreReplace === true
   };
+}
+
+function compiledScoreTransaction(score, config, runtime, target, options = {}) {
+  const artifact = runtime.rnboCompiledArtifacts?.get(score, target, options);
+  return artifact
+    ? bindCompiledScoreArtifact(artifact, 0)
+    : compileScoreTransaction(score, config, 0, target, options);
 }
 
 async function findRnboTarget(config, runtime, targetId) {
@@ -2326,7 +2333,7 @@ export async function writeTransportControlsToPlaybackTargets(score, config, run
   if (!target || target.available === false) {
     throw new Error(`unknown RNBO target '${targetId}'`);
   }
-  const preparedParams = prepareRnboTransportControls(score, config, target, controls);
+  const preparedParams = prepareRnboTransportControls(score, config, runtime, target, controls);
   const writes = await writeRnboTransportControls(config, target, preparedParams, {
     writer: runtime.rnboParamWriter
   });
@@ -2350,7 +2357,7 @@ export async function reassertPlaybackClockIntervals(score, config, runtime, opt
     if (!assignedVoiceId) {
       return [];
     }
-    const compiled = compileScoreTransaction(score, config, 0, { ...target, voiceId: assignedVoiceId });
+    const compiled = compiledScoreTransaction(score, config, runtime, { ...target, voiceId: assignedVoiceId });
     const writes = await writeRnboTransportControls(config, target, {
       ClockInterval: compiled.timing.ticksPerStage
     }, {
@@ -2379,7 +2386,7 @@ export async function reassertPlaybackPatternLengths(score, config, runtime, opt
     if (!assignedVoiceId) {
       return [];
     }
-    const compiled = compileScoreTransaction(score, config, 0, { ...target, voiceId: assignedVoiceId });
+    const compiled = compiledScoreTransaction(score, config, runtime, { ...target, voiceId: assignedVoiceId });
     const writes = await writeRnboTransportControls(config, target, {
       MaxSteps: compiled.patternLength
     }, {
@@ -2393,13 +2400,13 @@ export async function reassertPlaybackPatternLengths(score, config, runtime, opt
   return targetWrites.flat();
 }
 
-function prepareRnboTransportControls(score, config, target, controls) {
+function prepareRnboTransportControls(score, config, runtime, target, controls) {
   const entries = Object.entries(controls ?? {});
   const assignedVoiceId = assignedVoiceForTarget(score, target);
   const prepared = new Map(entries);
 
   if (assignedVoiceId) {
-    const compiled = compileScoreTransaction(score, config, 0, { ...target, voiceId: assignedVoiceId });
+    const compiled = compiledScoreTransaction(score, config, runtime, { ...target, voiceId: assignedVoiceId });
     prepared.set("MaxSteps", compiled.patternLength);
     prepared.set("ClockInterval", compiled.timing.ticksPerStage);
   }
@@ -3896,7 +3903,7 @@ async function runAtomicClockArmStart(score, config, runtime, options) {
   const phaseStage = Number(options.phaseStage);
   const cohort = options.targets.map((target) => {
     const voiceId = assignedVoiceForTarget(score, target);
-    const compiled = compileScoreTransaction(score, config, 0, { ...target, voiceId });
+    const compiled = compiledScoreTransaction(score, config, runtime, { ...target, voiceId });
     const request = atomicClockArmRequest({
       clockInterval: compiled.timing.ticksPerStage,
       maxSteps: compiled.patternLength,
@@ -3999,7 +4006,7 @@ async function runTransactionalTransportStart(score, config, runtime, options) {
   const phaseStage = Number(options.phaseStage);
   const cohort = options.targets.map((target) => {
     const voiceId = assignedVoiceForTarget(score, target);
-    const compiled = compileScoreTransaction(score, config, 0, { ...target, voiceId });
+    const compiled = compiledScoreTransaction(score, config, runtime, { ...target, voiceId });
     if (!Number.isInteger(phaseStage) || phaseStage < 0 || phaseStage >= compiled.patternLength) {
       const error = new Error(`transactional start stage ${String(options.phaseStage)} is outside target '${target.id}' pattern length ${compiled.patternLength}`);
       error.code = "TRANSPORT_START_STAGE_UNAVAILABLE";
@@ -5281,7 +5288,7 @@ async function runArrangement(store, config, runtime, body = {}) {
 
 async function requireStableContinuingClockContract(score, config, runtime) {
   const targets = await readAllRnboTargets(config, runtime);
-  const result = continuingClockContractForArrangement(score, config, targets);
+  const result = continuingClockContractForArrangement(score, config, targets, runtime.rnboCompiledArtifacts);
   if (result.applies && !result.stable) {
     const variants = result.variants
       .map(({ blockId, targetId, ticksPerStage }) => `${blockId}/${targetId}=${ticksPerStage}`)
@@ -5297,7 +5304,7 @@ async function requireStableContinuingClockContract(score, config, runtime) {
   return result;
 }
 
-export function continuingClockContractForArrangement(score, config, targets = []) {
+export function continuingClockContractForArrangement(score, config, targets = [], compiledArtifacts) {
   const blocks = [...new Set(score.macrostructure?.blocks ?? [])]
     .filter((blockId) => score.mesostructure?.[blockId]);
   const continuingTargets = targets.filter((target) =>
@@ -5316,7 +5323,10 @@ export function continuingClockContractForArrangement(score, config, targets = [
     };
     return continuingTargets.map((target) => {
       const voiceId = assignedVoiceForTarget(score, target);
-      const compiled = compileScoreTransaction(blockScore, config, 0, { ...target, voiceId });
+      const artifact = compiledArtifacts?.get(blockScore, { ...target, voiceId });
+      const compiled = artifact
+        ? bindCompiledScoreArtifact(artifact, 0)
+        : compileScoreTransaction(blockScore, config, 0, { ...target, voiceId });
       return {
         blockId,
         targetId: target.id ?? "",

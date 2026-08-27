@@ -334,7 +334,18 @@ For the session-day operator flow, see
 - Automatic updates reuse an identical active or prepared staged payload by hash and block identity. Manual and forced full-clear sends always retransmit. Target discovery treats a failed OSCQuery read as unknown rather than an empty inventory, accepts a changed inventory only after consecutive matching observations, and retransmits only to newly available or endpoint-changed targets.
 - During JACK-derived playback, the server prepares the next macro block inside the configured `rnbo.lookAheadBeats` window on staged-capable targets only; legacy clients are not sent future-block payloads.
 - `POST /admin/rnbo/resend`: manually resend the current score to RNBO playback targets. Add `?mode=full-clear` or `{ "mode": "full-clear" }` to force capacity-sized clear rows even for compact-capable targets.
-- Score replacement queues ordered UDP bursts controlled by `rnbo.sendBatchSize` (default `4`) and retains `rnbo.sendDelayMs` pacing between bursts. `BEGIN_REPLACE`, indexed note rows, `COMMIT`, and transport inports keep their original order; READY row-count validation and retry remain the delivery gate.
+- Score replacement queues ordered UDP bursts controlled by the requested
+  `rnbo.sendBatchSize` (default `1`) and retains `rnbo.sendDelayMs` pacing
+  between bursts. A target uses a batch larger than one row only when its live
+  RNBO metadata advertises bounded score-batch ingestion with commit
+  acknowledgement and acknowledgement polling is enabled; otherwise delivery
+  fails safe to one-row pacing. Whole-target score transfers run with bounded
+  cross-target concurrency controlled by `rnbo.maxConcurrentScoreTransfers`
+  (default `2`), while packet ordering remains serial within each target.
+  `BEGIN_REPLACE`, indexed note rows, `COMMIT`, and transport inports keep their
+  original order; READY row-count validation and conservative retry remain the
+  delivery gate. `GET /rnbo/transfers` exposes requested/effective batch size,
+  pacing backlog, queue time, and receiver capability evidence.
 - `POST /transport/jack/snapshot`: accept a host-local JACK BBT snapshot from the bridge helper.
 - `POST /transport/jack/start`: start JACK transport through a configured JACK controller.
 - `POST /transport/jack/stop`: stop JACK transport through a configured JACK controller.
@@ -450,6 +461,10 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /editors/softpiano`: bundled SoftPiano OSC editor with canonical instant-write block state and explicit recall.
 - `GET /editors/ttid`: bundled Block Attributes editor for block-owned TTID,
   Swing/SwingAmt, and compatible transpose destinations.
+- `GET /tools/osc-mixer`: aggregate mixer for compatible controls across
+  discovered OSC instances.
+- `GET /tools/osc-trigger-sequencers`: aggregate 16-step trigger lanes across
+  compatible TriggerSequencer instances.
 - `GET /tools/osc-volume`: OSC target volume trim tool.
 - `GET /tools/osc-macros`: OSC macro builder and validator.
 - `GET /event-list`: canonical clip attribute and note-event editor.
@@ -458,16 +473,20 @@ Clip documents contain `notes`, `context`, `playbackType`, and `behavior`.
 - `GET /structure-editor`: meso/macro structure editor.
 - `GET /events`: server-sent event stream of score changes.
 - `GET /collab`: WebSocket collaboration endpoint for realtime JSON commands.
-- `GET /realtime`: versioned read-only WebSocket topics for score, transport,
-  playback, transfers, and normalized participant inventory.
+- `GET /realtime`: versioned WebSocket topics for score, transport, playback,
+  transfers, and normalized participant inventory. Observer sessions are
+  read-only; capability-declaring playback sessions can register as software
+  participants and exchange prepare, activation, execution-witness, and
+  reconnect-reconciliation messages. See
+  [`docs/realtime-api.md`](docs/realtime-api.md).
 
 ## WebSocket Collaboration
 
 Connect WebSocket clients to `/collab`. This version-1 collaboration protocol
 uses the server's shared standards-based WebSocket connection layer while
-remaining distinct from the read-only `/realtime` version-2 protocol. The
-server sends `welcome`, `snapshot`, and `presence.list`, in that order, on
-connect. Score mutations are broadcast as `score.changed` messages with the
+remaining distinct from the role- and capability-gated `/realtime` version-2
+protocol. The server sends `welcome`, `snapshot`, and `presence.list`, in that
+order, on connect. Score mutations are broadcast as `score.changed` messages with the
 same event shape used by `/events`. Fragmented text messages are supported;
 binary, malformed, and oversized messages are rejected.
 

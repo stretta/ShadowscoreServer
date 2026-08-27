@@ -40,6 +40,7 @@ The response is:
     "path": "shadow_score transport",
     "type": "ShadowScoreTransport",
     "revision": 42,
+    "playback_generation": 1842,
     "observed_at": "2026-08-19T12:00:00.000Z",
     "authority": "server",
     "clock_source": "jack",
@@ -54,6 +55,8 @@ The response is:
     "time_signature_numerator": 4,
     "time_signature_denominator": 4,
     "active_section": "B",
+    "state": "playing",
+    "transition": { "active": null, "last": null },
     "macro_index": 1,
     "beat_into_section": 2,
     "playback_session": {},
@@ -64,6 +67,15 @@ The response is:
   }
 }
 ```
+
+`revision` identifies publication of the transport representation.
+`playback_generation` identifies the coherent underlying playback snapshot from
+which that representation was derived. Multiple sequential transport reads can
+therefore have increasing `revision` values while retaining the same
+`playback_generation`; clients that correlate transport with playback should
+use the generation, not the publication revision, for that comparison.
+`state` is the acknowledged player transition state, and `transition` exposes
+the active and most recently completed player transitions.
 
 `playback_session` contains the acknowledged player-play session id, start time,
 elapsed seconds, and running state. It resets only on a stopped-to-playing

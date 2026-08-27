@@ -1,10 +1,13 @@
 # Realtime WebSocket API
 
-ShadowscoreServer exposes a standards-based, read-only realtime gateway at
-`/realtime`. It shares standards-based WebSocket connection infrastructure with
-the version-1 collaboration endpoint at `/collab`, but their application
-protocols, identities, message shapes, and delivery policies remain separate.
-`/realtime` does not yet accept score, transport, or playback commands.
+ShadowscoreServer exposes a standards-based, role- and capability-gated realtime
+gateway at `/realtime`. It shares WebSocket connection infrastructure with the
+version-1 collaboration endpoint at `/collab`, but their protocols, identities,
+message shapes, and delivery policies remain separate. Observer sessions are
+read-only. Registered playback sessions can acknowledge server-initiated score
+preparation and activation, publish identity-matched execution witnesses, and
+reconcile bounded active state after reconnect. The gateway does not accept
+score mutation or transport-control commands.
 
 ## Discovery
 
@@ -12,17 +15,24 @@ protocols, identities, message shapes, and delivery policies remain separate.
 
 - `endpoints.realtime`: the `ws://` or `wss://` gateway URL;
 - `realtime.protocol`: `shadowscore.realtime.v2`;
-- `realtime.roles`: currently `observer`;
-- `realtime.topics`: the topics available to that role.
+- `realtime.readOnly`: `false` because the playback role accepts participant
+  protocol messages;
+- `realtime.roles`: `observer` and `playback`;
+- `realtime.playbackParticipantProtocolVersion`: currently `1`;
+- `realtime.commands`: playback messages accepted from a registered participant;
+- `realtime.topics`: topics available for observation.
 
 Clients must request the WebSocket subprotocol `shadowscore.realtime.v2` during
-the HTTP upgrade. A missing or unsupported subprotocol receives HTTP 426.
+the HTTP upgrade. A missing or unsupported subprotocol receives HTTP 426. The
+server's initial `hello.required` message also lists `available_roles`, granted
+role capabilities, and the participant protocol version required by the
+playback role.
 
 ## Connection Sequence
 
 The server first sends `hello.required` with a server-generated
-`connection_id`, the hello deadline, and the available topics. The client's
-first message must then be:
+`connection_id`, the hello deadline, available topics, and available roles. An
+observer's first message is:
 
 ```json
 {
@@ -35,13 +45,46 @@ first message must then be:
 }
 ```
 
-`client_id` is optional. When omitted, the server grants a generated client ID.
-When a new connection claims an existing stable client ID, the older connection
-is closed with code 4001. Client-supplied roles and capabilities are requests;
-the `welcome` response contains the granted values.
+`client_id` is optional for observers. When omitted, the server grants a
+generated client ID. When a new connection claims an existing client ID, the
+older connection is closed with code 4001. The server responds with `welcome`,
+followed by one complete `snapshot` for each accepted topic. Subsequent
+publisher changes arrive as `event` messages.
 
-The server responds with `welcome`, followed by one complete `snapshot` for
-each accepted topic. Subsequent publisher changes arrive as `event` messages.
+### Playback participant hello
+
+A software playback client requests the `playback` role and includes a
+participant declaration:
+
+```json
+{
+  "protocol": "shadowscore.realtime.v2",
+  "type": "hello",
+  "request_id": "hello-player-1",
+  "client_id": "software-player-1",
+  "role": "playback",
+  "topics": ["transport", "playback", "participants"],
+  "participant": {
+    "protocol_version": 1,
+    "stable_device_id": "stage-left-laptop",
+    "display_name": "Stage Left Software Player",
+    "capabilities": ["score:prepare", "score:activate", "execution:witness"],
+    "runtime": {
+      "name": "shadow-player",
+      "version": "1.4.0",
+      "platform": "macOS"
+    }
+  }
+}
+```
+
+`stable_device_id` defaults to `client_id`; `display_name` and `runtime` are
+optional. Participant capabilities are declarations used by the playback
+adapter to authorize operations. `welcome.payload.participant` returns the
+server participant ID (`realtime:<client_id>`), accepted participant protocol
+version, stable device ID, and declared capabilities. A voice must be assigned
+to that participant by `clientId` or matching stable `deviceId` before the
+participant joins a playback cohort.
 
 ## Envelope
 
@@ -67,7 +110,8 @@ Every server message uses this envelope:
 
 Sequences are monotonic within a topic for the life of the server process.
 Snapshots and topic events are replaceable under backpressure; the newest
-complete state wins. Request results and errors are never silently replaced.
+complete state wins. Request results, playback commands, and errors are never
+silently replaced.
 
 ## Topics
 
@@ -83,10 +127,11 @@ The gateway uses the same publishers as the existing HTTP and SSE routes. It
 does not independently poll JACK, RNBO, or the score store.
 
 The `participants` topic is inventory and liveness, not playback authority. An
-observer session appears as a connected software participant but receives no
-prepare, activation, transport-write, or acknowledgement capability. Hardware
-units remain available through their existing APIs and are projected into this
-topic only through their RNBO targets.
+observer session is not registered as a software playback participant. A
+playback session is registered but receives prepare or activation operations
+only when its assignment and declared capabilities match. Hardware units remain
+available through their existing APIs and are projected into this topic through
+their RNBO targets.
 
 Each participant descriptor includes `participant_id`, `stable_device_id`,
 `kind`, `adapter`, `status`, `available`, `capabilities`, transport-specific
@@ -107,10 +152,106 @@ After `welcome`, subscriptions can be changed with correlated requests:
 }
 ```
 
-Supported request types are `subscribe`, `unsubscribe`, and `ping`. A repeated
-`request_id` with identical content replays its cached result. Reusing an ID
-with different content returns an error. Write-like message types return a
+All roles support `subscribe`, `unsubscribe`, and `ping`. A registered playback
+role also supports `playback.ready`, `playback.active`, `playback.execution`,
+and `playback.reconciled`, as described below. A repeated `request_id` with
+identical content replays its cached result. Reusing an ID with different
+content returns an error. Unsupported or write-like message types return a
 `read_only_gateway` error.
+
+## Playback Participant Protocol
+
+Playback exchange is server-initiated and fail-closed. A participant cannot
+start transport or choose its own score. The server selects assigned software
+participants, sends an operation, and waits for an exact acknowledgement on the
+same connection. Every client response requires a unique `request_id`; the
+gateway returns a correlated `result` or `error` envelope.
+
+| Server message | Required declaration | Client response | Required identity |
+| --- | --- | --- | --- |
+| `playback.prepare` | `score:prepare` | `playback.ready` | `operation_id`, `block_id`, `score_revision`, `payload_hash` |
+| `playback.activate` | `score:activate` | `playback.active` | Prepare identity plus `prepared_operation_id` |
+| Active playback | `execution:witness` | `playback.execution` | Active operation identity plus `execution` |
+| `playback.reconcile` after reconnect | `execution:witness` | `playback.reconciled` | Retained active identity plus `state` and, when active, `execution` |
+
+`playback.prepare.payload.desired` uses schema
+`shadowscore.playback-score.v1`. It contains the canonical score and structure
+revisions, ensemble and block IDs, assigned voice IDs, context, block timing and
+scale data, and the assigned clips. A READY acknowledgement must echo the
+server's operation, block, revision, and SHA-256 payload hash exactly:
+
+```json
+{
+  "protocol": "shadowscore.realtime.v2",
+  "type": "playback.ready",
+  "request_id": "ready-17",
+  "payload": {
+    "operation_id": "prepare-17",
+    "block_id": "B",
+    "score_revision": 42,
+    "payload_hash": "server-supplied-sha256"
+  }
+}
+```
+
+After every participant in that prepare cohort is READY, the server can send
+`playback.activate`. The participant activates the exact prepared payload at the
+requested `boundary` and `position`, then answers `playback.active` with the
+activation `operation_id`, original `prepared_operation_id`, `block_id`,
+`score_revision`, and `payload_hash`. Mismatched, missing, late,
+replaced-connection, or timed-out acknowledgements fail the coordinated
+operation.
+
+### Execution witnesses
+
+ACTIVE acknowledges activation, not execution. A participant declaring
+`execution:witness` proves continuing playback with `playback.execution`:
+
+```json
+{
+  "protocol": "shadowscore.realtime.v2",
+  "type": "playback.execution",
+  "request_id": "execution-81",
+  "payload": {
+    "operation_id": "activate-17",
+    "prepared_operation_id": "prepare-17",
+    "block_id": "B",
+    "score_revision": 42,
+    "payload_hash": "server-supplied-sha256",
+    "execution": {
+      "sequence": 81,
+      "playing": true,
+      "position": {
+        "absolute_beat": 18,
+        "beat_into_block": 2,
+        "seconds": 9
+      }
+    }
+  }
+}
+```
+
+`execution.sequence` must be a non-negative safe integer and strictly increase
+on the connection. `position.absolute_beat` is required and non-negative;
+`seconds`, `beat_into_block`, and `block_beat` are optional non-negative
+numbers. The server reports a witness as advancing only after both the sequence
+and absolute beat increase while `playing` is true. Stale, stationary, or
+identity-mismatched witnesses are not execution proof.
+
+### Reconnect reconciliation
+
+Disconnect removes READY state and current execution evidence. If the
+participant had an ACTIVE payload, the server retains its exact identity for a
+bounded reconciliation window. Reconnecting with the same `client_id` and
+`execution:witness` capability can receive `playback.reconcile`. The client must
+answer `playback.reconciled` with the echoed operation identity and either:
+
+- `state: "idle"`, which clears the retained active assumption; or
+- `state: "active"` plus a valid execution object, which restores ACTIVE state
+  and records a fresh execution witness.
+
+The server never infers active execution merely from reconnection. Expired,
+wrong-connection, or identity-mismatched reconciliation responses fail closed.
 
 ## Limits and Liveness
 
@@ -126,7 +267,7 @@ The server coalesces replaceable topic state for a slow connection. If bounded
 queues are still exceeded, it closes the connection instead of allowing
 unbounded memory growth.
 
-## Browser Example
+## Browser Observer Example
 
 ```js
 const socket = new WebSocket(session.endpoints.realtime, session.realtime.protocol);
@@ -147,5 +288,5 @@ socket.addEventListener("message", (event) => {
 });
 ```
 
-The future playback-participant protocol will build on this gateway only after
-the RNBO participant coordinator has been separately extracted and proven.
+Observer clients should use the simpler read-only hello above. Only software
+that actually executes assigned score material should request the playback role.

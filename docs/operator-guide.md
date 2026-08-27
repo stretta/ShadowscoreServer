@@ -41,6 +41,8 @@ http://<host>.local:8790/editors/vantor
 http://<host>.local:8790/editors/drumbox
 http://<host>.local:8790/editors/triggersequencer
 http://<host>.local:8790/editors/plate
+http://<host>.local:8790/tools/osc-mixer
+http://<host>.local:8790/tools/osc-trigger-sequencers
 http://<host>.local:8790/tools/osc-volume
 http://<host>.local:8790/tools/osc-macros
 ```

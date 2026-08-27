@@ -36,11 +36,12 @@ Start with the current guides:
 Design and implementation notes:
 
 - [`realtime-participant-architecture-plan.md`](realtime-participant-architecture-plan.md):
-  current audit and staged migration plan for shared realtime publication,
-  transport-neutral playback participants, RNBO adapter extraction, and future
-  software playback clients.
-- [`realtime-api.md`](realtime-api.md): versioned read-only WebSocket discovery,
-  handshake, topics, limits, liveness, and subscription contract.
+  implementation history and remaining migration plan for shared realtime
+  publication, transport-neutral playback participants, and RNBO adapter
+  extraction.
+- [`realtime-api.md`](realtime-api.md): current versioned WebSocket discovery,
+  observer and playback-participant handshakes, topics, playback messages,
+  execution witnesses, reconnect reconciliation, limits, and liveness.
 - [`mesostructural-ttid-scale-plan.md`](mesostructural-ttid-scale-plan.md):
   block-owned TTID, non-destructive Matrix Edit folding, explicit focused-note
   quantization, the retained whole-score scale-transform API, OSC snapshot

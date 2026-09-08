@@ -569,11 +569,13 @@ For source-copy development deploys to a Pi that is already installed, use:
 npm run deploy:pi -- --host wren.local
 ```
 
-The deploy helper syncs this checkout to `/home/pi/ShadowscoreServer`, preserves
-remote `config/*.local.json` files and `data/`, checks non-interactive sudo,
-restarts the matching systemd service, verifies the service state and host
-routes, and runs the hardware smoke test. Use `--role peer` for registration
-agent units, `--sync-only` for a file-only update, `--force-restart` for the
-kill/reset/start recovery path, `--verify-route <path>` for rollout-specific
-host checks, or `--dry-run` to preview the rsync. If the Pi does not allow
-passwordless sudo, set `SHADOWSCORE_SUDO_PASSWORD` for that deploy.
+The deploy helper validates the remote destination, previews the rsync, and
+then syncs this checkout to `/home/pi/ShadowscoreServer`. It keeps the source
+snapshot separate from host-owned `config/*.local.json` files and `data/`,
+checks non-interactive sudo, restarts the matching systemd service, verifies the
+service state and host routes, and runs the hardware smoke test. Use
+`--role peer` for registration agent units, `--sync-only` for a file-only
+update, `--force-restart` for the kill/reset/start recovery path,
+`--verify-route <path>` for rollout-specific host checks, or `--dry-run` to
+preview the rsync. If the Pi does not allow passwordless sudo, set
+`SHADOWSCORE_SUDO_PASSWORD` for that deploy.

@@ -50,6 +50,17 @@ deployed code is actually running.
 - Allows `SHADOWSCORE_SUDO_PASSWORD` for known lab units that require sudo
   password entry during unattended test deploys.
 
+### Sync Preflight And Runtime-State Boundary
+
+- Before using rsync with `--delete`, verifies that the remote destination is
+  missing, empty, or already has the ShadowscoreServer project shape.
+- Runs a read-only, itemized rsync pass before applying the source snapshot.
+- Treats `data/` and `config/*.local.json` as host-owned runtime state with
+  explicit sender-side hide and receiver-side protect rules. A checkout or
+  exported Git snapshot therefore cannot overwrite or delete live score state
+  or local configuration.
+- In `--dry-run` mode, the read-only preflight is the only rsync pass.
+
 ### Host Route Verification
 
 - For `--role host`, verifies live HTTP routes after restart:

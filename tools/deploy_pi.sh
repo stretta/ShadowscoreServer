@@ -250,6 +250,60 @@ if (info.matrixeditCommit || Object.prototype.hasOwnProperty.call(info, "matrixe
   fi
 }
 
+preflight_remote_deploy_path() {
+  local path_state=""
+  local quoted_path=""
+  local quoted_package=""
+  local quoted_src=""
+
+  quoted_path="$(quote "${PI_PATH}")"
+  quoted_package="$(quote "${PI_PATH}/package.json")"
+  quoted_src="$(quote "${PI_PATH}/src")"
+  path_state="$(remote_sh "if [ ! -e ${quoted_path} ]; then printf '%s\\n' missing; elif [ ! -d ${quoted_path} ]; then printf '%s\\n' unsafe; elif [ -f ${quoted_package} ] && [ -d ${quoted_src} ]; then printf '%s\\n' project; elif [ -z \"\$(ls -A ${quoted_path} 2>/dev/null)\" ]; then printf '%s\\n' empty; else printf '%s\\n' unsafe; fi")"
+
+  case "${path_state}" in
+    project)
+      echo "Sync destination preflight: existing ShadowscoreServer tree"
+      ;;
+    missing)
+      echo "Sync destination preflight: target path does not exist yet"
+      ;;
+    empty)
+      echo "Sync destination preflight: target path is empty"
+      ;;
+    *)
+      echo "Refusing to sync with --delete: '${PI_PATH}' exists but is not a ShadowscoreServer tree or an empty directory." >&2
+      exit 1
+      ;;
+  esac
+}
+
+append_rsync_filters() {
+  # These paths belong to the installed host, not to a deploy source snapshot.
+  # Separate sender-side hide and receiver-side protect rules ensure that
+  # neither transfer nor --delete can change runtime state.
+  RSYNC_FILTERS+=(
+    --filter "protect /data/***"
+    --filter "hide /data/***"
+    --filter "protect /config/*.local.json"
+    --filter "hide /config/*.local.json"
+    --exclude '.git'
+    --exclude '.agents'
+    --exclude '.codex'
+    --exclude 'node_modules'
+    --exclude '.DS_Store'
+  )
+}
+
+run_rsync_preflight() {
+  local preflight_opts=(-a --delete --dry-run --itemize-changes)
+
+  echo "Running read-only rsync preflight..."
+  rsync "${preflight_opts[@]}" "${RSYNC_FILTERS[@]}" \
+    "${LOCAL_PATH}" \
+    "${PI_USER}@${RESOLVED_PI_HOST}:${PI_PATH}/"
+}
+
 verify_url_with_retry() {
   local url="$1"
   local deadline=$((SECONDS + RESTART_TIMEOUT))
@@ -486,6 +540,8 @@ fi
 
 print_local_provenance
 
+preflight_remote_deploy_path
+
 if [[ "${RESTART_SERVICE}" == "1" && "${SUDO_PREFLIGHT}" == "1" && "${DRY_RUN}" != "1" ]]; then
   echo "Checking non-interactive sudo on ${PI_USER}@${RESOLVED_PI_HOST}..."
   if ! remote_sudo_sh "systemctl show $(quote "${SERVICE_NAME}") -p ActiveState >/dev/null"; then
@@ -496,6 +552,8 @@ if [[ "${RESTART_SERVICE}" == "1" && "${SUDO_PREFLIGHT}" == "1" && "${DRY_RUN}" 
 fi
 
 RSYNC_OPTS=(-a --delete --stats)
+RSYNC_FILTERS=()
+append_rsync_filters
 if [[ "${VERBOSE_RSYNC}" == "1" ]]; then
   RSYNC_OPTS=(-av --delete --progress)
 fi
@@ -509,16 +567,14 @@ else
   echo "Would create remote directory '${PI_PATH}'"
 fi
 
-rsync "${RSYNC_OPTS[@]}" \
-  --exclude '.git' \
-  --exclude '.agents' \
-  --exclude '.codex' \
-  --exclude 'node_modules' \
-  --exclude 'data/***' \
-  --exclude 'config/*.local.json' \
-  --exclude '.DS_Store' \
-  "${LOCAL_PATH}" \
-  "${PI_USER}@${RESOLVED_PI_HOST}:${PI_PATH}/"
+run_rsync_preflight
+
+if [[ "${DRY_RUN}" != "1" ]]; then
+  echo "Sync preflight passed; applying source snapshot."
+  rsync "${RSYNC_OPTS[@]}" "${RSYNC_FILTERS[@]}" \
+    "${LOCAL_PATH}" \
+    "${PI_USER}@${RESOLVED_PI_HOST}:${PI_PATH}/"
+fi
 
 if [[ "${INSTALL_REQUIREMENTS}" == "1" ]]; then
   if [[ "${DRY_RUN}" == "1" ]]; then

@@ -203,7 +203,12 @@ New Shadowbox integrations should resolve or address the `transport` object,
 send the direct operation envelope above, and consume acknowledged POST state
 or SSE snapshots. The older `/transport/*` routes remain compatibility and
 operator routes; `/transport/external` has distinct hardware-intent semantics
-and is not the canonical object-call envelope.
+and is not the canonical object-call envelope. External intent is observational
+by default: `{ "rolling": true }` or `{ "rolling": false }` records the intent
+without changing Players or Arrangement state. A specialized bridge must
+include `{ "adoptArrangement": true }` to explicitly adopt or release
+Arrangement ownership. Adopted Play selects Arrangement Run explicitly rather
+than using a sticky prior Run/Hold selection.
 
 The working Max adapter is
 [`../examples/max/shadowscore-transport-client.cjs`](../examples/max/shadowscore-transport-client.cjs).

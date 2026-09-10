@@ -4352,16 +4352,34 @@ async function observeExternalTransportIntent(store, config, runtime, body = {})
     error.statusCode = 400;
     throw error;
   }
+  if (body.adoptArrangement !== undefined && typeof body.adoptArrangement !== "boolean") {
+    const error = new Error("adoptArrangement must be a boolean");
+    error.statusCode = 400;
+    throw error;
+  }
   const playback = requireMacroPlayback(runtime);
   const performance = performanceTransportFor(runtime);
   const source = optionalString(body.source) || "external";
   const unitId = optionalString(body.unitId);
+  const adoptArrangement = body.adoptArrangement === true;
   performance.lastExternalIntent = {
     source,
     unitId,
     rolling: body.rolling,
+    adoptArrangement,
     receivedAt: new Date().toISOString()
   };
+
+  if (!adoptArrangement) {
+    const current = playback.snapshot();
+    return {
+      adopted: false,
+      released: false,
+      recorded: true,
+      arrangementHeld: !current.running,
+      mode: current.mode
+    };
+  }
 
   if (!body.rolling) {
     playback.stop();
@@ -4374,10 +4392,7 @@ async function observeExternalTransportIntent(store, config, runtime, body = {})
   setPerformancePlayersPlaying(runtime, performance, true);
   performance.playerControlOrigin = source === "shadowbox" ? "shadowbox" : "external";
   performance.adoptionPayloadVerified = null;
-  if (performance.arrangementRequestedMode !== "run") {
-    playback.stop();
-    return { adopted: true, arrangementHeld: true, mode: "stopped" };
-  }
+  performance.arrangementRequestedMode = "run";
 
   const witnessContext = await readExternalPhaseWitnessContext(store.getScore(), config, runtime);
   const initialAnchor = externalTransportAnchor(body, unitId, witnessContext);

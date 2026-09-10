@@ -2678,9 +2678,10 @@ test("Transport Play adopts externally moving active players without reset or pa
   assert.match(played.transport.warnings.join(" "), /preserved without server-side hash verification/);
 });
 
-test("Shadowbox transport intent starts and stops arrangement ownership without payload or clock writes", async () => {
+test("external transport intent is observational by default and cannot change sticky arrangement ownership", async () => {
   let startOptions = null;
   let running = false;
+  let stopCount = 0;
   let prepareCount = 0;
   let applyCount = 0;
   const writes = [];
@@ -2710,6 +2711,7 @@ test("Shadowbox transport intent starts and stops arrangement ownership without 
           return context.runtime.macroPlayback.snapshot();
         },
         stop: () => {
+          stopCount += 1;
           running = false;
           return context.runtime.macroPlayback.snapshot();
         }
@@ -2722,30 +2724,89 @@ test("Shadowbox transport intent starts and stops arrangement ownership without 
     unitId: "wren",
     rolling: true
   });
-  assert.equal(started.adopted, true);
+  assert.equal(started.adopted, false);
+  assert.equal(started.recorded, true);
   assert.equal(startOptions, null);
   assert.equal(started.arrangementHeld, true);
-  assert.equal(started.arrangementSynchronized, false);
-  assert.equal(started.phaseAlignment.reason, "source-stage-unavailable");
   assert.equal(prepareCount, 0);
   assert.equal(applyCount, 0);
   assert.equal(writes.length, 0);
-  assert.equal(started.transport.players.playing, true);
-  assert.equal(started.transport.players.controlOrigin, "shadowbox");
+  assert.equal(started.transport.players.playing, false);
+  assert.equal(started.transport.players.controlOrigin, "none");
   assert.deepEqual(
     started.transport.players.lastExternalIntent,
-    { source: "shadowbox", unitId: "wren", rolling: true, receivedAt: started.transport.players.lastExternalIntent.receivedAt }
+    {
+      source: "shadowbox",
+      unitId: "wren",
+      rolling: true,
+      adoptArrangement: false,
+      receivedAt: started.transport.players.lastExternalIntent.receivedAt
+    }
   );
 
+  running = true;
+  context.runtime.performanceTransport.playersPlaying = true;
+  context.runtime.performanceTransport.playerControlOrigin = "transport";
   const stopped = await requestJson(context, "POST", "/transport/external", {
     source: "shadowbox",
     unitId: "wren",
     rolling: false
   });
-  assert.equal(stopped.released, true);
-  assert.equal(stopped.transport.players.playing, false);
-  assert.equal(stopped.transport.arrangement.running, false);
+  assert.equal(stopped.adopted, false);
+  assert.equal(stopped.released, false);
+  assert.equal(stopped.recorded, true);
+  assert.equal(stopCount, 0);
+  assert.equal(stopped.transport.players.playing, true);
+  assert.equal(stopped.transport.arrangement.running, true);
   assert.equal(writes.length, 0);
+});
+
+test("external transport can explicitly adopt and release arrangement ownership", async () => {
+  let running = false;
+  let stopCount = 0;
+  const context = createRouteContext({
+    runtime: {
+      performanceTransport: { playersPlaying: false, arrangementRequestedMode: "hold" },
+      macroPlayback: {
+        snapshot: () => ({
+          running,
+          mode: running ? "jack" : "stopped",
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: { source: "none", usable: false, reason: "macro playback stopped" }
+        }),
+        start: () => {
+          running = true;
+          return context.runtime.macroPlayback.snapshot();
+        },
+        stop: () => {
+          stopCount += 1;
+          running = false;
+          return context.runtime.macroPlayback.snapshot();
+        }
+      }
+    }
+  });
+
+  const started = await requestJson(context, "POST", "/transport/external", {
+    source: "controller",
+    rolling: true,
+    adoptArrangement: true
+  });
+  assert.equal(started.adopted, true);
+  assert.equal(started.arrangementHeld, true);
+  assert.equal(started.phaseAlignment.reason, "source-stage-unavailable");
+  assert.equal(started.transport.players.playing, true);
+  assert.equal(started.transport.arrangement.requestedMode, "run");
+
+  const stopped = await requestJson(context, "POST", "/transport/external", {
+    source: "controller",
+    rolling: false,
+    adoptArrangement: true
+  });
+  assert.equal(stopped.released, true);
+  assert.equal(stopCount, 1);
+  assert.equal(stopped.transport.players.playing, false);
 });
 
 test("Shadowbox transport intent anchors arrangement to the initiating unit's RNBO stage", async () => {
@@ -2829,7 +2890,8 @@ test("Shadowbox transport intent anchors arrangement to the initiating unit's RN
   const started = await requestJson(context, "POST", "/transport/external", {
     source: "shadowbox",
     unitId: "wren",
-    rolling: true
+    rolling: true,
+    adoptArrangement: true
   });
 
   assert.equal(startOptions.anchorOffsetBeats, 2.5);
@@ -2954,7 +3016,8 @@ test("Shadowbox transport intent restarts assigned peers from the initiating uni
   const started = await requestJson(context, "POST", "/transport/external", {
     source: "shadowbox",
     unitId: "wren",
-    rolling: true
+    rolling: true,
+    adoptArrangement: true
   });
 
   assert.equal(started.phaseAlignment.applied, true);
@@ -3067,7 +3130,8 @@ test("Shadowbox transport intent does not phase-write when an assigned peer lack
   const started = await requestJson(context, "POST", "/transport/external", {
     source: "shadowbox",
     unitId: "wren",
-    rolling: true
+    rolling: true,
+    adoptArrangement: true
   });
 
   assert.equal(started.phaseAlignment.applied, false);
@@ -3086,6 +3150,17 @@ test("external transport intent rejects an ambiguous rolling value", async () =>
   });
   assert.equal(response.status, 400);
   assert.match(response.body, /rolling must be a boolean/);
+});
+
+test("external transport intent rejects an ambiguous adoption value", async () => {
+  const context = createRouteContext();
+  const response = await request(context, "POST", "/transport/external", {
+    source: "controller",
+    rolling: true,
+    adoptArrangement: "true"
+  });
+  assert.equal(response.status, 400);
+  assert.match(response.body, /adoptArrangement must be a boolean/);
 });
 
 test("playback snapshot reports externally running RNBO players before adoption", async () => {

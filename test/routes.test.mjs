@@ -261,6 +261,8 @@ test("admin page is served as html", async () => {
   assert.match(response.body, /\/assignments\/reconcile/);
   assert.match(response.body, /Live Client/);
   assert.match(response.body, /Routing/);
+  assert.match(response.body, /return instanceId \? "Source-" \+ instanceId : "Source"/);
+  assert.match(response.body, /return displayTargetLabel\(target\) \|\| "Player " \+ \(index \+ 1\)/);
   assert.match(response.body, /Import voice notes to clips/);
   assert.match(response.body, /\/admin\/import-legacy-voice-notes/);
   assert.match(response.body, /Resend RNBO score/);

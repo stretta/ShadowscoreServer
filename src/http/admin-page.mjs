@@ -1959,7 +1959,7 @@ export function adminPage() {
     }
 
     function scoreWizardTargetLabel(target, index) {
-      return target.hardwareUnitName || target.hardwareUnitId || target.name || target.id || "Player " + (index + 1);
+      return displayTargetLabel(target) || "Player " + (index + 1);
     }
 
     function scoreWizardColor(index) {
@@ -2074,9 +2074,17 @@ export function adminPage() {
     function friendlyTargetName(target) {
       const name = target.name ?? target.id ?? target.address ?? "RNBO target";
       if (/ShadowScoreClient/i.test(name) && /shadowscore/i.test(target.address ?? name)) {
-        return "Source";
+        const instanceId = targetInstanceId(target);
+        return instanceId ? "Source-" + instanceId : "Source";
       }
       return name;
+    }
+
+    function targetInstanceId(target) {
+      const explicit = String(target.instanceId ?? "").trim();
+      if (explicit) return explicit;
+      const address = String(target.address ?? target.messagePath ?? "");
+      return address.match(/\\/rnbo\\/inst\\/([^/]+)/i)?.[1] ?? "";
     }
 
     function groupedTargets(targets) {

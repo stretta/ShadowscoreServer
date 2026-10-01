@@ -2135,6 +2135,94 @@ test("automatic sync recovery does not interrupt a transient client slip", async
   assert.equal(context.runtime.performanceTransport.playersPlaying, true);
 });
 
+test("automatic sync recovery defers when a playback operation starts during slip confirmation", async () => {
+  let queueBusy = false;
+  const supervisor = createEnsembleSyncSupervisor({
+    requiredConsecutiveSlips: 1,
+    cooldownMs: 0
+  });
+  const targets = [
+    {
+      id: "left-client",
+      host: "127.0.0.1",
+      port: 1234,
+      address: "/rnbo/inst/2/messages/in/shadowscore",
+      currentStagePath: "/rnbo/inst/2/messages/out/current_stage"
+    },
+    {
+      id: "right-client",
+      host: "peer.local",
+      port: 1234,
+      address: "/rnbo/inst/7/messages/in/shadowscore",
+      currentStagePath: "/rnbo/inst/7/messages/out/current_stage"
+    }
+  ];
+  const context = createRouteContext({
+    config: mergeConfig(defaultConfig, {
+      rnbo: { oscQuery: { enabled: false }, targets },
+      transport: {
+        rnboClient: {
+          autoResync: { enabled: true, requiredConsecutiveSlips: 1, cooldownMs: 0 }
+        }
+      }
+    }),
+    runtime: {
+      ensembleSyncSupervisor: supervisor,
+      performanceTransport: { playersPlaying: true },
+      playbackCoordinator: {
+        async playbackUpdates() { return {}; },
+        operationQueueStatus() {
+          return { inProgress: queueBusy, queued: false, active: null, queuedRequest: null };
+        }
+      },
+      verifyAutomaticClientSlip: async () => {
+        queueBusy = true;
+        return { confirmed: true, reason: "persistent client skew" };
+      },
+      rnboStageCollector: {
+        async ensureObservations() {},
+        targets: (entries) => entries.map((target) => ({
+          ...target,
+          currentStage: target.id === "left-client" ? 0 : 4,
+          stateObservedAt: new Date().toISOString(),
+          stateAgeMs: 0,
+          fresh: true,
+          stageMovement: "moving",
+          stageReadbackStatus: "fresh"
+        }))
+      },
+      macroPlayback: {
+        snapshot: () => ({
+          running: true,
+          mode: "jack",
+          activeBlockId: "A",
+          macroIndex: 0,
+          witness: { source: "rnbo-client", usable: true, absoluteBeat: 0 }
+        })
+      }
+    }
+  });
+  await requestJson(context, "POST", "/voices/player-1/assignment", {
+    rnboTargetId: "left-client",
+    rnboHost: "127.0.0.1",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/2/messages/in/shadowscore"
+  });
+  await requestJson(context, "POST", "/voices/player-2/assignment", {
+    rnboTargetId: "right-client",
+    rnboHost: "peer.local",
+    rnboPort: 1234,
+    rnboAddress: "/rnbo/inst/7/messages/in/shadowscore"
+  });
+
+  const recovery = await runAutomaticSyncRecovery(context.store, context.config, context.runtime);
+
+  assert.equal(recovery.inProgress, false);
+  assert.equal(recovery.lastAttemptAt, null);
+  assert.equal(recovery.deferredReason, "playback-operation-in-progress");
+  assert.equal(context.runtime.performanceTransport.playersPlaying, true);
+});
+
 test("player and arrangement controls remain distinct and idempotent", async () => {
   const writes = [];
   const oscWrites = [];
@@ -4605,6 +4693,66 @@ test("Apply next beat refuses to overwrite an imminent macro transition", async 
   assert.equal(response.status, 409);
   assert.equal(JSON.parse(response.body).code, "BLOCK_TRANSITION_RESERVED");
   assert.equal(applyCount, 0);
+});
+
+test("Apply next beat refuses an automatic sync recovery already in progress", async () => {
+  let applyCount = 0;
+  const supervisor = createEnsembleSyncSupervisor({ cooldownMs: 0 });
+  supervisor.begin();
+  const context = createRouteContext({
+    runtime: {
+      ensembleSyncSupervisor: supervisor,
+      playbackCoordinator: {
+        enabled: true,
+        async playbackUpdates() { return {}; },
+        async applyBlockUpdate() { applyCount += 1; }
+      },
+      macroPlayback: {
+        snapshot: () => ({ running: true, activeBlockId: "A" })
+      }
+    }
+  });
+
+  const response = await request(context, "POST", "/playback/updates/apply-next-beat", {
+    blockId: "A",
+    expectedScoreRevision: 0
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(JSON.parse(response.body).code, "PLAYBACK_ACTIVATION_CONFLICT");
+  assert.equal(applyCount, 0);
+});
+
+test("Apply next beat rechecks sync recovery immediately before activation", async () => {
+  let activationCount = 0;
+  const supervisor = createEnsembleSyncSupervisor({ cooldownMs: 0 });
+  const context = createRouteContext({
+    runtime: {
+      ensembleSyncSupervisor: supervisor,
+      playbackCoordinator: {
+        enabled: true,
+        async playbackUpdates() { return {}; },
+        async applyBlockUpdate(blockId, options) {
+          supervisor.begin();
+          await options.authorizeActivation();
+          activationCount += 1;
+          return { blockId, action: "active" };
+        }
+      },
+      macroPlayback: {
+        snapshot: () => ({ running: true, activeBlockId: "A" })
+      }
+    }
+  });
+
+  const response = await request(context, "POST", "/playback/updates/apply-next-beat", {
+    blockId: "A",
+    expectedScoreRevision: 0
+  });
+
+  assert.equal(response.status, 409);
+  assert.equal(JSON.parse(response.body).code, "PLAYBACK_ACTIVATION_CONFLICT");
+  assert.equal(activationCount, 0);
 });
 
 test("macro playback route derives macro index from updated JACK witness beat", async () => {

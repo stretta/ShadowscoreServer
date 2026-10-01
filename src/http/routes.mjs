@@ -1104,6 +1104,7 @@ export async function routeRequest(request, response, store, config, runtime = {
   if (request.method === "POST" && url.pathname === "/playback/updates/apply-next-beat") {
     try {
       const body = await readJson(request);
+      assertPlaybackActivationAvailable(runtime);
       const playback = await macroPlaybackSnapshot(runtime, store, config);
       if (!playback.running) throw new Error("transport is stopped; use Update players now");
       const blockId = optionalString(body.blockId) || playback.activeBlockId || store.getScore().structureState?.activeBlockId || "";
@@ -1115,6 +1116,7 @@ export async function routeRequest(request, response, store, config, runtime = {
         expectedScoreRevision: optionalInteger(body.expectedScoreRevision, "expectedScoreRevision"),
         restoreBlockId,
         authorizeActivation: async () => {
+          assertPlaybackActivationAvailable(runtime);
           const latest = await macroPlaybackSnapshot(runtime, store, config);
           assertApplyNextBeatSafe(latest, store.getScore(), config, blockId);
         }
@@ -2790,6 +2792,20 @@ function assertApplyNextBeatSafe(playback, score, config, blockId) {
   throw error;
 }
 
+function assertPlaybackActivationAvailable(runtime) {
+  const transition = transportTransitionSnapshot(runtime).active;
+  const syncRecovery = runtime.ensembleSyncSupervisor?.snapshot?.();
+  if (!transition && syncRecovery?.inProgress !== true) return;
+
+  const label = transition?.kind === "resync" || syncRecovery?.inProgress === true
+    ? "player re-sync"
+    : "transport start";
+  const error = new Error(`${label} is in progress; wait for it to finish before applying the update`);
+  error.code = "PLAYBACK_ACTIVATION_CONFLICT";
+  error.statusCode = 409;
+  throw error;
+}
+
 function nextMacroBlockId(score, activeBlockId) {
   const blocks = score.macrostructure?.blocks ?? [];
   if (blocks.length < 2) return "";
@@ -2974,6 +2990,13 @@ export async function runAutomaticSyncRecovery(store, config, runtime) {
         supervisor.reset();
         return { ...supervisor.snapshot(), confirmation };
       }
+    }
+    if (playbackOperationQueueIsBusy(runtime)) {
+      supervisor.reset();
+      return {
+        ...supervisor.snapshot(),
+        deferredReason: "playback-operation-in-progress"
+      };
     }
     if (!performance.playersPlaying
       || transportStopIsInProgress(runtime)
@@ -5602,6 +5625,11 @@ function playbackParticipantDeliveryStatus(runtime) {
 function playbackOperationQueueStatus(runtime) {
   return runtime.playbackCoordinator?.operationQueueStatus?.()
     ?? rnboSendQueueStatus(runtime);
+}
+
+function playbackOperationQueueIsBusy(runtime) {
+  const queue = playbackOperationQueueStatus(runtime);
+  return queue.inProgress === true || queue.queued === true;
 }
 
 function playbackDeliveryStatus(runtime) {
